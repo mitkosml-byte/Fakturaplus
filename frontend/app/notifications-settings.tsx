@@ -76,28 +76,34 @@ export default function NotificationsSettingsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B5CF6" />
+      <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
+        <View style={styles.overlay}>
+          <SafeAreaView style={styles.container} edges={['top']}>
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#8B5CF6" />
+            </View>
+          </SafeAreaView>
         </View>
-      </SafeAreaView>
+      </ImageBackground>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
-        <Text style={styles.title}>Известия за ДДС</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
+      <View style={styles.overlay}>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+              <Ionicons name="arrow-back" size={24} color="white" />
+            </TouchableOpacity>
+            <Text style={styles.title}>Известия за ДДС</Text>
+            <View style={{ width: 40 }} />
+          </View>
 
-      <ScrollView style={styles.content}>
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={[styles.sectionIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+          <ScrollView style={styles.content}>
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={[styles.sectionIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
               <Ionicons name="alert-circle" size={24} color="#EF4444" />
             </View>
             <View style={styles.sectionTitleContainer}>
