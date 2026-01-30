@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
+import { View as GradientView } from 'react-native';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
