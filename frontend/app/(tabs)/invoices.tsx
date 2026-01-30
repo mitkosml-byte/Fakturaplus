@@ -140,39 +140,49 @@ export default function InvoicesScreen() {
   const totalVat = invoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Фактури</Text>
-        <TouchableOpacity style={styles.exportButton} onPress={() => setExportModalVisible(true)}>
-          <Ionicons name="download" size={24} color="#8B5CF6" />
-        </TouchableOpacity>
-      </View>
+    <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
+      <View style={styles.overlay}>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Фактури</Text>
+            <TouchableOpacity style={styles.exportButton} onPress={() => setExportModalVisible(true)}>
+              <Ionicons name="download" size={24} color="#8B5CF6" />
+            </TouchableOpacity>
+          </View>
 
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#64748B" />
-        <TextInput
-          style={styles.searchInput}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder="Търси по доставчик..."
-          placeholderTextColor="#64748B"
-          onSubmitEditing={loadInvoices}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => { setSearchQuery(''); loadInvoices(); }}>
-            <Ionicons name="close-circle" size={20} color="#64748B" />
-          </TouchableOpacity>
-        )}
-      </View>
+          {/* Search */}
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#64748B" />
+            <TextInput
+              style={styles.searchInput}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Търси по доставчик..."
+              placeholderTextColor="#64748B"
+              onSubmitEditing={loadInvoices}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => { setSearchQuery(''); loadInvoices(); }}>
+                <Ionicons name="close-circle" size={20} color="#64748B" />
+              </TouchableOpacity>
+            )}
+          </View>
 
-      {/* Summary */}
-      <View style={styles.summaryBar}>
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>Брой:</Text>
-          <Text style={styles.summaryValue}>{invoices.length}</Text>
-        </View>
-        <View style={styles.summaryItem}>
+          {/* Summary */}
+          <View style={styles.summaryBar}>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>Брой:</Text>
+              <Text style={styles.summaryValue}>{invoices.length}</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>ДДС:</Text>
+              <Text style={styles.summaryValue}>{totalVat.toFixed(2)} лв.</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>Общо:</Text>
+              <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>{totalAmount.toFixed(2)} лв.</Text>
+            </View>
+          </View>>
           <Text style={styles.summaryLabel}>ДДС:</Text>
           <Text style={styles.summaryValue}>{totalVat.toFixed(2)} лв.</Text>
         </View>
