@@ -291,13 +291,14 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Auth endpoints"
-    - "Invoice CRUD"
-    - "Statistics API"
-  stuck_tasks: []
+    - "OCR Invoice Scanning with Gemini API"
+  stuck_tasks:
+    - "OCR Invoice Scanning with Gemini API"
   test_all: false
-  test_priority: "high_first"
+  test_priority: "stuck_first"
 
 agent_communication:
   - agent: "main"
     message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+  - agent: "testing"
+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
