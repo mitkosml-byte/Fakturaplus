@@ -1,169 +1,174 @@
-diff --git a/frontend/app/(tabs)/profile.tsx b/frontend/app/(tabs)/profile.tsx
-index e47ff1c..caed74e 100644
---- a/frontend/app/(tabs)/profile.tsx
-+++ b/frontend/app/(tabs)/profile.tsx
-@@ -71,7 +71,7 @@ export default function ProfileScreen() {
-         <View style={styles.menuSection}>
-           <Text style={styles.menuSectionTitle}>Настройки</Text>
- 
--          <TouchableOpacity style={styles.menuItem}>
-+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
-             <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-               <Ionicons name="notifications" size={20} color="#8B5CF6" />
-             </View>
 diff --git a/model.patch b/model.patch
-index 9efac8f..e69de29 100644
+index 074293a..e69de29 100644
 --- a/model.patch
 +++ b/model.patch
-@@ -1,151 +0,0 @@
--diff --git a/test_result.md b/test_result.md
--index 30c484c..38875f4 100644
----- a/test_result.md
--+++ b/test_result.md
--@@ -107,87 +107,108 @@ user_problem_statement: Bulgarian Invoice Management Android App with OCR scanni
-- backend:
--   - task: "Auth endpoints (session, me, logout)"
--     implemented: true
---    working: "NA"
--+    working: true
--     file: "server.py"
--     stuck_count: 0
--     priority: "high"
---    needs_retesting: true
--+    needs_retesting: false
--     status_history:
--       - working: "NA"
--         agent: "main"
--         comment: "Implemented Google OAuth via Emergent Auth with session management"
--+      - working: true
--+        agent: "testing"
--+        comment: "✅ All auth endpoints working correctly. Created test user and session in MongoDB, /api/auth/me returns proper user data with Bearer token authentication"
+@@ -1,169 +0,0 @@
+-diff --git a/frontend/app/(tabs)/profile.tsx b/frontend/app/(tabs)/profile.tsx
+-index e47ff1c..caed74e 100644
+---- a/frontend/app/(tabs)/profile.tsx
+-+++ b/frontend/app/(tabs)/profile.tsx
+-@@ -71,7 +71,7 @@ export default function ProfileScreen() {
+-         <View style={styles.menuSection}>
+-           <Text style={styles.menuSectionTitle}>Настройки</Text>
 - 
--   - task: "OCR Invoice Scanning with Gemini API"
--     implemented: true
---    working: "NA"
--+    working: false
--     file: "server.py"
---    stuck_count: 0
--+    stuck_count: 1
--     priority: "high"
---    needs_retesting: true
--+    needs_retesting: false
--     status_history:
--       - working: "NA"
--         agent: "main"
--         comment: "Implemented OCR using Emergent LLM key with Gemini for Bulgarian invoice text extraction"
--+      - working: false
--+        agent: "testing"
--+        comment: "❌ OCR endpoint failing with error: UserMessage.__init__() got an unexpected keyword argument 'image_contents'. This is an Emergent LLM library API issue that needs research to fix the correct parameter name/structure"
-- 
--   - task: "Invoice CRUD operations"
--     implemented: true
---    working: "NA"
--+    working: true
--     file: "server.py"
--     stuck_count: 0
--     priority: "high"
---    needs_retesting: true
--+    needs_retesting: false
--     status_history:
--       - working: "NA"
--         agent: "main"
--         comment: "Full CRUD for invoices with search and filtering"
--+      - working: true
--+        agent: "testing"
--+        comment: "✅ All invoice CRUD operations working perfectly. Successfully created invoice with Bulgarian supplier name, retrieved invoice list, and search by supplier name works correctly"
-- 
--   - task: "Daily Revenue management"
--     implemented: true
---    working: "NA"
--+    working: true
--     file: "server.py"
--     stuck_count: 0
--     priority: "high"
---    needs_retesting: true
--+    needs_retesting: false
--     status_history:
--       - working: "NA"
--         agent: "main"
--         comment: "Fiscal revenue and pocket money tracking"
--+      - working: true
--+        agent: "testing"
--+        comment: "✅ Daily revenue endpoint working correctly. Successfully created daily revenue entry with fiscal_revenue: 500.00 and pocket_money: 100.00"
-- 
--   - task: "Non-Invoice Expenses (В канала)"
--     implemented: true
---    working: "NA"
--+    working: true
--     file: "server.py"
--     stuck_count: 0
--     priority: "medium"
---    needs_retesting: true
--+    needs_retesting: false
--     status_history:
--       - working: "NA"
--         agent: "main"
--         comment: "Expense tracking without invoices"
--+      - working: true
--+        agent: "testing"
--+        comment: "✅ Expenses endpoint working correctly. Successfully created expense with Bulgarian description 'Гориво за кола' and amount 80.00"
-- 
--   - task: "Statistics and VAT calculations"
--     implemented: true
---    working: "NA"
--+    working: true
--     file: "server.py"
--     stuck_count: 0
--     priority: "high"
---    needs_retesting: true
--+    needs_retesting: false
--     status_history:
--       - working: "NA"
--         agent: "main"
--         comment: "VAT calculation from fiscal revenue minus invoice VAT credit"
--+      - working: true
--+        agent: "testing"
--+        comment: "✅ Statistics endpoints working perfectly. Summary shows correct VAT calculations: fiscal_vat: 83.33, vat_to_pay: 63.33, profit: 400.0. Chart data endpoint also functional"
-- 
--   - task: "Export Excel/PDF"
--     implemented: true
---    working: "NA"
--+    working: true
--     file: "server.py"
--     stuck_count: 0
--     priority: "medium"
---    needs_retesting: true
--+    needs_retesting: false
--     status_history:
--       - working: "NA"
--         agent: "main"
--         comment: "Export invoices to Excel and PDF formats"
--+      - working: true
--+        agent: "testing"
--+        comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
-- 
-- frontend:
--   - task: "Login screen with Google OAuth"
--@@ -270,13 +291,14 @@ metadata:
-- 
-- test_plan:
--   current_focus:
---    - "Auth endpoints"
---    - "Invoice CRUD"
---    - "Statistics API"
---  stuck_tasks: []
--+    - "OCR Invoice Scanning with Gemini API"
--+  stuck_tasks:
--+    - "OCR Invoice Scanning with Gemini API"
--   test_all: false
---  test_priority: "high_first"
--+  test_priority: "stuck_first"
-- 
-- agent_communication:
--   - agent: "main"
---    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
--\ No newline at end of file
--+    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
--+  - agent: "testing"
--+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
--\ No newline at end of file
+--          <TouchableOpacity style={styles.menuItem}>
+-+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
+-             <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+-               <Ionicons name="notifications" size={20} color="#8B5CF6" />
+-             </View>
+-diff --git a/model.patch b/model.patch
+-index 9efac8f..e69de29 100644
+---- a/model.patch
+-+++ b/model.patch
+-@@ -1,151 +0,0 @@
+--diff --git a/test_result.md b/test_result.md
+--index 30c484c..38875f4 100644
+----- a/test_result.md
+--+++ b/test_result.md
+--@@ -107,87 +107,108 @@ user_problem_statement: Bulgarian Invoice Management Android App with OCR scanni
+-- backend:
+--   - task: "Auth endpoints (session, me, logout)"
+--     implemented: true
+---    working: "NA"
+--+    working: true
+--     file: "server.py"
+--     stuck_count: 0
+--     priority: "high"
+---    needs_retesting: true
+--+    needs_retesting: false
+--     status_history:
+--       - working: "NA"
+--         agent: "main"
+--         comment: "Implemented Google OAuth via Emergent Auth with session management"
+--+      - working: true
+--+        agent: "testing"
+--+        comment: "✅ All auth endpoints working correctly. Created test user and session in MongoDB, /api/auth/me returns proper user data with Bearer token authentication"
+-- 
+--   - task: "OCR Invoice Scanning with Gemini API"
+--     implemented: true
+---    working: "NA"
+--+    working: false
+--     file: "server.py"
+---    stuck_count: 0
+--+    stuck_count: 1
+--     priority: "high"
+---    needs_retesting: true
+--+    needs_retesting: false
+--     status_history:
+--       - working: "NA"
+--         agent: "main"
+--         comment: "Implemented OCR using Emergent LLM key with Gemini for Bulgarian invoice text extraction"
+--+      - working: false
+--+        agent: "testing"
+--+        comment: "❌ OCR endpoint failing with error: UserMessage.__init__() got an unexpected keyword argument 'image_contents'. This is an Emergent LLM library API issue that needs research to fix the correct parameter name/structure"
+-- 
+--   - task: "Invoice CRUD operations"
+--     implemented: true
+---    working: "NA"
+--+    working: true
+--     file: "server.py"
+--     stuck_count: 0
+--     priority: "high"
+---    needs_retesting: true
+--+    needs_retesting: false
+--     status_history:
+--       - working: "NA"
+--         agent: "main"
+--         comment: "Full CRUD for invoices with search and filtering"
+--+      - working: true
+--+        agent: "testing"
+--+        comment: "✅ All invoice CRUD operations working perfectly. Successfully created invoice with Bulgarian supplier name, retrieved invoice list, and search by supplier name works correctly"
+-- 
+--   - task: "Daily Revenue management"
+--     implemented: true
+---    working: "NA"
+--+    working: true
+--     file: "server.py"
+--     stuck_count: 0
+--     priority: "high"
+---    needs_retesting: true
+--+    needs_retesting: false
+--     status_history:
+--       - working: "NA"
+--         agent: "main"
+--         comment: "Fiscal revenue and pocket money tracking"
+--+      - working: true
+--+        agent: "testing"
+--+        comment: "✅ Daily revenue endpoint working correctly. Successfully created daily revenue entry with fiscal_revenue: 500.00 and pocket_money: 100.00"
+-- 
+--   - task: "Non-Invoice Expenses (В канала)"
+--     implemented: true
+---    working: "NA"
+--+    working: true
+--     file: "server.py"
+--     stuck_count: 0
+--     priority: "medium"
+---    needs_retesting: true
+--+    needs_retesting: false
+--     status_history:
+--       - working: "NA"
+--         agent: "main"
+--         comment: "Expense tracking without invoices"
+--+      - working: true
+--+        agent: "testing"
+--+        comment: "✅ Expenses endpoint working correctly. Successfully created expense with Bulgarian description 'Гориво за кола' and amount 80.00"
+-- 
+--   - task: "Statistics and VAT calculations"
+--     implemented: true
+---    working: "NA"
+--+    working: true
+--     file: "server.py"
+--     stuck_count: 0
+--     priority: "high"
+---    needs_retesting: true
+--+    needs_retesting: false
+--     status_history:
+--       - working: "NA"
+--         agent: "main"
+--         comment: "VAT calculation from fiscal revenue minus invoice VAT credit"
+--+      - working: true
+--+        agent: "testing"
+--+        comment: "✅ Statistics endpoints working perfectly. Summary shows correct VAT calculations: fiscal_vat: 83.33, vat_to_pay: 63.33, profit: 400.0. Chart data endpoint also functional"
+-- 
+--   - task: "Export Excel/PDF"
+--     implemented: true
+---    working: "NA"
+--+    working: true
+--     file: "server.py"
+--     stuck_count: 0
+--     priority: "medium"
+---    needs_retesting: true
+--+    needs_retesting: false
+--     status_history:
+--       - working: "NA"
+--         agent: "main"
+--         comment: "Export invoices to Excel and PDF formats"
+--+      - working: true
+--+        agent: "testing"
+--+        comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
+-- 
+-- frontend:
+--   - task: "Login screen with Google OAuth"
+--@@ -270,13 +291,14 @@ metadata:
+-- 
+-- test_plan:
+--   current_focus:
+---    - "Auth endpoints"
+---    - "Invoice CRUD"
+---    - "Statistics API"
+---  stuck_tasks: []
+--+    - "OCR Invoice Scanning with Gemini API"
+--+  stuck_tasks:
+--+    - "OCR Invoice Scanning with Gemini API"
+--   test_all: false
+---  test_priority: "high_first"
+--+  test_priority: "stuck_first"
+-- 
+-- agent_communication:
+--   - agent: "main"
+---    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+--\ No newline at end of file
+--+    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+--+  - agent: "testing"
+--+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+--\ No newline at end of file
