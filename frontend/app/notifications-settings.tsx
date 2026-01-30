@@ -213,9 +213,15 @@ export default function NotificationsSettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  backgroundImage: {
+    flex: 1,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+  },
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
   },
   loadingContainer: {
     flex: 1,
