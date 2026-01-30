@@ -184,29 +184,31 @@ export default function NotificationsSettingsScreen() {
           )}
         </View>
 
-        <View style={styles.infoCard}>
-          <Ionicons name="information-circle" size={24} color="#64748B" />
-          <Text style={styles.infoText}>
-            Известията се изпращат като push нотификации. 
-            Уверете се, че сте ги разрешили.
-          </Text>
-        </View>
-      </ScrollView>
+            <View style={styles.infoCard}>
+              <Ionicons name="information-circle" size={24} color="#64748B" />
+              <Text style={styles.infoText}>
+                Известията се изпращат като push нотификации. 
+                Уверете се, че сте ги разрешили.
+              </Text>
+            </View>
+          </ScrollView>
 
-      <View style={styles.footer}>
-        <TouchableOpacity 
-          style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color="white" />
-          ) : (
-            <Text style={styles.saveButtonText}>Запази настройки</Text>
-          )}
-        </TouchableOpacity>
+          <View style={styles.footer}>
+            <TouchableOpacity 
+              style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+              onPress={handleSave}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.saveButtonText}>Запази настройки</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
       </View>
-    </SafeAreaView>
+    </ImageBackground>
   );
 }
 
