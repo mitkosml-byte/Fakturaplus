@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, AutoFocus } from 'expo-camera';
 import { api } from '../../src/services/api';
 import { OCRResult } from '../../src/types';
 import { format } from 'date-fns';
@@ -27,6 +28,7 @@ export default function ScanScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
+  const [focusKey, setFocusKey] = useState(0);
   const cameraRef = useRef<any>(null);
 
   // Form fields (editable after OCR)
@@ -37,10 +39,20 @@ export default function ScanScreen() {
   const [totalAmount, setTotalAmount] = useState('');
   const [notes, setNotes] = useState('');
 
+  // Tap to focus - triggers refocus
+  const handleTapToFocus = useCallback(() => {
+    setFocusKey(prev => prev + 1);
+  }, []);
+
   const handleTakePhoto = async () => {
     if (cameraRef.current) {
       try {
-        const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
+        // Use higher quality for better OCR results
+        const photo = await cameraRef.current.takePictureAsync({ 
+          base64: true, 
+          quality: 0.9,
+          skipProcessing: false,
+        });
         setCapturedImage(`data:image/jpeg;base64,${photo.base64}`);
         setShowCamera(false);
         await processImage(photo.base64);
