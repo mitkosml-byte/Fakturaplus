@@ -48,7 +48,7 @@ export default function Index() {
 
   const handleGoogleLogin = async () => {
     const redirectUrl = Platform.OS === 'web'
-      ? `${API_URL}/`
+      ? (typeof window !== 'undefined' ? window.location.origin + '/' : '/')
       : Linking.createURL('/');
     
     const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
