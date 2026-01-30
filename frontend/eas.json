@@ -1,0 +1,28 @@
+{
+  "cli": {
+    "version": ">= 5.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "node": "20.19.0"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "node": "20.19.0"
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "node": "20.19.0"
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
