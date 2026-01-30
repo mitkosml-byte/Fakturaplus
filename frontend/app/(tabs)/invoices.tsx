@@ -121,17 +121,17 @@ export default function InvoicesScreen() {
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Без ДДС:</Text>
-          <Text style={styles.detailValue}>{item.amount_without_vat.toFixed(2)} лв.</Text>
+          <Text style={styles.detailValue}>{item.amount_without_vat.toFixed(2)} €</Text>
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>ДДС:</Text>
-          <Text style={styles.detailValue}>{item.vat_amount.toFixed(2)} лв.</Text>
+          <Text style={styles.detailValue}>{item.vat_amount.toFixed(2)} €</Text>
         </View>
       </View>
 
       <View style={styles.invoiceFooter}>
         <Text style={styles.totalLabel}>Общо:</Text>
-        <Text style={styles.totalValue}>{item.total_amount.toFixed(2)} лв.</Text>
+        <Text style={styles.totalValue}>{item.total_amount.toFixed(2)} €</Text>
       </View>
     </TouchableOpacity>
   );
@@ -176,11 +176,11 @@ export default function InvoicesScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>ДДС:</Text>
-              <Text style={styles.summaryValue}>{totalVat.toFixed(2)} лв.</Text>
+              <Text style={styles.summaryValue}>{totalVat.toFixed(2)} €</Text>
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>Общо:</Text>
-              <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>{totalAmount.toFixed(2)} лв.</Text>
+              <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>{totalAmount.toFixed(2)} €</Text>
             </View>
           </View>
 
@@ -263,16 +263,16 @@ export default function InvoicesScreen() {
                 <View style={styles.detailRow2}>
                   <View style={styles.detailSection}>
                     <Text style={styles.detailSectionLabel}>Без ДДС</Text>
-                    <Text style={styles.detailSectionValue}>{selectedInvoice.amount_without_vat.toFixed(2)} лв.</Text>
+                    <Text style={styles.detailSectionValue}>{selectedInvoice.amount_without_vat.toFixed(2)} €</Text>
                   </View>
                   <View style={styles.detailSection}>
                     <Text style={styles.detailSectionLabel}>ДДС (20%)</Text>
-                    <Text style={styles.detailSectionValue}>{selectedInvoice.vat_amount.toFixed(2)} лв.</Text>
+                    <Text style={styles.detailSectionValue}>{selectedInvoice.vat_amount.toFixed(2)} €</Text>
                   </View>
                 </View>
                 <View style={styles.totalSection}>
                   <Text style={styles.totalSectionLabel}>Обща сума</Text>
-                  <Text style={styles.totalSectionValue}>{selectedInvoice.total_amount.toFixed(2)} лв.</Text>
+                  <Text style={styles.totalSectionValue}>{selectedInvoice.total_amount.toFixed(2)} €</Text>
                 </View>
                 {selectedInvoice.notes && (
                   <View style={styles.detailSection}>

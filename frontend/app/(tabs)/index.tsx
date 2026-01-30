@@ -128,7 +128,7 @@ export default function HomeScreen() {
                 </View>
                 <Text style={styles.cardLabel}>Общ приход</Text>
                 <Text style={[styles.cardValue, { color: '#10B981' }]}>
-                  {summary?.total_income.toFixed(2) || '0.00'} лв.
+                  {summary?.total_income.toFixed(2) || '0.00'} €
                 </Text>
               </View>
 
@@ -138,7 +138,7 @@ export default function HomeScreen() {
             </View>
             <Text style={styles.cardLabel}>Общ разход</Text>
             <Text style={[styles.cardValue, { color: '#EF4444' }]}>
-              {summary?.total_expense.toFixed(2) || '0.00'} лв.
+              {summary?.total_expense.toFixed(2) || '0.00'} €
             </Text>
           </View>
         </View>
@@ -150,16 +150,16 @@ export default function HomeScreen() {
             <Text style={styles.vatTitle}>ДДС за плащане</Text>
           </View>
           <Text style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
-            {(summary?.vat_to_pay || 0).toFixed(2)} лв.
+            {(summary?.vat_to_pay || 0).toFixed(2)} €
           </Text>
           <View style={styles.vatDetails}>
             <View style={styles.vatDetailRow}>
               <Text style={styles.vatDetailLabel}>ДДС от продажби:</Text>
-              <Text style={styles.vatDetailValue}>{summary?.fiscal_vat.toFixed(2) || '0.00'} лв.</Text>
+              <Text style={styles.vatDetailValue}>{summary?.fiscal_vat.toFixed(2) || '0.00'} €</Text>
             </View>
             <View style={styles.vatDetailRow}>
               <Text style={styles.vatDetailLabel}>ДДС кредит (фактури):</Text>
-              <Text style={styles.vatDetailValue}>-{summary?.total_invoice_vat.toFixed(2) || '0.00'} лв.</Text>
+              <Text style={styles.vatDetailValue}>-{summary?.total_invoice_vat.toFixed(2) || '0.00'} €</Text>
             </View>
           </View>
         </View>
@@ -218,7 +218,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Фискализиран оборот (лв.)</Text>
+              <Text style={styles.inputLabel}>Фискализиран оборот (€)</Text>
               <TextInput
                 style={styles.input}
                 value={fiscalRevenue}
@@ -231,7 +231,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Джобче (лв.)</Text>
+              <Text style={styles.inputLabel}>Джобче (€)</Text>
               <TextInput
                 style={styles.input}
                 value={pocketMoney}
@@ -273,7 +273,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Сума (лв.)</Text>
+              <Text style={styles.inputLabel}>Сума (€)</Text>
               <TextInput
                 style={styles.input}
                 value={expenseAmount}

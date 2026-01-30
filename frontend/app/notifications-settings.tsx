@@ -120,7 +120,7 @@ export default function NotificationsSettingsScreen() {
 
           {thresholdEnabled && (
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Сума на ДДС (лв.)</Text>
+              <Text style={styles.inputLabel}>Сума на ДДС (€)</Text>
               <TextInput
                 style={styles.input}
                 value={thresholdAmount}

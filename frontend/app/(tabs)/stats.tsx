@@ -110,28 +110,28 @@ export default function StatsScreen() {
             <Ionicons name="trending-up" size={24} color="#10B981" />
             <Text style={styles.cardLabel}>Общ приход</Text>
             <Text style={[styles.cardValue, { color: '#10B981' }]}>
-              {summary?.total_income.toFixed(2) || '0.00'} лв.
+              {summary?.total_income.toFixed(2) || '0.00'} €
             </Text>
           </View>
           <View style={[styles.summaryCard, { borderLeftColor: '#EF4444' }]}>
             <Ionicons name="trending-down" size={24} color="#EF4444" />
             <Text style={styles.cardLabel}>Общ разход</Text>
             <Text style={[styles.cardValue, { color: '#EF4444' }]}>
-              {summary?.total_expense.toFixed(2) || '0.00'} лв.
+              {summary?.total_expense.toFixed(2) || '0.00'} €
             </Text>
           </View>
           <View style={[styles.summaryCard, { borderLeftColor: '#8B5CF6' }]}>
             <Ionicons name="calculator" size={24} color="#8B5CF6" />
             <Text style={styles.cardLabel}>ДДС за плащане</Text>
             <Text style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
-              {summary?.vat_to_pay.toFixed(2) || '0.00'} лв.
+              {summary?.vat_to_pay.toFixed(2) || '0.00'} €
             </Text>
           </View>
           <View style={[styles.summaryCard, { borderLeftColor: '#F59E0B' }]}>
             <Ionicons name="wallet" size={24} color="#F59E0B" />
             <Text style={styles.cardLabel}>Печалба</Text>
             <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
-              {summary?.profit.toFixed(2) || '0.00'} лв.
+              {summary?.profit.toFixed(2) || '0.00'} €
             </Text>
           </View>
         </View>
@@ -204,13 +204,13 @@ export default function StatsScreen() {
             <View style={styles.vatItem}>
               <Text style={styles.vatLabel}>ДДС от продажби</Text>
               <Text style={[styles.vatValue, { color: '#EF4444' }]}>
-                +{summary?.fiscal_vat.toFixed(2) || '0.00'} лв.
+                +{summary?.fiscal_vat.toFixed(2) || '0.00'} €
               </Text>
             </View>
             <View style={styles.vatItem}>
               <Text style={styles.vatLabel}>ДДС кредит (фактури)</Text>
               <Text style={[styles.vatValue, { color: '#10B981' }]}>
-                -{summary?.total_invoice_vat.toFixed(2) || '0.00'} лв.
+                -{summary?.total_invoice_vat.toFixed(2) || '0.00'} €
               </Text>
             </View>
           </View>
@@ -218,7 +218,7 @@ export default function StatsScreen() {
           <View style={styles.vatTotal}>
             <Text style={styles.vatTotalLabel}>ДДС за плащане</Text>
             <Text style={[styles.vatTotalValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
-              {summary?.vat_to_pay.toFixed(2) || '0.00'} лв.
+              {summary?.vat_to_pay.toFixed(2) || '0.00'} €
             </Text>
           </View>
         </View>
@@ -236,7 +236,7 @@ export default function StatsScreen() {
             <View style={styles.statItem}>
               <Ionicons name="cash" size={20} color="#10B981" />
               <Text style={styles.statLabel}>Фискален оборот</Text>
-              <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0} лв.</Text>
+              <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0} €</Text>
             </View>
           </View>
 
@@ -244,12 +244,12 @@ export default function StatsScreen() {
             <View style={styles.statItem}>
               <Ionicons name="wallet" size={20} color="#F59E0B" />
               <Text style={styles.statLabel}>Джобче</Text>
-              <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0} лв.</Text>
+              <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0} €</Text>
             </View>
             <View style={styles.statItem}>
               <Ionicons name="remove-circle" size={20} color="#EF4444" />
               <Text style={styles.statLabel}>Разходи "в канала"</Text>
-              <Text style={styles.statValue}>{summary?.total_non_invoice_expenses.toFixed(0) || 0} лв.</Text>
+              <Text style={styles.statValue}>{summary?.total_non_invoice_expenses.toFixed(0) || 0} €</Text>
             </View>
           </View>
         </View>
