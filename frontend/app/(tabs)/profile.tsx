@@ -136,22 +136,30 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out" size={20} color="#EF4444" />
-          <Text style={styles.logoutText}>Изход</Text>
-        </TouchableOpacity>
+            {/* Logout Button */}
+            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+              <Ionicons name="log-out" size={20} color="#EF4444" />
+              <Text style={styles.logoutText}>Изход</Text>
+            </TouchableOpacity>
 
-        <View style={{ height: 40 }} />
-      </ScrollView>
-    </SafeAreaView>
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        </SafeAreaView>
+      </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
+  backgroundImage: {
+    flex: 1,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+  },
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
   },
   scrollView: {
     flex: 1,
