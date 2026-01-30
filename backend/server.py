@@ -112,6 +112,22 @@ class NonInvoiceExpenseCreate(BaseModel):
     amount: float
     date: str
 
+class NotificationSettings(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    vat_threshold_enabled: bool = False
+    vat_threshold_amount: float = 0
+    periodic_enabled: bool = False
+    periodic_dates: List[int] = []  # Days of month (1-31)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class NotificationSettingsUpdate(BaseModel):
+    vat_threshold_enabled: Optional[bool] = None
+    vat_threshold_amount: Optional[float] = None
+    periodic_enabled: Optional[bool] = None
+    periodic_dates: Optional[List[int]] = None
+
 class OCRResult(BaseModel):
     supplier: str
     invoice_number: str
