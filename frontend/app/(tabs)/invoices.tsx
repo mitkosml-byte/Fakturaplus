@@ -182,35 +182,27 @@ export default function InvoicesScreen() {
               <Text style={styles.summaryLabel}>Общо:</Text>
               <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>{totalAmount.toFixed(2)} лв.</Text>
             </View>
-          </View>>
-          <Text style={styles.summaryLabel}>ДДС:</Text>
-          <Text style={styles.summaryValue}>{totalVat.toFixed(2)} лв.</Text>
-        </View>
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>Общо:</Text>
-          <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>{totalAmount.toFixed(2)} лв.</Text>
-        </View>
-      </View>
-
-      {/* List */}
-      <FlatList
-        data={invoices}
-        renderItem={renderInvoice}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="document-text-outline" size={64} color="#334155" />
-            <Text style={styles.emptyText}>Няма фактури</Text>
-            <Text style={styles.emptyHint}>Сканирайте първата си фактура</Text>
           </View>
-        }
-      />
 
-      {/* Export Modal */}
+          {/* List */}
+          <FlatList
+            data={invoices}
+            renderItem={renderInvoice}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="document-text-outline" size={64} color="#334155" />
+                <Text style={styles.emptyText}>Няма фактури</Text>
+                <Text style={styles.emptyHint}>Сканирайте първата си фактура</Text>
+              </View>
+            }
+          />
+
+          {/* Export Modal */}
       <Modal visible={exportModalVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
