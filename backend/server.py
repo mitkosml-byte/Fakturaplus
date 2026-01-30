@@ -284,6 +284,42 @@ async def get_all_users(current_user: User = Depends(get_current_user)):
     users = await db.users.find({}, {"_id": 0}).to_list(1000)
     return users
 
+# ===================== NOTIFICATION SETTINGS ENDPOINTS =====================
+
+@api_router.get("/notifications/settings", response_model=NotificationSettings)
+async def get_notification_settings(current_user: User = Depends(get_current_user)):
+    settings = await db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    if not settings:
+        # Create default settings
+        default_settings = NotificationSettings(user_id=current_user.user_id)
+        await db.notification_settings.insert_one(default_settings.dict())
+        return default_settings
+    return NotificationSettings(**settings)
+
+@api_router.put("/notifications/settings", response_model=NotificationSettings)
+async def update_notification_settings(
+    settings_update: NotificationSettingsUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    update_data = {k: v for k, v in settings_update.dict().items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    
+    existing = await db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    
+    if not existing:
+        # Create new settings
+        new_settings = NotificationSettings(user_id=current_user.user_id, **update_data)
+        await db.notification_settings.insert_one(new_settings.dict())
+        return new_settings
+    
+    await db.notification_settings.update_one(
+        {"user_id": current_user.user_id},
+        {"$set": update_data}
+    )
+    
+    updated = await db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    return NotificationSettings(**updated)
+
 # ===================== OCR ENDPOINT =====================
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
