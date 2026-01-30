@@ -82,9 +82,13 @@ export default function Index() {
   }
 
   return (
-    <View style={styles.container}>
+    <ImageBackground 
+      source={{ uri: BACKGROUND_IMAGE }} 
+      style={styles.container}
+      resizeMode="cover"
+    >
       <LinearGradient
-        colors={['#0F172A', '#1E293B', '#0F172A']}
+        colors={['rgba(15, 23, 42, 0.85)', 'rgba(30, 41, 59, 0.75)', 'rgba(15, 23, 42, 0.9)']}
         style={styles.gradient}
       >
         <View style={styles.content}>
@@ -113,7 +117,7 @@ export default function Index() {
           </Text>
         </View>
       </LinearGradient>
-    </View>
+    </ImageBackground>
   );
 }
 
