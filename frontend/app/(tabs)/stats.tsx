@@ -77,17 +77,19 @@ export default function StatsScreen() {
   }));
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
-      >
-        <View style={styles.header}>
-          <Text style={styles.title}>Статистики</Text>
-          <Text style={styles.subtitle}>Анализ на приходи и разходи</Text>
-        </View>
+    <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
+      <View style={styles.overlay}>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <ScrollView
+            style={styles.scrollView}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+          >
+            <View style={styles.header}>
+              <Text style={styles.title}>Статистики</Text>
+              <Text style={styles.subtitle}>Анализ на приходи и разходи</Text>
+            </View>
 
-        {/* Period Selector */}
+            {/* Period Selector */}
         <View style={styles.periodSelector}>
           {(['week', 'month', 'year'] as const).map((p) => (
             <TouchableOpacity
