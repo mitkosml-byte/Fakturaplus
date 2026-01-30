@@ -322,16 +322,24 @@ export default function ScanScreen() {
               )}
             </View>
           )}
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
+  backgroundImage: {
+    flex: 1,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+  },
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
   },
   keyboardView: {
     flex: 1,
