@@ -102,37 +102,39 @@ export default function HomeScreen() {
   const today = format(new Date(), "d MMMM yyyy 'г.'" , { locale: bg });
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>Добре дошли!</Text>
-            <Text style={styles.date}>{today}</Text>
-          </View>
-          <View style={styles.headerIcon}>
-            <Ionicons name="receipt" size={28} color="#8B5CF6" />
-          </View>
-        </View>
-
-        {/* Summary Cards */}
-        <View style={styles.summaryContainer}>
-          <View style={[styles.summaryCard, styles.incomeCard]}>
-            <View style={styles.cardIcon}>
-              <Ionicons name="trending-up" size={24} color="#10B981" />
+    <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
+      <View style={styles.overlay}>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <ScrollView
+            style={styles.scrollView}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+          >
+            {/* Header */}
+            <View style={styles.header}>
+              <View>
+                <Text style={styles.greeting}>Добре дошли!</Text>
+                <Text style={styles.date}>{today}</Text>
+              </View>
+              <View style={styles.headerIcon}>
+                <Ionicons name="receipt" size={28} color="#8B5CF6" />
+              </View>
             </View>
-            <Text style={styles.cardLabel}>Общ приход</Text>
-            <Text style={[styles.cardValue, { color: '#10B981' }]}>
-              {summary?.total_income.toFixed(2) || '0.00'} лв.
-            </Text>
-          </View>
 
-          <View style={[styles.summaryCard, styles.expenseCard]}>
-            <View style={styles.cardIcon}>
-              <Ionicons name="trending-down" size={24} color="#EF4444" />
+            {/* Summary Cards */}
+            <View style={styles.summaryContainer}>
+              <View style={[styles.summaryCard, styles.incomeCard]}>
+                <View style={styles.cardIcon}>
+                  <Ionicons name="trending-up" size={24} color="#10B981" />
+                </View>
+                <Text style={styles.cardLabel}>Общ приход</Text>
+                <Text style={[styles.cardValue, { color: '#10B981' }]}>
+                  {summary?.total_income.toFixed(2) || '0.00'} лв.
+                </Text>
+              </View>
+
+              <View style={[styles.summaryCard, styles.expenseCard]}>
+                <View style={styles.cardIcon}>
+                  <Ionicons name="trending-down" size={24} color="#EF4444" />
             </View>
             <Text style={styles.cardLabel}>Общ разход</Text>
             <Text style={[styles.cardValue, { color: '#EF4444' }]}>
