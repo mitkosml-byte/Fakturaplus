@@ -306,7 +306,7 @@ async def scan_invoice(image_base64: str = None, request: Request = None):
         
         user_message = UserMessage(
             text="Извлечи данните от тази фактура. Отговори само с JSON.",
-            image_contents=[image_content]
+            file_contents=[image_content]
         )
         
         response = await chat.send_message(user_message)
