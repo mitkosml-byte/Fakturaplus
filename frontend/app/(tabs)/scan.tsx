@@ -402,7 +402,7 @@ const styles = StyleSheet.create({
   },
   cameraFrame: {
     width: '90%',
-    aspectRatio: 1.4,
+    aspectRatio: 0.7,
     alignSelf: 'center',
     position: 'relative',
   },
@@ -411,6 +411,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderColor: '#8B5CF6',
+    borderRadius: 4,
   },
   topLeft: {
     top: 0,
