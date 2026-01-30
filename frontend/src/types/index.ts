@@ -68,3 +68,14 @@ export interface ChartDataPoint {
   expense: number;
   vat: number;
 }
+
+export interface NotificationSettings {
+  id: string;
+  user_id: string;
+  vat_threshold_enabled: boolean;
+  vat_threshold_amount: number;
+  periodic_enabled: boolean;
+  periodic_dates: number[];
+  created_at: string;
+  updated_at: string;
+}
