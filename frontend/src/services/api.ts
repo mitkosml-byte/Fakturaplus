@@ -156,6 +156,23 @@ class ApiService {
     const query = queryParams.toString();
     return `${API_URL}/api/export/pdf${query ? `?${query}` : ''}`;
   }
+
+  // Notification Settings
+  async getNotificationSettings(): Promise<NotificationSettings> {
+    return this.fetch('/notifications/settings');
+  }
+
+  async updateNotificationSettings(settings: {
+    vat_threshold_enabled?: boolean;
+    vat_threshold_amount?: number;
+    periodic_enabled?: boolean;
+    periodic_dates?: number[];
+  }): Promise<NotificationSettings> {
+    return this.fetch('/notifications/settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    });
+  }
 }
 
 export const api = new ApiService();
