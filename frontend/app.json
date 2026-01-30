@@ -1,22 +1,31 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "Фактура+",
+    "slug": "faktura-plus",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
+    "scheme": "fakturaplus",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Сканиране на фактури с камерата",
+        "NSPhotoLibraryUsageDescription": "Избор на снимки на фактури"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000"
+        "backgroundColor": "#0F172A"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ],
+      "package": "com.fakturaplus.app"
     },
     "web": {
       "bundler": "metro",
@@ -31,7 +40,19 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#000"
+          "backgroundColor": "#0F172A"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Разрешете достъп до камерата за сканиране на фактури"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Разрешете достъп до галерията за избор на снимки на фактури"
         }
       ]
     ],
