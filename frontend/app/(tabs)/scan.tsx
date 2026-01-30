@@ -180,19 +180,21 @@ export default function ScanScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-      >
-        <ScrollView style={styles.scrollView}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Сканирай фактура</Text>
-            <Text style={styles.subtitle}>Използвай OCR за автоматично извличане</Text>
-          </View>
+    <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
+      <View style={styles.overlay}>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.keyboardView}
+          >
+            <ScrollView style={styles.scrollView}>
+              <View style={styles.header}>
+                <Text style={styles.title}>Сканирай фактура</Text>
+                <Text style={styles.subtitle}>Използвай OCR за автоматично извличане</Text>
+              </View>
 
-          {!capturedImage ? (
-            <View style={styles.scanOptions}>
+              {!capturedImage ? (
+                <View style={styles.scanOptions}>
               <TouchableOpacity style={styles.scanButton} onPress={openCamera}>
                 <View style={styles.scanIconContainer}>
                   <Ionicons name="camera" size={48} color="#8B5CF6" />
