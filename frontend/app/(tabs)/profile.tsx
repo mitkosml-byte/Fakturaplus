@@ -39,35 +39,37 @@ export default function ProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView style={styles.scrollView}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Профил</Text>
-        </View>
+    <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
+      <View style={styles.overlay}>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <ScrollView style={styles.scrollView}>
+            <View style={styles.header}>
+              <Text style={styles.title}>Профил</Text>
+            </View>
 
-        {/* User Card */}
-        <View style={styles.userCard}>
-          <View style={styles.avatarContainer}>
-            {user?.picture ? (
-              <Image source={{ uri: user.picture }} style={styles.avatar} />
-            ) : (
-              <View style={styles.avatarPlaceholder}>
-                <Ionicons name="person" size={40} color="#8B5CF6" />
+            {/* User Card */}
+            <View style={styles.userCard}>
+              <View style={styles.avatarContainer}>
+                {user?.picture ? (
+                  <Image source={{ uri: user.picture }} style={styles.avatar} />
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <Ionicons name="person" size={40} color="#8B5CF6" />
+                  </View>
+                )}
               </View>
-            )}
-          </View>
-          <Text style={styles.userName}>{user?.name || 'Потребител'}</Text>
-          <Text style={styles.userEmail}>{user?.email || ''}</Text>
-          <View style={styles.roleContainer}>
-            <Ionicons 
-              name={user?.role === 'accountant' ? 'briefcase' : 'person'} 
-              size={16} 
-              color={user?.role === 'accountant' ? '#8B5CF6' : '#64748B'} 
-            />
-            <Text style={[styles.roleText, user?.role === 'accountant' && styles.roleTextAccountant]}>
-              {user?.role === 'accountant' ? 'Счетоводител' : 'Потребител'}
-            </Text>
-          </View>
+              <Text style={styles.userName}>{user?.name || 'Потребител'}</Text>
+              <Text style={styles.userEmail}>{user?.email || ''}</Text>
+              <View style={styles.roleContainer}>
+                <Ionicons 
+                  name={user?.role === 'accountant' ? 'briefcase' : 'person'} 
+                  size={16} 
+                  color={user?.role === 'accountant' ? '#8B5CF6' : '#64748B'} 
+                />
+                <Text style={[styles.roleText, user?.role === 'accountant' && styles.roleTextAccountant]}>
+                  {user?.role === 'accountant' ? 'Счетоводител' : 'Потребител'}
+                </Text>
+              </View>
         </View>
 
         {/* Menu Items */}
