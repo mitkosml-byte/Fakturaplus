@@ -387,6 +387,9 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
+  cameraOverlayPressable: {
+    flex: 1,
+  },
   cameraOverlay: {
     flex: 1,
     backgroundColor: 'transparent',
