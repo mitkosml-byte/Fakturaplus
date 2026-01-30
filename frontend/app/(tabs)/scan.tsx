@@ -145,22 +145,32 @@ export default function ScanScreen() {
   if (showCamera) {
     return (
       <View style={styles.cameraContainer}>
-        <CameraView style={styles.camera} ref={cameraRef} facing="back">
-          <SafeAreaView style={styles.cameraOverlay}>
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowCamera(false)}>
-              <Ionicons name="close" size={32} color="white" />
-            </TouchableOpacity>
-            <View style={styles.cameraFrame}>
-              <View style={[styles.corner, styles.topLeft]} />
-              <View style={[styles.corner, styles.topRight]} />
-              <View style={[styles.corner, styles.bottomLeft]} />
-              <View style={[styles.corner, styles.bottomRight]} />
-            </View>
-            <Text style={styles.cameraHint}>Позиционирайте фактурата в рамката</Text>
-            <TouchableOpacity style={styles.captureButton} onPress={handleTakePhoto}>
-              <Ionicons name="scan" size={32} color="white" />
-            </TouchableOpacity>
-          </SafeAreaView>
+        <CameraView 
+          key={focusKey}
+          style={styles.camera} 
+          ref={cameraRef} 
+          facing="back"
+          autofocus="on"
+          mode="picture"
+        >
+          <Pressable style={styles.cameraOverlayPressable} onPress={handleTapToFocus}>
+            <SafeAreaView style={styles.cameraOverlay}>
+              <TouchableOpacity style={styles.closeButton} onPress={() => setShowCamera(false)}>
+                <Ionicons name="close" size={32} color="white" />
+              </TouchableOpacity>
+              <View style={styles.cameraFrame}>
+                <View style={[styles.corner, styles.topLeft]} />
+                <View style={[styles.corner, styles.topRight]} />
+                <View style={[styles.corner, styles.bottomLeft]} />
+                <View style={[styles.corner, styles.bottomRight]} />
+              </View>
+              <Text style={styles.cameraHint}>Докоснете екрана за фокусиране</Text>
+              <Text style={styles.cameraHint2}>Позиционирайте фактурата в рамката</Text>
+              <TouchableOpacity style={styles.captureButton} onPress={handleTakePhoto}>
+                <Ionicons name="camera" size={36} color="white" />
+              </TouchableOpacity>
+            </SafeAreaView>
+          </Pressable>
         </CameraView>
       </View>
     );
