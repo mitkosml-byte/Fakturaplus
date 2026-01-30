@@ -163,16 +163,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 48,
   },
-  iconCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-    borderWidth: 2,
-    borderColor: 'rgba(139, 92, 246, 0.3)',
+  logo: {
+    width: 140,
+    height: 140,
+    marginBottom: 16,
   },
   title: {
     fontSize: 42,
