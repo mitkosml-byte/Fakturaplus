@@ -281,7 +281,7 @@ async def get_all_users(current_user: User = Depends(get_current_user)):
     if current_user.role != "accountant":
         raise HTTPException(status_code=403, detail="Нямате права за тази операция")
     
-    users = await db.users.find({}, {"_id": 0}).to_list(1000)
+    users = await db.users.find({}, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "picture": 1}).to_list(1000)
     return users
 
 # ===================== NOTIFICATION SETTINGS ENDPOINTS =====================
