@@ -420,7 +420,7 @@ async def get_invoices(
         else:
             query["date"] = {"$lte": datetime.fromisoformat(end_date.replace("Z", "+00:00"))}
     
-    invoices = await db.invoices.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
     return [Invoice(**inv) for inv in invoices]
 
 @api_router.get("/invoices/{invoice_id}", response_model=Invoice)
