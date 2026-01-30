@@ -563,19 +563,19 @@ async def get_summary(
         if end_date:
             inv_query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
     
-    invoices = await db.invoices.find(inv_query, {"_id": 0}).to_list(1000)
+    invoices = await db.invoices.find(inv_query, {"_id": 0, "total_amount": 1, "vat_amount": 1}).to_list(1000)
     
     # Get daily revenues
     rev_query = {"user_id": current_user.user_id}
     if date_query:
         rev_query["date"] = date_query
-    revenues = await db.daily_revenue.find(rev_query, {"_id": 0}).to_list(1000)
+    revenues = await db.daily_revenue.find(rev_query, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
     
     # Get expenses
     exp_query = {"user_id": current_user.user_id}
     if date_query:
         exp_query["date"] = date_query
-    expenses = await db.expenses.find(exp_query, {"_id": 0}).to_list(1000)
+    expenses = await db.expenses.find(exp_query, {"_id": 0, "amount": 1}).to_list(1000)
     
     # Calculate totals
     total_invoice_amount = sum(inv.get("total_amount", 0) for inv in invoices)
