@@ -93,9 +93,11 @@ export default function Index() {
       >
         <View style={styles.content}>
           <View style={styles.logoContainer}>
-            <View style={styles.iconCircle}>
-              <Ionicons name="receipt" size={64} color="#8B5CF6" />
-            </View>
+            <Image 
+              source={require('../assets/images/logo.png')} 
+              style={styles.logo}
+              resizeMode="contain"
+            />
             <Text style={styles.title}>Фактура+</Text>
             <Text style={styles.subtitle}>Управление на фактури</Text>
           </View>
