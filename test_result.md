@@ -107,87 +107,108 @@ user_problem_statement: Bulgarian Invoice Management Android App with OCR scanni
 backend:
   - task: "Auth endpoints (session, me, logout)"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Implemented Google OAuth via Emergent Auth with session management"
+      - working: true
+        agent: "testing"
+        comment: "✅ All auth endpoints working correctly. Created test user and session in MongoDB, /api/auth/me returns proper user data with Bearer token authentication"
 
   - task: "OCR Invoice Scanning with Gemini API"
     implemented: true
-    working: "NA"
+    working: false
     file: "server.py"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Implemented OCR using Emergent LLM key with Gemini for Bulgarian invoice text extraction"
+      - working: false
+        agent: "testing"
+        comment: "❌ OCR endpoint failing with error: UserMessage.__init__() got an unexpected keyword argument 'image_contents'. This is an Emergent LLM library API issue that needs research to fix the correct parameter name/structure"
 
   - task: "Invoice CRUD operations"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Full CRUD for invoices with search and filtering"
+      - working: true
+        agent: "testing"
+        comment: "✅ All invoice CRUD operations working perfectly. Successfully created invoice with Bulgarian supplier name, retrieved invoice list, and search by supplier name works correctly"
 
   - task: "Daily Revenue management"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Fiscal revenue and pocket money tracking"
+      - working: true
+        agent: "testing"
+        comment: "✅ Daily revenue endpoint working correctly. Successfully created daily revenue entry with fiscal_revenue: 500.00 and pocket_money: 100.00"
 
   - task: "Non-Invoice Expenses (В канала)"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Expense tracking without invoices"
+      - working: true
+        agent: "testing"
+        comment: "✅ Expenses endpoint working correctly. Successfully created expense with Bulgarian description 'Гориво за кола' and amount 80.00"
 
   - task: "Statistics and VAT calculations"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "VAT calculation from fiscal revenue minus invoice VAT credit"
+      - working: true
+        agent: "testing"
+        comment: "✅ Statistics endpoints working perfectly. Summary shows correct VAT calculations: fiscal_vat: 83.33, vat_to_pay: 63.33, profit: 400.0. Chart data endpoint also functional"
 
   - task: "Export Excel/PDF"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Export invoices to Excel and PDF formats"
+      - working: true
+        agent: "testing"
+        comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
 
 frontend:
   - task: "Login screen with Google OAuth"
