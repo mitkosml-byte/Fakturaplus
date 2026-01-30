@@ -13,8 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { api } from '../../src/services/api';
-import { NotificationSettings } from '../../src/types';
+import { api } from '../src/services/api';
+import { NotificationSettings } from '../src/types';
 
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
 
