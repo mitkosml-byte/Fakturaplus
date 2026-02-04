@@ -300,7 +300,7 @@ export default function HomeScreen() {
 
             {/* Date Picker */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Дата</Text>
+              <Text style={styles.inputLabel}>{t('home.date')}</Text>
               <View style={styles.datePickerContainer}>
                 <TouchableOpacity 
                   style={styles.dateButton} 
@@ -314,7 +314,7 @@ export default function HomeScreen() {
                 >
                   <Ionicons name="calendar" size={20} color="#8B5CF6" />
                   <Text style={styles.dateText}>
-                    {format(revenueDate, 'd MMMM yyyy', { locale: bg })}
+                    {format(revenueDate, 'd MMMM yyyy', { locale: dateLocale })}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
@@ -336,15 +336,15 @@ export default function HomeScreen() {
                 setRevenueDatePickerVisible(false);
               }}
               onCancel={() => setRevenueDatePickerVisible(false)}
-              confirmTextIOS="Избери"
-              cancelTextIOS="Отказ"
-              locale="bg"
+              confirmTextIOS={t('common.select')}
+              cancelTextIOS={t('common.cancel')}
+              locale={language}
             />
 
             {/* Current totals display */}
             {(currentDayRevenue.fiscal_revenue > 0 || currentDayRevenue.pocket_money > 0) && (
               <View style={styles.currentTotalsCard}>
-                <Text style={styles.currentTotalsTitle}>Натрупано за {format(revenueDate, 'd MMM', { locale: bg })}:</Text>
+                <Text style={styles.currentTotalsTitle}>{t('home.accumulatedFor')} {format(revenueDate, 'd MMM', { locale: dateLocale })}:</Text>
                 <View style={styles.currentTotalsRow}>
                   <View style={styles.currentTotalItem}>
                     <Text style={styles.currentTotalValue}>{currentDayRevenue.fiscal_revenue.toFixed(2)} €</Text>
