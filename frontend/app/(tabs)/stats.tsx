@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Dimensions,
   ImageBackground,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,11 +20,26 @@ const { width } = Dimensions.get('window');
 const chartWidth = width - 80;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
+interface SupplierStats {
+  supplier: string;
+  total_amount: number;
+  total_vat: number;
+  total_net: number;
+  invoice_count: number;
+  avg_invoice: number;
+}
+
 export default function StatsScreen() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
   const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'suppliers'>('overview');
+  const [supplierStats, setSupplierStats] = useState<{
+    totals: { total_amount: number; total_vat: number; supplier_count: number; invoice_count: number };
+    top_10: SupplierStats[];
+  } | null>(null);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
