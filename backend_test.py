@@ -593,172 +593,9 @@ class BudgetAndExportTester:
             self.log_result("Delete Recurring Expense", False, error=str(e))
             return False
             
-    async def test_get_price_alert_settings(self):
-        """Test GET /api/items/price-alert-settings - Get alert threshold settings"""
-        try:
-            async with self.session.get(
-                f"{BACKEND_URL}/items/price-alert-settings",
-                headers=self.get_auth_headers()
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    threshold_percent = data.get("threshold_percent", 0)
-                    enabled = data.get("enabled", False)
-                    
-                    self.log_result(
-                        "Get Price Alert Settings", 
-                        True, 
-                        f"Threshold: {threshold_percent}%, Enabled: {enabled}"
-                    )
-                    return True
-                else:
-                    error_text = await response.text()
-                    self.log_result("Get Price Alert Settings", False, error=f"Status {response.status}: {error_text}")
-                    return False
-                    
-        except Exception as e:
-            self.log_result("Get Price Alert Settings", False, error=str(e))
-            return False
-            
-    async def test_get_item_statistics(self):
-        """Test GET /api/statistics/items - Get item statistics with top lists"""
-        try:
-            async with self.session.get(
-                f"{BACKEND_URL}/statistics/items",
-                headers=self.get_auth_headers()
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    totals = data.get("totals", {})
-                    top_by_quantity = data.get("top_by_quantity", [])
-                    top_by_value = data.get("top_by_value", [])
-                    top_by_frequency = data.get("top_by_frequency", [])
-                    price_trends = data.get("price_trends", [])
-                    
-                    total_items = totals.get("total_items", 0)
-                    unique_items = totals.get("unique_items", 0)
-                    
-                    # Check if our items appear in the statistics
-                    coffee_found = any(item.get("item_name") == "кафе" for item in top_by_quantity)
-                    sugar_found = any(item.get("item_name") == "захар" for item in top_by_quantity)
-                    
-                    self.log_result(
-                        "Get Item Statistics", 
-                        True, 
-                        f"Total items: {total_items}, Unique: {unique_items}, Top lists: {len(top_by_quantity)} by qty, {len(top_by_value)} by value, {len(price_trends)} trends. Coffee found: {coffee_found}, Sugar found: {sugar_found}"
-                    )
-                    return True
-                else:
-                    error_text = await response.text()
-                    self.log_result("Get Item Statistics", False, error=f"Status {response.status}: {error_text}")
-                    return False
-                    
-        except Exception as e:
-            self.log_result("Get Item Statistics", False, error=str(e))
-            return False
-            
-    async def test_get_item_price_history(self):
-        """Test GET /api/items/price-history/кафе - Get price history for 'Кафе' item"""
-        try:
-            # URL encode the Bulgarian text
-            import urllib.parse
-            item_name = urllib.parse.quote("кафе")
-            
-            async with self.session.get(
-                f"{BACKEND_URL}/items/price-history/{item_name}",
-                headers=self.get_auth_headers()
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    history = data.get("history", [])
-                    statistics = data.get("statistics", {})
-                    
-                    avg_price = statistics.get("avg_price", 0)
-                    min_price = statistics.get("min_price", 0)
-                    max_price = statistics.get("max_price", 0)
-                    trend_percent = statistics.get("trend_percent", 0)
-                    total_records = statistics.get("total_records", 0)
-                    
-                    # Check if we have the expected price history
-                    if total_records >= 2:
-                        self.log_result(
-                            "Get Item Price History (Кафе)", 
-                            True, 
-                            f"Found {total_records} records. Avg: {avg_price} лв, Range: {min_price}-{max_price} лв, Trend: {trend_percent}%"
-                        )
-                        return True
-                    else:
-                        self.log_result(
-                            "Get Item Price History (Кафе)", 
-                            True, 
-                            f"Found {total_records} records (may be expected if items not yet processed)"
-                        )
-                        return True
-                else:
-                    error_text = await response.text()
-                    self.log_result("Get Item Price History (Кафе)", False, error=f"Status {response.status}: {error_text}")
-                    return False
-                    
-        except Exception as e:
-            self.log_result("Get Item Price History (Кафе)", False, error=str(e))
-            return False
-            
-    async def test_get_item_by_supplier(self):
-        """Test GET /api/statistics/items/кафе/by-supplier - Compare prices by supplier"""
-        try:
-            # URL encode the Bulgarian text
-            import urllib.parse
-            item_name = urllib.parse.quote("кафе")
-            
-            async with self.session.get(
-                f"{BACKEND_URL}/statistics/items/{item_name}/by-supplier",
-                headers=self.get_auth_headers()
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    suppliers = data.get("suppliers", [])
-                    recommendation = data.get("recommendation")
-                    
-                    if suppliers:
-                        # Find our test supplier
-                        test_supplier = next((s for s in suppliers if s.get("supplier") == "Test Supplier"), None)
-                        
-                        if test_supplier:
-                            avg_price = test_supplier.get("avg_price", 0)
-                            purchase_count = test_supplier.get("purchase_count", 0)
-                            
-                            self.log_result(
-                                "Get Item by Supplier (Кафе)", 
-                                True, 
-                                f"Found {len(suppliers)} suppliers. Test Supplier: avg {avg_price} лв, {purchase_count} purchases. Recommendation: {recommendation is not None}"
-                            )
-                            return True
-                        else:
-                            self.log_result(
-                                "Get Item by Supplier (Кафе)", 
-                                True, 
-                                f"Found {len(suppliers)} suppliers (Test Supplier not found - may be expected)"
-                            )
-                            return True
-                    else:
-                        self.log_result(
-                            "Get Item by Supplier (Кафе)", 
-                            True, 
-                            "No suppliers found (may be expected if data not yet processed)"
-                        )
-                        return True
-                else:
-                    error_text = await response.text()
-                    self.log_result("Get Item by Supplier (Кафе)", False, error=f"Status {response.status}: {error_text}")
-                    return False
-                    
-        except Exception as e:
-            self.log_result("Get Item by Supplier (Кафе)", False, error=str(e))
-            return False
-            
     async def run_all_tests(self):
-        """Run all item price tracking tests"""
-        print("🧪 Starting Item Price Tracking API Tests")
+        """Run all budget and export API tests"""
+        print("🧪 Starting Budget and Export API Tests")
         print("=" * 60)
         
         await self.setup_session()
@@ -769,16 +606,31 @@ class BudgetAndExportTester:
                 print("❌ Authentication failed. Cannot continue with tests.")
                 return False
                 
-            # Test invoice creation with items
-            await self.test_create_invoice_with_items_1()
-            await self.test_create_invoice_with_items_2()
+            # Budget Management Tests
+            await self.test_get_budget_status_initial()
+            await self.test_create_budget()
+            await self.test_get_budgets()
+            await self.test_get_budget_status_after_creation()
             
-            # Test price tracking endpoints
-            await self.test_get_price_alerts()
-            await self.test_get_price_alert_settings()
-            await self.test_get_item_statistics()
-            await self.test_get_item_price_history()
-            await self.test_get_item_by_supplier()
+            # Recurring Expenses Tests
+            await self.test_get_recurring_expenses_initial()
+            await self.test_create_recurring_expense()
+            await self.test_get_recurring_expenses_after_creation()
+            
+            # Export Tests
+            await self.test_export_invoices_excel()
+            await self.test_export_invoices_pdf()
+            
+            # Forecast Tests
+            await self.test_forecast_expenses()
+            await self.test_forecast_revenue()
+            
+            # Audit Log Tests
+            await self.test_audit_logs()
+            await self.test_audit_logs_filtered()
+            
+            # Cleanup - Delete recurring expense
+            await self.test_delete_recurring_expense()
             
         finally:
             await self.cleanup_session()
