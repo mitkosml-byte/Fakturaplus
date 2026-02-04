@@ -576,3 +576,5 @@ class ApiService {
     return this.fetch(`/roi/trend?months=${months}`);
   }
 }
+
+export const api = new ApiService();
