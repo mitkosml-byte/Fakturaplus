@@ -113,12 +113,12 @@ export default function HomeScreen() {
 
   const handleDeleteExpense = async (expenseId: string) => {
     Alert.alert(
-      'Изтриване',
-      'Сигурни ли сте, че искате да изтриете този разход?',
+      t('common.delete'),
+      t('msg.deleteConfirmExpense'),
       [
-        { text: 'Отказ', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Изтрий',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -126,7 +126,7 @@ export default function HomeScreen() {
               loadDayExpenses(expenseDate);
               loadData();
             } catch (error: any) {
-              Alert.alert('Грешка', error.message);
+              Alert.alert(t('common.error'), error.message);
             }
           }
         }
