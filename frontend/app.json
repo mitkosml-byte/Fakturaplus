@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "fakturaplus",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.fakturaplus.app",
@@ -22,7 +21,6 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0F172A"
       },
-      "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -62,11 +60,6 @@
     ],
     "experiments": {
       "typedRoutes": true
-    },
-    "extra": {
-      "eas": {
-        "projectId": "faktura-plus"
-      }
     },
     "locales": {
       "bg": "./locales/bg.json",
