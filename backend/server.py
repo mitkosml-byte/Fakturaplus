@@ -942,6 +942,292 @@ async def get_company_users(current_user: User = Depends(get_current_user)):
     
     return users
 
+# ===================== AI DATA CORRECTION MODULE =====================
+
+class DataCorrectionResult(BaseModel):
+    original: dict
+    corrected: dict
+    corrections_made: List[str] = []
+    confidence: float = 1.0
+
+async def normalize_supplier_name(supplier: str, company_id: Optional[str] = None) -> tuple[str, bool]:
+    """Нормализира име на доставчик и го съпоставя с известни доставчици"""
+    if not supplier:
+        return supplier, False
+    
+    # Почистване на основни проблеми
+    supplier = supplier.strip()
+    
+    # Премахване на типични OCR грешки
+    ocr_fixes = {
+        '0': 'О',  # Нула -> О (за български текст)
+        '1': 'І',  # Единица -> И (в някои контексти)
+        '|': 'І',
+        '!': 'І',
+    }
+    
+    # Нормализиране на правните форми
+    legal_forms = [
+        (r'\bЕООД\b', 'ЕООД'),
+        (r'\bООД\b', 'ООД'),
+        (r'\bАД\b', 'АД'),
+        (r'\bЕАД\b', 'ЕАД'),
+        (r'\bЕТ\b', 'ЕТ'),
+        (r'\bСД\b', 'СД'),
+        (r'\bКД\b', 'КД'),
+        (r'\bКДА\b', 'КДА'),
+    ]
+    
+    normalized = supplier.upper()
+    for pattern, replacement in legal_forms:
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+    
+    # Ако има company_id, търсим съществуващ подобен доставчик
+    if company_id:
+        existing_suppliers = await db.invoices.distinct("supplier", {"company_id": company_id})
+        
+        # Fuzzy matching - търсим най-близкото съвпадение
+        best_match = None
+        best_score = 0
+        
+        for existing in existing_suppliers:
+            # Проста метрика за сходство
+            existing_norm = existing.upper().replace(' ', '').replace('.', '')
+            supplier_norm = normalized.replace(' ', '').replace('.', '')
+            
+            # Проверка за частично съвпадение
+            if existing_norm in supplier_norm or supplier_norm in existing_norm:
+                score = len(min(existing_norm, supplier_norm, key=len)) / len(max(existing_norm, supplier_norm, key=len))
+                if score > best_score and score > 0.7:
+                    best_score = score
+                    best_match = existing
+            
+            # Точно съвпадение с игнориране на интервали и точки
+            if existing_norm == supplier_norm:
+                return existing, True
+        
+        if best_match and best_score > 0.8:
+            return best_match, True
+    
+    # Форматиране - първа буква главна
+    words = normalized.split()
+    formatted_words = []
+    for word in words:
+        if word in ['ЕООД', 'ООД', 'АД', 'ЕАД', 'ЕТ', 'СД', 'КД', 'КДА', 'LIDL', 'BILLA', 'KAUFLAND']:
+            formatted_words.append(word)
+        else:
+            formatted_words.append(word.capitalize())
+    
+    return ' '.join(formatted_words), False
+
+def fix_ocr_number_errors(value: str) -> str:
+    """Поправя типични OCR грешки в числа"""
+    if not value:
+        return value
+    
+    # Типични OCR грешки при числа
+    fixes = {
+        'O': '0',
+        'o': '0',
+        'О': '0',  # Кирилица О
+        'о': '0',  # Кирилица о
+        'l': '1',
+        'I': '1',
+        'І': '1',  # Кирилица І
+        '|': '1',
+        'S': '5',
+        's': '5',
+        'B': '8',
+        'Z': '2',
+        'z': '2',
+        ',': '.',  # Запетая към точка за десетични
+    }
+    
+    result = value
+    for wrong, correct in fixes.items():
+        result = result.replace(wrong, correct)
+    
+    # Премахване на всичко освен цифри и точка
+    result = re.sub(r'[^\d.]', '', result)
+    
+    return result
+
+def parse_amount(value) -> float:
+    """Парсва сума от различни формати"""
+    if value is None:
+        return 0.0
+    
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    if isinstance(value, str):
+        # Почистване
+        cleaned = fix_ocr_number_errors(value)
+        
+        # Обработка на европейски формат (1.234,56 -> 1234.56)
+        if ',' in value and '.' in value:
+            if value.rfind(',') > value.rfind('.'):
+                # Европейски формат: 1.234,56
+                cleaned = value.replace('.', '').replace(',', '.')
+        elif ',' in value:
+            # Може да е десетична запетая
+            cleaned = value.replace(',', '.')
+        
+        cleaned = re.sub(r'[^\d.]', '', cleaned)
+        
+        try:
+            return float(cleaned) if cleaned else 0.0
+        except ValueError:
+            return 0.0
+    
+    return 0.0
+
+def normalize_invoice_number(invoice_number: str) -> str:
+    """Нормализира номер на фактура"""
+    if not invoice_number:
+        return invoice_number
+    
+    # Почистване от OCR грешки
+    cleaned = invoice_number.strip()
+    
+    # Поправка на типични грешки
+    ocr_fixes = {
+        'O': '0',
+        'o': '0',
+        'l': '1',
+        'I': '1',
+    }
+    
+    # За номера на фактури, само в числовите части
+    parts = re.split(r'(\D+)', cleaned)
+    result_parts = []
+    
+    for part in parts:
+        if part.isdigit() or re.match(r'^[\dOoIl]+$', part):
+            # Числова част - поправяме OCR грешки
+            fixed = part
+            for wrong, correct in ocr_fixes.items():
+                fixed = fixed.replace(wrong, correct)
+            result_parts.append(fixed)
+        else:
+            result_parts.append(part.upper())
+    
+    return ''.join(result_parts)
+
+def normalize_date(date_str: str) -> Optional[str]:
+    """Нормализира дата в ISO формат YYYY-MM-DD"""
+    if not date_str:
+        return None
+    
+    # Почистване
+    date_str = date_str.strip()
+    
+    # Поправка на OCR грешки в числата
+    date_str = fix_ocr_number_errors(date_str)
+    
+    # Различни формати
+    patterns = [
+        (r'(\d{4})-(\d{1,2})-(\d{1,2})', '%Y-%m-%d'),  # 2024-01-15
+        (r'(\d{1,2})\.(\d{1,2})\.(\d{4})', '%d.%m.%Y'),  # 15.01.2024
+        (r'(\d{1,2})/(\d{1,2})/(\d{4})', '%d/%m/%Y'),  # 15/01/2024
+        (r'(\d{1,2})-(\d{1,2})-(\d{4})', '%d-%m-%Y'),  # 15-01-2024
+    ]
+    
+    for pattern, fmt in patterns:
+        match = re.search(pattern, date_str)
+        if match:
+            try:
+                parsed = datetime.strptime(match.group(), fmt)
+                return parsed.strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+    
+    return None
+
+async def correct_ocr_data(
+    data: dict,
+    company_id: Optional[str] = None
+) -> DataCorrectionResult:
+    """
+    AI-powered корекция на OCR данни
+    """
+    original = data.copy()
+    corrected = data.copy()
+    corrections = []
+    
+    # 1. Корекция на доставчик
+    if data.get("supplier"):
+        normalized_supplier, was_matched = await normalize_supplier_name(
+            data["supplier"], 
+            company_id
+        )
+        if normalized_supplier != data["supplier"]:
+            corrected["supplier"] = normalized_supplier
+            if was_matched:
+                corrections.append(f"Доставчик съпоставен: '{data['supplier']}' → '{normalized_supplier}'")
+            else:
+                corrections.append(f"Доставчик нормализиран: '{data['supplier']}' → '{normalized_supplier}'")
+    
+    # 2. Корекция на номер на фактура
+    if data.get("invoice_number"):
+        normalized_number = normalize_invoice_number(data["invoice_number"])
+        if normalized_number != data["invoice_number"]:
+            corrected["invoice_number"] = normalized_number
+            corrections.append(f"Номер на фактура коригиран: '{data['invoice_number']}' → '{normalized_number}'")
+    
+    # 3. Корекция на дата
+    if data.get("invoice_date"):
+        normalized_date = normalize_date(str(data["invoice_date"]))
+        if normalized_date and normalized_date != data.get("invoice_date"):
+            corrected["invoice_date"] = normalized_date
+            corrections.append(f"Дата нормализирана: '{data['invoice_date']}' → '{normalized_date}'")
+    
+    # 4. Корекция на суми
+    amount_fields = ["amount_without_vat", "vat_amount", "total_amount"]
+    for field in amount_fields:
+        if field in data:
+            parsed = parse_amount(data[field])
+            if parsed != data.get(field):
+                corrected[field] = parsed
+                corrections.append(f"{field} коригирано: '{data[field]}' → {parsed}")
+    
+    # 5. Валидация на ДДС изчисления
+    amount_without_vat = corrected.get("amount_without_vat", 0)
+    vat_amount = corrected.get("vat_amount", 0)
+    total_amount = corrected.get("total_amount", 0)
+    
+    # Проверка за консистентност
+    if amount_without_vat > 0 and total_amount > 0:
+        expected_vat = amount_without_vat * 0.20
+        expected_total = amount_without_vat + expected_vat
+        
+        # Ако ДДС е грешно, коригираме
+        if vat_amount == 0 and total_amount > amount_without_vat:
+            corrected["vat_amount"] = round(total_amount - amount_without_vat, 2)
+            corrections.append(f"ДДС изчислено: {corrected['vat_amount']}")
+        
+        # Ако общата сума е грешна, коригираме
+        elif abs(total_amount - (amount_without_vat + vat_amount)) > 0.02:
+            corrected["total_amount"] = round(amount_without_vat + vat_amount, 2)
+            corrections.append(f"Обща сума коригирана: {corrected['total_amount']}")
+        
+        # Ако само ДДС липсва
+        elif vat_amount == 0 and total_amount == amount_without_vat:
+            corrected["vat_amount"] = round(amount_without_vat * 0.20, 2)
+            corrected["total_amount"] = round(amount_without_vat * 1.20, 2)
+            corrections.append(f"ДДС добавено (20%): {corrected['vat_amount']}")
+    
+    # Изчисляване на confidence
+    confidence = 1.0 - (len(corrections) * 0.05)  # Намаляме увереността с всяка корекция
+    confidence = max(0.5, confidence)  # Минимум 50%
+    
+    return DataCorrectionResult(
+        original=original,
+        corrected=corrected,
+        corrections_made=corrections,
+        confidence=confidence
+    )
+
 # ===================== OCR ENDPOINT =====================
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
