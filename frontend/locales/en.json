@@ -1,0 +1,13 @@
+{
+  "app_name": "Faktura+",
+  "app_description": "Invoice Management",
+  "language_name": "English",
+  "permissions": {
+    "camera": "Scan invoices using camera",
+    "photo_library": "Select photos from gallery"
+  },
+  "errors": {
+    "network": "Network error",
+    "unknown": "Unknown error"
+  }
+}
