@@ -38,6 +38,8 @@ export default function ScanScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
+  const [ocrCorrections, setOcrCorrections] = useState<string[]>([]);
+  const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
   const [focusKey, setFocusKey] = useState(0);
   const cameraRef = useRef<any>(null);
 
