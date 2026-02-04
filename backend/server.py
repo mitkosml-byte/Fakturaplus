@@ -355,6 +355,135 @@ async def logout(request: Request, response: Response):
     response.delete_cookie(key="session_token", path="/")
     return {"message": "Успешно излязохте"}
 
+# ===================== EMAIL/PASSWORD AUTH =====================
+
+def validate_email(email: str) -> bool:
+    """Validate email format"""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+def validate_password(password: str) -> tuple[bool, str]:
+    """Validate password strength"""
+    if len(password) < 8:
+        return False, "Паролата трябва да е поне 8 символа"
+    if not re.search(r'[A-Za-z]', password):
+        return False, "Паролата трябва да съдържа поне една буква"
+    if not re.search(r'\d', password):
+        return False, "Паролата трябва да съдържа поне една цифра"
+    return True, ""
+
+@api_router.post("/auth/register")
+async def register_user(user_data: UserRegister, response: Response):
+    """Register new user with email/password"""
+    # Validate email
+    if not validate_email(user_data.email):
+        raise HTTPException(status_code=400, detail="Невалиден имейл адрес")
+    
+    # Validate password
+    is_valid, error_msg = validate_password(user_data.password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    # Validate name
+    if not user_data.name or len(user_data.name.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Името трябва да е поне 2 символа")
+    
+    # Check if user already exists
+    existing_user = await db.users.find_one({"email": user_data.email.lower()})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Потребител с този имейл вече съществува")
+    
+    # Create user
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    password_hash = pwd_context.hash(user_data.password)
+    
+    # Auto-create company for new user
+    company_name = user_data.name.split()[0] + " Company" if user_data.name else "My Company"
+    new_company = Company(
+        name=company_name,
+        eik=f"AUTO{uuid.uuid4().hex[:9].upper()}"
+    )
+    await db.companies.insert_one(new_company.dict())
+    
+    new_user = {
+        "user_id": user_id,
+        "email": user_data.email.lower(),
+        "name": user_data.name.strip(),
+        "picture": None,
+        "role": "owner",
+        "company_id": new_company.id,
+        "password_hash": password_hash,
+        "auth_provider": "email",
+        "created_at": datetime.now(timezone.utc)
+    }
+    await db.users.insert_one(new_user)
+    
+    # Create session
+    session_token = uuid.uuid4().hex
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    session_doc = {
+        "user_id": user_id,
+        "session_token": session_token,
+        "expires_at": expires_at,
+        "created_at": datetime.now(timezone.utc)
+    }
+    await db.user_sessions.insert_one(session_doc)
+    
+    # Set cookie
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=7 * 24 * 60 * 60,
+        path="/"
+    )
+    
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    return {"user": user_doc, "session_token": session_token}
+
+@api_router.post("/auth/login")
+async def login_user(user_data: UserLogin, response: Response):
+    """Login with email/password"""
+    # Find user
+    user = await db.users.find_one({"email": user_data.email.lower()})
+    if not user:
+        raise HTTPException(status_code=401, detail="Невалиден имейл или парола")
+    
+    # Check if user has password (might be Google-only user)
+    if not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="Този акаунт използва Google вход. Моля, използвайте бутона за Google.")
+    
+    # Verify password
+    if not pwd_context.verify(user_data.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Невалиден имейл или парола")
+    
+    # Create session
+    session_token = uuid.uuid4().hex
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    session_doc = {
+        "user_id": user["user_id"],
+        "session_token": session_token,
+        "expires_at": expires_at,
+        "created_at": datetime.now(timezone.utc)
+    }
+    await db.user_sessions.insert_one(session_doc)
+    
+    # Set cookie
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=7 * 24 * 60 * 60,
+        path="/"
+    )
+    
+    user_doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    return {"user": user_doc, "session_token": session_token}
+
 @api_router.put("/auth/role/{user_id}")
 async def update_user_role(user_id: str, request: Request, current_user: User = Depends(get_current_user)):
     body = await request.json()
