@@ -1003,6 +1003,214 @@ export default function StatsScreen() {
                 )}
                 <View style={{ height: 40 }} />
               </View>
+            ) : (
+              /* ========== ITEMS TAB ========== */
+              <View style={styles.suppliersContainer}>
+                {loadingItems ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#8B5CF6" />
+                    <Text style={styles.loadingText}>{t('stats.loadingData')}</Text>
+                  </View>
+                ) : (
+                  <>
+                    {/* Price Alerts Section */}
+                    {priceAlerts.length > 0 && (
+                      <View style={styles.priceAlertsCard}>
+                        <View style={styles.priceAlertsHeader}>
+                          <Ionicons name="alert-circle" size={24} color="#EF4444" />
+                          <Text style={styles.priceAlertsTitle}>{t('stats.priceAlerts')}</Text>
+                          {unreadAlerts > 0 && (
+                            <View style={styles.alertCountBadge}>
+                              <Text style={styles.alertCountText}>{unreadAlerts}</Text>
+                            </View>
+                          )}
+                        </View>
+                        
+                        {priceAlerts.filter(a => a.status !== 'dismissed').slice(0, 5).map((alert) => (
+                          <View 
+                            key={alert.id} 
+                            style={[styles.alertItem, alert.status === 'unread' && styles.alertItemUnread]}
+                          >
+                            <View style={styles.alertInfo}>
+                              <Text style={styles.alertItemName} numberOfLines={1}>{alert.item_name}</Text>
+                              <Text style={styles.alertSupplier}>{alert.supplier}</Text>
+                              <View style={styles.alertPrices}>
+                                <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
+                                <Ionicons name="arrow-forward" size={14} color="#64748B" />
+                                <Text style={styles.alertNewPrice}>{alert.new_price.toFixed(2)}€</Text>
+                                <View style={styles.alertChangeBadge}>
+                                  <Text style={styles.alertChangeText}>+{alert.change_percent}%</Text>
+                                </View>
+                              </View>
+                            </View>
+                            <View style={styles.alertActions}>
+                              {alert.status === 'unread' && (
+                                <TouchableOpacity 
+                                  style={styles.alertActionBtn}
+                                  onPress={() => markAlertAsRead(alert.id)}
+                                >
+                                  <Ionicons name="checkmark" size={18} color="#10B981" />
+                                </TouchableOpacity>
+                              )}
+                              <TouchableOpacity 
+                                style={styles.alertActionBtn}
+                                onPress={() => dismissAlert(alert.id)}
+                              >
+                                <Ionicons name="close" size={18} color="#EF4444" />
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Item Totals */}
+                    {itemStats && (
+                      <View style={styles.supplierTotalsCard}>
+                        <Text style={styles.supplierTotalsTitle}>{t('stats.itemsTitle')}</Text>
+                        <View style={styles.supplierTotalsRow}>
+                          <View style={styles.supplierTotalItem}>
+                            <Text style={styles.supplierTotalValue}>
+                              {itemStats.totals?.unique_items || 0}
+                            </Text>
+                            <Text style={styles.supplierTotalLabel}>{t('stats.uniqueItems')}</Text>
+                          </View>
+                          <View style={styles.supplierTotalItem}>
+                            <Text style={styles.supplierTotalValue}>
+                              {(itemStats.totals?.total_value || 0).toFixed(0)} €
+                            </Text>
+                            <Text style={styles.supplierTotalLabel}>{t('stats.totalValue')}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Ranking Type Selector */}
+                    <View style={styles.rankingSelector}>
+                      <TouchableOpacity
+                        style={[styles.rankingButton, itemRankingType === 'value' && styles.rankingButtonActive]}
+                        onPress={() => setItemRankingType('value')}
+                      >
+                        <Text style={[styles.rankingButtonText, itemRankingType === 'value' && styles.rankingButtonTextActive]}>
+                          {t('stats.topByValue')}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.rankingButton, itemRankingType === 'quantity' && styles.rankingButtonActive]}
+                        onPress={() => setItemRankingType('quantity')}
+                      >
+                        <Text style={[styles.rankingButtonText, itemRankingType === 'quantity' && styles.rankingButtonTextActive]}>
+                          {t('stats.topByQuantity')}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.rankingButton, itemRankingType === 'frequency' && styles.rankingButtonActive]}
+                        onPress={() => setItemRankingType('frequency')}
+                      >
+                        <Text style={[styles.rankingButtonText, itemRankingType === 'frequency' && styles.rankingButtonTextActive]}>
+                          {t('stats.byFrequency')}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Items Ranking List */}
+                    <View style={styles.topSuppliersCard}>
+                      <View style={styles.topSuppliersHeader}>
+                        <Ionicons name="pricetags" size={24} color="#8B5CF6" />
+                        <Text style={styles.topSuppliersTitle}>
+                          {itemRankingType === 'value' ? t('stats.topByValue') : 
+                           itemRankingType === 'quantity' ? t('stats.topByQuantity') : t('stats.byFrequency')}
+                        </Text>
+                      </View>
+                      
+                      {getCurrentItemRanking().length > 0 ? (
+                        getCurrentItemRanking().map((item: any, index: number) => (
+                          <TouchableOpacity 
+                            key={item.item_name} 
+                            style={styles.supplierItem}
+                            onPress={() => setSelectedItem(item.item_name)}
+                          >
+                            <View style={styles.supplierRank}>
+                              <Text style={[
+                                styles.supplierRankText,
+                                index < 3 && { color: index === 0 ? '#F59E0B' : index === 1 ? '#94A3B8' : '#CD7F32' }
+                              ]}>
+                                #{index + 1}
+                              </Text>
+                            </View>
+                            <View style={styles.supplierInfo}>
+                              <Text style={styles.supplierName} numberOfLines={1}>
+                                {item.item_name}
+                              </Text>
+                              <Text style={styles.supplierMeta}>
+                                {item.frequency} {t('stats.invoices')} • {item.supplier_count} {t('stats.suppliers').toLowerCase()}
+                              </Text>
+                            </View>
+                            <View style={styles.supplierAmounts}>
+                              <Text style={styles.supplierAmount}>
+                                {itemRankingType === 'quantity' 
+                                  ? `${item.quantity.toFixed(1)} ед.`
+                                  : `${item.total_value.toFixed(2)} €`}
+                              </Text>
+                              <View style={styles.itemTrendBadge}>
+                                <Ionicons 
+                                  name={item.trend_percent > 0 ? "trending-up" : item.trend_percent < 0 ? "trending-down" : "remove"} 
+                                  size={12} 
+                                  color={item.trend_percent > 5 ? '#EF4444' : item.trend_percent < -5 ? '#10B981' : '#64748B'} 
+                                />
+                                <Text style={[
+                                  styles.itemTrendText,
+                                  { color: item.trend_percent > 5 ? '#EF4444' : item.trend_percent < -5 ? '#10B981' : '#64748B' }
+                                ]}>
+                                  {item.trend_percent > 0 ? '+' : ''}{item.trend_percent.toFixed(0)}%
+                                </Text>
+                              </View>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+                          </TouchableOpacity>
+                        ))
+                      ) : (
+                        <View style={styles.noDataContainer}>
+                          <Ionicons name="pricetags-outline" size={48} color="#64748B" />
+                          <Text style={styles.noDataText}>{t('stats.noItems')}</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Price Trends Section */}
+                    {itemStats?.price_trends?.length > 0 && (
+                      <View style={styles.dependencyAlertCard}>
+                        <View style={styles.dependencyAlertHeader}>
+                          <Ionicons name="trending-up" size={24} color="#F59E0B" />
+                          <Text style={styles.dependencyAlertTitle}>{t('stats.priceTrends')}</Text>
+                        </View>
+                        <Text style={styles.dependencyAlertDesc}>
+                          {t('stats.highDependencyDesc').replace('доставчици', 'артикули').replace('suppliers', 'items')}
+                        </Text>
+                        {itemStats.price_trends.slice(0, 5).map((item: any) => (
+                          <TouchableOpacity 
+                            key={item.item_name} 
+                            style={styles.dependencyAlertItem}
+                            onPress={() => setSelectedItem(item.item_name)}
+                          >
+                            <Text style={styles.dependencyAlertName} numberOfLines={1}>{item.item_name}</Text>
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text style={[
+                                styles.dependencyAlertPercent,
+                                { color: item.trend_percent > 0 ? '#EF4444' : '#10B981' }
+                              ]}>
+                                {item.trend_percent > 0 ? '+' : ''}{item.trend_percent.toFixed(1)}%
+                              </Text>
+                              <Text style={styles.itemAvgPrice}>{t('stats.avgPrice')}: {item.avg_price.toFixed(2)}€</Text>
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </>
+                )}
+                <View style={{ height: 40 }} />
+              </View>
             )}
           </ScrollView>
         </SafeAreaView>
@@ -1010,6 +1218,163 @@ export default function StatsScreen() {
       
       {/* Supplier Detail Modal */}
       {renderSupplierDetailModal()}
+      
+      {/* Item Detail Modal */}
+      <Modal
+        visible={!!selectedItem}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => {
+          setSelectedItem(null);
+          setItemPriceHistory(null);
+          setItemBySupplier(null);
+        }}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity 
+              style={styles.modalCloseButton}
+              onPress={() => {
+                setSelectedItem(null);
+                setItemPriceHistory(null);
+                setItemBySupplier(null);
+              }}
+            >
+              <Ionicons name="close" size={24} color="white" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle} numberOfLines={1}>{selectedItem}</Text>
+            <View style={{ width: 40 }} />
+          </View>
+
+          {loadingItemDetail ? (
+            <View style={styles.modalLoading}>
+              <ActivityIndicator size="large" color="#8B5CF6" />
+            </View>
+          ) : (
+            <ScrollView style={styles.modalContent}>
+              {/* Item Statistics */}
+              {itemPriceHistory?.statistics && (
+                <View style={styles.detailCard}>
+                  <Text style={styles.detailCardTitle}>{t('stats.priceHistory')}</Text>
+                  <View style={styles.detailGrid}>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailValue}>{itemPriceHistory.statistics.avg_price}€</Text>
+                      <Text style={styles.detailLabel}>{t('stats.avgPrice')}</Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailValue}>{itemPriceHistory.statistics.min_price}€</Text>
+                      <Text style={styles.detailLabel}>{t('stats.minPrice')}</Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailValue}>{itemPriceHistory.statistics.max_price}€</Text>
+                      <Text style={styles.detailLabel}>{t('stats.maxPrice')}</Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={[styles.detailValue, { 
+                        color: itemPriceHistory.statistics.trend_percent > 5 ? '#EF4444' : 
+                               itemPriceHistory.statistics.trend_percent < -5 ? '#10B981' : '#8B5CF6'
+                      }]}>
+                        {itemPriceHistory.statistics.trend_percent > 0 ? '+' : ''}{itemPriceHistory.statistics.trend_percent}%
+                      </Text>
+                      <Text style={styles.detailLabel}>{t('stats.priceTrends')}</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Price History Chart */}
+              {itemPriceHistory?.history?.length > 0 && (
+                <View style={styles.detailCard}>
+                  <Text style={styles.detailCardTitle}>{t('stats.monthlyTrend')}</Text>
+                  <LineChart
+                    data={itemPriceHistory.history.slice(-10).map((h: any) => ({
+                      value: h.unit_price,
+                      label: h.date.substring(5),
+                      dataPointColor: '#8B5CF6',
+                    }))}
+                    width={chartWidth - 20}
+                    height={150}
+                    color="#8B5CF6"
+                    thickness={2}
+                    dataPointsColor="#8B5CF6"
+                    yAxisColor="#334155"
+                    xAxisColor="#334155"
+                    yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                    xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                    hideRules
+                    isAnimated
+                    curved
+                  />
+                </View>
+              )}
+
+              {/* Supplier Comparison */}
+              {itemBySupplier?.suppliers?.length > 0 && (
+                <View style={styles.detailCard}>
+                  <Text style={styles.detailCardTitle}>{t('stats.supplierCompare')}</Text>
+                  
+                  {/* Recommendation */}
+                  {itemBySupplier.recommendation && (
+                    <View style={styles.recommendationBanner}>
+                      <Ionicons name="bulb" size={20} color="#10B981" />
+                      <View style={{ flex: 1, marginLeft: 8 }}>
+                        <Text style={styles.recommendationTitle}>{t('stats.bestSupplier')}</Text>
+                        <Text style={styles.recommendationText}>
+                          {itemBySupplier.recommendation.best_supplier} - {itemBySupplier.recommendation.avg_price}€
+                        </Text>
+                        <Text style={styles.recommendationSavings}>
+                          {t('stats.potentialSavings')}: {itemBySupplier.recommendation.potential_savings_percent}%
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                  
+                  {itemBySupplier.suppliers.map((sup: any, index: number) => (
+                    <View key={sup.supplier} style={styles.supplierCompareItem}>
+                      <View style={styles.supplierCompareRank}>
+                        <Text style={[
+                          styles.supplierCompareRankText,
+                          index === 0 && { color: '#10B981' }
+                        ]}>
+                          #{index + 1}
+                        </Text>
+                      </View>
+                      <View style={styles.supplierCompareInfo}>
+                        <Text style={styles.supplierCompareName} numberOfLines={1}>{sup.supplier}</Text>
+                        <Text style={styles.supplierCompareMeta}>
+                          {sup.purchase_count}x • {t('stats.lastDelivery')}: {sup.last_purchase || '-'}
+                        </Text>
+                      </View>
+                      <View style={styles.supplierComparePrices}>
+                        <Text style={styles.supplierComparePrice}>{sup.avg_price}€</Text>
+                        <Text style={styles.supplierComparePriceLabel}>{t('stats.avgPrice')}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Recent Price History */}
+              {itemPriceHistory?.history?.length > 0 && (
+                <View style={styles.detailCard}>
+                  <Text style={styles.detailCardTitle}>{t('stats.recentInvoices')}</Text>
+                  {itemPriceHistory.history.slice(-5).reverse().map((h: any, index: number) => (
+                    <View key={index} style={styles.recentInvoiceItem}>
+                      <View>
+                        <Text style={styles.recentInvoiceNumber}>№{h.invoice_number}</Text>
+                        <Text style={styles.recentInvoiceDate}>{h.date} • {h.supplier}</Text>
+                      </View>
+                      <Text style={styles.recentInvoiceAmount}>{h.unit_price.toFixed(2)}€</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              
+              <View style={{ height: 40 }} />
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
     </ImageBackground>
   );
 }
