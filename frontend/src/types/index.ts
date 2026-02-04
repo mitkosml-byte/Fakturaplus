@@ -3,7 +3,7 @@ export interface User {
   email: string;
   name: string;
   picture?: string;
-  role: 'user' | 'accountant';
+  role: 'owner' | 'manager' | 'staff';
   company_id?: string;
   created_at: string;
 }
@@ -22,6 +22,19 @@ export interface Company {
   bank_iban?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface Invitation {
+  id: string;
+  company_id: string;
+  invited_by: string;
+  email?: string;
+  phone?: string;
+  role: 'manager' | 'staff';
+  code: string;
+  status: 'pending' | 'accepted' | 'cancelled' | 'expired';
+  expires_at: string;
+  created_at: string;
 }
 
 export interface Invoice {
