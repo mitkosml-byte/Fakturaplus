@@ -271,12 +271,22 @@ async def create_session(request: Request, response: Response):
     if not existing_user:
         # Create new user
         user_id = f"user_{uuid.uuid4().hex[:12]}"
+        
+        # Auto-create company for new user
+        company_name = session_data.name.split()[0] + " Company" if session_data.name else "My Company"
+        new_company = Company(
+            name=company_name,
+            eik=f"AUTO{uuid.uuid4().hex[:9].upper()}"  # Temporary auto-generated EIK
+        )
+        await db.companies.insert_one(new_company.dict())
+        
         new_user = {
             "user_id": user_id,
             "email": session_data.email,
             "name": session_data.name,
             "picture": session_data.picture,
-            "role": "user",
+            "role": "owner",  # First user is owner
+            "company_id": new_company.id,
             "created_at": datetime.now(timezone.utc)
         }
         await db.users.insert_one(new_user)
