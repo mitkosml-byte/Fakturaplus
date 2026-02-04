@@ -18,13 +18,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/services/api';
 import { Invoice } from '../../src/types';
 import { format } from 'date-fns';
-import { bg } from 'date-fns/locale';
+import { bg, enUS } from 'date-fns/locale';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import { useTranslation, useLanguageStore } from '../../src/i18n';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function InvoicesScreen() {
+  const { t } = useTranslation();
+  const { language } = useLanguageStore();
+  const dateLocale = language === 'bg' ? bg : enUS;
+  
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
