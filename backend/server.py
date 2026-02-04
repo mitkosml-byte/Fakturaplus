@@ -379,7 +379,8 @@ async def scan_invoice(image_base64: str = None, request: Request = None):
                 invoice_number=result.get("invoice_number", ""),
                 amount_without_vat=float(result.get("amount_without_vat", 0)),
                 vat_amount=float(result.get("vat_amount", 0)),
-                total_amount=float(result.get("total_amount", 0))
+                total_amount=float(result.get("total_amount", 0)),
+                invoice_date=result.get("invoice_date")
             )
         else:
             raise HTTPException(status_code=500, detail="Не можах да разпозная фактурата")
