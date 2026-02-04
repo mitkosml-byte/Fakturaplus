@@ -160,7 +160,7 @@ export default function ScanScreen() {
     if (!permission?.granted) {
       const result = await requestPermission();
       if (!result.granted) {
-        Alert.alert('Грешка', 'Нужен е достъп до камерата');
+        Alert.alert(t('common.error'), language === 'bg' ? 'Нужен е достъп до камерата' : 'Camera access required');
         return;
       }
     }
