@@ -881,6 +881,108 @@ export const translations: Translations = {
     bg: 'Няма данни за доставчици',
     en: 'No supplier data',
   },
+  
+  // Advanced Supplier Statistics
+  'stats.executiveSummary': {
+    bg: 'Изпълнително резюме',
+    en: 'Executive Summary',
+  },
+  'stats.totalSuppliers': {
+    bg: 'Общо доставчици',
+    en: 'Total Suppliers',
+  },
+  'stats.activeSuppliers': {
+    bg: 'Активни',
+    en: 'Active',
+  },
+  'stats.inactiveSuppliers': {
+    bg: 'Неактивни',
+    en: 'Inactive',
+  },
+  'stats.top3Concentration': {
+    bg: 'Топ 3 концентрация',
+    en: 'Top 3 Concentration',
+  },
+  'stats.highDependencyAlert': {
+    bg: 'доставчици с висока зависимост (>30%)',
+    en: 'suppliers with high dependency (>30%)',
+  },
+  'stats.byAmount': {
+    bg: 'По сума',
+    en: 'By Amount',
+  },
+  'stats.byFrequency': {
+    bg: 'По честота',
+    en: 'By Frequency',
+  },
+  'stats.byAvg': {
+    bg: 'Ср. фактура',
+    en: 'Avg Invoice',
+  },
+  'stats.topByAmount': {
+    bg: 'Топ 10 по обем',
+    en: 'Top 10 by Volume',
+  },
+  'stats.topByFrequency': {
+    bg: 'Топ 10 по честота',
+    en: 'Top 10 by Frequency',
+  },
+  'stats.topByAvg': {
+    bg: 'Топ 10 по средна стойност',
+    en: 'Top 10 by Average',
+  },
+  'stats.invoices': {
+    bg: 'фактури',
+    en: 'invoices',
+  },
+  'stats.avgShort': {
+    bg: 'Ср.',
+    en: 'Avg',
+  },
+  'stats.highDependency': {
+    bg: 'Висока зависимост',
+    en: 'High Dependency',
+  },
+  'stats.highDependencyDesc': {
+    bg: 'Тези доставчици представляват повече от 30% от покупките ви. Помислете за диверсификация.',
+    en: 'These suppliers represent more than 30% of your purchases. Consider diversification.',
+  },
+  'stats.supplierOverview': {
+    bg: 'Преглед на доставчика',
+    en: 'Supplier Overview',
+  },
+  'stats.firstDelivery': {
+    bg: 'Първа доставка',
+    en: 'First Delivery',
+  },
+  'stats.lastDelivery': {
+    bg: 'Последна доставка',
+    en: 'Last Delivery',
+  },
+  'stats.activeSupplier': {
+    bg: 'Активен доставчик',
+    en: 'Active Supplier',
+  },
+  'stats.inactiveSupplier': {
+    bg: 'Неактивен',
+    en: 'Inactive',
+  },
+  'stats.days': {
+    bg: 'дни',
+    en: 'days',
+  },
+  'stats.monthlyTrend': {
+    bg: 'Месечна тенденция',
+    en: 'Monthly Trend',
+  },
+  'stats.anomalies': {
+    bg: 'Аномалии (необичайни суми)',
+    en: 'Anomalies (unusual amounts)',
+  },
+  'stats.recentInvoices': {
+    bg: 'Последни фактури',
+    en: 'Recent Invoices',
+  },
 };
 
 // Zustand store for language
