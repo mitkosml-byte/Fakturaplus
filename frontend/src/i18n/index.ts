@@ -1194,6 +1194,146 @@ export const translations: Translations = {
     en: 'Merged statistics',
   },
   
+  // Personal Expenses & ROI (Owner only)
+  'personal.title': {
+    bg: 'Лични разходи',
+    en: 'Personal Expenses',
+  },
+  'personal.subtitle': {
+    bg: 'Вашите инвестиции в бизнеса',
+    en: 'Your investments in the business',
+  },
+  'personal.addExpense': {
+    bg: 'Добави разход',
+    en: 'Add Expense',
+  },
+  'personal.amount': {
+    bg: 'Сума (лв)',
+    en: 'Amount (BGN)',
+  },
+  'personal.description': {
+    bg: 'Описание',
+    en: 'Description',
+  },
+  'personal.typeInvestment': {
+    bg: 'Инвестиция',
+    en: 'Investment',
+  },
+  'personal.typeRecurring': {
+    bg: 'Текущ разход',
+    en: 'Recurring',
+  },
+  'personal.typeOneTime': {
+    bg: 'Еднократен',
+    en: 'One-time',
+  },
+  'personal.categoryGoods': {
+    bg: 'Стока',
+    en: 'Goods',
+  },
+  'personal.categoryService': {
+    bg: 'Услуга',
+    en: 'Service',
+  },
+  'personal.categoryPersonnel': {
+    bg: 'Персонал',
+    en: 'Personnel',
+  },
+  'personal.categoryRent': {
+    bg: 'Наем',
+    en: 'Rent',
+  },
+  'personal.categoryExtraordinary': {
+    bg: 'Извънреден',
+    en: 'Extraordinary',
+  },
+  'personal.categoryOther': {
+    bg: 'Друго',
+    en: 'Other',
+  },
+  'personal.period': {
+    bg: 'Период',
+    en: 'Period',
+  },
+  'personal.supplier': {
+    bg: 'Доставчик',
+    en: 'Supplier',
+  },
+  'personal.project': {
+    bg: 'Проект',
+    en: 'Project',
+  },
+  'personal.notes': {
+    bg: 'Бележки',
+    en: 'Notes',
+  },
+  'personal.noExpenses': {
+    bg: 'Няма лични разходи за периода',
+    en: 'No personal expenses for this period',
+  },
+  'personal.created': {
+    bg: 'Разходът е записан',
+    en: 'Expense recorded',
+  },
+  'personal.deleted': {
+    bg: 'Разходът е изтрит',
+    en: 'Expense deleted',
+  },
+  'personal.deleteConfirm': {
+    bg: 'Сигурни ли сте, че искате да изтриете този разход?',
+    en: 'Are you sure you want to delete this expense?',
+  },
+  
+  // ROI
+  'roi.title': {
+    bg: 'ROI Анализ',
+    en: 'ROI Analysis',
+  },
+  'roi.totalInvestment': {
+    bg: 'Лична инвестиция',
+    en: 'Personal Investment',
+  },
+  'roi.totalRevenue': {
+    bg: 'Общ оборот',
+    en: 'Total Revenue',
+  },
+  'roi.totalProfit': {
+    bg: 'Печалба',
+    en: 'Profit',
+  },
+  'roi.roiPercent': {
+    bg: 'ROI',
+    en: 'ROI',
+  },
+  'roi.profitable': {
+    bg: 'Печеливш',
+    en: 'Profitable',
+  },
+  'roi.notProfitable': {
+    bg: 'Непечеливш',
+    en: 'Not Profitable',
+  },
+  'roi.investmentCovered': {
+    bg: 'Инвестицията покрита',
+    en: 'Investment Covered',
+  },
+  'roi.investmentNotCovered': {
+    bg: 'Инвестицията не е покрита',
+    en: 'Investment Not Covered',
+  },
+  'roi.aiInsights': {
+    bg: 'AI Анализ',
+    en: 'AI Insights',
+  },
+  'roi.trend': {
+    bg: 'Тренд',
+    en: 'Trend',
+  },
+  'roi.noData': {
+    bg: 'Няма данни за анализ',
+    en: 'No data for analysis',
+  },
+  
   // Units
   'units.pieces': {
     bg: 'ед.',
