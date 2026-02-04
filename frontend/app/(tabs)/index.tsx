@@ -236,12 +236,15 @@ export default function HomeScreen() {
                 >
                   <Ionicons name="chevron-back" size={24} color="#8B5CF6" />
                 </TouchableOpacity>
-                <View style={styles.dateDisplay}>
+                <TouchableOpacity 
+                  style={styles.dateDisplay}
+                  onPress={() => setRevenueDatePickerVisible(true)}
+                >
                   <Ionicons name="calendar" size={20} color="#8B5CF6" />
                   <Text style={styles.dateText}>
                     {format(revenueDate, 'd MMMM yyyy', { locale: bg })}
                   </Text>
-                </View>
+                </TouchableOpacity>
                 <TouchableOpacity 
                   style={styles.dateButton} 
                   onPress={() => setRevenueDate(addDays(revenueDate, 1))}
@@ -250,6 +253,21 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+            
+            {/* Calendar Date Picker Modal */}
+            <DateTimePickerModal
+              isVisible={isRevenueDatePickerVisible}
+              mode="date"
+              date={revenueDate}
+              onConfirm={(date) => {
+                setRevenueDate(date);
+                setRevenueDatePickerVisible(false);
+              }}
+              onCancel={() => setRevenueDatePickerVisible(false)}
+              confirmTextIOS="Избери"
+              cancelTextIOS="Отказ"
+              locale="bg"
+            />
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Фискализиран оборот (€)</Text>
