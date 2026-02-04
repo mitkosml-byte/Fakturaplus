@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/services/api';
 import { Summary, ChartDataPoint } from '../../src/types';
 import { BarChart, LineChart } from 'react-native-gifted-charts';
+import { useTranslation } from '../../src/i18n';
 
 const { width } = Dimensions.get('window');
 const chartWidth = width - 80;
