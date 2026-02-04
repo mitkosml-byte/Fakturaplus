@@ -624,4 +624,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  dateInputButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+    gap: 10,
+  },
+  dateInputText: {
+    flex: 1,
+    color: 'white',
+    fontSize: 16,
+  },
 });
