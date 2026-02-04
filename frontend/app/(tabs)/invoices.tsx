@@ -245,7 +245,7 @@ export default function InvoicesScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.detailModalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Детайли</Text>
+              <Text style={styles.modalTitle}>{t('invoices.details')}</Text>
               <TouchableOpacity onPress={() => setSelectedInvoice(null)}>
                 <Ionicons name="close" size={28} color="#94A3B8" />
               </TouchableOpacity>
@@ -254,34 +254,34 @@ export default function InvoicesScreen() {
             {selectedInvoice && (
               <View>
                 <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionLabel}>Доставчик</Text>
+                  <Text style={styles.detailSectionLabel}>{t('invoices.supplier')}</Text>
                   <Text style={styles.detailSectionValue}>{selectedInvoice.supplier}</Text>
                 </View>
                 <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionLabel}>№ Фактура</Text>
+                  <Text style={styles.detailSectionLabel}>{t('invoices.invoiceNo')}</Text>
                   <Text style={styles.detailSectionValue}>{selectedInvoice.invoice_number}</Text>
                 </View>
                 <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionLabel}>Дата</Text>
+                  <Text style={styles.detailSectionLabel}>{t('invoices.dateLabel')}</Text>
                   <Text style={styles.detailSectionValue}>{formatDate(selectedInvoice.date)}</Text>
                 </View>
                 <View style={styles.detailRow2}>
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionLabel}>Без ДДС</Text>
+                    <Text style={styles.detailSectionLabel}>{t('invoices.withoutVAT')}</Text>
                     <Text style={styles.detailSectionValue}>{selectedInvoice.amount_without_vat.toFixed(2)} €</Text>
                   </View>
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionLabel}>ДДС (20%)</Text>
+                    <Text style={styles.detailSectionLabel}>{t('invoices.vatPercent')}</Text>
                     <Text style={styles.detailSectionValue}>{selectedInvoice.vat_amount.toFixed(2)} €</Text>
                   </View>
                 </View>
                 <View style={styles.totalSection}>
-                  <Text style={styles.totalSectionLabel}>Обща сума</Text>
+                  <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
                   <Text style={styles.totalSectionValue}>{selectedInvoice.total_amount.toFixed(2)} €</Text>
                 </View>
                 {selectedInvoice.notes && (
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionLabel}>Бележки</Text>
+                    <Text style={styles.detailSectionLabel}>{t('invoices.notes')}</Text>
                     <Text style={styles.detailSectionValue}>{selectedInvoice.notes}</Text>
                   </View>
                 )}
@@ -294,7 +294,7 @@ export default function InvoicesScreen() {
                   }}
                 >
                   <Ionicons name="trash" size={20} color="#EF4444" />
-                  <Text style={styles.deleteButtonText}>Изтрий фактурата</Text>
+                  <Text style={styles.deleteButtonText}>{t('invoices.deleteInvoice')}</Text>
                 </TouchableOpacity>
               </View>
             )}
