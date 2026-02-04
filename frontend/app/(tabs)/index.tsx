@@ -323,12 +323,15 @@ export default function HomeScreen() {
                 >
                   <Ionicons name="chevron-back" size={24} color="#8B5CF6" />
                 </TouchableOpacity>
-                <View style={styles.dateDisplay}>
+                <TouchableOpacity 
+                  style={styles.dateDisplay}
+                  onPress={() => setExpenseDatePickerVisible(true)}
+                >
                   <Ionicons name="calendar" size={20} color="#8B5CF6" />
                   <Text style={styles.dateText}>
                     {format(expenseDate, 'd MMMM yyyy', { locale: bg })}
                   </Text>
-                </View>
+                </TouchableOpacity>
                 <TouchableOpacity 
                   style={styles.dateButton} 
                   onPress={() => setExpenseDate(addDays(expenseDate, 1))}
@@ -337,6 +340,21 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+            
+            {/* Calendar Date Picker Modal */}
+            <DateTimePickerModal
+              isVisible={isExpenseDatePickerVisible}
+              mode="date"
+              date={expenseDate}
+              onConfirm={(date) => {
+                setExpenseDate(date);
+                setExpenseDatePickerVisible(false);
+              }}
+              onCancel={() => setExpenseDatePickerVisible(false)}
+              confirmTextIOS="Избери"
+              cancelTextIOS="Отказ"
+              locale="bg"
+            />
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Описание</Text>
