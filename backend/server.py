@@ -534,22 +534,48 @@ async def scan_invoice(image_base64: str = None, request: Request = None):
 
 @api_router.post("/invoices", response_model=Invoice)
 async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(get_current_user)):
-    # Check for duplicate invoice (same invoice_number and supplier for this user)
-    existing_invoice = await db.invoices.find_one({
-        "user_id": current_user.user_id,
-        "invoice_number": invoice.invoice_number,
-        "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"}  # Case-insensitive match
-    }, {"_id": 0, "id": 1, "date": 1})
+    # Get user's company_id
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
     
-    if existing_invoice:
-        raise HTTPException(
-            status_code=409,  # Conflict
-            detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече съществува в системата!"
-        )
+    # Check for duplicate invoice
+    if company_id:
+        # If user has a company, check across all company users
+        company_users = await db.users.find({"company_id": company_id}, {"user_id": 1}).to_list(1000)
+        company_user_ids = [u["user_id"] for u in company_users]
+        
+        existing_invoice = await db.invoices.find_one({
+            "user_id": {"$in": company_user_ids},
+            "invoice_number": invoice.invoice_number,
+            "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"}
+        }, {"_id": 0, "id": 1, "date": 1, "user_id": 1})
+        
+        if existing_invoice:
+            # Find who added the duplicate
+            added_by_user = await db.users.find_one({"user_id": existing_invoice["user_id"]}, {"name": 1})
+            added_by_name = added_by_user.get("name", "друг потребител") if added_by_user else "друг потребител"
+            raise HTTPException(
+                status_code=409,
+                detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече е добавена от {added_by_name}!"
+            )
+    else:
+        # No company - check only for current user
+        existing_invoice = await db.invoices.find_one({
+            "user_id": current_user.user_id,
+            "invoice_number": invoice.invoice_number,
+            "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"}
+        }, {"_id": 0, "id": 1, "date": 1})
+        
+        if existing_invoice:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече съществува в системата!"
+            )
     
     invoice_dict = invoice.dict()
     invoice_obj = Invoice(
         user_id=current_user.user_id,
+        company_id=company_id,
         date=datetime.fromisoformat(invoice_dict["date"].replace("Z", "+00:00")),
         **{k: v for k, v in invoice_dict.items() if k != "date"}
     )
