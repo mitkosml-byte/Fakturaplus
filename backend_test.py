@@ -20,6 +20,7 @@ class BudgetAndExportTester:
         self.auth_token = None
         self.user_data = None
         self.test_results = []
+        self.recurring_expense_id = None
         
     async def setup_session(self):
         """Initialize HTTP session"""
