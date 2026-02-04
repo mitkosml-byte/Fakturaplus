@@ -22,6 +22,7 @@
     "expo": "^54.0.33",
     "expo-blur": "~14.1.5",
     "expo-camera": "^17.0.10",
+    "expo-clipboard": "^8.0.8",
     "expo-constants": "~17.1.7",
     "expo-document-picker": "^14.0.8",
     "expo-file-system": "^19.0.21",
