@@ -1552,7 +1552,15 @@ async def get_detailed_supplier_stats(
     
     first_delivery = min(dates) if dates else None
     last_delivery = max(dates) if dates else None
-    days_inactive = (now - last_delivery).days if last_delivery else 999
+    
+    # Ensure timezone consistency for date calculations
+    if last_delivery:
+        if last_delivery.tzinfo is None:
+            last_delivery = last_delivery.replace(tzinfo=timezone.utc)
+        days_inactive = (now - last_delivery).days
+    else:
+        days_inactive = 999
+    
     is_active = days_inactive <= 30
     
     # Monthly breakdown
