@@ -4,7 +4,8 @@ import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../src/contexts/AuthContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { OfflineBanner } from '../src/components/OfflineBanner';
 
 export default function RootLayout() {
   return (
@@ -12,12 +13,15 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <AuthProvider>
           <StatusBar style="light" />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: '#0F172A' },
-            }}
-          />
+          <View style={styles.container}>
+            <OfflineBanner />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: '#0F172A' },
+              }}
+            />
+          </View>
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
