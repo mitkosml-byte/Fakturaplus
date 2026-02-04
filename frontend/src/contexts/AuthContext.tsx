@@ -70,8 +70,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     checkAuth();
   }, []);
 
+  // Role-based permission helpers
+  const roleHelpers = useMemo(() => {
+    const userRole = (user?.role || 'staff') as UserRole;
+    
+    const hasPermission = (permission: Permission): boolean => {
+      if (!user) return false;
+      const permissions = rolePermissions[userRole] || [];
+      return permissions.includes(permission);
+    };
+    
+    const hasRole = (role: UserRole): boolean => {
+      if (!user) return false;
+      const roleHierarchy: UserRole[] = ['owner', 'manager', 'staff'];
+      const userRoleIndex = roleHierarchy.indexOf(userRole);
+      const requiredRoleIndex = roleHierarchy.indexOf(role);
+      return userRoleIndex <= requiredRoleIndex;
+    };
+    
+    return {
+      hasPermission,
+      hasRole,
+      isOwner: userRole === 'owner',
+      isManager: userRole === 'manager',
+      isStaff: userRole === 'staff',
+    };
+  }, [user]);
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated, login, logout, refreshUser, setUser }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      isLoading, 
+      isAuthenticated, 
+      login, 
+      logout, 
+      refreshUser, 
+      setUser,
+      ...roleHelpers
+    }}>
       {children}
     </AuthContext.Provider>
   );
