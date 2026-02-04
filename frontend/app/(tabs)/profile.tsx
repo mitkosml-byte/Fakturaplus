@@ -140,8 +140,22 @@ export default function ProfileScreen() {
         </View>
 
         {/* Menu Items */}
-        <View style={styles.menuSection}>>
+        <View style={styles.menuSection}>
           <Text style={styles.menuSectionTitle}>{t('profile.settings')}</Text>
+
+          {/* Users Management - Only for Owner */}
+          {user?.role === 'owner' && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/users-management')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
+                <Ionicons name="people" size={20} color="#EC4899" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{language === 'bg' ? 'Потребители' : 'Users'}</Text>
+                <Text style={styles.menuSubtitle}>{language === 'bg' ? 'Управление и покани' : 'Manage & invite'}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/company-settings')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
