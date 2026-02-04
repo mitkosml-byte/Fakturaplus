@@ -265,7 +265,7 @@ export default function BackupScreen() {
                 ) : (
                   <>
                     <Ionicons name="cloud-upload" size={24} color="white" />
-                    <Text style={styles.actionButtonText}>Създай Backup</Text>
+                    <Text style={styles.actionButtonText}>{t('backup.create')}</Text>
                   </>
                 )}
               </TouchableOpacity>
