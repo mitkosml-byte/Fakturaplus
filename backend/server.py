@@ -2970,6 +2970,281 @@ async def get_item_by_supplier(
         "recommendation": recommendation
     }
 
+# ===================== AI ITEM MERGING =====================
+
+@api_router.post("/items/ai-merge")
+async def ai_merge_similar_items(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    AI модул за автоматично сливане на сходни продукти.
+    Използва Gemini за идентифициране на еднакви продукти с различни имена.
+    """
+    from collections import defaultdict
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"merged_groups": [], "total_merged": 0}
+    
+    # Get all unique item names
+    history = await db.item_price_history.find(
+        {"company_id": company_id},
+        {"_id": 0, "item_name": 1}
+    ).to_list(10000)
+    
+    unique_items = list(set(h["item_name"] for h in history))
+    
+    if len(unique_items) < 2:
+        return {"merged_groups": [], "total_merged": 0, "message": "Недостатъчно артикули за анализ"}
+    
+    # Use AI to find similar items
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        
+        llm = LlmChat(
+            api_key=os.getenv("EMERGENT_LLM_KEY"),
+            model="gemini/gemini-2.5-flash"
+        )
+        
+        items_text = "\n".join(unique_items[:100])  # Limit to 100 items
+        
+        prompt = f"""Анализирай следния списък с имена на продукти и групирай сходните продукти.
+Търси продукти, които са едни и същи, но са записани по различен начин (различен регистър, съкращения, правописни грешки, варианти на името).
+
+Списък с продукти:
+{items_text}
+
+Върни САМО JSON масив с групите, без допълнителен текст. Формат:
+[
+  {{"canonical_name": "Олио слънчогледово", "variants": ["Олио Първа Преса", "олио слънчогледово", "ОЛИО", "Олио Екстра"]}},
+  {{"canonical_name": "Захар кристална", "variants": ["Захар", "захар кристална", "ЗАХАР БГ"]}}
+]
+
+Ако няма сходни продукти, върни празен масив: []
+Не групирай продукти, които са наистина различни (например "Олио" и "Оцет" са РАЗЛИЧНИ).
+Групирай САМО ако са очевидно същият продукт с различно изписване."""
+
+        response = await llm.send_async(UserMessage(content=prompt))
+        response_text = response.text.strip()
+        
+        # Extract JSON from response
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', response_text)
+        if json_match:
+            merged_groups = json.loads(json_match.group())
+        else:
+            merged_groups = []
+        
+        # Save merge mappings to database
+        if merged_groups:
+            for group in merged_groups:
+                canonical = group.get("canonical_name", "")
+                variants = group.get("variants", [])
+                
+                if canonical and variants:
+                    # Create or update merge mapping
+                    await db.item_merge_mappings.update_one(
+                        {"company_id": company_id, "canonical_name": canonical.lower()},
+                        {
+                            "$set": {
+                                "canonical_name": canonical.lower(),
+                                "display_name": canonical,
+                                "variants": [v.lower() for v in variants],
+                                "company_id": company_id,
+                                "updated_at": datetime.now(timezone.utc)
+                            }
+                        },
+                        upsert=True
+                    )
+        
+        total_merged = sum(len(g.get("variants", [])) for g in merged_groups)
+        
+        return {
+            "merged_groups": merged_groups,
+            "total_merged": total_merged,
+            "message": f"Намерени {len(merged_groups)} групи сходни продукти"
+        }
+        
+    except Exception as e:
+        logger.error(f"AI merge error: {str(e)}")
+        return {"merged_groups": [], "total_merged": 0, "error": str(e)}
+
+@api_router.get("/items/merge-mappings")
+async def get_merge_mappings(current_user: User = Depends(get_current_user)):
+    """Връща текущите сливания на продукти"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"mappings": []}
+    
+    mappings = await db.item_merge_mappings.find(
+        {"company_id": company_id},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    return {"mappings": mappings}
+
+@api_router.delete("/items/merge-mappings/{canonical_name}")
+async def delete_merge_mapping(
+    canonical_name: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Изтрива сливане на продукти"""
+    from urllib.parse import unquote
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=404, detail="Фирмата не е намерена")
+    
+    result = await db.item_merge_mappings.delete_one({
+        "company_id": company_id,
+        "canonical_name": unquote(canonical_name).lower()
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Сливането не е намерено")
+    
+    return {"message": "Сливането е изтрито"}
+
+@api_router.get("/statistics/items/merged")
+async def get_merged_item_statistics(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    top_n: int = 10,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Връща статистика за артикули с приложени AI сливания.
+    Сходните продукти са обединени в една позиция.
+    """
+    from collections import defaultdict
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {
+            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0, "merged_items": 0},
+            "top_by_quantity": [],
+            "top_by_value": [],
+            "merge_applied": False
+        }
+    
+    # Get merge mappings
+    mappings = await db.item_merge_mappings.find(
+        {"company_id": company_id},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    # Create variant to canonical mapping
+    variant_to_canonical = {}
+    canonical_display = {}
+    for m in mappings:
+        canonical = m["canonical_name"]
+        canonical_display[canonical] = m.get("display_name", canonical)
+        for variant in m.get("variants", []):
+            variant_to_canonical[variant.lower()] = canonical
+    
+    # Build date query
+    query = {"company_id": company_id}
+    if start_date or end_date:
+        query["invoice_date"] = {}
+        if start_date:
+            query["invoice_date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
+        if end_date:
+            query["invoice_date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    
+    # Get all price history records
+    history = await db.item_price_history.find(query, {"_id": 0}).to_list(10000)
+    
+    if not history:
+        return {
+            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0, "merged_items": 0},
+            "top_by_quantity": [],
+            "top_by_value": [],
+            "merge_applied": bool(mappings)
+        }
+    
+    # Aggregate with merging
+    item_stats = defaultdict(lambda: {
+        "display_name": "",
+        "quantity": 0,
+        "total_value": 0,
+        "frequency": 0,
+        "prices": [],
+        "suppliers": set(),
+        "original_names": set()
+    })
+    
+    merged_count = 0
+    for record in history:
+        original_name = record["item_name"]
+        name_lower = original_name.lower()
+        
+        # Apply merge mapping
+        if name_lower in variant_to_canonical:
+            canonical = variant_to_canonical[name_lower]
+            display = canonical_display.get(canonical, canonical.title())
+            merged_count += 1
+        else:
+            canonical = name_lower
+            display = original_name
+        
+        price = record["unit_price"]
+        qty = record["quantity"]
+        
+        item_stats[canonical]["display_name"] = display
+        item_stats[canonical]["quantity"] += qty
+        item_stats[canonical]["total_value"] += price * qty
+        item_stats[canonical]["frequency"] += 1
+        item_stats[canonical]["prices"].append(price)
+        item_stats[canonical]["suppliers"].add(record["supplier"])
+        item_stats[canonical]["original_names"].add(original_name)
+    
+    # Calculate totals
+    total_items = sum(s["frequency"] for s in item_stats.values())
+    total_value = sum(s["total_value"] for s in item_stats.values())
+    unique_items = len(item_stats)
+    
+    # Build top lists
+    items_list = []
+    for canonical, stats in item_stats.items():
+        prices = stats["prices"]
+        avg_price = sum(prices) / len(prices) if prices else 0
+        
+        items_list.append({
+            "name": stats["display_name"],
+            "canonical_name": canonical,
+            "total_quantity": round(stats["quantity"], 2),
+            "total_value": round(stats["total_value"], 2),
+            "frequency": stats["frequency"],
+            "avg_price": round(avg_price, 2),
+            "supplier_count": len(stats["suppliers"]),
+            "original_names": list(stats["original_names"])[:5]  # Show max 5 variants
+        })
+    
+    # Sort for top lists
+    top_by_quantity = sorted(items_list, key=lambda x: x["total_quantity"], reverse=True)[:top_n]
+    top_by_value = sorted(items_list, key=lambda x: x["total_value"], reverse=True)[:top_n]
+    
+    return {
+        "totals": {
+            "total_items": total_items,
+            "total_value": round(total_value, 2),
+            "unique_items": unique_items,
+            "merged_items": merged_count
+        },
+        "top_by_quantity": top_by_quantity,
+        "top_by_value": top_by_value,
+        "merge_applied": bool(mappings),
+        "merge_groups_count": len(mappings)
+    }
+
 # ===================== EXPORT ENDPOINTS =====================
 
 from services.export_service import ExportService
