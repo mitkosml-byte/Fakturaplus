@@ -1211,7 +1211,7 @@ export default function StatsScreen() {
                 )}
                 <View style={{ height: 40 }} />
               </View>
-            )}
+            ) : null}
           </ScrollView>
         </SafeAreaView>
       </View>
