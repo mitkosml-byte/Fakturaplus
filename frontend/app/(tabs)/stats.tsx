@@ -9,26 +9,25 @@ import {
   Dimensions,
   ImageBackground,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/services/api';
-import { Summary, ChartDataPoint } from '../../src/types';
-import { BarChart, LineChart } from 'react-native-gifted-charts';
+import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse } from '../../src/types';
+import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
 
 const { width } = Dimensions.get('window');
 const chartWidth = width - 80;
+const pieChartRadius = (width - 80) / 3;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
-interface SupplierStats {
-  supplier: string;
-  total_amount: number;
-  total_vat: number;
-  total_net: number;
-  invoice_count: number;
-  avg_invoice: number;
-}
+// Color palette for charts
+const CHART_COLORS = [
+  '#8B5CF6', '#10B981', '#F59E0B', '#EF4444', '#3B82F6',
+  '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16'
+];
 
 export default function StatsScreen() {
   const { t } = useTranslation();
@@ -37,11 +36,17 @@ export default function StatsScreen() {
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'suppliers'>('overview');
-  const [supplierStats, setSupplierStats] = useState<{
-    totals: { total_amount: number; total_vat: number; supplier_count: number; invoice_count: number };
-    top_10: SupplierStats[];
-  } | null>(null);
+  
+  // Advanced supplier stats
+  const [supplierOverview, setSupplierOverview] = useState<SupplierOverviewResponse | null>(null);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
+  const [supplierChartType, setSupplierChartType] = useState<ChartType>('pie');
+  const [supplierRankingType, setSupplierRankingType] = useState<'amount' | 'frequency' | 'avg'>('amount');
+  
+  // Supplier detail modal
+  const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
+  const [supplierDetail, setSupplierDetail] = useState<SupplierDetailedResponse | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -59,12 +64,24 @@ export default function StatsScreen() {
   const loadSupplierStats = useCallback(async () => {
     setLoadingSuppliers(true);
     try {
-      const data = await api.getSupplierStatistics();
-      setSupplierStats(data);
+      const data = await api.getSupplierOverview();
+      setSupplierOverview(data);
     } catch (error) {
       console.error('Error loading supplier stats:', error);
     } finally {
       setLoadingSuppliers(false);
+    }
+  }, []);
+
+  const loadSupplierDetail = useCallback(async (supplierName: string) => {
+    setLoadingDetail(true);
+    try {
+      const data = await api.getSupplierDetailed(supplierName);
+      setSupplierDetail(data);
+    } catch (error) {
+      console.error('Error loading supplier detail:', error);
+    } finally {
+      setLoadingDetail(false);
     }
   }, []);
 
@@ -73,10 +90,16 @@ export default function StatsScreen() {
   }, [loadData]);
 
   useEffect(() => {
-    if (activeTab === 'suppliers' && !supplierStats) {
+    if (activeTab === 'suppliers' && !supplierOverview) {
       loadSupplierStats();
     }
-  }, [activeTab, supplierStats, loadSupplierStats]);
+  }, [activeTab, supplierOverview, loadSupplierStats]);
+
+  useEffect(() => {
+    if (selectedSupplier) {
+      loadSupplierDetail(selectedSupplier);
+    }
+  }, [selectedSupplier, loadSupplierDetail]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -88,6 +111,7 @@ export default function StatsScreen() {
     setRefreshing(false);
   }, [loadData, loadSupplierStats, activeTab]);
 
+  // Chart data for overview
   const incomeBarData = chartData.map((item) => ({
     value: item.income,
     label: item.label,
@@ -110,11 +134,247 @@ export default function StatsScreen() {
     ),
   }));
 
-  const vatLineData = chartData.map((item) => ({
-    value: item.vat,
-    label: item.label,
-    dataPointColor: '#8B5CF6',
-  }));
+  // Get current ranking data
+  const getCurrentRanking = (): SupplierStats[] => {
+    if (!supplierOverview) return [];
+    switch (supplierRankingType) {
+      case 'frequency':
+        return supplierOverview.top_by_frequency;
+      case 'avg':
+        return supplierOverview.top_by_avg;
+      default:
+        return supplierOverview.top_by_amount;
+    }
+  };
+
+  // Prepare pie chart data
+  const getPieChartData = () => {
+    const ranking = getCurrentRanking();
+    const top5 = ranking.slice(0, 5);
+    const othersTotal = ranking.slice(5).reduce((sum, s) => sum + s.total_amount, 0);
+    
+    const data = top5.map((supplier, index) => ({
+      value: supplier.total_amount,
+      color: CHART_COLORS[index],
+      text: `${supplier.dependency_percent.toFixed(0)}%`,
+      shiftTextX: -8,
+      shiftTextY: 0,
+    }));
+    
+    if (othersTotal > 0) {
+      data.push({
+        value: othersTotal,
+        color: '#64748B',
+        text: '',
+        shiftTextX: 0,
+        shiftTextY: 0,
+      });
+    }
+    
+    return data;
+  };
+
+  // Prepare bar chart data for suppliers
+  const getSupplierBarData = () => {
+    const ranking = getCurrentRanking().slice(0, 7);
+    return ranking.map((supplier, index) => ({
+      value: supplierRankingType === 'frequency' ? supplier.invoice_count : 
+             supplierRankingType === 'avg' ? supplier.avg_invoice : supplier.total_amount,
+      label: supplier.supplier.substring(0, 6),
+      frontColor: CHART_COLORS[index % CHART_COLORS.length],
+    }));
+  };
+
+  // Prepare line chart data for supplier monthly trend
+  const getSupplierLineData = () => {
+    if (!supplierDetail?.monthly_trend) return [];
+    return supplierDetail.monthly_trend.map(m => ({
+      value: m.amount,
+      label: m.month.substring(5),
+      dataPointColor: '#8B5CF6',
+    }));
+  };
+
+  // Render chart type selector
+  const renderChartTypeSelector = () => (
+    <View style={styles.chartTypeSelector}>
+      <TouchableOpacity
+        style={[styles.chartTypeButton, supplierChartType === 'pie' && styles.chartTypeButtonActive]}
+        onPress={() => setSupplierChartType('pie')}
+      >
+        <Ionicons name="pie-chart" size={18} color={supplierChartType === 'pie' ? 'white' : '#64748B'} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.chartTypeButton, supplierChartType === 'bar' && styles.chartTypeButtonActive]}
+        onPress={() => setSupplierChartType('bar')}
+      >
+        <Ionicons name="bar-chart" size={18} color={supplierChartType === 'bar' ? 'white' : '#64748B'} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.chartTypeButton, supplierChartType === 'line' && styles.chartTypeButtonActive]}
+        onPress={() => setSupplierChartType('line')}
+      >
+        <Ionicons name="trending-up" size={18} color={supplierChartType === 'line' ? 'white' : '#64748B'} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Render supplier detail modal
+  const renderSupplierDetailModal = () => (
+    <Modal
+      visible={!!selectedSupplier}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => {
+        setSelectedSupplier(null);
+        setSupplierDetail(null);
+      }}
+    >
+      <View style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <TouchableOpacity 
+            style={styles.modalCloseButton}
+            onPress={() => {
+              setSelectedSupplier(null);
+              setSupplierDetail(null);
+            }}
+          >
+            <Ionicons name="close" size={24} color="white" />
+          </TouchableOpacity>
+          <Text style={styles.modalTitle} numberOfLines={1}>{selectedSupplier}</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        {loadingDetail ? (
+          <View style={styles.modalLoading}>
+            <ActivityIndicator size="large" color="#8B5CF6" />
+          </View>
+        ) : supplierDetail?.found ? (
+          <ScrollView style={styles.modalContent}>
+            {/* Overview Card */}
+            <View style={styles.detailCard}>
+              <Text style={styles.detailCardTitle}>{t('stats.supplierOverview')}</Text>
+              <View style={styles.detailGrid}>
+                <View style={styles.detailItem}>
+                  <Text style={styles.detailValue}>{supplierDetail.overview?.total_amount.toFixed(2)} €</Text>
+                  <Text style={styles.detailLabel}>{t('stats.totalAmount')}</Text>
+                </View>
+                <View style={styles.detailItem}>
+                  <Text style={styles.detailValue}>{supplierDetail.overview?.invoice_count}</Text>
+                  <Text style={styles.detailLabel}>{t('stats.invoiceCount')}</Text>
+                </View>
+                <View style={styles.detailItem}>
+                  <Text style={styles.detailValue}>{supplierDetail.overview?.avg_invoice.toFixed(2)} €</Text>
+                  <Text style={styles.detailLabel}>{t('stats.avgInvoice')}</Text>
+                </View>
+                <View style={styles.detailItem}>
+                  <Text style={styles.detailValue}>{supplierDetail.overview?.total_vat.toFixed(2)} €</Text>
+                  <Text style={styles.detailLabel}>{t('stats.vat')}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.detailDates}>
+                <View style={styles.detailDateItem}>
+                  <Ionicons name="calendar-outline" size={16} color="#64748B" />
+                  <Text style={styles.detailDateLabel}>{t('stats.firstDelivery')}: </Text>
+                  <Text style={styles.detailDateValue}>{supplierDetail.overview?.first_delivery || '-'}</Text>
+                </View>
+                <View style={styles.detailDateItem}>
+                  <Ionicons name="time-outline" size={16} color="#64748B" />
+                  <Text style={styles.detailDateLabel}>{t('stats.lastDelivery')}: </Text>
+                  <Text style={styles.detailDateValue}>{supplierDetail.overview?.last_delivery || '-'}</Text>
+                </View>
+              </View>
+              
+              <View style={[
+                styles.statusBadge, 
+                { backgroundColor: supplierDetail.overview?.is_active ? '#10B98120' : '#EF444420' }
+              ]}>
+                <Ionicons 
+                  name={supplierDetail.overview?.is_active ? "checkmark-circle" : "alert-circle"} 
+                  size={16} 
+                  color={supplierDetail.overview?.is_active ? '#10B981' : '#EF4444'} 
+                />
+                <Text style={[
+                  styles.statusText, 
+                  { color: supplierDetail.overview?.is_active ? '#10B981' : '#EF4444' }
+                ]}>
+                  {supplierDetail.overview?.is_active ? t('stats.activeSupplier') : `${t('stats.inactiveSupplier')} (${supplierDetail.overview?.days_inactive} ${t('stats.days')})`}
+                </Text>
+              </View>
+            </View>
+
+            {/* Monthly Trend Chart */}
+            {supplierDetail.monthly_trend && supplierDetail.monthly_trend.length > 0 && (
+              <View style={styles.detailCard}>
+                <Text style={styles.detailCardTitle}>{t('stats.monthlyTrend')}</Text>
+                <LineChart
+                  data={getSupplierLineData()}
+                  width={chartWidth - 20}
+                  height={150}
+                  color="#8B5CF6"
+                  thickness={2}
+                  dataPointsColor="#8B5CF6"
+                  yAxisColor="#334155"
+                  xAxisColor="#334155"
+                  yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                  xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                  hideRules
+                  isAnimated
+                  curved
+                />
+              </View>
+            )}
+
+            {/* Anomalies */}
+            {supplierDetail.anomalies && supplierDetail.anomalies.length > 0 && (
+              <View style={styles.detailCard}>
+                <View style={styles.anomalyHeader}>
+                  <Ionicons name="warning" size={20} color="#F59E0B" />
+                  <Text style={styles.detailCardTitle}>{t('stats.anomalies')}</Text>
+                </View>
+                {supplierDetail.anomalies.map((anomaly, index) => (
+                  <View key={index} style={styles.anomalyItem}>
+                    <View>
+                      <Text style={styles.anomalyInvoice}>№{anomaly.invoice_number}</Text>
+                      <Text style={styles.anomalyDate}>{anomaly.date}</Text>
+                    </View>
+                    <View style={styles.anomalyAmount}>
+                      <Text style={styles.anomalyValue}>{anomaly.amount.toFixed(2)} €</Text>
+                      <Text style={styles.anomalyDeviation}>+{anomaly.deviation_percent}%</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Recent Invoices */}
+            {supplierDetail.recent_invoices && supplierDetail.recent_invoices.length > 0 && (
+              <View style={styles.detailCard}>
+                <Text style={styles.detailCardTitle}>{t('stats.recentInvoices')}</Text>
+                {supplierDetail.recent_invoices.map((invoice, index) => (
+                  <View key={index} style={styles.recentInvoiceItem}>
+                    <View>
+                      <Text style={styles.recentInvoiceNumber}>№{invoice.invoice_number}</Text>
+                      <Text style={styles.recentInvoiceDate}>{invoice.date}</Text>
+                    </View>
+                    <Text style={styles.recentInvoiceAmount}>{invoice.total_amount.toFixed(2)} €</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        ) : (
+          <View style={styles.modalLoading}>
+            <Ionicons name="alert-circle-outline" size={48} color="#64748B" />
+            <Text style={styles.noDataText}>{t('stats.noSupplierData')}</Text>
+          </View>
+        )}
+      </View>
+    </Modal>
+  );
 
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -153,196 +413,249 @@ export default function StatsScreen() {
 
             {activeTab === 'overview' ? (
               <>
-            {/* Period Selector */}
-        <View style={styles.periodSelector}>
-          {(['week', 'month', 'year'] as const).map((p) => (
-            <TouchableOpacity
-              key={p}
-              style={[styles.periodButton, period === p && styles.periodButtonActive]}
-              onPress={() => setPeriod(p)}
-            >
-              <Text style={[styles.periodButtonText, period === p && styles.periodButtonTextActive]}>
-                {p === 'week' ? t('stats.week') : p === 'month' ? t('stats.month') : t('stats.year')}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+                {/* Period Selector */}
+                <View style={styles.periodSelector}>
+                  {(['week', 'month', 'year'] as const).map((p) => (
+                    <TouchableOpacity
+                      key={p}
+                      style={[styles.periodButton, period === p && styles.periodButtonActive]}
+                      onPress={() => setPeriod(p)}
+                    >
+                      <Text style={[styles.periodButtonText, period === p && styles.periodButtonTextActive]}>
+                        {p === 'week' ? t('stats.week') : p === 'month' ? t('stats.month') : t('stats.year')}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
-        {/* Summary Cards */}
-        <View style={styles.summaryGrid}>
-          <View style={[styles.summaryCard, { borderLeftColor: '#10B981' }]}>
-            <Ionicons name="trending-up" size={24} color="#10B981" />
-            <Text style={styles.cardLabel}>{t('stats.totalIncome')}</Text>
-            <Text style={[styles.cardValue, { color: '#10B981' }]}>
-              {summary?.total_income.toFixed(2) || '0.00'} €
-            </Text>
-          </View>
-          <View style={[styles.summaryCard, { borderLeftColor: '#EF4444' }]}>
-            <Ionicons name="trending-down" size={24} color="#EF4444" />
-            <Text style={styles.cardLabel}>{t('stats.totalExpense')}</Text>
-            <Text style={[styles.cardValue, { color: '#EF4444' }]}>
-              {summary?.total_expense.toFixed(2) || '0.00'} €
-            </Text>
-          </View>
-          <View style={[styles.summaryCard, { borderLeftColor: '#8B5CF6' }]}>
-            <Ionicons name="calculator" size={24} color="#8B5CF6" />
-            <Text style={styles.cardLabel}>{t('stats.vatToPay')}</Text>
-            <Text style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
-              {summary?.vat_to_pay.toFixed(2) || '0.00'} €
-            </Text>
-          </View>
-          <View style={[styles.summaryCard, { borderLeftColor: '#F59E0B' }]}>
-            <Ionicons name="wallet" size={24} color="#F59E0B" />
-            <Text style={styles.cardLabel}>{t('stats.profitLabel')}</Text>
-            <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
-              {summary?.profit.toFixed(2) || '0.00'} €
-            </Text>
-          </View>
-        </View>
+                {/* Summary Cards */}
+                <View style={styles.summaryGrid}>
+                  <View style={[styles.summaryCard, { borderLeftColor: '#10B981' }]}>
+                    <Ionicons name="trending-up" size={24} color="#10B981" />
+                    <Text style={styles.cardLabel}>{t('stats.totalIncome')}</Text>
+                    <Text style={[styles.cardValue, { color: '#10B981' }]}>
+                      {summary?.total_income.toFixed(2) || '0.00'} €
+                    </Text>
+                  </View>
+                  <View style={[styles.summaryCard, { borderLeftColor: '#EF4444' }]}>
+                    <Ionicons name="trending-down" size={24} color="#EF4444" />
+                    <Text style={styles.cardLabel}>{t('stats.totalExpense')}</Text>
+                    <Text style={[styles.cardValue, { color: '#EF4444' }]}>
+                      {summary?.total_expense.toFixed(2) || '0.00'} €
+                    </Text>
+                  </View>
+                  <View style={[styles.summaryCard, { borderLeftColor: '#8B5CF6' }]}>
+                    <Ionicons name="calculator" size={24} color="#8B5CF6" />
+                    <Text style={styles.cardLabel}>{t('stats.vatToPay')}</Text>
+                    <Text style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
+                      {summary?.vat_to_pay.toFixed(2) || '0.00'} €
+                    </Text>
+                  </View>
+                  <View style={[styles.summaryCard, { borderLeftColor: '#F59E0B' }]}>
+                    <Ionicons name="wallet" size={24} color="#F59E0B" />
+                    <Text style={styles.cardLabel}>{t('stats.profitLabel')}</Text>
+                    <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+                      {summary?.profit.toFixed(2) || '0.00'} €
+                    </Text>
+                  </View>
+                </View>
 
-        {/* Income Chart */}
-        <View style={styles.chartContainer}>
-          <View style={styles.chartHeader}>
-            <Ionicons name="arrow-up-circle" size={24} color="#10B981" />
-            <Text style={styles.chartTitle}>{t('stats.income')}</Text>
-          </View>
-          {incomeBarData.length > 0 ? (
-            <BarChart
-              data={incomeBarData}
-              width={chartWidth}
-              height={180}
-              barWidth={20}
-              spacing={16}
-              noOfSections={4}
-              barBorderRadius={4}
-              frontColor="#10B981"
-              yAxisColor="#334155"
-              xAxisColor="#334155"
-              yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-              xAxisLabelTextStyle={{ color: '#64748B', fontSize: 10 }}
-              hideRules
-              isAnimated
-            />
-          ) : (
-            <View style={styles.noDataContainer}>
-              <Text style={styles.noDataText}>{t('stats.noData')}</Text>
-            </View>
-          )}
-        </View>
+                {/* Income Chart */}
+                <View style={styles.chartContainer}>
+                  <View style={styles.chartHeader}>
+                    <Ionicons name="arrow-up-circle" size={24} color="#10B981" />
+                    <Text style={styles.chartTitle}>{t('stats.income')}</Text>
+                  </View>
+                  {incomeBarData.length > 0 ? (
+                    <BarChart
+                      data={incomeBarData}
+                      width={chartWidth}
+                      height={180}
+                      barWidth={20}
+                      spacing={16}
+                      noOfSections={4}
+                      barBorderRadius={4}
+                      frontColor="#10B981"
+                      yAxisColor="#334155"
+                      xAxisColor="#334155"
+                      yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                      xAxisLabelTextStyle={{ color: '#64748B', fontSize: 10 }}
+                      hideRules
+                      isAnimated
+                    />
+                  ) : (
+                    <View style={styles.noDataContainer}>
+                      <Text style={styles.noDataText}>{t('stats.noData')}</Text>
+                    </View>
+                  )}
+                </View>
 
-        {/* Expense Chart */}
-        <View style={styles.chartContainer}>
-          <View style={styles.chartHeader}>
-            <Ionicons name="arrow-down-circle" size={24} color="#EF4444" />
-            <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
-          </View>
-          {expenseBarData.length > 0 ? (
-            <BarChart
-              data={expenseBarData}
-              width={chartWidth}
-              height={180}
-              barWidth={20}
-              spacing={16}
-              noOfSections={4}
-              barBorderRadius={4}
-              frontColor="#EF4444"
-              yAxisColor="#334155"
-              xAxisColor="#334155"
-              yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-              xAxisLabelTextStyle={{ color: '#64748B', fontSize: 10 }}
-              hideRules
-              isAnimated
-            />
-          ) : (
-            <View style={styles.noDataContainer}>
-              <Text style={styles.noDataText}>{t('stats.noData')}</Text>
-            </View>
-          )}
-        </View>
+                {/* Expense Chart */}
+                <View style={styles.chartContainer}>
+                  <View style={styles.chartHeader}>
+                    <Ionicons name="arrow-down-circle" size={24} color="#EF4444" />
+                    <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
+                  </View>
+                  {expenseBarData.length > 0 ? (
+                    <BarChart
+                      data={expenseBarData}
+                      width={chartWidth}
+                      height={180}
+                      barWidth={20}
+                      spacing={16}
+                      noOfSections={4}
+                      barBorderRadius={4}
+                      frontColor="#EF4444"
+                      yAxisColor="#334155"
+                      xAxisColor="#334155"
+                      yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                      xAxisLabelTextStyle={{ color: '#64748B', fontSize: 10 }}
+                      hideRules
+                      isAnimated
+                    />
+                  ) : (
+                    <View style={styles.noDataContainer}>
+                      <Text style={styles.noDataText}>{t('stats.noData')}</Text>
+                    </View>
+                  )}
+                </View>
 
-        {/* VAT Breakdown */}
-        <View style={styles.vatBreakdown}>
-          <Text style={styles.sectionTitle}>{t('stats.vatBreakdown')}</Text>
-          
-          <View style={styles.vatRow}>
-            <View style={styles.vatItem}>
-              <Text style={styles.vatLabel}>{t('stats.vatFromSales')}</Text>
-              <Text style={[styles.vatValue, { color: '#EF4444' }]}>
-                +{summary?.fiscal_vat.toFixed(2) || '0.00'} €
-              </Text>
-            </View>
-            <View style={styles.vatItem}>
-              <Text style={styles.vatLabel}>{t('stats.vatCredit')}</Text>
-              <Text style={[styles.vatValue, { color: '#10B981' }]}>
-                -{summary?.total_invoice_vat.toFixed(2) || '0.00'} €
-              </Text>
-            </View>
-          </View>
+                {/* VAT Breakdown */}
+                <View style={styles.vatBreakdown}>
+                  <Text style={styles.sectionTitle}>{t('stats.vatBreakdown')}</Text>
+                  
+                  <View style={styles.vatRow}>
+                    <View style={styles.vatItem}>
+                      <Text style={styles.vatLabel}>{t('stats.vatFromSales')}</Text>
+                      <Text style={[styles.vatValue, { color: '#EF4444' }]}>
+                        +{summary?.fiscal_vat.toFixed(2) || '0.00'} €
+                      </Text>
+                    </View>
+                    <View style={styles.vatItem}>
+                      <Text style={styles.vatLabel}>{t('stats.vatCredit')}</Text>
+                      <Text style={[styles.vatValue, { color: '#10B981' }]}>
+                        -{summary?.total_invoice_vat.toFixed(2) || '0.00'} €
+                      </Text>
+                    </View>
+                  </View>
 
-          <View style={styles.vatTotal}>
-            <Text style={styles.vatTotalLabel}>{t('stats.vatToPay')}</Text>
-            <Text style={[styles.vatTotalValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
-              {summary?.vat_to_pay.toFixed(2) || '0.00'} €
-            </Text>
-          </View>
-        </View>
+                  <View style={styles.vatTotal}>
+                    <Text style={styles.vatTotalLabel}>{t('stats.vatToPay')}</Text>
+                    <Text style={[styles.vatTotalValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
+                      {summary?.vat_to_pay.toFixed(2) || '0.00'} €
+                    </Text>
+                  </View>
+                </View>
 
-        {/* Additional Stats */}
-        <View style={styles.additionalStats}>
-          <Text style={styles.sectionTitle}>{t('stats.additionalInfo')}</Text>
-          
-          <View style={styles.statRow}>
-            <View style={styles.statItem}>
-              <Ionicons name="receipt" size={20} color="#8B5CF6" />
-              <Text style={styles.statLabel}>{t('stats.invoiceCount')}</Text>
-              <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Ionicons name="cash" size={20} color="#10B981" />
-              <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
-              <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0} €</Text>
-            </View>
-          </View>
+                {/* Additional Stats */}
+                <View style={styles.additionalStats}>
+                  <Text style={styles.sectionTitle}>{t('stats.additionalInfo')}</Text>
+                  
+                  <View style={styles.statRow}>
+                    <View style={styles.statItem}>
+                      <Ionicons name="receipt" size={20} color="#8B5CF6" />
+                      <Text style={styles.statLabel}>{t('stats.invoiceCount')}</Text>
+                      <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                      <Ionicons name="cash" size={20} color="#10B981" />
+                      <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
+                      <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0} €</Text>
+                    </View>
+                  </View>
 
-          <View style={styles.statRow}>
-            <View style={styles.statItem}>
-              <Ionicons name="wallet" size={20} color="#F59E0B" />
-              <Text style={styles.statLabel}>{t('home.pocket')}</Text>
-              <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0} €</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Ionicons name="remove-circle" size={20} color="#EF4444" />
-              <Text style={styles.statLabel}>{t('stats.expensesNoInvoice')}</Text>
-              <Text style={styles.statValue}>{summary?.total_non_invoice_expenses.toFixed(0) || 0} €</Text>
-            </View>
-          </View>
-        </View>
+                  <View style={styles.statRow}>
+                    <View style={styles.statItem}>
+                      <Ionicons name="wallet" size={20} color="#F59E0B" />
+                      <Text style={styles.statLabel}>{t('home.pocket')}</Text>
+                      <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0} €</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                      <Ionicons name="remove-circle" size={20} color="#EF4444" />
+                      <Text style={styles.statLabel}>{t('stats.expensesNoInvoice')}</Text>
+                      <Text style={styles.statValue}>{summary?.total_non_invoice_expenses.toFixed(0) || 0} €</Text>
+                    </View>
+                  </View>
+                </View>
 
-            <View style={{ height: 40 }} />
+                <View style={{ height: 40 }} />
               </>
             ) : (
-              /* Suppliers Tab */
+              /* ========== ADVANCED SUPPLIERS TAB ========== */
               <View style={styles.suppliersContainer}>
                 {loadingSuppliers ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#8B5CF6" />
                     <Text style={styles.loadingText}>{t('stats.loadingData')}</Text>
                   </View>
-                ) : supplierStats ? (
+                ) : supplierOverview ? (
                   <>
+                    {/* Executive Summary */}
+                    <View style={styles.executiveSummaryCard}>
+                      <View style={styles.execSummaryHeader}>
+                        <Ionicons name="analytics" size={24} color="#8B5CF6" />
+                        <Text style={styles.execSummaryTitle}>{t('stats.executiveSummary')}</Text>
+                      </View>
+                      
+                      <View style={styles.execSummaryGrid}>
+                        <View style={styles.execItem}>
+                          <Text style={styles.execValue}>{supplierOverview.executive_summary.total_suppliers}</Text>
+                          <Text style={styles.execLabel}>{t('stats.totalSuppliers')}</Text>
+                        </View>
+                        <View style={styles.execItem}>
+                          <Text style={[styles.execValue, { color: '#10B981' }]}>
+                            {supplierOverview.executive_summary.active_suppliers}
+                          </Text>
+                          <Text style={styles.execLabel}>{t('stats.activeSuppliers')}</Text>
+                        </View>
+                        <View style={styles.execItem}>
+                          <Text style={[styles.execValue, { color: '#EF4444' }]}>
+                            {supplierOverview.executive_summary.inactive_suppliers}
+                          </Text>
+                          <Text style={styles.execLabel}>{t('stats.inactiveSuppliers')}</Text>
+                        </View>
+                      </View>
+                      
+                      {/* Concentration indicators */}
+                      <View style={styles.concentrationRow}>
+                        <View style={styles.concentrationItem}>
+                          <Text style={styles.concentrationLabel}>{t('stats.top3Concentration')}</Text>
+                          <View style={styles.concentrationBar}>
+                            <View style={[styles.concentrationFill, { 
+                              width: `${Math.min(supplierOverview.executive_summary.top_3_concentration, 100)}%`,
+                              backgroundColor: supplierOverview.executive_summary.top_3_concentration > 70 ? '#EF4444' : '#10B981'
+                            }]} />
+                          </View>
+                          <Text style={styles.concentrationValue}>
+                            {supplierOverview.executive_summary.top_3_concentration.toFixed(1)}%
+                          </Text>
+                        </View>
+                      </View>
+                      
+                      {/* High dependency alert */}
+                      {supplierOverview.executive_summary.high_dependency_count > 0 && (
+                        <View style={styles.alertBanner}>
+                          <Ionicons name="warning" size={18} color="#F59E0B" />
+                          <Text style={styles.alertText}>
+                            {supplierOverview.executive_summary.high_dependency_count} {t('stats.highDependencyAlert')}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
                     {/* Totals Summary */}
                     <View style={styles.supplierTotalsCard}>
                       <Text style={styles.supplierTotalsTitle}>{t('stats.currentMonthTotal')}</Text>
                       <View style={styles.supplierTotalsRow}>
                         <View style={styles.supplierTotalItem}>
                           <Text style={styles.supplierTotalValue}>
-                            {supplierStats.totals.total_amount.toFixed(2)} €
+                            {supplierOverview.totals.total_amount.toFixed(2)} €
                           </Text>
                           <Text style={styles.supplierTotalLabel}>{t('stats.totalAmount')}</Text>
                         </View>
                         <View style={styles.supplierTotalItem}>
                           <Text style={styles.supplierTotalValue}>
-                            {supplierStats.totals.total_vat.toFixed(2)} €
+                            {supplierOverview.totals.total_vat.toFixed(2)} €
                           </Text>
                           <Text style={styles.supplierTotalLabel}>{t('stats.vat')}</Text>
                         </View>
@@ -350,29 +663,148 @@ export default function StatsScreen() {
                       <View style={styles.supplierTotalsRow}>
                         <View style={styles.supplierTotalItem}>
                           <Text style={styles.supplierTotalValue}>
-                            {supplierStats.totals.supplier_count}
+                            {supplierOverview.totals.supplier_count}
                           </Text>
                           <Text style={styles.supplierTotalLabel}>{t('stats.supplierCount')}</Text>
                         </View>
                         <View style={styles.supplierTotalItem}>
                           <Text style={styles.supplierTotalValue}>
-                            {supplierStats.totals.invoice_count}
+                            {supplierOverview.totals.invoice_count}
                           </Text>
                           <Text style={styles.supplierTotalLabel}>{t('stats.invoiceCount')}</Text>
                         </View>
                       </View>
                     </View>
 
-                    {/* Top 10 Suppliers */}
-                    <View style={styles.topSuppliersCard}>
-                      <View style={styles.topSuppliersHeader}>
+                    {/* Chart Type & Ranking Selectors */}
+                    <View style={styles.chartControlsContainer}>
+                      {renderChartTypeSelector()}
+                      
+                      <View style={styles.rankingSelector}>
+                        <TouchableOpacity
+                          style={[styles.rankingButton, supplierRankingType === 'amount' && styles.rankingButtonActive]}
+                          onPress={() => setSupplierRankingType('amount')}
+                        >
+                          <Text style={[styles.rankingButtonText, supplierRankingType === 'amount' && styles.rankingButtonTextActive]}>
+                            {t('stats.byAmount')}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.rankingButton, supplierRankingType === 'frequency' && styles.rankingButtonActive]}
+                          onPress={() => setSupplierRankingType('frequency')}
+                        >
+                          <Text style={[styles.rankingButtonText, supplierRankingType === 'frequency' && styles.rankingButtonTextActive]}>
+                            {t('stats.byFrequency')}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.rankingButton, supplierRankingType === 'avg' && styles.rankingButtonActive]}
+                          onPress={() => setSupplierRankingType('avg')}
+                        >
+                          <Text style={[styles.rankingButtonText, supplierRankingType === 'avg' && styles.rankingButtonTextActive]}>
+                            {t('stats.byAvg')}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    {/* Chart Display */}
+                    <View style={styles.chartContainer}>
+                      <View style={styles.chartHeader}>
                         <Ionicons name="trophy" size={24} color="#F59E0B" />
-                        <Text style={styles.topSuppliersTitle}>{t('stats.top10')}</Text>
+                        <Text style={styles.chartTitle}>{t('stats.top10')}</Text>
                       </View>
                       
-                      {supplierStats.top_10.length > 0 ? (
-                        supplierStats.top_10.map((supplier, index) => (
-                          <View key={supplier.supplier} style={styles.supplierItem}>
+                      {supplierChartType === 'pie' && getPieChartData().length > 0 && (
+                        <View style={styles.pieChartContainer}>
+                          <PieChart
+                            data={getPieChartData()}
+                            radius={pieChartRadius}
+                            innerRadius={pieChartRadius * 0.5}
+                            centerLabelComponent={() => (
+                              <View style={styles.pieCenter}>
+                                <Text style={styles.pieCenterValue}>
+                                  {supplierOverview.totals.total_amount.toFixed(0)}€
+                                </Text>
+                                <Text style={styles.pieCenterLabel}>{t('stats.totalAmount')}</Text>
+                              </View>
+                            )}
+                            showText
+                            textColor="white"
+                            textSize={10}
+                          />
+                          
+                          {/* Legend */}
+                          <View style={styles.legendContainer}>
+                            {getCurrentRanking().slice(0, 5).map((supplier, index) => (
+                              <TouchableOpacity 
+                                key={supplier.supplier} 
+                                style={styles.legendItem}
+                                onPress={() => setSelectedSupplier(supplier.supplier)}
+                              >
+                                <View style={[styles.legendColor, { backgroundColor: CHART_COLORS[index] }]} />
+                                <Text style={styles.legendText} numberOfLines={1}>{supplier.supplier}</Text>
+                                <Text style={styles.legendValue}>{supplier.dependency_percent.toFixed(0)}%</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </View>
+                      )}
+                      
+                      {supplierChartType === 'bar' && getSupplierBarData().length > 0 && (
+                        <BarChart
+                          data={getSupplierBarData()}
+                          width={chartWidth}
+                          height={200}
+                          barWidth={28}
+                          spacing={12}
+                          noOfSections={4}
+                          barBorderRadius={4}
+                          yAxisColor="#334155"
+                          xAxisColor="#334155"
+                          yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                          xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                          hideRules
+                          isAnimated
+                        />
+                      )}
+                      
+                      {supplierChartType === 'line' && getSupplierBarData().length > 0 && (
+                        <LineChart
+                          data={getSupplierBarData().map(d => ({ value: d.value, label: d.label, dataPointColor: '#8B5CF6' }))}
+                          width={chartWidth}
+                          height={200}
+                          color="#8B5CF6"
+                          thickness={3}
+                          dataPointsColor="#8B5CF6"
+                          yAxisColor="#334155"
+                          xAxisColor="#334155"
+                          yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                          xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                          hideRules
+                          isAnimated
+                          curved
+                        />
+                      )}
+                    </View>
+
+                    {/* Top Suppliers List */}
+                    <View style={styles.topSuppliersCard}>
+                      <View style={styles.topSuppliersHeader}>
+                        <Ionicons name="list" size={24} color="#8B5CF6" />
+                        <Text style={styles.topSuppliersTitle}>
+                          {supplierRankingType === 'amount' ? t('stats.topByAmount') : 
+                           supplierRankingType === 'frequency' ? t('stats.topByFrequency') : t('stats.topByAvg')}
+                        </Text>
+                      </View>
+                      
+                      {getCurrentRanking().length > 0 ? (
+                        getCurrentRanking().map((supplier, index) => (
+                          <TouchableOpacity 
+                            key={supplier.supplier} 
+                            style={styles.supplierItem}
+                            onPress={() => setSelectedSupplier(supplier.supplier)}
+                          >
                             <View style={styles.supplierRank}>
                               <Text style={[
                                 styles.supplierRankText,
@@ -386,23 +818,74 @@ export default function StatsScreen() {
                                 {supplier.supplier}
                               </Text>
                               <Text style={styles.supplierMeta}>
-                                {supplier.invoice_count} {t('stats.invoiceCount').toLowerCase()} • {t('stats.avgInvoice')} {supplier.avg_invoice.toFixed(0)}€
+                                {supplier.invoice_count} {t('stats.invoices')} • {t('stats.avgShort')} {supplier.avg_invoice.toFixed(0)}€
                               </Text>
                             </View>
                             <View style={styles.supplierAmounts}>
                               <Text style={styles.supplierAmount}>
                                 {supplier.total_amount.toFixed(2)} €
                               </Text>
-                              <Text style={styles.supplierVat}>
-                                {t('stats.vat')}: {supplier.total_vat.toFixed(2)} €
-                              </Text>
+                              <View style={styles.dependencyBadge}>
+                                <Text style={[
+                                  styles.dependencyText,
+                                  supplier.dependency_percent > 30 && { color: '#EF4444' }
+                                ]}>
+                                  {supplier.dependency_percent.toFixed(0)}%
+                                </Text>
+                              </View>
                             </View>
-                          </View>
+                            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+                          </TouchableOpacity>
                         ))
                       ) : (
                         <Text style={styles.noDataText}>{t('stats.noSupplierData')}</Text>
                       )}
                     </View>
+
+                    {/* Inactive Suppliers Warning */}
+                    {supplierOverview.inactive_suppliers.length > 0 && (
+                      <View style={styles.inactiveCard}>
+                        <View style={styles.inactiveHeader}>
+                          <Ionicons name="time" size={24} color="#EF4444" />
+                          <Text style={styles.inactiveTitle}>{t('stats.inactiveSuppliers')}</Text>
+                        </View>
+                        {supplierOverview.inactive_suppliers.slice(0, 5).map((supplier, index) => (
+                          <TouchableOpacity 
+                            key={supplier.supplier} 
+                            style={styles.inactiveItem}
+                            onPress={() => setSelectedSupplier(supplier.supplier)}
+                          >
+                            <View>
+                              <Text style={styles.inactiveName}>{supplier.supplier}</Text>
+                              <Text style={styles.inactiveMeta}>
+                                {t('stats.lastDelivery')}: {supplier.last_delivery || '-'}
+                              </Text>
+                            </View>
+                            <View style={styles.inactiveDays}>
+                              <Text style={styles.inactiveDaysValue}>{supplier.days_inactive}</Text>
+                              <Text style={styles.inactiveDaysLabel}>{t('stats.days')}</Text>
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* High Dependency Alerts */}
+                    {supplierOverview.high_dependency_alerts.length > 0 && (
+                      <View style={styles.dependencyAlertCard}>
+                        <View style={styles.dependencyAlertHeader}>
+                          <Ionicons name="warning" size={24} color="#F59E0B" />
+                          <Text style={styles.dependencyAlertTitle}>{t('stats.highDependency')}</Text>
+                        </View>
+                        <Text style={styles.dependencyAlertDesc}>{t('stats.highDependencyDesc')}</Text>
+                        {supplierOverview.high_dependency_alerts.map((supplier, index) => (
+                          <View key={supplier.supplier} style={styles.dependencyAlertItem}>
+                            <Text style={styles.dependencyAlertName}>{supplier.supplier}</Text>
+                            <Text style={styles.dependencyAlertPercent}>{supplier.dependency_percent.toFixed(1)}%</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
                   </>
                 ) : (
                   <View style={styles.noDataContainer}>
@@ -416,6 +899,9 @@ export default function StatsScreen() {
           </ScrollView>
         </SafeAreaView>
       </View>
+      
+      {/* Supplier Detail Modal */}
+      {renderSupplierDetailModal()}
     </ImageBackground>
   );
 }
@@ -638,6 +1124,89 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginTop: 12,
   },
+  
+  // Executive Summary
+  executiveSummaryCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  execSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  execSummaryTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  execSummaryGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+  },
+  execItem: {
+    alignItems: 'center',
+  },
+  execValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#8B5CF6',
+  },
+  execLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 4,
+  },
+  concentrationRow: {
+    marginBottom: 12,
+  },
+  concentrationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  concentrationLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    width: 100,
+  },
+  concentrationBar: {
+    flex: 1,
+    height: 8,
+    backgroundColor: '#0F172A',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  concentrationFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  concentrationValue: {
+    fontSize: 12,
+    color: 'white',
+    fontWeight: 'bold',
+    width: 50,
+    textAlign: 'right',
+  },
+  alertBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F59E0B20',
+    padding: 12,
+    borderRadius: 8,
+  },
+  alertText: {
+    color: '#F59E0B',
+    fontSize: 13,
+    flex: 1,
+  },
+  
+  // Supplier Totals
   supplierTotalsCard: {
     backgroundColor: '#1E293B',
     borderRadius: 16,
@@ -669,10 +1238,97 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginTop: 4,
   },
+  
+  // Chart Controls
+  chartControlsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  chartTypeSelector: {
+    flexDirection: 'row',
+    backgroundColor: '#1E293B',
+    borderRadius: 8,
+    padding: 4,
+  },
+  chartTypeButton: {
+    padding: 10,
+    borderRadius: 6,
+  },
+  chartTypeButtonActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  rankingSelector: {
+    flexDirection: 'row',
+    backgroundColor: '#1E293B',
+    borderRadius: 8,
+    padding: 4,
+  },
+  rankingButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  rankingButtonActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  rankingButtonText: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  rankingButtonTextActive: {
+    color: 'white',
+  },
+  
+  // Pie Chart
+  pieChartContainer: {
+    alignItems: 'center',
+  },
+  pieCenter: {
+    alignItems: 'center',
+  },
+  pieCenterValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  pieCenterLabel: {
+    fontSize: 10,
+    color: '#64748B',
+  },
+  legendContainer: {
+    marginTop: 16,
+    width: '100%',
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  legendColor: {
+    width: 12,
+    height: 12,
+    borderRadius: 3,
+    marginRight: 8,
+  },
+  legendText: {
+    flex: 1,
+    color: 'white',
+    fontSize: 13,
+  },
+  legendValue: {
+    color: '#64748B',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  
+  // Top Suppliers
   topSuppliersCard: {
     backgroundColor: '#1E293B',
     borderRadius: 16,
     padding: 16,
+    marginBottom: 16,
   },
   topSuppliersHeader: {
     flexDirection: 'row',
@@ -718,25 +1374,282 @@ const styles = StyleSheet.create({
   },
   supplierAmounts: {
     alignItems: 'flex-end',
+    marginRight: 8,
   },
   supplierAmount: {
     fontSize: 14,
     fontWeight: 'bold',
     color: '#10B981',
   },
-  supplierVat: {
+  dependencyBadge: {
+    backgroundColor: '#8B5CF620',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 2,
+  },
+  dependencyText: {
+    fontSize: 10,
+    color: '#8B5CF6',
+    fontWeight: 'bold',
+  },
+  
+  // Inactive Suppliers
+  inactiveCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#EF4444',
+  },
+  inactiveHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  inactiveTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#EF4444',
+  },
+  inactiveItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0F172A',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  inactiveName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+  },
+  inactiveMeta: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  inactiveDays: {
+    alignItems: 'center',
+  },
+  inactiveDaysValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#EF4444',
+  },
+  inactiveDaysLabel: {
+    fontSize: 10,
+    color: '#64748B',
+  },
+  
+  // High Dependency Alert
+  dependencyAlertCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#F59E0B',
+  },
+  dependencyAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  dependencyAlertTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#F59E0B',
+  },
+  dependencyAlertDesc: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 12,
+  },
+  dependencyAlertItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  dependencyAlertName: {
+    fontSize: 14,
+    color: 'white',
+  },
+  dependencyAlertPercent: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#F59E0B',
+  },
+  
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    backgroundColor: '#1E293B',
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  modalCloseButton: {
+    padding: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+    flex: 1,
+    textAlign: 'center',
+  },
+  modalContent: {
+    flex: 1,
+    padding: 16,
+  },
+  modalLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  
+  // Detail Card
+  detailCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  detailCardTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 16,
+  },
+  detailGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  detailItem: {
+    width: '47%',
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  detailValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#8B5CF6',
+  },
+  detailLabel: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 4,
+  },
+  detailDates: {
+    marginTop: 16,
+  },
+  detailDateItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  detailDateLabel: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  detailDateValue: {
+    fontSize: 12,
+    color: 'white',
+    fontWeight: '500',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  
+  // Anomaly
+  anomalyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  anomalyItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  anomalyInvoice: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+  },
+  anomalyDate: {
     fontSize: 11,
     color: '#64748B',
   },
-  noDataContainer: {
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+  anomalyAmount: {
+    alignItems: 'flex-end',
   },
-  noDataText: {
+  anomalyValue: {
     fontSize: 14,
+    fontWeight: 'bold',
+    color: '#F59E0B',
+  },
+  anomalyDeviation: {
+    fontSize: 10,
+    color: '#EF4444',
+    fontWeight: 'bold',
+  },
+  
+  // Recent Invoices
+  recentInvoiceItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  recentInvoiceNumber: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'white',
+  },
+  recentInvoiceDate: {
+    fontSize: 11,
     color: '#64748B',
-    textAlign: 'center',
-    marginTop: 12,
+  },
+  recentInvoiceAmount: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#10B981',
   },
 });
