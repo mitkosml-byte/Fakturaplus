@@ -681,4 +681,49 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
   },
+  
+  // AI Corrections Styles
+  correctionsContainer: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  correctionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  correctionsTitle: {
+    color: '#10B981',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  confidenceBadge: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  confidenceText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  correctionItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: 4,
+  },
+  correctionText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 18,
+  },
 });
