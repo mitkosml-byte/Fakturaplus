@@ -388,83 +388,135 @@ export default function HomeScreen() {
       {/* Expense Modal */}
       <Modal visible={expenseModalVisible} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Разход без фактура</Text>
-              <TouchableOpacity onPress={() => setExpenseModalVisible(false)}>
+              <Text style={styles.modalTitle}>В канала (разходи)</Text>
+              <TouchableOpacity onPress={() => {
+                setExpenseModalVisible(false);
+                setExpenseDate(new Date());
+              }}>
                 <Ionicons name="close" size={28} color="#94A3B8" />
               </TouchableOpacity>
             </View>
 
-            {/* Date Picker */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Дата</Text>
-              <View style={styles.datePickerContainer}>
-                <TouchableOpacity 
-                  style={styles.dateButton} 
-                  onPress={() => setExpenseDate(subDays(expenseDate, 1))}
-                >
-                  <Ionicons name="chevron-back" size={24} color="#8B5CF6" />
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.dateDisplay}
-                  onPress={() => setExpenseDatePickerVisible(true)}
-                >
-                  <Ionicons name="calendar" size={20} color="#8B5CF6" />
-                  <Text style={styles.dateText}>
-                    {format(expenseDate, 'd MMMM yyyy', { locale: bg })}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.dateButton} 
-                  onPress={() => setExpenseDate(addDays(expenseDate, 1))}
-                >
-                  <Ionicons name="chevron-forward" size={24} color="#8B5CF6" />
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Date Picker */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Дата</Text>
+                <View style={styles.datePickerContainer}>
+                  <TouchableOpacity 
+                    style={styles.dateButton} 
+                    onPress={() => setExpenseDate(subDays(expenseDate, 1))}
+                  >
+                    <Ionicons name="chevron-back" size={24} color="#8B5CF6" />
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.dateDisplay}
+                    onPress={() => setExpenseDatePickerVisible(true)}
+                  >
+                    <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                    <Text style={styles.dateText}>
+                      {format(expenseDate, 'd MMMM yyyy', { locale: bg })}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.dateButton} 
+                    onPress={() => setExpenseDate(addDays(expenseDate, 1))}
+                  >
+                    <Ionicons name="chevron-forward" size={24} color="#8B5CF6" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              {/* Calendar Date Picker Modal */}
+              <DateTimePickerModal
+                isVisible={isExpenseDatePickerVisible}
+                mode="date"
+                date={expenseDate}
+                onConfirm={(date) => {
+                  setExpenseDate(date);
+                  setExpenseDatePickerVisible(false);
+                }}
+                onCancel={() => setExpenseDatePickerVisible(false)}
+                confirmTextIOS="Избери"
+                cancelTextIOS="Отказ"
+                locale="bg"
+              />
+
+              {/* Daily Expenses List */}
+              <View style={styles.dayExpensesSection}>
+                <Text style={styles.dayExpensesTitle}>
+                  Разходи за {format(expenseDate, 'd MMM', { locale: bg })}:
+                </Text>
+                
+                {loadingExpenses ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator color="#F59E0B" />
+                  </View>
+                ) : dayExpenses.length > 0 ? (
+                  <>
+                    {dayExpenses.map((expense, index) => (
+                      <View key={expense.id} style={styles.expenseItem}>
+                        <View style={styles.expenseItemLeft}>
+                          <Text style={styles.expenseItemIndex}>{index + 1}.</Text>
+                          <Text style={styles.expenseItemDescription}>{expense.description}</Text>
+                        </View>
+                        <View style={styles.expenseItemRight}>
+                          <Text style={styles.expenseItemAmount}>{expense.amount.toFixed(2)} €</Text>
+                          <TouchableOpacity 
+                            style={styles.expenseDeleteButton}
+                            onPress={() => handleDeleteExpense(expense.id)}
+                          >
+                            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))}
+                    <View style={styles.expensesTotalRow}>
+                      <Text style={styles.expensesTotalLabel}>Общо за деня:</Text>
+                      <Text style={styles.expensesTotalValue}>
+                        {dayExpenses.reduce((sum, e) => sum + e.amount, 0).toFixed(2)} €
+                      </Text>
+                    </View>
+                  </>
+                ) : (
+                  <Text style={styles.noExpensesText}>Няма записани разходи за тази дата</Text>
+                )}
+              </View>
+
+              {/* Add New Expense Form */}
+              <View style={styles.addExpenseSection}>
+                <Text style={styles.addExpenseTitle}>Добави нов разход:</Text>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Описание</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={expenseDescription}
+                    onChangeText={setExpenseDescription}
+                    placeholder="Напр. гориво, материали..."
+                    placeholderTextColor="#64748B"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Сума (€)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={expenseAmount}
+                    onChangeText={setExpenseAmount}
+                    keyboardType="decimal-pad"
+                    placeholder="0.00"
+                    placeholderTextColor="#64748B"
+                  />
+                </View>
+
+                <TouchableOpacity style={[styles.submitButton, { backgroundColor: '#F59E0B' }]} onPress={handleAddExpense}>
+                  <Ionicons name="add-circle" size={20} color="white" />
+                  <Text style={styles.submitButtonText}>Добави разход</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-            
-            {/* Calendar Date Picker Modal */}
-            <DateTimePickerModal
-              isVisible={isExpenseDatePickerVisible}
-              mode="date"
-              date={expenseDate}
-              onConfirm={(date) => {
-                setExpenseDate(date);
-                setExpenseDatePickerVisible(false);
-              }}
-              onCancel={() => setExpenseDatePickerVisible(false)}
-              confirmTextIOS="Избери"
-              cancelTextIOS="Отказ"
-              locale="bg"
-            />
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Описание</Text>
-              <TextInput
-                style={styles.input}
-                value={expenseDescription}
-                onChangeText={setExpenseDescription}
-                placeholder="Напр. гориво, материали..."
-                placeholderTextColor="#64748B"
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Сума (€)</Text>
-              <TextInput
-                style={styles.input}
-                value={expenseAmount}
-                onChangeText={setExpenseAmount}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor="#64748B"
-              />
-            </View>
-
-            <TouchableOpacity style={styles.submitButton} onPress={handleAddExpense}>
-              <Text style={styles.submitButtonText}>Запиши</Text>
-            </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
