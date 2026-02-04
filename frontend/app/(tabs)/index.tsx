@@ -159,7 +159,7 @@ export default function HomeScreen() {
 
   const handleAddExpense = async () => {
     if (!expenseDescription || !expenseAmount) {
-      Alert.alert('Грешка', 'Попълнете всички полета');
+      Alert.alert(t('common.error'), t('msg.fillAllFields'));
       return;
     }
 
@@ -174,9 +174,9 @@ export default function HomeScreen() {
       setExpenseAmount('');
       loadDayExpenses(expenseDate);
       loadData();
-      Alert.alert('Успех', 'Разходът е записан');
+      Alert.alert(t('common.success'), t('msg.expenseSaved'));
     } catch (error: any) {
-      Alert.alert('Грешка', error.message);
+      Alert.alert(t('common.error'), error.message);
     }
   };
 
