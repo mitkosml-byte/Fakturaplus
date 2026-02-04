@@ -248,19 +248,19 @@ def test_compare_suppliers():
             print(f"✅ Supplier comparison retrieved successfully")
             
             # Verify response structure
-            expected_keys = ["period", "comparison", "summary"]
+            expected_keys = ["period", "suppliers"]
             missing_keys = [key for key in expected_keys if key not in data]
             if missing_keys:
                 print(f"⚠️ Missing expected keys: {missing_keys}")
                 return False
             
-            comparison = data.get("comparison", [])
-            if comparison:
+            suppliers = data.get("suppliers", [])
+            if suppliers:
                 # Check first supplier structure
-                first_supplier = comparison[0]
+                first_supplier = suppliers[0]
                 supplier_keys = [
                     "supplier", "total_amount", "invoice_count", "avg_invoice",
-                    "first_delivery", "last_delivery", "is_active"
+                    "amount_percent", "count_percent"
                 ]
                 missing_supplier_keys = [key for key in supplier_keys if key not in first_supplier]
                 if missing_supplier_keys:
