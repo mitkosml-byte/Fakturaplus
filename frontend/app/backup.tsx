@@ -288,14 +288,14 @@ export default function BackupScreen() {
 
             {/* Instructions */}
             <View style={styles.instructionsCard}>
-              <Text style={styles.instructionsTitle}>📖 Как да използвате</Text>
+              <Text style={styles.instructionsTitle}>📖 {t('backup.howToUse')}</Text>
               
               <View style={styles.instruction}>
                 <View style={styles.instructionNumber}>
                   <Text style={styles.instructionNumberText}>1</Text>
                 </View>
                 <Text style={styles.instructionText}>
-                  Натиснете "Създай Backup" за да експортирате данните
+                  {t('backup.step1')}
                 </Text>
               </View>
               
@@ -304,7 +304,7 @@ export default function BackupScreen() {
                   <Text style={styles.instructionNumberText}>2</Text>
                 </View>
                 <Text style={styles.instructionText}>
-                  Изберете "Запази в Google Drive" от менюто за споделяне
+                  {t('backup.step2')}
                 </Text>
               </View>
               
@@ -313,7 +313,7 @@ export default function BackupScreen() {
                   <Text style={styles.instructionNumberText}>3</Text>
                 </View>
                 <Text style={styles.instructionText}>
-                  За възстановяване - изберете файла от Google Drive
+                  {t('backup.step3')}
                 </Text>
               </View>
             </View>
