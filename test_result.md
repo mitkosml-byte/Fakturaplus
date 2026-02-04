@@ -284,15 +284,18 @@ backend:
 
   - task: "Audit Log API Endpoints"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "low"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Added audit log endpoint: GET /api/audit-logs with filtering by action and entity_type (Owner/Manager only)"
+      - working: true
+        agent: "testing"
+        comment: "✅ Audit log endpoints working correctly. GET /api/audit-logs returns audit logs with proper structure (logs array and total count). GET /api/audit-logs?action=create&entity_type=invoice returns filtered results correctly. Both endpoints handle authentication properly. Access control working as expected (may return 403 for non-Owner/Manager users)."
 
 frontend:
   - task: "Login screen with Google OAuth"
