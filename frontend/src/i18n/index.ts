@@ -983,6 +983,158 @@ export const translations: Translations = {
     bg: 'Последни фактури',
     en: 'Recent Invoices',
   },
+  
+  // Items & Price Tracking
+  'stats.items': {
+    bg: 'Артикули',
+    en: 'Items',
+  },
+  'stats.itemsTitle': {
+    bg: 'Статистика на артикулите',
+    en: 'Item Statistics',
+  },
+  'stats.priceAlerts': {
+    bg: 'Ценови аларми',
+    en: 'Price Alerts',
+  },
+  'stats.priceChange': {
+    bg: 'Промяна в цена',
+    en: 'Price Change',
+  },
+  'stats.oldPrice': {
+    bg: 'Стара цена',
+    en: 'Old Price',
+  },
+  'stats.newPrice': {
+    bg: 'Нова цена',
+    en: 'New Price',
+  },
+  'stats.priceIncrease': {
+    bg: 'Повишение на цената',
+    en: 'Price Increase',
+  },
+  'stats.topByQuantity': {
+    bg: 'Топ по количество',
+    en: 'Top by Quantity',
+  },
+  'stats.topByValue': {
+    bg: 'Топ по стойност',
+    en: 'Top by Value',
+  },
+  'stats.priceTrends': {
+    bg: 'Ценови тенденции',
+    en: 'Price Trends',
+  },
+  'stats.avgPrice': {
+    bg: 'Средна цена',
+    en: 'Avg Price',
+  },
+  'stats.minPrice': {
+    bg: 'Мин. цена',
+    en: 'Min Price',
+  },
+  'stats.maxPrice': {
+    bg: 'Макс. цена',
+    en: 'Max Price',
+  },
+  'stats.priceVariance': {
+    bg: 'Вариация',
+    en: 'Variance',
+  },
+  'stats.supplierCompare': {
+    bg: 'Сравнение по доставчици',
+    en: 'Supplier Comparison',
+  },
+  'stats.bestSupplier': {
+    bg: 'Най-изгоден доставчик',
+    en: 'Best Supplier',
+  },
+  'stats.potentialSavings': {
+    bg: 'Потенциални спестявания',
+    en: 'Potential Savings',
+  },
+  'stats.totalItems': {
+    bg: 'Общо артикули',
+    en: 'Total Items',
+  },
+  'stats.uniqueItems': {
+    bg: 'Уникални артикули',
+    en: 'Unique Items',
+  },
+  'stats.totalValue': {
+    bg: 'Обща стойност',
+    en: 'Total Value',
+  },
+  'stats.alertThreshold': {
+    bg: 'Праг за аларма',
+    en: 'Alert Threshold',
+  },
+  'stats.alertsEnabled': {
+    bg: 'Аларми активни',
+    en: 'Alerts Enabled',
+  },
+  'stats.noAlerts': {
+    bg: 'Няма ценови аларми',
+    en: 'No price alerts',
+  },
+  'stats.noItems': {
+    bg: 'Няма артикули',
+    en: 'No items',
+  },
+  'stats.markAsRead': {
+    bg: 'Маркирай като прочетена',
+    en: 'Mark as read',
+  },
+  'stats.dismiss': {
+    bg: 'Отхвърли',
+    en: 'Dismiss',
+  },
+  'stats.priceHistory': {
+    bg: 'История на цените',
+    en: 'Price History',
+  },
+  'stats.quantity': {
+    bg: 'Количество',
+    en: 'Quantity',
+  },
+  'stats.unit': {
+    bg: 'Единица',
+    en: 'Unit',
+  },
+  
+  // Scan screen items
+  'scan.addItem': {
+    bg: 'Добави артикул',
+    en: 'Add Item',
+  },
+  'scan.itemName': {
+    bg: 'Наименование',
+    en: 'Item Name',
+  },
+  'scan.quantity': {
+    bg: 'Количество',
+    en: 'Quantity',
+  },
+  'scan.unit': {
+    bg: 'Мерна единица',
+    en: 'Unit',
+  },
+  'scan.unitPrice': {
+    bg: 'Единична цена',
+    en: 'Unit Price',
+  },
+  'scan.items': {
+    bg: 'Артикули',
+    en: 'Items',
+  },
+  'scan.noItems': {
+    bg: 'Няма добавени артикули',
+    en: 'No items added',
+  },
+  'scan.priceAlert': {
+    bg: 'Внимание: Повишение на цена!',
+    en: 'Warning: Price Increase!',
+  },
 };
 
 // Zustand store for language
