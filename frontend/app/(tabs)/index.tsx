@@ -221,6 +221,31 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Date Picker */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Дата</Text>
+              <View style={styles.datePickerContainer}>
+                <TouchableOpacity 
+                  style={styles.dateButton} 
+                  onPress={() => setRevenueDate(subDays(revenueDate, 1))}
+                >
+                  <Ionicons name="chevron-back" size={24} color="#8B5CF6" />
+                </TouchableOpacity>
+                <View style={styles.dateDisplay}>
+                  <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                  <Text style={styles.dateText}>
+                    {format(revenueDate, 'd MMMM yyyy', { locale: bg })}
+                  </Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.dateButton} 
+                  onPress={() => setRevenueDate(addDays(revenueDate, 1))}
+                >
+                  <Ionicons name="chevron-forward" size={24} color="#8B5CF6" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Фискализиран оборот (€)</Text>
               <TextInput
@@ -263,6 +288,31 @@ export default function HomeScreen() {
               <TouchableOpacity onPress={() => setExpenseModalVisible(false)}>
                 <Ionicons name="close" size={28} color="#94A3B8" />
               </TouchableOpacity>
+            </View>
+
+            {/* Date Picker */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Дата</Text>
+              <View style={styles.datePickerContainer}>
+                <TouchableOpacity 
+                  style={styles.dateButton} 
+                  onPress={() => setExpenseDate(subDays(expenseDate, 1))}
+                >
+                  <Ionicons name="chevron-back" size={24} color="#8B5CF6" />
+                </TouchableOpacity>
+                <View style={styles.dateDisplay}>
+                  <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                  <Text style={styles.dateText}>
+                    {format(expenseDate, 'd MMMM yyyy', { locale: bg })}
+                  </Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.dateButton} 
+                  onPress={() => setExpenseDate(addDays(expenseDate, 1))}
+                >
+                  <Ionicons name="chevron-forward" size={24} color="#8B5CF6" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.inputGroup}>
