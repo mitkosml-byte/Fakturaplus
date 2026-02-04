@@ -313,6 +313,7 @@ async def create_session(request: Request, response: Response):
             "picture": session_data.picture,
             "role": "owner",  # First user is owner
             "company_id": new_company.id,
+            "auth_provider": "google",
             "created_at": datetime.now(timezone.utc)
         }
         await db.users.insert_one(new_user)
