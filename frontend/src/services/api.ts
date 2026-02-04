@@ -213,6 +213,37 @@ class ApiService {
   async getCompanyUsers(): Promise<User[]> {
     return this.fetch('/company/users');
   }
+
+  // Backup
+  async createBackup(): Promise<any> {
+    return this.fetch('/backup/create', {
+      method: 'POST',
+    });
+  }
+
+  async getBackupStatus(): Promise<{
+    has_backup: boolean;
+    last_backup_date: string | null;
+    file_name?: string;
+    statistics?: { invoices: number; revenues: number; expenses: number };
+  }> {
+    return this.fetch('/backup/status');
+  }
+
+  async listBackups(): Promise<{ backups: any[] }> {
+    return this.fetch('/backup/list');
+  }
+
+  async restoreBackup(backupData: any): Promise<{
+    success: boolean;
+    message: string;
+    restored: { invoices: number; revenues: number; expenses: number };
+  }> {
+    return this.fetch('/backup/restore', {
+      method: 'POST',
+      body: JSON.stringify(backupData),
+    });
+  }
 }
 
 export const api = new ApiService();
