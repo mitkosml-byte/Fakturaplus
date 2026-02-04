@@ -33,6 +33,7 @@ export default function HomeScreen() {
   const [fiscalRevenue, setFiscalRevenue] = useState('');
   const [pocketMoney, setPocketMoney] = useState('');
   const [revenueDate, setRevenueDate] = useState(new Date());
+  const [currentDayRevenue, setCurrentDayRevenue] = useState({ fiscal_revenue: 0, pocket_money: 0 });
   
   // Expense form
   const [expenseDescription, setExpenseDescription] = useState('');
@@ -52,9 +53,26 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const loadCurrentDayRevenue = useCallback(async (date: Date) => {
+    try {
+      const dateStr = format(date, 'yyyy-MM-dd');
+      const data = await api.getRevenueByDate(dateStr);
+      setCurrentDayRevenue(data);
+    } catch (error) {
+      setCurrentDayRevenue({ fiscal_revenue: 0, pocket_money: 0 });
+    }
+  }, []);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Load current day revenue when revenue modal opens or date changes
+  useEffect(() => {
+    if (revenueModalVisible) {
+      loadCurrentDayRevenue(revenueDate);
+    }
+  }, [revenueModalVisible, revenueDate, loadCurrentDayRevenue]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
