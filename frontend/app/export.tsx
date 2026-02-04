@@ -21,9 +21,8 @@ export default function ExportScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
 
-  const API_URL = Constants.expoConfig?.extra?.EXPO_BACKEND_URL || 
-                  process.env.EXPO_PUBLIC_API_URL || 
-                  'http://localhost:8001';
+  // Use environment variable for API URL - no hardcoded fallback for production
+  const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
   const exportData = async (format: 'excel' | 'pdf') => {
     setLoading(format);
