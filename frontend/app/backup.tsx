@@ -158,7 +158,10 @@ export default function BackupScreen() {
       );
       
     } catch (error: any) {
-      Alert.alert('Грешка', error.message || 'Неуспешен избор на файл');
+      Alert.alert(
+        language === 'bg' ? 'Грешка' : 'Error', 
+        error.message || (language === 'bg' ? 'Неуспешен избор на файл' : 'Failed to select file')
+      );
     }
   };
 
