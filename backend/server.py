@@ -1571,6 +1571,12 @@ async def get_supplier_statistics(
         first_delivery = sorted_dates[0] if sorted_dates else None
         last_delivery = sorted_dates[-1] if sorted_dates else None
         
+        # Make dates timezone-aware if they aren't
+        if last_delivery and last_delivery.tzinfo is None:
+            last_delivery = last_delivery.replace(tzinfo=timezone.utc)
+        if first_delivery and first_delivery.tzinfo is None:
+            first_delivery = first_delivery.replace(tzinfo=timezone.utc)
+        
         # Determine status
         is_active = last_delivery and last_delivery > inactive_threshold if last_delivery else False
         days_inactive = (now - last_delivery).days if last_delivery else 999
