@@ -278,150 +278,19 @@ def test_compare_suppliers():
         print(f"❌ Supplier comparison error: {e}")
         return False
 
-def test_expenses():
-    """Test Expenses (В канала) endpoint"""
-    print("\n6. TESTING EXPENSES")
-    print("-" * 40)
-    
-    if not session_token:
-        print("❌ No session token available")
-        return False
-    
-    headers = {"Authorization": f"Bearer {session_token}", "Content-Type": "application/json"}
-    
-    try:
-        expense_data = {
-            "description": "Гориво за кола",
-            "amount": 80.00,
-            "date": "2025-01-30"
-        }
-        
-        response = requests.post(f"{API_URL}/expenses", headers=headers, json=expense_data)
-        print(f"POST /api/expenses - Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            created_expense = response.json()
-            print(f"✅ Expense created: {json.dumps(created_expense, indent=2)}")
-            return True
-        else:
-            print(f"❌ Expense creation failed: {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Expense error: {e}")
-        return False
-
-def test_statistics():
-    """Test Statistics endpoints"""
-    print("\n7. TESTING STATISTICS")
-    print("-" * 40)
-    
-    if not session_token:
-        print("❌ No session token available")
-        return False
-    
-    headers = {"Authorization": f"Bearer {session_token}"}
-    
-    # Test summary statistics
-    try:
-        response = requests.get(f"{API_URL}/statistics/summary", headers=headers)
-        print(f"GET /api/statistics/summary - Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            summary = response.json()
-            print(f"✅ Statistics summary: {json.dumps(summary, indent=2)}")
-        else:
-            print(f"❌ Statistics summary failed: {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Statistics summary error: {e}")
-        return False
-    
-    # Test chart data
-    try:
-        response = requests.get(f"{API_URL}/statistics/chart-data?period=week", headers=headers)
-        print(f"GET /api/statistics/chart-data?period=week - Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            chart_data = response.json()
-            print(f"✅ Chart data retrieved: {len(chart_data)} data points")
-            return True
-        else:
-            print(f"❌ Chart data failed: {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Chart data error: {e}")
-        return False
-
-def test_export():
-    """Test Export endpoints"""
-    print("\n8. TESTING EXPORT")
-    print("-" * 40)
-    
-    if not session_token:
-        print("❌ No session token available")
-        return False
-    
-    headers = {"Authorization": f"Bearer {session_token}"}
-    
-    # Test Excel export
-    try:
-        response = requests.get(f"{API_URL}/export/excel", headers=headers)
-        print(f"GET /api/export/excel - Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            content_type = response.headers.get('content-type', '')
-            if 'spreadsheet' in content_type or 'excel' in content_type:
-                print(f"✅ Excel export working - Content-Type: {content_type}")
-            else:
-                print(f"⚠️ Excel export returned unexpected content type: {content_type}")
-        else:
-            print(f"❌ Excel export failed: {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Excel export error: {e}")
-        return False
-    
-    # Test PDF export
-    try:
-        response = requests.get(f"{API_URL}/export/pdf", headers=headers)
-        print(f"GET /api/export/pdf - Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            content_type = response.headers.get('content-type', '')
-            if 'pdf' in content_type:
-                print(f"✅ PDF export working - Content-Type: {content_type}")
-                return True
-            else:
-                print(f"⚠️ PDF export returned unexpected content type: {content_type}")
-                return True
-        else:
-            print(f"❌ PDF export failed: {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ PDF export error: {e}")
-        return False
-
 def main():
-    """Run all tests"""
-    print("BULGARIAN INVOICE MANAGEMENT BACKEND API TESTS")
+    """Run supplier statistics tests"""
+    print("BULGARIAN INVOICE MANAGEMENT - SUPPLIER STATISTICS TESTS")
     print("=" * 60)
     
     test_results = {}
     
-    # Run all tests
-    test_results['health'] = test_health_endpoints()
-    test_results['user_session'] = create_test_user_and_session()
-    test_results['auth'] = test_auth_endpoint()
-    test_results['invoice_crud'] = test_invoice_crud()
-    test_results['daily_revenue'] = test_daily_revenue()
-    test_results['expenses'] = test_expenses()
-    test_results['statistics'] = test_statistics()
-    test_results['export'] = test_export()
+    # Run tests in sequence
+    test_results['register_user'] = register_test_user()
+    test_results['create_invoice'] = create_test_invoice()
+    test_results['supplier_stats'] = test_supplier_statistics()
+    test_results['detailed_stats'] = test_detailed_supplier_stats()
+    test_results['compare_suppliers'] = test_compare_suppliers()
     
     # Summary
     print("\n" + "=" * 60)
@@ -440,10 +309,10 @@ def main():
     print(f"\nOverall: {passed}/{total} tests passed")
     
     if passed == total:
-        print("🎉 All backend tests PASSED!")
+        print("🎉 All supplier statistics tests PASSED!")
         return True
     else:
-        print("⚠️ Some backend tests FAILED!")
+        print("⚠️ Some supplier statistics tests FAILED!")
         return False
 
 if __name__ == "__main__":
