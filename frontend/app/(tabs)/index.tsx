@@ -136,7 +136,7 @@ export default function HomeScreen() {
 
   const handleAddRevenue = async () => {
     if (!fiscalRevenue && !pocketMoney) {
-      Alert.alert('Грешка', 'Въведете поне една стойност');
+      Alert.alert(t('common.error'), t('msg.enterAtLeastOne'));
       return;
     }
 
@@ -151,9 +151,9 @@ export default function HomeScreen() {
       setPocketMoney('');
       setRevenueDate(new Date());
       loadData();
-      Alert.alert('Успех', 'Дневният оборот е записан');
+      Alert.alert(t('common.success'), t('msg.revenueSaved'));
     } catch (error: any) {
-      Alert.alert('Грешка', error.message);
+      Alert.alert(t('common.error'), error.message);
     }
   };
 
