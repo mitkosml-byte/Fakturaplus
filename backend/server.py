@@ -2970,6 +2970,375 @@ async def get_item_by_supplier(
         "recommendation": recommendation
     }
 
+# ===================== EXPORT ENDPOINTS =====================
+
+from services.export_service import ExportService
+from services.audit_service import AuditService
+from services.forecast_service import ForecastService
+
+# Initialize services
+audit_service = AuditService(db)
+forecast_service = ForecastService(db)
+
+@api_router.get("/export/invoices/excel")
+async def export_invoices_excel(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Export invoices to Excel"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    query = {}
+    if company_id:
+        query["company_id"] = company_id
+    else:
+        query["user_id"] = current_user.user_id
+    
+    if start_date:
+        query["date"] = {"$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00")}
+    if end_date:
+        if "date" not in query:
+            query["date"] = {}
+        query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(10000)
+    
+    # Get company name
+    company_name = ""
+    if company_id:
+        company = await db.companies.find_one({"id": company_id})
+        company_name = company.get("name", "") if company else ""
+    
+    try:
+        excel_data = ExportService.generate_invoices_excel(invoices, company_name)
+        
+        # Log export
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+            action="export",
+            entity_type="invoices",
+            company_id=company_id,
+            details={"format": "excel", "count": len(invoices)}
+        )
+        
+        filename = f"invoices_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        return Response(
+            content=excel_data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Excel export not available")
+
+@api_router.get("/export/invoices/pdf")
+async def export_invoices_pdf(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Export invoices to PDF"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    query = {}
+    if company_id:
+        query["company_id"] = company_id
+    else:
+        query["user_id"] = current_user.user_id
+    
+    if start_date:
+        query["date"] = {"$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00")}
+    if end_date:
+        if "date" not in query:
+            query["date"] = {}
+        query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(10000)
+    
+    company_name = ""
+    if company_id:
+        company = await db.companies.find_one({"id": company_id})
+        company_name = company.get("name", "") if company else ""
+    
+    try:
+        pdf_data = ExportService.generate_invoices_pdf(invoices, company_name)
+        
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+            action="export",
+            entity_type="invoices",
+            company_id=company_id,
+            details={"format": "pdf", "count": len(invoices)}
+        )
+        
+        filename = f"invoices_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        return Response(
+            content=pdf_data,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PDF export not available")
+
+# ===================== BUDGET ENDPOINTS =====================
+
+class BudgetCreate(BaseModel):
+    month: str  # YYYY-MM
+    expense_limit: float
+    alert_threshold: float = 80.0
+
+@api_router.get("/budget")
+async def get_budgets(current_user: User = Depends(get_current_user)):
+    """Get all budgets for company"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"budgets": []}
+    
+    budgets = await db.budgets.find({"company_id": company_id}, {"_id": 0}).sort("month", -1).to_list(24)
+    return {"budgets": budgets}
+
+@api_router.post("/budget")
+async def create_budget(budget: BudgetCreate, current_user: User = Depends(get_current_user)):
+    """Create or update budget for a month"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="No company associated")
+    
+    # Check if budget exists for this month
+    existing = await db.budgets.find_one({"company_id": company_id, "month": budget.month})
+    
+    if existing:
+        await db.budgets.update_one(
+            {"company_id": company_id, "month": budget.month},
+            {"$set": {"expense_limit": budget.expense_limit, "alert_threshold": budget.alert_threshold}}
+        )
+    else:
+        budget_doc = {
+            "id": str(uuid.uuid4()),
+            "company_id": company_id,
+            "month": budget.month,
+            "expense_limit": budget.expense_limit,
+            "alert_threshold": budget.alert_threshold,
+            "created_at": datetime.now(timezone.utc)
+        }
+        await db.budgets.insert_one(budget_doc)
+    
+    return {"message": "Budget saved"}
+
+@api_router.get("/budget/status")
+async def get_budget_status(current_user: User = Depends(get_current_user)):
+    """Get current month budget status"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"has_budget": False}
+    
+    current_month = datetime.now().strftime("%Y-%m")
+    budget = await db.budgets.find_one({"company_id": company_id, "month": current_month}, {"_id": 0})
+    
+    if not budget:
+        return {"has_budget": False}
+    
+    # Calculate current expenses
+    month_start = datetime.fromisoformat(f"{current_month}-01T00:00:00+00:00")
+    
+    invoices = await db.invoices.find(
+        {"company_id": company_id, "date": {"$gte": month_start}},
+        {"total_amount": 1}
+    ).to_list(10000)
+    
+    expenses = await db.non_invoice_expenses.find(
+        {"company_id": company_id, "date": {"$gte": month_start}},
+        {"amount": 1}
+    ).to_list(10000)
+    
+    total_spent = sum(inv.get("total_amount", 0) for inv in invoices)
+    total_spent += sum(exp.get("amount", 0) for exp in expenses)
+    
+    limit = budget.get("expense_limit", 0)
+    threshold = budget.get("alert_threshold", 80)
+    
+    percent_used = (total_spent / limit * 100) if limit > 0 else 0
+    is_alert = percent_used >= threshold
+    is_exceeded = percent_used >= 100
+    
+    return {
+        "has_budget": True,
+        "month": current_month,
+        "expense_limit": limit,
+        "total_spent": round(total_spent, 2),
+        "remaining": round(max(0, limit - total_spent), 2),
+        "percent_used": round(percent_used, 1),
+        "alert_threshold": threshold,
+        "is_alert": is_alert,
+        "is_exceeded": is_exceeded
+    }
+
+# ===================== RECURRING EXPENSES =====================
+
+class RecurringExpenseCreate(BaseModel):
+    description: str
+    amount: float
+    day_of_month: int  # 1-28
+    category: Optional[str] = None
+
+@api_router.get("/recurring-expenses")
+async def get_recurring_expenses(current_user: User = Depends(get_current_user)):
+    """Get recurring expenses"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"recurring_expenses": []}
+    
+    expenses = await db.recurring_expenses.find(
+        {"company_id": company_id},
+        {"_id": 0}
+    ).to_list(100)
+    
+    return {"recurring_expenses": expenses}
+
+@api_router.post("/recurring-expenses")
+async def create_recurring_expense(
+    expense: RecurringExpenseCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create recurring expense"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="No company associated")
+    
+    if expense.day_of_month < 1 or expense.day_of_month > 28:
+        raise HTTPException(status_code=400, detail="Day must be between 1 and 28")
+    
+    expense_doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": company_id,
+        "user_id": current_user.user_id,
+        "description": expense.description,
+        "amount": expense.amount,
+        "day_of_month": expense.day_of_month,
+        "category": expense.category,
+        "is_active": True,
+        "last_generated": None,
+        "created_at": datetime.now(timezone.utc)
+    }
+    
+    await db.recurring_expenses.insert_one(expense_doc)
+    return {"message": "Recurring expense created", "id": expense_doc["id"]}
+
+@api_router.delete("/recurring-expenses/{expense_id}")
+async def delete_recurring_expense(expense_id: str, current_user: User = Depends(get_current_user)):
+    """Delete recurring expense"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    result = await db.recurring_expenses.delete_one({"id": expense_id, "company_id": company_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    
+    return {"message": "Deleted"}
+
+# ===================== FORECAST ENDPOINTS =====================
+
+@api_router.get("/forecast/expenses")
+async def get_expense_forecast(
+    months_ahead: int = 3,
+    current_user: User = Depends(get_current_user)
+):
+    """Get expense forecast"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"error": "No company"}
+    
+    return await forecast_service.get_expense_forecast(company_id, months_ahead)
+
+@api_router.get("/forecast/revenue")
+async def get_revenue_forecast(
+    months_ahead: int = 3,
+    current_user: User = Depends(get_current_user)
+):
+    """Get revenue forecast"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"error": "No company"}
+    
+    return await forecast_service.get_revenue_forecast(company_id, months_ahead)
+
+# ===================== AUDIT LOG =====================
+
+@api_router.get("/audit-logs")
+async def get_audit_logs(
+    action: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user)
+):
+    """Get audit logs (Owner/Manager only)"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1, "role": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    role = user_doc.get("role", "staff") if user_doc else "staff"
+    
+    if role not in ["owner", "manager"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    logs = await audit_service.get_logs(
+        company_id=company_id,
+        action=action,
+        entity_type=entity_type,
+        limit=limit
+    )
+    
+    return {"logs": logs}
+
+# ===================== DATABASE INDEXES =====================
+
+@app.on_event("startup")
+async def create_indexes():
+    """Create database indexes for performance"""
+    try:
+        # Invoices indexes
+        await db.invoices.create_index([("company_id", 1), ("date", -1)])
+        await db.invoices.create_index([("company_id", 1), ("supplier", 1)])
+        await db.invoices.create_index([("user_id", 1), ("date", -1)])
+        
+        # Revenues indexes
+        await db.daily_revenues.create_index([("company_id", 1), ("date", -1)])
+        
+        # Expenses indexes
+        await db.non_invoice_expenses.create_index([("company_id", 1), ("date", -1)])
+        
+        # Price history indexes
+        await db.item_price_history.create_index([("company_id", 1), ("item_name", 1)])
+        await db.item_price_history.create_index([("company_id", 1), ("supplier", 1)])
+        
+        # Users indexes
+        await db.users.create_index([("email", 1)], unique=True, sparse=True)
+        await db.users.create_index([("company_id", 1)])
+        
+        # Audit log index
+        await db.audit_logs.create_index([("company_id", 1), ("created_at", -1)])
+        
+        logger.info("Database indexes created successfully")
+    except Exception as e:
+        logger.error(f"Error creating indexes: {e}")
+
 # ===================== HEALTH CHECK =====================
 
 @api_router.get("/")
