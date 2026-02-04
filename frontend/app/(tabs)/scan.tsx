@@ -111,7 +111,7 @@ export default function ScanScreen() {
         }
       }
     } catch (error: any) {
-      Alert.alert('Грешка при сканиране', error.message || 'Моля, опитайте отново');
+      Alert.alert(language === 'bg' ? 'Грешка при сканиране' : 'Scan error', error.message || (language === 'bg' ? 'Моля, опитайте отново' : 'Please try again'));
     } finally {
       setIsScanning(false);
     }
