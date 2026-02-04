@@ -239,15 +239,18 @@ backend:
 
   - task: "Budget Management API Endpoints"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Added budget endpoints: GET/POST /api/budget (get/create budgets), GET /api/budget/status (current month status with spending percentage), GET/POST/DELETE /api/recurring-expenses (periodic expense management)"
+      - working: true
+        agent: "testing"
+        comment: "✅ All budget management endpoints working perfectly. Successfully tested: GET /api/budget/status (returns has_budget: false initially, then true after creation with spending percentage), POST /api/budget (creates budget for current month with limit 5000 and threshold 80%), GET /api/budget (retrieves all budgets correctly), GET/POST/DELETE /api/recurring-expenses (creates 'Наем офис' 500 лв recurring expense, retrieves it, and deletes successfully). All Bulgarian text handling working correctly."
 
   - task: "Export Excel/PDF Enhanced Endpoints"
     implemented: true
