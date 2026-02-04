@@ -1159,6 +1159,14 @@ export const translations: Translations = {
     bg: 'доставчици',
     en: 'suppliers',
   },
+  'stats.times': {
+    bg: 'пъти',
+    en: 'times',
+  },
+  'stats.noValue': {
+    bg: 'няма',
+    en: 'none',
+  },
 };
 
 // Zustand store for language
