@@ -3,9 +3,11 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, View, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from '../../src/i18n';
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   return (
     <Tabs
@@ -30,7 +32,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Главна',
+          title: t('nav.home'),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={24} color={color} />
           ),
@@ -39,7 +41,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="scan"
         options={{
-          title: 'Сканирай',
+          title: t('nav.scan'),
           tabBarIcon: ({ color, size }) => (
             <View style={styles.scanButton}>
               <Ionicons name="scan" size={28} color="white" />
@@ -50,7 +52,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="invoices"
         options={{
-          title: 'Фактури',
+          title: t('nav.invoices'),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="document-text" size={24} color={color} />
           ),
@@ -59,7 +61,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="stats"
         options={{
-          title: 'Статистики',
+          title: t('nav.stats'),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="stats-chart" size={24} color={color} />
           ),
@@ -68,7 +70,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Профил',
+          title: t('nav.profile'),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={24} color={color} />
           ),
