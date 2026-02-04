@@ -93,6 +93,18 @@ export default function ScanScreen() {
       setAmountWithoutVat(result.amount_without_vat.toString());
       setVatAmount(result.vat_amount.toString());
       setTotalAmount(result.total_amount.toString());
+      
+      // Set invoice date from OCR if available
+      if (result.invoice_date) {
+        try {
+          const parsedDate = new Date(result.invoice_date);
+          if (!isNaN(parsedDate.getTime())) {
+            setInvoiceDate(parsedDate);
+          }
+        } catch (e) {
+          // Keep default date if parsing fails
+        }
+      }
     } catch (error: any) {
       Alert.alert('Грешка при сканиране', error.message || 'Моля, опитайте отново');
     } finally {
