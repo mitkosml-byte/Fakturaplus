@@ -99,32 +99,60 @@ def create_test_invoice():
         print(f"❌ Invoice creation error: {e}")
         return False
 
-def test_auth_endpoint():
-    """Test authentication endpoint"""
-    print("\n3. TESTING AUTH ENDPOINT")
+def test_supplier_statistics():
+    """Test GET /api/statistics/suppliers endpoint"""
+    print("\n3. TESTING SUPPLIER STATISTICS ENDPOINT")
     print("-" * 40)
     
     if not session_token:
         print("❌ No session token available")
         return False
     
+    headers = {"Authorization": f"Bearer {session_token}"}
+    
     try:
-        headers = {"Authorization": f"Bearer {session_token}"}
-        response = requests.get(f"{API_URL}/auth/me", headers=headers)
-        
-        print(f"GET /api/auth/me - Status: {response.status_code}")
+        response = requests.get(f"{API_URL}/statistics/suppliers", headers=headers)
+        print(f"GET /api/statistics/suppliers - Status: {response.status_code}")
         
         if response.status_code == 200:
-            user_data = response.json()
-            print(f"User data: {json.dumps(user_data, indent=2)}")
-            print("✅ Auth endpoint working")
+            data = response.json()
+            print(f"✅ Supplier statistics retrieved successfully")
+            
+            # Verify expected response structure
+            expected_keys = [
+                "period", "executive_summary", "totals", 
+                "top_by_amount", "top_by_frequency", "top_by_avg",
+                "inactive_suppliers", "high_dependency_alerts"
+            ]
+            
+            missing_keys = [key for key in expected_keys if key not in data]
+            if missing_keys:
+                print(f"⚠️ Missing expected keys: {missing_keys}")
+                return False
+            
+            # Verify executive_summary structure
+            exec_summary = data.get("executive_summary", {})
+            exec_keys = [
+                "top_3_concentration", "top_5_concentration", "total_suppliers",
+                "active_suppliers", "inactive_suppliers", "high_dependency_count",
+                "largest_supplier", "largest_amount"
+            ]
+            
+            missing_exec_keys = [key for key in exec_keys if key not in exec_summary]
+            if missing_exec_keys:
+                print(f"⚠️ Missing executive_summary keys: {missing_exec_keys}")
+                return False
+            
+            print(f"✅ Response structure is correct")
+            print(f"Total suppliers: {exec_summary.get('total_suppliers', 0)}")
+            print(f"Active suppliers: {exec_summary.get('active_suppliers', 0)}")
             return True
         else:
-            print(f"❌ Auth endpoint failed: {response.text}")
+            print(f"❌ Supplier statistics failed: {response.text}")
             return False
             
     except Exception as e:
-        print(f"❌ Auth endpoint error: {e}")
+        print(f"❌ Supplier statistics error: {e}")
         return False
 
 def test_invoice_crud():
