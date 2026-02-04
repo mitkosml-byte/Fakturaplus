@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useLanguageStore, useTranslation, Language } from '../src/i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -14,6 +15,12 @@ export default function Index() {
   const { isLoading, isAuthenticated, login } = useAuth();
   const router = useRouter();
   const [isProcessing, setIsProcessing] = useState(false);
+  const { language, setLanguage, loadLanguage } = useLanguageStore();
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    loadLanguage();
+  }, []);
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
