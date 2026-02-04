@@ -348,18 +348,18 @@ export default function HomeScreen() {
                 <View style={styles.currentTotalsRow}>
                   <View style={styles.currentTotalItem}>
                     <Text style={styles.currentTotalValue}>{currentDayRevenue.fiscal_revenue.toFixed(2)} €</Text>
-                    <Text style={styles.currentTotalLabel}>Фискален</Text>
+                    <Text style={styles.currentTotalLabel}>{t('home.fiscal')}</Text>
                   </View>
                   <View style={styles.currentTotalItem}>
                     <Text style={styles.currentTotalValue}>{currentDayRevenue.pocket_money.toFixed(2)} €</Text>
-                    <Text style={styles.currentTotalLabel}>Джобче</Text>
+                    <Text style={styles.currentTotalLabel}>{t('home.pocket')}</Text>
                   </View>
                 </View>
               </View>
             )}
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Добави фискализиран оборот (€)</Text>
+              <Text style={styles.inputLabel}>{t('home.addFiscalRevenue')} (€)</Text>
               <TextInput
                 style={styles.input}
                 value={fiscalRevenue}
@@ -368,11 +368,11 @@ export default function HomeScreen() {
                 placeholder="0.00"
                 placeholderTextColor="#64748B"
               />
-              <Text style={styles.inputHint}>Ще се добави към съществуващото • Влиза в ДДС</Text>
+              <Text style={styles.inputHint}>{t('home.willBeAdded')} • {t('home.includesVAT')}</Text>
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Добави към джобче (€)</Text>
+              <Text style={styles.inputLabel}>{t('home.addToPocket')} (€)</Text>
               <TextInput
                 style={styles.input}
                 value={pocketMoney}
@@ -381,11 +381,11 @@ export default function HomeScreen() {
                 placeholder="0.00"
                 placeholderTextColor="#64748B"
               />
-              <Text style={styles.inputHint}>Ще се добави към съществуващото • НЕ влиза в ДДС</Text>
+              <Text style={styles.inputHint}>{t('home.willBeAdded')} • {t('home.excludesVAT')}</Text>
             </View>
 
             <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue}>
-              <Text style={styles.submitButtonText}>Запиши</Text>
+              <Text style={styles.submitButtonText}>{t('home.save')}</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -396,7 +396,7 @@ export default function HomeScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>В канала (разходи)</Text>
+              <Text style={styles.modalTitle}>{t('expenses.title')}</Text>
               <TouchableOpacity onPress={() => {
                 setExpenseModalVisible(false);
                 setExpenseDate(new Date());
@@ -408,7 +408,7 @@ export default function HomeScreen() {
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Date Picker */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Дата</Text>
+                <Text style={styles.inputLabel}>{t('home.date')}</Text>
                 <View style={styles.datePickerContainer}>
                   <TouchableOpacity 
                     style={styles.dateButton} 
