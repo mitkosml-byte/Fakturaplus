@@ -1,1231 +1,1272 @@
 diff --git a/model.patch b/model.patch
-index 880f5d1..e69de29 100644
+index f3c64be..e69de29 100644
 --- a/model.patch
 +++ b/model.patch
-@@ -1,1417 +0,0 @@
--diff --git a/ai_merge_test.py b/ai_merge_test.py
--new file mode 100644
--index 0000000..e722d84
----- /dev/null
--+++ b/ai_merge_test.py
--@@ -0,0 +1,485 @@
--+#!/usr/bin/env python3
--+"""
--+AI Item Merging API Tests for Bulgarian Invoice Management App
--+Tests the new AI Item Merging API endpoints
--+"""
--+
--+import asyncio
--+import aiohttp
--+import json
--+import sys
--+from datetime import datetime, timezone
--+import os
--+
--+# Backend URL from environment
--+BACKEND_URL = "https://invtrack-43.preview.emergentagent.com/api"
--+
--+class AIItemMergingTester:
--+    def __init__(self):
--+        self.session = None
--+        self.auth_token = None
--+        self.test_user_email = "aimerge_test@test.com"
--+        self.test_user_password = "Test1234"
--+        self.test_user_name = "AI Merge Tester"
--+        
--+    async def setup_session(self):
--+        """Initialize HTTP session"""
--+        self.session = aiohttp.ClientSession()
--+        
--+    async def cleanup_session(self):
--+        """Cleanup HTTP session"""
--+        if self.session:
--+            await self.session.close()
--+            
--+    async def register_test_user(self):
--+        """Register test user for authentication"""
--+        print("🔐 Registering test user...")
--+        
--+        register_data = {
--+            "email": self.test_user_email,
--+            "password": self.test_user_password,
--+            "name": self.test_user_name
--+        }
--+        
--+        try:
--+            async with self.session.post(
--+                f"{BACKEND_URL}/auth/register",
--+                json=register_data,
--+                headers={"Content-Type": "application/json"}
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    self.auth_token = data.get("session_token")
--+                    print(f"✅ User registered successfully. Token: {self.auth_token[:20]}...")
--+                    return True
--+                elif response.status == 400:
--+                    # User might already exist, try login
--+                    print("ℹ️ User already exists, trying login...")
--+                    return await self.login_test_user()
--+                else:
--+                    error_text = await response.text()
--+                    print(f"❌ Registration failed: {response.status} - {error_text}")
--+                    return False
--+        except Exception as e:
--+            print(f"❌ Registration error: {str(e)}")
--+            return False
--+            
--+    async def login_test_user(self):
--+        """Login test user"""
--+        print("🔐 Logging in test user...")
--+        
--+        login_data = {
--+            "email": self.test_user_email,
--+            "password": self.test_user_password
--+        }
--+        
--+        try:
--+            async with self.session.post(
--+                f"{BACKEND_URL}/auth/login",
--+                json=login_data,
--+                headers={"Content-Type": "application/json"}
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    self.auth_token = data.get("session_token")
--+                    print(f"✅ Login successful. Token: {self.auth_token[:20]}...")
--+                    return True
--+                else:
--+                    error_text = await response.text()
--+                    print(f"❌ Login failed: {response.status} - {error_text}")
--+                    return False
--+        except Exception as e:
--+            print(f"❌ Login error: {str(e)}")
--+            return False
--+            
--+    def get_auth_headers(self):
--+        """Get authorization headers"""
--+        return {
--+            "Authorization": f"Bearer {self.auth_token}",
--+            "Content-Type": "application/json"
--+        }
--+        
--+    async def create_test_invoices_with_similar_items(self):
--+        """Create test invoices with similar item names for AI merging"""
--+        print("📄 Creating test invoices with similar item names...")
--+        
--+        # Test invoices with similar Bulgarian product names
--+        test_invoices = [
--+            {
--+                "supplier": "Магазин Олио ЕООД",
--+                "invoice_number": "INV-001",
--+                "amount_without_vat": 10.00,
--+                "vat_amount": 2.00,
--+                "total_amount": 12.00,
--+                "date": "2024-01-15",
--+                "items": [
--+                    {
--+                        "name": "Олио слънчогледово",
--+                        "quantity": 1,
--+                        "unit": "л.",
--+                        "unit_price": 8.50,
--+                        "total_price": 8.50
--+                    }
--+                ]
--+            },
--+            {
--+                "supplier": "Супермаркет БГ",
--+                "invoice_number": "INV-002", 
--+                "amount_without_vat": 15.00,
--+                "vat_amount": 3.00,
--+                "total_amount": 18.00,
--+                "date": "2024-01-16",
--+                "items": [
--+                    {
--+                        "name": "олио екстра",
--+                        "quantity": 2,
--+                        "unit": "л.",
--+                        "unit_price": 7.25,
--+                        "total_price": 14.50
--+                    }
--+                ]
--+            },
--+            {
--+                "supplier": "Хранителни стоки ООД",
--+                "invoice_number": "INV-003",
--+                "amount_without_vat": 20.00,
--+                "vat_amount": 4.00,
--+                "total_amount": 24.00,
--+                "date": "2024-01-17",
--+                "items": [
--+                    {
--+                        "name": "ОЛИО",
--+                        "quantity": 1,
--+                        "unit": "л.",
--+                        "unit_price": 9.00,
--+                        "total_price": 9.00
--+                    }
--+                ]
--+            },
--+            {
--+                "supplier": "Продукти и храни АД",
--+                "invoice_number": "INV-004",
--+                "amount_without_vat": 25.00,
--+                "vat_amount": 5.00,
--+                "total_amount": 30.00,
--+                "date": "2024-01-18",
--+                "items": [
--+                    {
--+                        "name": "Захар кристална",
--+                        "quantity": 2,
--+                        "unit": "кг.",
--+                        "unit_price": 2.50,
--+                        "total_price": 5.00
--+                    }
--+                ]
--+            },
--+            {
--+                "supplier": "Сладки продукти ЕООД",
--+                "invoice_number": "INV-005",
--+                "amount_without_vat": 12.00,
--+                "vat_amount": 2.40,
--+                "total_amount": 14.40,
--+                "date": "2024-01-19",
--+                "items": [
--+                    {
--+                        "name": "захар",
--+                        "quantity": 3,
--+                        "unit": "кг.",
--+                        "unit_price": 2.30,
--+                        "total_price": 6.90
--+                    }
--+                ]
--+            }
--+        ]
--+        
--+        created_invoices = []
--+        for invoice_data in test_invoices:
--+            try:
--+                async with self.session.post(
--+                    f"{BACKEND_URL}/invoices",
--+                    json=invoice_data,
--+                    headers=self.get_auth_headers()
--+                ) as response:
--+                    if response.status == 200:
--+                        invoice = await response.json()
--+                        created_invoices.append(invoice)
--+                        print(f"✅ Created invoice {invoice_data['invoice_number']} with items: {[item['name'] for item in invoice_data['items']]}")
--+                    else:
--+                        error_text = await response.text()
--+                        print(f"⚠️ Failed to create invoice {invoice_data['invoice_number']}: {response.status} - {error_text}")
--+            except Exception as e:
--+                print(f"❌ Error creating invoice {invoice_data['invoice_number']}: {str(e)}")
--+                
--+        print(f"📊 Created {len(created_invoices)} test invoices")
--+        return created_invoices
--+        
--+    async def test_get_merge_mappings_initial(self):
--+        """Test GET /api/items/merge-mappings - should be empty initially"""
--+        print("\n🧪 Testing GET /api/items/merge-mappings (initial state)...")
--+        
--+        try:
--+            async with self.session.get(
--+                f"{BACKEND_URL}/items/merge-mappings",
--+                headers=self.get_auth_headers()
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    mappings = data.get("mappings", [])
--+                    print(f"✅ GET /api/items/merge-mappings successful")
--+                    print(f"📊 Initial mappings count: {len(mappings)}")
--+                    if mappings:
--+                        print(f"📋 Existing mappings: {mappings}")
--+                    return True, mappings
--+                else:
--+                    error_text = await response.text()
--+                    print(f"❌ GET /api/items/merge-mappings failed: {response.status} - {error_text}")
--+                    return False, []
--+        except Exception as e:
--+            print(f"❌ Error testing merge mappings: {str(e)}")
--+            return False, []
--+            
--+    async def test_ai_merge_items(self):
--+        """Test POST /api/items/ai-merge - triggers AI analysis"""
--+        print("\n🤖 Testing POST /api/items/ai-merge (AI analysis)...")
--+        
--+        try:
--+            async with self.session.post(
--+                f"{BACKEND_URL}/items/ai-merge",
--+                headers=self.get_auth_headers()
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    merged_groups = data.get("merged_groups", [])
--+                    total_merged = data.get("total_merged", 0)
--+                    message = data.get("message", "")
--+                    
--+                    print(f"✅ POST /api/items/ai-merge successful")
--+                    print(f"🔍 AI found {len(merged_groups)} merge groups")
--+                    print(f"📊 Total items merged: {total_merged}")
--+                    print(f"💬 Message: {message}")
--+                    
--+                    if merged_groups:
--+                        print("🎯 Merge groups found:")
--+                        for i, group in enumerate(merged_groups, 1):
--+                            canonical = group.get("canonical_name", "")
--+                            variants = group.get("variants", [])
--+                            print(f"   {i}. '{canonical}' ← {variants}")
--+                    
--+                    return True, data
--+                else:
--+                    error_text = await response.text()
--+                    print(f"❌ POST /api/items/ai-merge failed: {response.status} - {error_text}")
--+                    return False, {}
--+        except Exception as e:
--+            print(f"❌ Error testing AI merge: {str(e)}")
--+            return False, {}
--+            
--+    async def test_get_merge_mappings_after_ai(self):
--+        """Test GET /api/items/merge-mappings after AI analysis"""
--+        print("\n🧪 Testing GET /api/items/merge-mappings (after AI analysis)...")
--+        
--+        try:
--+            async with self.session.get(
--+                f"{BACKEND_URL}/items/merge-mappings",
--+                headers=self.get_auth_headers()
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    mappings = data.get("mappings", [])
--+                    print(f"✅ GET /api/items/merge-mappings successful")
--+                    print(f"📊 Mappings count after AI: {len(mappings)}")
--+                    
--+                    if mappings:
--+                        print("📋 Current mappings:")
--+                        for i, mapping in enumerate(mappings, 1):
--+                            canonical = mapping.get("canonical_name", "")
--+                            display = mapping.get("display_name", "")
--+                            variants = mapping.get("variants", [])
--+                            print(f"   {i}. '{display}' ({canonical}) ← {variants}")
--+                    
--+                    return True, mappings
--+                else:
--+                    error_text = await response.text()
--+                    print(f"❌ GET /api/items/merge-mappings failed: {response.status} - {error_text}")
--+                    return False, []
--+        except Exception as e:
--+            print(f"❌ Error testing merge mappings: {str(e)}")
--+            return False, []
--+            
--+    async def test_merged_statistics(self):
--+        """Test GET /api/statistics/items/merged"""
--+        print("\n📈 Testing GET /api/statistics/items/merged...")
--+        
--+        try:
--+            # Test with different parameters
--+            test_params = [
--+                {},  # No parameters
--+                {"top_n": "5"},  # Limit results
--+                {"start_date": "2024-01-01", "end_date": "2024-01-31", "top_n": "10"}  # Date range
--+            ]
--+            
--+            for i, params in enumerate(test_params, 1):
--+                print(f"\n   Test {i}: {params if params else 'No parameters'}")
--+                
--+                async with self.session.get(
--+                    f"{BACKEND_URL}/statistics/items/merged",
--+                    params=params,
--+                    headers=self.get_auth_headers()
--+                ) as response:
--+                    if response.status == 200:
--+                        data = await response.json()
--+                        totals = data.get("totals", {})
--+                        top_by_quantity = data.get("top_by_quantity", [])
--+                        top_by_value = data.get("top_by_value", [])
--+                        merge_applied = data.get("merge_applied", False)
--+                        merge_groups_count = data.get("merge_groups_count", 0)
--+                        
--+                        print(f"   ✅ GET /api/statistics/items/merged successful")
--+                        print(f"   📊 Totals: {totals}")
--+                        print(f"   🔄 Merge applied: {merge_applied}")
--+                        print(f"   🎯 Merge groups: {merge_groups_count}")
--+                        print(f"   📈 Top by quantity: {len(top_by_quantity)} items")
--+                        print(f"   💰 Top by value: {len(top_by_value)} items")
--+                        
--+                        if top_by_quantity:
--+                            print("   🏆 Top items by quantity:")
--+                            for item in top_by_quantity[:3]:
--+                                name = item.get("name", "")
--+                                qty = item.get("total_quantity", 0)
--+                                value = item.get("total_value", 0)
--+                                original_names = item.get("original_names", [])
--+                                print(f"      • {name}: {qty} units, {value} лв (variants: {original_names})")
--+                    else:
--+                        error_text = await response.text()
--+                        print(f"   ❌ Test {i} failed: {response.status} - {error_text}")
--+                        
--+            return True
--+        except Exception as e:
--+            print(f"❌ Error testing merged statistics: {str(e)}")
--+            return False
--+            
--+    async def test_delete_merge_mapping(self, mappings):
--+        """Test DELETE /api/items/merge-mappings/{canonical_name}"""
--+        print("\n🗑️ Testing DELETE /api/items/merge-mappings/{canonical_name}...")
--+        
--+        if not mappings:
--+            print("⚠️ No mappings to delete")
--+            return True
--+            
--+        # Try to delete the first mapping
--+        first_mapping = mappings[0]
--+        canonical_name = first_mapping.get("canonical_name", "")
--+        display_name = first_mapping.get("display_name", "")
--+        
--+        if not canonical_name:
--+            print("⚠️ No canonical name found in mapping")
--+            return False
--+            
--+        print(f"🎯 Attempting to delete mapping: '{display_name}' ({canonical_name})")
--+        
--+        try:
--+            # URL encode the canonical name
--+            from urllib.parse import quote
--+            encoded_name = quote(canonical_name)
--+            
--+            async with self.session.delete(
--+                f"{BACKEND_URL}/items/merge-mappings/{encoded_name}",
--+                headers=self.get_auth_headers()
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    message = data.get("message", "")
--+                    print(f"✅ DELETE /api/items/merge-mappings/{canonical_name} successful")
--+                    print(f"💬 Message: {message}")
--+                    
--+                    # Verify deletion by checking mappings again
--+                    print("🔍 Verifying deletion...")
--+                    success, updated_mappings = await self.test_get_merge_mappings_after_ai()
--+                    if success:
--+                        print(f"📊 Mappings count after deletion: {len(updated_mappings)}")
--+                        if len(updated_mappings) < len(mappings):
--+                            print("✅ Mapping successfully deleted")
--+                        else:
--+                            print("⚠️ Mapping count unchanged - deletion may have failed")
--+                    
--+                    return True
--+                else:
--+                    error_text = await response.text()
--+                    print(f"❌ DELETE /api/items/merge-mappings/{canonical_name} failed: {response.status} - {error_text}")
--+                    return False
--+        except Exception as e:
--+            print(f"❌ Error testing delete mapping: {str(e)}")
--+            return False
--+            
--+    async def run_all_tests(self):
--+        """Run all AI Item Merging tests"""
--+        print("🚀 Starting AI Item Merging API Tests")
--+        print("=" * 60)
--+        
--+        # Setup
--+        await self.setup_session()
--+        
--+        try:
--+            # Authentication
--+            if not await self.register_test_user():
--+                print("❌ Authentication failed - cannot continue tests")
--+                return False
--+                
--+            # Create test data
--+            await self.create_test_invoices_with_similar_items()
--+            
--+            # Test 1: Initial merge mappings (should be empty)
--+            success1, initial_mappings = await self.test_get_merge_mappings_initial()
--+            
--+            # Test 2: AI merge analysis
--+            success2, merge_result = await self.test_ai_merge_items()
--+            
--+            # Test 3: Merge mappings after AI (should have data)
--+            success3, final_mappings = await self.test_get_merge_mappings_after_ai()
--+            
--+            # Test 4: Merged statistics
--+            success4 = await self.test_merged_statistics()
--+            
--+            # Test 5: Delete merge mapping
--+            success5 = await self.test_delete_merge_mapping(final_mappings)
--+            
--+            # Summary
--+            print("\n" + "=" * 60)
--+            print("📋 TEST SUMMARY")
--+            print("=" * 60)
--+            
--+            tests = [
--+                ("GET /api/items/merge-mappings (initial)", success1),
--+                ("POST /api/items/ai-merge", success2),
--+                ("GET /api/items/merge-mappings (after AI)", success3),
--+                ("GET /api/statistics/items/merged", success4),
--+                ("DELETE /api/items/merge-mappings/{name}", success5)
--+            ]
--+            
--+            passed = sum(1 for _, success in tests if success)
--+            total = len(tests)
--+            
--+            for test_name, success in tests:
--+                status = "✅ PASS" if success else "❌ FAIL"
--+                print(f"{status} {test_name}")
--+                
--+            print(f"\n🎯 Results: {passed}/{total} tests passed")
--+            
--+            if passed == total:
--+                print("🎉 All AI Item Merging tests PASSED!")
--+                return True
--+            else:
--+                print("⚠️ Some tests FAILED - check logs above")
--+                return False
--+                
--+        finally:
--+            await self.cleanup_session()
--+
--+async def main():
--+    """Main test runner"""
--+    tester = AIItemMergingTester()
--+    success = await tester.run_all_tests()
--+    sys.exit(0 if success else 1)
--+
--+if __name__ == "__main__":
--+    asyncio.run(main())
--\ No newline at end of file
--diff --git a/comprehensive_ai_merge_test.py b/comprehensive_ai_merge_test.py
--new file mode 100644
--index 0000000..ce4317e
----- /dev/null
--+++ b/comprehensive_ai_merge_test.py
--@@ -0,0 +1,480 @@
--+#!/usr/bin/env python3
--+"""
--+Comprehensive AI Item Merging API Tests for Bulgarian Invoice Management App
--+Tests all AI Item Merging endpoints and error conditions
--+"""
--+
--+import asyncio
--+import aiohttp
--+import json
--+import sys
--+from datetime import datetime, timezone
--+import os
--+
--+# Backend URL from environment
--+BACKEND_URL = "https://invtrack-43.preview.emergentagent.com/api"
--+
--+class ComprehensiveAIMergeTester:
--+    def __init__(self):
--+        self.session = None
--+        self.auth_token = None
--+        self.test_user_email = "comprehensive_aimerge@test.com"
--+        self.test_user_password = "Test1234"
--+        self.test_user_name = "Comprehensive AI Merge Tester"
--+        self.test_results = []
--+        
--+    async def setup_session(self):
--+        """Initialize HTTP session"""
--+        self.session = aiohttp.ClientSession()
--+        
--+    async def cleanup_session(self):
--+        """Cleanup HTTP session"""
--+        if self.session:
--+            await self.session.close()
--+            
--+    def log_result(self, test_name, success, details="", error=""):
--+        """Log test result"""
--+        result = {
--+            "test": test_name,
--+            "success": success,
--+            "details": details,
--+            "error": error,
--+            "timestamp": datetime.now().isoformat()
--+        }
--+        self.test_results.append(result)
--+        
--+        status = "✅ PASS" if success else "❌ FAIL"
--+        print(f"{status} {test_name}")
--+        if details:
--+            print(f"   Details: {details}")
--+        if error:
--+            print(f"   Error: {error}")
--+            
--+    async def register_test_user(self):
--+        """Register test user for authentication"""
--+        print("🔐 Setting up authentication...")
--+        
--+        register_data = {
--+            "email": self.test_user_email,
--+            "password": self.test_user_password,
--+            "name": self.test_user_name
--+        }
--+        
--+        try:
--+            async with self.session.post(
--+                f"{BACKEND_URL}/auth/register",
--+                json=register_data,
--+                headers={"Content-Type": "application/json"}
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    self.auth_token = data.get("session_token")
--+                    self.log_result("User Registration", True, f"Token: {self.auth_token[:20]}...")
--+                    return True
--+                elif response.status == 400:
--+                    # User might already exist, try login
--+                    return await self.login_test_user()
--+                else:
--+                    error_text = await response.text()
--+                    self.log_result("User Registration", False, error=f"{response.status} - {error_text}")
--+                    return False
--+        except Exception as e:
--+            self.log_result("User Registration", False, error=str(e))
--+            return False
--+            
--+    async def login_test_user(self):
--+        """Login test user"""
--+        login_data = {
--+            "email": self.test_user_email,
--+            "password": self.test_user_password
--+        }
--+        
--+        try:
--+            async with self.session.post(
--+                f"{BACKEND_URL}/auth/login",
--+                json=login_data,
--+                headers={"Content-Type": "application/json"}
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    self.auth_token = data.get("session_token")
--+                    self.log_result("User Login", True, f"Token: {self.auth_token[:20]}...")
--+                    return True
--+                else:
--+                    error_text = await response.text()
--+                    self.log_result("User Login", False, error=f"{response.status} - {error_text}")
--+                    return False
--+        except Exception as e:
--+            self.log_result("User Login", False, error=str(e))
--+            return False
--+            
--+    def get_auth_headers(self):
--+        """Get authorization headers"""
--+        return {
--+            "Authorization": f"Bearer {self.auth_token}",
--+            "Content-Type": "application/json"
--+        }
--+        
--+    async def create_test_invoices_with_similar_items(self):
--+        """Create test invoices with similar item names for AI merging"""
--+        print("\n📄 Creating test data with similar Bulgarian product names...")
--+        
--+        # More comprehensive test data with clearly similar items
--+        test_invoices = [
--+            {
--+                "supplier": "Магазин Олио ЕООД",
--+                "invoice_number": "MERGE-001",
--+                "amount_without_vat": 10.00,
--+                "vat_amount": 2.00,
--+                "total_amount": 12.00,
--+                "date": "2024-01-15",
--+                "items": [
--+                    {
--+                        "name": "Олио слънчогледово",
--+                        "quantity": 1,
--+                        "unit": "л.",
--+                        "unit_price": 8.50,
--+                        "total_price": 8.50
--+                    }
--+                ]
--+            },
--+            {
--+                "supplier": "Супермаркет БГ",
--+                "invoice_number": "MERGE-002", 
--+                "amount_without_vat": 15.00,
--+                "vat_amount": 3.00,
--+                "total_amount": 18.00,
--+                "date": "2024-01-16",
--+                "items": [
--+                    {
--+                        "name": "олио слънчогледово",  # Same but lowercase
--+                        "quantity": 2,
--+                        "unit": "л.",
--+                        "unit_price": 7.25,
--+                        "total_price": 14.50
--+                    }
--+                ]
--+            },
--+            {
--+                "supplier": "Хранителни стоки ООД",
--+                "invoice_number": "MERGE-003",
--+                "amount_without_vat": 20.00,
--+                "vat_amount": 4.00,
--+                "total_amount": 24.00,
--+                "date": "2024-01-17",
--+                "items": [
--+                    {
--+                        "name": "ОЛИО СЛЪНЧОГЛЕДОВО",  # Same but uppercase
--+                        "quantity": 1,
--+                        "unit": "л.",
--+                        "unit_price": 9.00,
--+                        "total_price": 9.00
--+                    }
--+                ]
--+            },
--+            {
--+                "supplier": "Продукти и храни АД",
--+                "invoice_number": "MERGE-004",
--+                "amount_without_vat": 25.00,
--+                "vat_amount": 5.00,
--+                "total_amount": 30.00,
--+                "date": "2024-01-18",
--+                "items": [
--+                    {
--+                        "name": "Захар кристална",
--+                        "quantity": 2,
--+                        "unit": "кг.",
--+                        "unit_price": 2.50,
--+                        "total_price": 5.00
--+                    }
--+                ]
--+            },
--+            {
--+                "supplier": "Сладки продукти ЕООД",
--+                "invoice_number": "MERGE-005",
--+                "amount_without_vat": 12.00,
--+                "vat_amount": 2.40,
--+                "total_amount": 14.40,
--+                "date": "2024-01-19",
--+                "items": [
--+                    {
--+                        "name": "захар кристална",  # Same but lowercase
--+                        "quantity": 3,
--+                        "unit": "кг.",
--+                        "unit_price": 2.30,
--+                        "total_price": 6.90
--+                    }
--+                ]
--+            }
--+        ]
--+        
--+        created_count = 0
--+        for invoice_data in test_invoices:
--+            try:
--+                async with self.session.post(
--+                    f"{BACKEND_URL}/invoices",
--+                    json=invoice_data,
--+                    headers=self.get_auth_headers()
--+                ) as response:
--+                    if response.status == 200:
--+                        created_count += 1
--+                        print(f"   ✅ Created {invoice_data['invoice_number']}: {[item['name'] for item in invoice_data['items']]}")
--+                    else:
--+                        error_text = await response.text()
--+                        print(f"   ⚠️ Failed {invoice_data['invoice_number']}: {response.status} - {error_text}")
--+            except Exception as e:
--+                print(f"   ❌ Error {invoice_data['invoice_number']}: {str(e)}")
--+                
--+        self.log_result("Test Data Creation", created_count > 0, f"Created {created_count}/5 invoices")
--+        return created_count > 0
--+        
--+    async def test_merge_mappings_endpoints(self):
--+        """Test all merge mappings endpoints"""
--+        print("\n🧪 Testing Merge Mappings Endpoints...")
--+        
--+        # Test 1: GET initial mappings
--+        try:
--+            async with self.session.get(
--+                f"{BACKEND_URL}/items/merge-mappings",
--+                headers=self.get_auth_headers()
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    mappings = data.get("mappings", [])
--+                    self.log_result("GET /api/items/merge-mappings", True, f"Found {len(mappings)} initial mappings")
--+                    return mappings
--+                else:
--+                    error_text = await response.text()
--+                    self.log_result("GET /api/items/merge-mappings", False, error=f"{response.status} - {error_text}")
--+                    return []
--+        except Exception as e:
--+            self.log_result("GET /api/items/merge-mappings", False, error=str(e))
--+            return []
--+            
--+    async def test_ai_merge_endpoint(self):
--+        """Test AI merge endpoint and check for errors"""
--+        print("\n🤖 Testing AI Merge Endpoint...")
--+        
--+        try:
--+            async with self.session.post(
--+                f"{BACKEND_URL}/items/ai-merge",
--+                headers=self.get_auth_headers()
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    merged_groups = data.get("merged_groups", [])
--+                    total_merged = data.get("total_merged", 0)
--+                    message = data.get("message", "")
--+                    error = data.get("error", "")
--+                    
--+                    if error:
--+                        self.log_result("POST /api/items/ai-merge", False, 
--+                                      f"API returned error: {error}")
--+                        return False, data
--+                    else:
--+                        self.log_result("POST /api/items/ai-merge", True, 
--+                                      f"Found {len(merged_groups)} groups, {total_merged} items merged. Message: {message}")
--+                        return True, data
--+                else:
--+                    error_text = await response.text()
--+                    self.log_result("POST /api/items/ai-merge", False, error=f"{response.status} - {error_text}")
--+                    return False, {}
--+        except Exception as e:
--+            self.log_result("POST /api/items/ai-merge", False, error=str(e))
--+            return False, {}
--+            
--+    async def test_merged_statistics_endpoint(self):
--+        """Test merged statistics endpoint with various parameters"""
--+        print("\n📈 Testing Merged Statistics Endpoint...")
--+        
--+        test_cases = [
--+            ("No parameters", {}),
--+            ("With top_n", {"top_n": "5"}),
--+            ("With date range", {"start_date": "2024-01-01", "end_date": "2024-01-31"}),
--+            ("Full parameters", {"start_date": "2024-01-01", "end_date": "2024-01-31", "top_n": "10"})
--+        ]
--+        
--+        all_passed = True
--+        for test_name, params in test_cases:
--+            try:
--+                async with self.session.get(
--+                    f"{BACKEND_URL}/statistics/items/merged",
--+                    params=params,
--+                    headers=self.get_auth_headers()
--+                ) as response:
--+                    if response.status == 200:
--+                        data = await response.json()
--+                        totals = data.get("totals", {})
--+                        merge_applied = data.get("merge_applied", False)
--+                        top_by_quantity = data.get("top_by_quantity", [])
--+                        top_by_value = data.get("top_by_value", [])
--+                        
--+                        details = f"Totals: {totals}, Merge applied: {merge_applied}, Items: {len(top_by_quantity)}"
--+                        self.log_result(f"GET /api/statistics/items/merged ({test_name})", True, details)
--+                    else:
--+                        error_text = await response.text()
--+                        self.log_result(f"GET /api/statistics/items/merged ({test_name})", False, 
--+                                      error=f"{response.status} - {error_text}")
--+                        all_passed = False
--+            except Exception as e:
--+                self.log_result(f"GET /api/statistics/items/merged ({test_name})", False, error=str(e))
--+                all_passed = False
--+                
--+        return all_passed
--+        
--+    async def test_delete_merge_mapping_endpoint(self, mappings):
--+        """Test delete merge mapping endpoint"""
--+        print("\n🗑️ Testing Delete Merge Mapping Endpoint...")
--+        
--+        if not mappings:
--+            self.log_result("DELETE /api/items/merge-mappings/{name}", True, "No mappings to delete (expected)")
--+            return True
--+            
--+        # Try to delete the first mapping
--+        first_mapping = mappings[0]
--+        canonical_name = first_mapping.get("canonical_name", "")
--+        
--+        if not canonical_name:
--+            self.log_result("DELETE /api/items/merge-mappings/{name}", False, error="No canonical name found")
--+            return False
--+            
--+        try:
--+            from urllib.parse import quote
--+            encoded_name = quote(canonical_name)
--+            
--+            async with self.session.delete(
--+                f"{BACKEND_URL}/items/merge-mappings/{encoded_name}",
--+                headers=self.get_auth_headers()
--+            ) as response:
--+                if response.status == 200:
--+                    data = await response.json()
--+                    message = data.get("message", "")
--+                    self.log_result("DELETE /api/items/merge-mappings/{name}", True, 
--+                                  f"Deleted '{canonical_name}': {message}")
--+                    return True
--+                else:
--+                    error_text = await response.text()
--+                    self.log_result("DELETE /api/items/merge-mappings/{name}", False, 
--+                                  error=f"{response.status} - {error_text}")
--+                    return False
--+        except Exception as e:
--+            self.log_result("DELETE /api/items/merge-mappings/{name}", False, error=str(e))
--+            return False
--+            
--+    async def test_authentication_required(self):
--+        """Test that endpoints require authentication"""
--+        print("\n🔒 Testing Authentication Requirements...")
--+        
--+        endpoints = [
--+            ("GET", "/items/merge-mappings"),
--+            ("POST", "/items/ai-merge"),
--+            ("GET", "/statistics/items/merged"),
--+            ("DELETE", "/items/merge-mappings/test")
--+        ]
--+        
--+        all_passed = True
--+        for method, endpoint in endpoints:
--+            try:
--+                if method == "GET":
--+                    async with self.session.get(f"{BACKEND_URL}{endpoint}") as response:
--+                        auth_required = response.status == 401
--+                elif method == "POST":
--+                    async with self.session.post(f"{BACKEND_URL}{endpoint}") as response:
--+                        auth_required = response.status == 401
--+                elif method == "DELETE":
--+                    async with self.session.delete(f"{BACKEND_URL}{endpoint}") as response:
--+                        auth_required = response.status == 401
--+                        
--+                if auth_required:
--+                    self.log_result(f"Auth Required: {method} {endpoint}", True, "Returns 401 without auth")
--+                else:
--+                    self.log_result(f"Auth Required: {method} {endpoint}", False, 
--+                                  f"Expected 401, got {response.status}")
--+                    all_passed = False
--+                    
--+            except Exception as e:
--+                self.log_result(f"Auth Required: {method} {endpoint}", False, error=str(e))
--+                all_passed = False
--+                
--+        return all_passed
--+        
--+    async def run_comprehensive_tests(self):
--+        """Run all comprehensive AI Item Merging tests"""
--+        print("🚀 Starting Comprehensive AI Item Merging API Tests")
--+        print("=" * 70)
--+        
--+        await self.setup_session()
--+        
--+        try:
--+            # Test 1: Authentication
--+            if not await self.register_test_user():
--+                print("❌ Authentication failed - cannot continue tests")
--+                return False
--+                
--+            # Test 2: Authentication requirements
--+            await self.test_authentication_required()
--+            
--+            # Test 3: Create test data
--+            if not await self.create_test_invoices_with_similar_items():
--+                print("❌ Test data creation failed - cannot continue tests")
--+                return False
--+                
--+            # Test 4: Initial merge mappings
--+            initial_mappings = await self.test_merge_mappings_endpoints()
--+            
--+            # Test 5: AI merge analysis
--+            ai_success, ai_result = await self.test_ai_merge_endpoint()
--+            
--+            # Test 6: Merge mappings after AI
--+            final_mappings = await self.test_merge_mappings_endpoints()
--+            
--+            # Test 7: Merged statistics
--+            await self.test_merged_statistics_endpoint()
--+            
--+            # Test 8: Delete merge mapping
--+            await self.test_delete_merge_mapping_endpoint(final_mappings)
--+            
--+            # Summary
--+            print("\n" + "=" * 70)
--+            print("📋 COMPREHENSIVE TEST SUMMARY")
--+            print("=" * 70)
--+            
--+            passed = sum(1 for result in self.test_results if result["success"])
--+            total = len(self.test_results)
--+            
--+            print(f"🎯 Results: {passed}/{total} tests passed ({passed/total*100:.1f}%)")
--+            
--+            # Show failed tests
--+            failed_tests = [r for r in self.test_results if not r["success"]]
--+            if failed_tests:
--+                print("\n❌ FAILED TESTS:")
--+                for test in failed_tests:
--+                    print(f"   • {test['test']}: {test['error']}")
--+                    
--+            # Critical issues
--+            critical_issues = []
--+            if not ai_success:
--+                ai_error = ai_result.get("error", "Unknown error")
--+                if "LlmChat.__init__() got an unexpected keyword argument 'model'" in ai_error:
--+                    critical_issues.append("AI Merge endpoint has LlmChat initialization bug - 'model' parameter should not be passed to constructor")
--+                else:
--+                    critical_issues.append(f"AI Merge endpoint error: {ai_error}")
--+                    
--+            if critical_issues:
--+                print("\n🚨 CRITICAL ISSUES FOUND:")
--+                for issue in critical_issues:
--+                    print(f"   • {issue}")
--+                    
--+            return len(critical_issues) == 0 and passed >= total * 0.8  # 80% pass rate
--+                
--+        finally:
--+            await self.cleanup_session()
--+
--+async def main():
--+    """Main test runner"""
--+    tester = ComprehensiveAIMergeTester()
--+    success = await tester.run_comprehensive_tests()
--+    sys.exit(0 if success else 1)
--+
--+if __name__ == "__main__":
--+    asyncio.run(main())
--\ No newline at end of file
+@@ -1,1422 +0,0 @@
 -diff --git a/model.patch b/model.patch
--index 7fb2dd9..fc98fc9 100644
+-index 880f5d1..e69de29 100644
 ---- a/model.patch
 -+++ b/model.patch
--@@ -1,385 +0,0 @@
+-@@ -1,1417 +0,0 @@
+--diff --git a/ai_merge_test.py b/ai_merge_test.py
+--new file mode 100644
+--index 0000000..e722d84
+----- /dev/null
+--+++ b/ai_merge_test.py
+--@@ -0,0 +1,485 @@
+--+#!/usr/bin/env python3
+--+"""
+--+AI Item Merging API Tests for Bulgarian Invoice Management App
+--+Tests the new AI Item Merging API endpoints
+--+"""
+--+
+--+import asyncio
+--+import aiohttp
+--+import json
+--+import sys
+--+from datetime import datetime, timezone
+--+import os
+--+
+--+# Backend URL from environment
+--+BACKEND_URL = "https://invtrack-43.preview.emergentagent.com/api"
+--+
+--+class AIItemMergingTester:
+--+    def __init__(self):
+--+        self.session = None
+--+        self.auth_token = None
+--+        self.test_user_email = "aimerge_test@test.com"
+--+        self.test_user_password = "Test1234"
+--+        self.test_user_name = "AI Merge Tester"
+--+        
+--+    async def setup_session(self):
+--+        """Initialize HTTP session"""
+--+        self.session = aiohttp.ClientSession()
+--+        
+--+    async def cleanup_session(self):
+--+        """Cleanup HTTP session"""
+--+        if self.session:
+--+            await self.session.close()
+--+            
+--+    async def register_test_user(self):
+--+        """Register test user for authentication"""
+--+        print("🔐 Registering test user...")
+--+        
+--+        register_data = {
+--+            "email": self.test_user_email,
+--+            "password": self.test_user_password,
+--+            "name": self.test_user_name
+--+        }
+--+        
+--+        try:
+--+            async with self.session.post(
+--+                f"{BACKEND_URL}/auth/register",
+--+                json=register_data,
+--+                headers={"Content-Type": "application/json"}
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    self.auth_token = data.get("session_token")
+--+                    print(f"✅ User registered successfully. Token: {self.auth_token[:20]}...")
+--+                    return True
+--+                elif response.status == 400:
+--+                    # User might already exist, try login
+--+                    print("ℹ️ User already exists, trying login...")
+--+                    return await self.login_test_user()
+--+                else:
+--+                    error_text = await response.text()
+--+                    print(f"❌ Registration failed: {response.status} - {error_text}")
+--+                    return False
+--+        except Exception as e:
+--+            print(f"❌ Registration error: {str(e)}")
+--+            return False
+--+            
+--+    async def login_test_user(self):
+--+        """Login test user"""
+--+        print("🔐 Logging in test user...")
+--+        
+--+        login_data = {
+--+            "email": self.test_user_email,
+--+            "password": self.test_user_password
+--+        }
+--+        
+--+        try:
+--+            async with self.session.post(
+--+                f"{BACKEND_URL}/auth/login",
+--+                json=login_data,
+--+                headers={"Content-Type": "application/json"}
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    self.auth_token = data.get("session_token")
+--+                    print(f"✅ Login successful. Token: {self.auth_token[:20]}...")
+--+                    return True
+--+                else:
+--+                    error_text = await response.text()
+--+                    print(f"❌ Login failed: {response.status} - {error_text}")
+--+                    return False
+--+        except Exception as e:
+--+            print(f"❌ Login error: {str(e)}")
+--+            return False
+--+            
+--+    def get_auth_headers(self):
+--+        """Get authorization headers"""
+--+        return {
+--+            "Authorization": f"Bearer {self.auth_token}",
+--+            "Content-Type": "application/json"
+--+        }
+--+        
+--+    async def create_test_invoices_with_similar_items(self):
+--+        """Create test invoices with similar item names for AI merging"""
+--+        print("📄 Creating test invoices with similar item names...")
+--+        
+--+        # Test invoices with similar Bulgarian product names
+--+        test_invoices = [
+--+            {
+--+                "supplier": "Магазин Олио ЕООД",
+--+                "invoice_number": "INV-001",
+--+                "amount_without_vat": 10.00,
+--+                "vat_amount": 2.00,
+--+                "total_amount": 12.00,
+--+                "date": "2024-01-15",
+--+                "items": [
+--+                    {
+--+                        "name": "Олио слънчогледово",
+--+                        "quantity": 1,
+--+                        "unit": "л.",
+--+                        "unit_price": 8.50,
+--+                        "total_price": 8.50
+--+                    }
+--+                ]
+--+            },
+--+            {
+--+                "supplier": "Супермаркет БГ",
+--+                "invoice_number": "INV-002", 
+--+                "amount_without_vat": 15.00,
+--+                "vat_amount": 3.00,
+--+                "total_amount": 18.00,
+--+                "date": "2024-01-16",
+--+                "items": [
+--+                    {
+--+                        "name": "олио екстра",
+--+                        "quantity": 2,
+--+                        "unit": "л.",
+--+                        "unit_price": 7.25,
+--+                        "total_price": 14.50
+--+                    }
+--+                ]
+--+            },
+--+            {
+--+                "supplier": "Хранителни стоки ООД",
+--+                "invoice_number": "INV-003",
+--+                "amount_without_vat": 20.00,
+--+                "vat_amount": 4.00,
+--+                "total_amount": 24.00,
+--+                "date": "2024-01-17",
+--+                "items": [
+--+                    {
+--+                        "name": "ОЛИО",
+--+                        "quantity": 1,
+--+                        "unit": "л.",
+--+                        "unit_price": 9.00,
+--+                        "total_price": 9.00
+--+                    }
+--+                ]
+--+            },
+--+            {
+--+                "supplier": "Продукти и храни АД",
+--+                "invoice_number": "INV-004",
+--+                "amount_without_vat": 25.00,
+--+                "vat_amount": 5.00,
+--+                "total_amount": 30.00,
+--+                "date": "2024-01-18",
+--+                "items": [
+--+                    {
+--+                        "name": "Захар кристална",
+--+                        "quantity": 2,
+--+                        "unit": "кг.",
+--+                        "unit_price": 2.50,
+--+                        "total_price": 5.00
+--+                    }
+--+                ]
+--+            },
+--+            {
+--+                "supplier": "Сладки продукти ЕООД",
+--+                "invoice_number": "INV-005",
+--+                "amount_without_vat": 12.00,
+--+                "vat_amount": 2.40,
+--+                "total_amount": 14.40,
+--+                "date": "2024-01-19",
+--+                "items": [
+--+                    {
+--+                        "name": "захар",
+--+                        "quantity": 3,
+--+                        "unit": "кг.",
+--+                        "unit_price": 2.30,
+--+                        "total_price": 6.90
+--+                    }
+--+                ]
+--+            }
+--+        ]
+--+        
+--+        created_invoices = []
+--+        for invoice_data in test_invoices:
+--+            try:
+--+                async with self.session.post(
+--+                    f"{BACKEND_URL}/invoices",
+--+                    json=invoice_data,
+--+                    headers=self.get_auth_headers()
+--+                ) as response:
+--+                    if response.status == 200:
+--+                        invoice = await response.json()
+--+                        created_invoices.append(invoice)
+--+                        print(f"✅ Created invoice {invoice_data['invoice_number']} with items: {[item['name'] for item in invoice_data['items']]}")
+--+                    else:
+--+                        error_text = await response.text()
+--+                        print(f"⚠️ Failed to create invoice {invoice_data['invoice_number']}: {response.status} - {error_text}")
+--+            except Exception as e:
+--+                print(f"❌ Error creating invoice {invoice_data['invoice_number']}: {str(e)}")
+--+                
+--+        print(f"📊 Created {len(created_invoices)} test invoices")
+--+        return created_invoices
+--+        
+--+    async def test_get_merge_mappings_initial(self):
+--+        """Test GET /api/items/merge-mappings - should be empty initially"""
+--+        print("\n🧪 Testing GET /api/items/merge-mappings (initial state)...")
+--+        
+--+        try:
+--+            async with self.session.get(
+--+                f"{BACKEND_URL}/items/merge-mappings",
+--+                headers=self.get_auth_headers()
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    mappings = data.get("mappings", [])
+--+                    print(f"✅ GET /api/items/merge-mappings successful")
+--+                    print(f"📊 Initial mappings count: {len(mappings)}")
+--+                    if mappings:
+--+                        print(f"📋 Existing mappings: {mappings}")
+--+                    return True, mappings
+--+                else:
+--+                    error_text = await response.text()
+--+                    print(f"❌ GET /api/items/merge-mappings failed: {response.status} - {error_text}")
+--+                    return False, []
+--+        except Exception as e:
+--+            print(f"❌ Error testing merge mappings: {str(e)}")
+--+            return False, []
+--+            
+--+    async def test_ai_merge_items(self):
+--+        """Test POST /api/items/ai-merge - triggers AI analysis"""
+--+        print("\n🤖 Testing POST /api/items/ai-merge (AI analysis)...")
+--+        
+--+        try:
+--+            async with self.session.post(
+--+                f"{BACKEND_URL}/items/ai-merge",
+--+                headers=self.get_auth_headers()
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    merged_groups = data.get("merged_groups", [])
+--+                    total_merged = data.get("total_merged", 0)
+--+                    message = data.get("message", "")
+--+                    
+--+                    print(f"✅ POST /api/items/ai-merge successful")
+--+                    print(f"🔍 AI found {len(merged_groups)} merge groups")
+--+                    print(f"📊 Total items merged: {total_merged}")
+--+                    print(f"💬 Message: {message}")
+--+                    
+--+                    if merged_groups:
+--+                        print("🎯 Merge groups found:")
+--+                        for i, group in enumerate(merged_groups, 1):
+--+                            canonical = group.get("canonical_name", "")
+--+                            variants = group.get("variants", [])
+--+                            print(f"   {i}. '{canonical}' ← {variants}")
+--+                    
+--+                    return True, data
+--+                else:
+--+                    error_text = await response.text()
+--+                    print(f"❌ POST /api/items/ai-merge failed: {response.status} - {error_text}")
+--+                    return False, {}
+--+        except Exception as e:
+--+            print(f"❌ Error testing AI merge: {str(e)}")
+--+            return False, {}
+--+            
+--+    async def test_get_merge_mappings_after_ai(self):
+--+        """Test GET /api/items/merge-mappings after AI analysis"""
+--+        print("\n🧪 Testing GET /api/items/merge-mappings (after AI analysis)...")
+--+        
+--+        try:
+--+            async with self.session.get(
+--+                f"{BACKEND_URL}/items/merge-mappings",
+--+                headers=self.get_auth_headers()
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    mappings = data.get("mappings", [])
+--+                    print(f"✅ GET /api/items/merge-mappings successful")
+--+                    print(f"📊 Mappings count after AI: {len(mappings)}")
+--+                    
+--+                    if mappings:
+--+                        print("📋 Current mappings:")
+--+                        for i, mapping in enumerate(mappings, 1):
+--+                            canonical = mapping.get("canonical_name", "")
+--+                            display = mapping.get("display_name", "")
+--+                            variants = mapping.get("variants", [])
+--+                            print(f"   {i}. '{display}' ({canonical}) ← {variants}")
+--+                    
+--+                    return True, mappings
+--+                else:
+--+                    error_text = await response.text()
+--+                    print(f"❌ GET /api/items/merge-mappings failed: {response.status} - {error_text}")
+--+                    return False, []
+--+        except Exception as e:
+--+            print(f"❌ Error testing merge mappings: {str(e)}")
+--+            return False, []
+--+            
+--+    async def test_merged_statistics(self):
+--+        """Test GET /api/statistics/items/merged"""
+--+        print("\n📈 Testing GET /api/statistics/items/merged...")
+--+        
+--+        try:
+--+            # Test with different parameters
+--+            test_params = [
+--+                {},  # No parameters
+--+                {"top_n": "5"},  # Limit results
+--+                {"start_date": "2024-01-01", "end_date": "2024-01-31", "top_n": "10"}  # Date range
+--+            ]
+--+            
+--+            for i, params in enumerate(test_params, 1):
+--+                print(f"\n   Test {i}: {params if params else 'No parameters'}")
+--+                
+--+                async with self.session.get(
+--+                    f"{BACKEND_URL}/statistics/items/merged",
+--+                    params=params,
+--+                    headers=self.get_auth_headers()
+--+                ) as response:
+--+                    if response.status == 200:
+--+                        data = await response.json()
+--+                        totals = data.get("totals", {})
+--+                        top_by_quantity = data.get("top_by_quantity", [])
+--+                        top_by_value = data.get("top_by_value", [])
+--+                        merge_applied = data.get("merge_applied", False)
+--+                        merge_groups_count = data.get("merge_groups_count", 0)
+--+                        
+--+                        print(f"   ✅ GET /api/statistics/items/merged successful")
+--+                        print(f"   📊 Totals: {totals}")
+--+                        print(f"   🔄 Merge applied: {merge_applied}")
+--+                        print(f"   🎯 Merge groups: {merge_groups_count}")
+--+                        print(f"   📈 Top by quantity: {len(top_by_quantity)} items")
+--+                        print(f"   💰 Top by value: {len(top_by_value)} items")
+--+                        
+--+                        if top_by_quantity:
+--+                            print("   🏆 Top items by quantity:")
+--+                            for item in top_by_quantity[:3]:
+--+                                name = item.get("name", "")
+--+                                qty = item.get("total_quantity", 0)
+--+                                value = item.get("total_value", 0)
+--+                                original_names = item.get("original_names", [])
+--+                                print(f"      • {name}: {qty} units, {value} лв (variants: {original_names})")
+--+                    else:
+--+                        error_text = await response.text()
+--+                        print(f"   ❌ Test {i} failed: {response.status} - {error_text}")
+--+                        
+--+            return True
+--+        except Exception as e:
+--+            print(f"❌ Error testing merged statistics: {str(e)}")
+--+            return False
+--+            
+--+    async def test_delete_merge_mapping(self, mappings):
+--+        """Test DELETE /api/items/merge-mappings/{canonical_name}"""
+--+        print("\n🗑️ Testing DELETE /api/items/merge-mappings/{canonical_name}...")
+--+        
+--+        if not mappings:
+--+            print("⚠️ No mappings to delete")
+--+            return True
+--+            
+--+        # Try to delete the first mapping
+--+        first_mapping = mappings[0]
+--+        canonical_name = first_mapping.get("canonical_name", "")
+--+        display_name = first_mapping.get("display_name", "")
+--+        
+--+        if not canonical_name:
+--+            print("⚠️ No canonical name found in mapping")
+--+            return False
+--+            
+--+        print(f"🎯 Attempting to delete mapping: '{display_name}' ({canonical_name})")
+--+        
+--+        try:
+--+            # URL encode the canonical name
+--+            from urllib.parse import quote
+--+            encoded_name = quote(canonical_name)
+--+            
+--+            async with self.session.delete(
+--+                f"{BACKEND_URL}/items/merge-mappings/{encoded_name}",
+--+                headers=self.get_auth_headers()
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    message = data.get("message", "")
+--+                    print(f"✅ DELETE /api/items/merge-mappings/{canonical_name} successful")
+--+                    print(f"💬 Message: {message}")
+--+                    
+--+                    # Verify deletion by checking mappings again
+--+                    print("🔍 Verifying deletion...")
+--+                    success, updated_mappings = await self.test_get_merge_mappings_after_ai()
+--+                    if success:
+--+                        print(f"📊 Mappings count after deletion: {len(updated_mappings)}")
+--+                        if len(updated_mappings) < len(mappings):
+--+                            print("✅ Mapping successfully deleted")
+--+                        else:
+--+                            print("⚠️ Mapping count unchanged - deletion may have failed")
+--+                    
+--+                    return True
+--+                else:
+--+                    error_text = await response.text()
+--+                    print(f"❌ DELETE /api/items/merge-mappings/{canonical_name} failed: {response.status} - {error_text}")
+--+                    return False
+--+        except Exception as e:
+--+            print(f"❌ Error testing delete mapping: {str(e)}")
+--+            return False
+--+            
+--+    async def run_all_tests(self):
+--+        """Run all AI Item Merging tests"""
+--+        print("🚀 Starting AI Item Merging API Tests")
+--+        print("=" * 60)
+--+        
+--+        # Setup
+--+        await self.setup_session()
+--+        
+--+        try:
+--+            # Authentication
+--+            if not await self.register_test_user():
+--+                print("❌ Authentication failed - cannot continue tests")
+--+                return False
+--+                
+--+            # Create test data
+--+            await self.create_test_invoices_with_similar_items()
+--+            
+--+            # Test 1: Initial merge mappings (should be empty)
+--+            success1, initial_mappings = await self.test_get_merge_mappings_initial()
+--+            
+--+            # Test 2: AI merge analysis
+--+            success2, merge_result = await self.test_ai_merge_items()
+--+            
+--+            # Test 3: Merge mappings after AI (should have data)
+--+            success3, final_mappings = await self.test_get_merge_mappings_after_ai()
+--+            
+--+            # Test 4: Merged statistics
+--+            success4 = await self.test_merged_statistics()
+--+            
+--+            # Test 5: Delete merge mapping
+--+            success5 = await self.test_delete_merge_mapping(final_mappings)
+--+            
+--+            # Summary
+--+            print("\n" + "=" * 60)
+--+            print("📋 TEST SUMMARY")
+--+            print("=" * 60)
+--+            
+--+            tests = [
+--+                ("GET /api/items/merge-mappings (initial)", success1),
+--+                ("POST /api/items/ai-merge", success2),
+--+                ("GET /api/items/merge-mappings (after AI)", success3),
+--+                ("GET /api/statistics/items/merged", success4),
+--+                ("DELETE /api/items/merge-mappings/{name}", success5)
+--+            ]
+--+            
+--+            passed = sum(1 for _, success in tests if success)
+--+            total = len(tests)
+--+            
+--+            for test_name, success in tests:
+--+                status = "✅ PASS" if success else "❌ FAIL"
+--+                print(f"{status} {test_name}")
+--+                
+--+            print(f"\n🎯 Results: {passed}/{total} tests passed")
+--+            
+--+            if passed == total:
+--+                print("🎉 All AI Item Merging tests PASSED!")
+--+                return True
+--+            else:
+--+                print("⚠️ Some tests FAILED - check logs above")
+--+                return False
+--+                
+--+        finally:
+--+            await self.cleanup_session()
+--+
+--+async def main():
+--+    """Main test runner"""
+--+    tester = AIItemMergingTester()
+--+    success = await tester.run_all_tests()
+--+    sys.exit(0 if success else 1)
+--+
+--+if __name__ == "__main__":
+--+    asyncio.run(main())
+--\ No newline at end of file
+--diff --git a/comprehensive_ai_merge_test.py b/comprehensive_ai_merge_test.py
+--new file mode 100644
+--index 0000000..ce4317e
+----- /dev/null
+--+++ b/comprehensive_ai_merge_test.py
+--@@ -0,0 +1,480 @@
+--+#!/usr/bin/env python3
+--+"""
+--+Comprehensive AI Item Merging API Tests for Bulgarian Invoice Management App
+--+Tests all AI Item Merging endpoints and error conditions
+--+"""
+--+
+--+import asyncio
+--+import aiohttp
+--+import json
+--+import sys
+--+from datetime import datetime, timezone
+--+import os
+--+
+--+# Backend URL from environment
+--+BACKEND_URL = "https://invtrack-43.preview.emergentagent.com/api"
+--+
+--+class ComprehensiveAIMergeTester:
+--+    def __init__(self):
+--+        self.session = None
+--+        self.auth_token = None
+--+        self.test_user_email = "comprehensive_aimerge@test.com"
+--+        self.test_user_password = "Test1234"
+--+        self.test_user_name = "Comprehensive AI Merge Tester"
+--+        self.test_results = []
+--+        
+--+    async def setup_session(self):
+--+        """Initialize HTTP session"""
+--+        self.session = aiohttp.ClientSession()
+--+        
+--+    async def cleanup_session(self):
+--+        """Cleanup HTTP session"""
+--+        if self.session:
+--+            await self.session.close()
+--+            
+--+    def log_result(self, test_name, success, details="", error=""):
+--+        """Log test result"""
+--+        result = {
+--+            "test": test_name,
+--+            "success": success,
+--+            "details": details,
+--+            "error": error,
+--+            "timestamp": datetime.now().isoformat()
+--+        }
+--+        self.test_results.append(result)
+--+        
+--+        status = "✅ PASS" if success else "❌ FAIL"
+--+        print(f"{status} {test_name}")
+--+        if details:
+--+            print(f"   Details: {details}")
+--+        if error:
+--+            print(f"   Error: {error}")
+--+            
+--+    async def register_test_user(self):
+--+        """Register test user for authentication"""
+--+        print("🔐 Setting up authentication...")
+--+        
+--+        register_data = {
+--+            "email": self.test_user_email,
+--+            "password": self.test_user_password,
+--+            "name": self.test_user_name
+--+        }
+--+        
+--+        try:
+--+            async with self.session.post(
+--+                f"{BACKEND_URL}/auth/register",
+--+                json=register_data,
+--+                headers={"Content-Type": "application/json"}
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    self.auth_token = data.get("session_token")
+--+                    self.log_result("User Registration", True, f"Token: {self.auth_token[:20]}...")
+--+                    return True
+--+                elif response.status == 400:
+--+                    # User might already exist, try login
+--+                    return await self.login_test_user()
+--+                else:
+--+                    error_text = await response.text()
+--+                    self.log_result("User Registration", False, error=f"{response.status} - {error_text}")
+--+                    return False
+--+        except Exception as e:
+--+            self.log_result("User Registration", False, error=str(e))
+--+            return False
+--+            
+--+    async def login_test_user(self):
+--+        """Login test user"""
+--+        login_data = {
+--+            "email": self.test_user_email,
+--+            "password": self.test_user_password
+--+        }
+--+        
+--+        try:
+--+            async with self.session.post(
+--+                f"{BACKEND_URL}/auth/login",
+--+                json=login_data,
+--+                headers={"Content-Type": "application/json"}
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    self.auth_token = data.get("session_token")
+--+                    self.log_result("User Login", True, f"Token: {self.auth_token[:20]}...")
+--+                    return True
+--+                else:
+--+                    error_text = await response.text()
+--+                    self.log_result("User Login", False, error=f"{response.status} - {error_text}")
+--+                    return False
+--+        except Exception as e:
+--+            self.log_result("User Login", False, error=str(e))
+--+            return False
+--+            
+--+    def get_auth_headers(self):
+--+        """Get authorization headers"""
+--+        return {
+--+            "Authorization": f"Bearer {self.auth_token}",
+--+            "Content-Type": "application/json"
+--+        }
+--+        
+--+    async def create_test_invoices_with_similar_items(self):
+--+        """Create test invoices with similar item names for AI merging"""
+--+        print("\n📄 Creating test data with similar Bulgarian product names...")
+--+        
+--+        # More comprehensive test data with clearly similar items
+--+        test_invoices = [
+--+            {
+--+                "supplier": "Магазин Олио ЕООД",
+--+                "invoice_number": "MERGE-001",
+--+                "amount_without_vat": 10.00,
+--+                "vat_amount": 2.00,
+--+                "total_amount": 12.00,
+--+                "date": "2024-01-15",
+--+                "items": [
+--+                    {
+--+                        "name": "Олио слънчогледово",
+--+                        "quantity": 1,
+--+                        "unit": "л.",
+--+                        "unit_price": 8.50,
+--+                        "total_price": 8.50
+--+                    }
+--+                ]
+--+            },
+--+            {
+--+                "supplier": "Супермаркет БГ",
+--+                "invoice_number": "MERGE-002", 
+--+                "amount_without_vat": 15.00,
+--+                "vat_amount": 3.00,
+--+                "total_amount": 18.00,
+--+                "date": "2024-01-16",
+--+                "items": [
+--+                    {
+--+                        "name": "олио слънчогледово",  # Same but lowercase
+--+                        "quantity": 2,
+--+                        "unit": "л.",
+--+                        "unit_price": 7.25,
+--+                        "total_price": 14.50
+--+                    }
+--+                ]
+--+            },
+--+            {
+--+                "supplier": "Хранителни стоки ООД",
+--+                "invoice_number": "MERGE-003",
+--+                "amount_without_vat": 20.00,
+--+                "vat_amount": 4.00,
+--+                "total_amount": 24.00,
+--+                "date": "2024-01-17",
+--+                "items": [
+--+                    {
+--+                        "name": "ОЛИО СЛЪНЧОГЛЕДОВО",  # Same but uppercase
+--+                        "quantity": 1,
+--+                        "unit": "л.",
+--+                        "unit_price": 9.00,
+--+                        "total_price": 9.00
+--+                    }
+--+                ]
+--+            },
+--+            {
+--+                "supplier": "Продукти и храни АД",
+--+                "invoice_number": "MERGE-004",
+--+                "amount_without_vat": 25.00,
+--+                "vat_amount": 5.00,
+--+                "total_amount": 30.00,
+--+                "date": "2024-01-18",
+--+                "items": [
+--+                    {
+--+                        "name": "Захар кристална",
+--+                        "quantity": 2,
+--+                        "unit": "кг.",
+--+                        "unit_price": 2.50,
+--+                        "total_price": 5.00
+--+                    }
+--+                ]
+--+            },
+--+            {
+--+                "supplier": "Сладки продукти ЕООД",
+--+                "invoice_number": "MERGE-005",
+--+                "amount_without_vat": 12.00,
+--+                "vat_amount": 2.40,
+--+                "total_amount": 14.40,
+--+                "date": "2024-01-19",
+--+                "items": [
+--+                    {
+--+                        "name": "захар кристална",  # Same but lowercase
+--+                        "quantity": 3,
+--+                        "unit": "кг.",
+--+                        "unit_price": 2.30,
+--+                        "total_price": 6.90
+--+                    }
+--+                ]
+--+            }
+--+        ]
+--+        
+--+        created_count = 0
+--+        for invoice_data in test_invoices:
+--+            try:
+--+                async with self.session.post(
+--+                    f"{BACKEND_URL}/invoices",
+--+                    json=invoice_data,
+--+                    headers=self.get_auth_headers()
+--+                ) as response:
+--+                    if response.status == 200:
+--+                        created_count += 1
+--+                        print(f"   ✅ Created {invoice_data['invoice_number']}: {[item['name'] for item in invoice_data['items']]}")
+--+                    else:
+--+                        error_text = await response.text()
+--+                        print(f"   ⚠️ Failed {invoice_data['invoice_number']}: {response.status} - {error_text}")
+--+            except Exception as e:
+--+                print(f"   ❌ Error {invoice_data['invoice_number']}: {str(e)}")
+--+                
+--+        self.log_result("Test Data Creation", created_count > 0, f"Created {created_count}/5 invoices")
+--+        return created_count > 0
+--+        
+--+    async def test_merge_mappings_endpoints(self):
+--+        """Test all merge mappings endpoints"""
+--+        print("\n🧪 Testing Merge Mappings Endpoints...")
+--+        
+--+        # Test 1: GET initial mappings
+--+        try:
+--+            async with self.session.get(
+--+                f"{BACKEND_URL}/items/merge-mappings",
+--+                headers=self.get_auth_headers()
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    mappings = data.get("mappings", [])
+--+                    self.log_result("GET /api/items/merge-mappings", True, f"Found {len(mappings)} initial mappings")
+--+                    return mappings
+--+                else:
+--+                    error_text = await response.text()
+--+                    self.log_result("GET /api/items/merge-mappings", False, error=f"{response.status} - {error_text}")
+--+                    return []
+--+        except Exception as e:
+--+            self.log_result("GET /api/items/merge-mappings", False, error=str(e))
+--+            return []
+--+            
+--+    async def test_ai_merge_endpoint(self):
+--+        """Test AI merge endpoint and check for errors"""
+--+        print("\n🤖 Testing AI Merge Endpoint...")
+--+        
+--+        try:
+--+            async with self.session.post(
+--+                f"{BACKEND_URL}/items/ai-merge",
+--+                headers=self.get_auth_headers()
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    merged_groups = data.get("merged_groups", [])
+--+                    total_merged = data.get("total_merged", 0)
+--+                    message = data.get("message", "")
+--+                    error = data.get("error", "")
+--+                    
+--+                    if error:
+--+                        self.log_result("POST /api/items/ai-merge", False, 
+--+                                      f"API returned error: {error}")
+--+                        return False, data
+--+                    else:
+--+                        self.log_result("POST /api/items/ai-merge", True, 
+--+                                      f"Found {len(merged_groups)} groups, {total_merged} items merged. Message: {message}")
+--+                        return True, data
+--+                else:
+--+                    error_text = await response.text()
+--+                    self.log_result("POST /api/items/ai-merge", False, error=f"{response.status} - {error_text}")
+--+                    return False, {}
+--+        except Exception as e:
+--+            self.log_result("POST /api/items/ai-merge", False, error=str(e))
+--+            return False, {}
+--+            
+--+    async def test_merged_statistics_endpoint(self):
+--+        """Test merged statistics endpoint with various parameters"""
+--+        print("\n📈 Testing Merged Statistics Endpoint...")
+--+        
+--+        test_cases = [
+--+            ("No parameters", {}),
+--+            ("With top_n", {"top_n": "5"}),
+--+            ("With date range", {"start_date": "2024-01-01", "end_date": "2024-01-31"}),
+--+            ("Full parameters", {"start_date": "2024-01-01", "end_date": "2024-01-31", "top_n": "10"})
+--+        ]
+--+        
+--+        all_passed = True
+--+        for test_name, params in test_cases:
+--+            try:
+--+                async with self.session.get(
+--+                    f"{BACKEND_URL}/statistics/items/merged",
+--+                    params=params,
+--+                    headers=self.get_auth_headers()
+--+                ) as response:
+--+                    if response.status == 200:
+--+                        data = await response.json()
+--+                        totals = data.get("totals", {})
+--+                        merge_applied = data.get("merge_applied", False)
+--+                        top_by_quantity = data.get("top_by_quantity", [])
+--+                        top_by_value = data.get("top_by_value", [])
+--+                        
+--+                        details = f"Totals: {totals}, Merge applied: {merge_applied}, Items: {len(top_by_quantity)}"
+--+                        self.log_result(f"GET /api/statistics/items/merged ({test_name})", True, details)
+--+                    else:
+--+                        error_text = await response.text()
+--+                        self.log_result(f"GET /api/statistics/items/merged ({test_name})", False, 
+--+                                      error=f"{response.status} - {error_text}")
+--+                        all_passed = False
+--+            except Exception as e:
+--+                self.log_result(f"GET /api/statistics/items/merged ({test_name})", False, error=str(e))
+--+                all_passed = False
+--+                
+--+        return all_passed
+--+        
+--+    async def test_delete_merge_mapping_endpoint(self, mappings):
+--+        """Test delete merge mapping endpoint"""
+--+        print("\n🗑️ Testing Delete Merge Mapping Endpoint...")
+--+        
+--+        if not mappings:
+--+            self.log_result("DELETE /api/items/merge-mappings/{name}", True, "No mappings to delete (expected)")
+--+            return True
+--+            
+--+        # Try to delete the first mapping
+--+        first_mapping = mappings[0]
+--+        canonical_name = first_mapping.get("canonical_name", "")
+--+        
+--+        if not canonical_name:
+--+            self.log_result("DELETE /api/items/merge-mappings/{name}", False, error="No canonical name found")
+--+            return False
+--+            
+--+        try:
+--+            from urllib.parse import quote
+--+            encoded_name = quote(canonical_name)
+--+            
+--+            async with self.session.delete(
+--+                f"{BACKEND_URL}/items/merge-mappings/{encoded_name}",
+--+                headers=self.get_auth_headers()
+--+            ) as response:
+--+                if response.status == 200:
+--+                    data = await response.json()
+--+                    message = data.get("message", "")
+--+                    self.log_result("DELETE /api/items/merge-mappings/{name}", True, 
+--+                                  f"Deleted '{canonical_name}': {message}")
+--+                    return True
+--+                else:
+--+                    error_text = await response.text()
+--+                    self.log_result("DELETE /api/items/merge-mappings/{name}", False, 
+--+                                  error=f"{response.status} - {error_text}")
+--+                    return False
+--+        except Exception as e:
+--+            self.log_result("DELETE /api/items/merge-mappings/{name}", False, error=str(e))
+--+            return False
+--+            
+--+    async def test_authentication_required(self):
+--+        """Test that endpoints require authentication"""
+--+        print("\n🔒 Testing Authentication Requirements...")
+--+        
+--+        endpoints = [
+--+            ("GET", "/items/merge-mappings"),
+--+            ("POST", "/items/ai-merge"),
+--+            ("GET", "/statistics/items/merged"),
+--+            ("DELETE", "/items/merge-mappings/test")
+--+        ]
+--+        
+--+        all_passed = True
+--+        for method, endpoint in endpoints:
+--+            try:
+--+                if method == "GET":
+--+                    async with self.session.get(f"{BACKEND_URL}{endpoint}") as response:
+--+                        auth_required = response.status == 401
+--+                elif method == "POST":
+--+                    async with self.session.post(f"{BACKEND_URL}{endpoint}") as response:
+--+                        auth_required = response.status == 401
+--+                elif method == "DELETE":
+--+                    async with self.session.delete(f"{BACKEND_URL}{endpoint}") as response:
+--+                        auth_required = response.status == 401
+--+                        
+--+                if auth_required:
+--+                    self.log_result(f"Auth Required: {method} {endpoint}", True, "Returns 401 without auth")
+--+                else:
+--+                    self.log_result(f"Auth Required: {method} {endpoint}", False, 
+--+                                  f"Expected 401, got {response.status}")
+--+                    all_passed = False
+--+                    
+--+            except Exception as e:
+--+                self.log_result(f"Auth Required: {method} {endpoint}", False, error=str(e))
+--+                all_passed = False
+--+                
+--+        return all_passed
+--+        
+--+    async def run_comprehensive_tests(self):
+--+        """Run all comprehensive AI Item Merging tests"""
+--+        print("🚀 Starting Comprehensive AI Item Merging API Tests")
+--+        print("=" * 70)
+--+        
+--+        await self.setup_session()
+--+        
+--+        try:
+--+            # Test 1: Authentication
+--+            if not await self.register_test_user():
+--+                print("❌ Authentication failed - cannot continue tests")
+--+                return False
+--+                
+--+            # Test 2: Authentication requirements
+--+            await self.test_authentication_required()
+--+            
+--+            # Test 3: Create test data
+--+            if not await self.create_test_invoices_with_similar_items():
+--+                print("❌ Test data creation failed - cannot continue tests")
+--+                return False
+--+                
+--+            # Test 4: Initial merge mappings
+--+            initial_mappings = await self.test_merge_mappings_endpoints()
+--+            
+--+            # Test 5: AI merge analysis
+--+            ai_success, ai_result = await self.test_ai_merge_endpoint()
+--+            
+--+            # Test 6: Merge mappings after AI
+--+            final_mappings = await self.test_merge_mappings_endpoints()
+--+            
+--+            # Test 7: Merged statistics
+--+            await self.test_merged_statistics_endpoint()
+--+            
+--+            # Test 8: Delete merge mapping
+--+            await self.test_delete_merge_mapping_endpoint(final_mappings)
+--+            
+--+            # Summary
+--+            print("\n" + "=" * 70)
+--+            print("📋 COMPREHENSIVE TEST SUMMARY")
+--+            print("=" * 70)
+--+            
+--+            passed = sum(1 for result in self.test_results if result["success"])
+--+            total = len(self.test_results)
+--+            
+--+            print(f"🎯 Results: {passed}/{total} tests passed ({passed/total*100:.1f}%)")
+--+            
+--+            # Show failed tests
+--+            failed_tests = [r for r in self.test_results if not r["success"]]
+--+            if failed_tests:
+--+                print("\n❌ FAILED TESTS:")
+--+                for test in failed_tests:
+--+                    print(f"   • {test['test']}: {test['error']}")
+--+                    
+--+            # Critical issues
+--+            critical_issues = []
+--+            if not ai_success:
+--+                ai_error = ai_result.get("error", "Unknown error")
+--+                if "LlmChat.__init__() got an unexpected keyword argument 'model'" in ai_error:
+--+                    critical_issues.append("AI Merge endpoint has LlmChat initialization bug - 'model' parameter should not be passed to constructor")
+--+                else:
+--+                    critical_issues.append(f"AI Merge endpoint error: {ai_error}")
+--+                    
+--+            if critical_issues:
+--+                print("\n🚨 CRITICAL ISSUES FOUND:")
+--+                for issue in critical_issues:
+--+                    print(f"   • {issue}")
+--+                    
+--+            return len(critical_issues) == 0 and passed >= total * 0.8  # 80% pass rate
+--+                
+--+        finally:
+--+            await self.cleanup_session()
+--+
+--+async def main():
+--+    """Main test runner"""
+--+    tester = ComprehensiveAIMergeTester()
+--+    success = await tester.run_comprehensive_tests()
+--+    sys.exit(0 if success else 1)
+--+
+--+if __name__ == "__main__":
+--+    asyncio.run(main())
+--\ No newline at end of file
 --diff --git a/model.patch b/model.patch
---index c629f16..e69de29 100644
+--index 7fb2dd9..fc98fc9 100644
 ----- a/model.patch
 --+++ b/model.patch
---@@ -1,380 +0,0 @@
+--@@ -1,385 +0,0 @@
 ---diff --git a/model.patch b/model.patch
----index d76f17f..e69de29 100644
+---index c629f16..e69de29 100644
 ------ a/model.patch
 ---+++ b/model.patch
----@@ -1,375 +0,0 @@
+---@@ -1,380 +0,0 @@
 ----diff --git a/model.patch b/model.patch
-----index ef0a74b..e69de29 100644
+----index d76f17f..e69de29 100644
 ------- a/model.patch
 ----+++ b/model.patch
-----@@ -1,284 +0,0 @@
+----@@ -1,375 +0,0 @@
 -----diff --git a/model.patch b/model.patch
------index 823608d..e69de29 100644
+-----index ef0a74b..e69de29 100644
 -------- a/model.patch
 -----+++ b/model.patch
------@@ -1,246 +0,0 @@
-------diff --git a/backend/server.py b/backend/server.py
-------index 6017dc7..039a4d2 100644
---------- a/backend/server.py
-------+++ b/backend/server.py
-------@@ -1552,7 +1552,15 @@ async def get_detailed_supplier_stats(
-------     
-------     first_delivery = min(dates) if dates else None
-------     last_delivery = max(dates) if dates else None
--------    days_inactive = (now - last_delivery).days if last_delivery else 999
-------+    
-------+    # Ensure timezone consistency for date calculations
-------+    if last_delivery:
-------+        if last_delivery.tzinfo is None:
-------+            last_delivery = last_delivery.replace(tzinfo=timezone.utc)
-------+        days_inactive = (now - last_delivery).days
-------+    else:
-------+        days_inactive = 999
-------+    
-------     is_active = days_inactive <= 30
-------     
-------     # Monthly breakdown
+-----@@ -1,284 +0,0 @@
 ------diff --git a/model.patch b/model.patch
-------index dc6e030..e69de29 100644
+------index 823608d..e69de29 100644
 --------- a/model.patch
 ------+++ b/model.patch
-------@@ -1,184 +0,0 @@
+------@@ -1,246 +0,0 @@
+-------diff --git a/backend/server.py b/backend/server.py
+-------index 6017dc7..039a4d2 100644
+---------- a/backend/server.py
+-------+++ b/backend/server.py
+-------@@ -1552,7 +1552,15 @@ async def get_detailed_supplier_stats(
+-------     
+-------     first_delivery = min(dates) if dates else None
+-------     last_delivery = max(dates) if dates else None
+--------    days_inactive = (now - last_delivery).days if last_delivery else 999
+-------+    
+-------+    # Ensure timezone consistency for date calculations
+-------+    if last_delivery:
+-------+        if last_delivery.tzinfo is None:
+-------+            last_delivery = last_delivery.replace(tzinfo=timezone.utc)
+-------+        days_inactive = (now - last_delivery).days
+-------+    else:
+-------+        days_inactive = 999
+-------+    
+-------     is_active = days_inactive <= 30
+-------     
+-------     # Monthly breakdown
 -------diff --git a/model.patch b/model.patch
--------index 19bbeb2..e69de29 100644
+-------index dc6e030..e69de29 100644
 ---------- a/model.patch
 -------+++ b/model.patch
--------@@ -1,179 +0,0 @@
+-------@@ -1,184 +0,0 @@
 --------diff --git a/model.patch b/model.patch
---------index 58f48af..e69de29 100644
+--------index 19bbeb2..e69de29 100644
 ----------- a/model.patch
 --------+++ b/model.patch
---------@@ -1,174 +0,0 @@
+--------@@ -1,179 +0,0 @@
 ---------diff --git a/model.patch b/model.patch
----------index 074293a..e69de29 100644
+---------index 58f48af..e69de29 100644
 ------------ a/model.patch
 ---------+++ b/model.patch
----------@@ -1,169 +0,0 @@
-----------diff --git a/frontend/app/(tabs)/profile.tsx b/frontend/app/(tabs)/profile.tsx
-----------index e47ff1c..caed74e 100644
-------------- a/frontend/app/(tabs)/profile.tsx
-----------+++ b/frontend/app/(tabs)/profile.tsx
-----------@@ -71,7 +71,7 @@ export default function ProfileScreen() {
-----------         <View style={styles.menuSection}>
-----------           <Text style={styles.menuSectionTitle}>Настройки</Text>
----------- 
------------          <TouchableOpacity style={styles.menuItem}>
-----------+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
-----------             <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-----------               <Ionicons name="notifications" size={20} color="#8B5CF6" />
-----------             </View>
+---------@@ -1,174 +0,0 @@
 ----------diff --git a/model.patch b/model.patch
-----------index 9efac8f..e69de29 100644
+----------index 074293a..e69de29 100644
 ------------- a/model.patch
 ----------+++ b/model.patch
-----------@@ -1,151 +0,0 @@
------------diff --git a/test_result.md b/test_result.md
------------index 30c484c..38875f4 100644
--------------- a/test_result.md
------------+++ b/test_result.md
------------@@ -107,87 +107,108 @@ user_problem_statement: Bulgarian Invoice Management Android App with OCR scanni
------------ backend:
------------   - task: "Auth endpoints (session, me, logout)"
------------     implemented: true
-------------    working: "NA"
------------+    working: true
------------     file: "server.py"
------------     stuck_count: 0
------------     priority: "high"
-------------    needs_retesting: true
------------+    needs_retesting: false
------------     status_history:
------------       - working: "NA"
------------         agent: "main"
------------         comment: "Implemented Google OAuth via Emergent Auth with session management"
------------+      - working: true
------------+        agent: "testing"
------------+        comment: "✅ All auth endpoints working correctly. Created test user and session in MongoDB, /api/auth/me returns proper user data with Bearer token authentication"
+----------@@ -1,169 +0,0 @@
+-----------diff --git a/frontend/app/(tabs)/profile.tsx b/frontend/app/(tabs)/profile.tsx
+-----------index e47ff1c..caed74e 100644
+-------------- a/frontend/app/(tabs)/profile.tsx
+-----------+++ b/frontend/app/(tabs)/profile.tsx
+-----------@@ -71,7 +71,7 @@ export default function ProfileScreen() {
+-----------         <View style={styles.menuSection}>
+-----------           <Text style={styles.menuSectionTitle}>Настройки</Text>
 ----------- 
------------   - task: "OCR Invoice Scanning with Gemini API"
------------     implemented: true
-------------    working: "NA"
------------+    working: false
------------     file: "server.py"
-------------    stuck_count: 0
------------+    stuck_count: 1
------------     priority: "high"
-------------    needs_retesting: true
------------+    needs_retesting: false
------------     status_history:
------------       - working: "NA"
------------         agent: "main"
------------         comment: "Implemented OCR using Emergent LLM key with Gemini for Bulgarian invoice text extraction"
------------+      - working: false
------------+        agent: "testing"
------------+        comment: "❌ OCR endpoint failing with error: UserMessage.__init__() got an unexpected keyword argument 'image_contents'. This is an Emergent LLM library API issue that needs research to fix the correct parameter name/structure"
------------ 
------------   - task: "Invoice CRUD operations"
------------     implemented: true
-------------    working: "NA"
------------+    working: true
------------     file: "server.py"
------------     stuck_count: 0
------------     priority: "high"
-------------    needs_retesting: true
------------+    needs_retesting: false
------------     status_history:
------------       - working: "NA"
------------         agent: "main"
------------         comment: "Full CRUD for invoices with search and filtering"
------------+      - working: true
------------+        agent: "testing"
------------+        comment: "✅ All invoice CRUD operations working perfectly. Successfully created invoice with Bulgarian supplier name, retrieved invoice list, and search by supplier name works correctly"
------------ 
------------   - task: "Daily Revenue management"
------------     implemented: true
-------------    working: "NA"
------------+    working: true
------------     file: "server.py"
------------     stuck_count: 0
------------     priority: "high"
-------------    needs_retesting: true
------------+    needs_retesting: false
------------     status_history:
------------       - working: "NA"
------------         agent: "main"
------------         comment: "Fiscal revenue and pocket money tracking"
------------+      - working: true
------------+        agent: "testing"
------------+        comment: "✅ Daily revenue endpoint working correctly. Successfully created daily revenue entry with fiscal_revenue: 500.00 and pocket_money: 100.00"
------------ 
------------   - task: "Non-Invoice Expenses (В канала)"
------------     implemented: true
-------------    working: "NA"
------------+    working: true
------------     file: "server.py"
------------     stuck_count: 0
------------     priority: "medium"
-------------    needs_retesting: true
------------+    needs_retesting: false
------------     status_history:
------------       - working: "NA"
------------         agent: "main"
------------         comment: "Expense tracking without invoices"
------------+      - working: true
------------+        agent: "testing"
------------+        comment: "✅ Expenses endpoint working correctly. Successfully created expense with Bulgarian description 'Гориво за кола' and amount 80.00"
------------ 
------------   - task: "Statistics and VAT calculations"
------------     implemented: true
-------------    working: "NA"
------------+    working: true
------------     file: "server.py"
------------     stuck_count: 0
------------     priority: "high"
-------------    needs_retesting: true
------------+    needs_retesting: false
------------     status_history:
------------       - working: "NA"
------------         agent: "main"
------------         comment: "VAT calculation from fiscal revenue minus invoice VAT credit"
------------+      - working: true
------------+        agent: "testing"
------------+        comment: "✅ Statistics endpoints working perfectly. Summary shows correct VAT calculations: fiscal_vat: 83.33, vat_to_pay: 63.33, profit: 400.0. Chart data endpoint also functional"
------------ 
------------   - task: "Export Excel/PDF"
------------     implemented: true
-------------    working: "NA"
------------+    working: true
------------     file: "server.py"
------------     stuck_count: 0
------------     priority: "medium"
-------------    needs_retesting: true
------------+    needs_retesting: false
------------     status_history:
------------       - working: "NA"
------------         agent: "main"
------------         comment: "Export invoices to Excel and PDF formats"
------------+      - working: true
------------+        agent: "testing"
------------+        comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
------------ 
------------ frontend:
------------   - task: "Login screen with Google OAuth"
------------@@ -270,13 +291,14 @@ metadata:
------------ 
------------ test_plan:
------------   current_focus:
-------------    - "Auth endpoints"
-------------    - "Invoice CRUD"
-------------    - "Statistics API"
-------------  stuck_tasks: []
------------+    - "OCR Invoice Scanning with Gemini API"
------------+  stuck_tasks:
------------+    - "OCR Invoice Scanning with Gemini API"
------------   test_all: false
-------------  test_priority: "high_first"
------------+  test_priority: "stuck_first"
------------ 
------------ agent_communication:
------------   - agent: "main"
-------------    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
------------\ No newline at end of file
------------+    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
------------+  - agent: "testing"
------------+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
------------\ No newline at end of file
+------------          <TouchableOpacity style={styles.menuItem}>
+-----------+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
+-----------             <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+-----------               <Ionicons name="notifications" size={20} color="#8B5CF6" />
+-----------             </View>
+-----------diff --git a/model.patch b/model.patch
+-----------index 9efac8f..e69de29 100644
+-------------- a/model.patch
+-----------+++ b/model.patch
+-----------@@ -1,151 +0,0 @@
+------------diff --git a/test_result.md b/test_result.md
+------------index 30c484c..38875f4 100644
+--------------- a/test_result.md
+------------+++ b/test_result.md
+------------@@ -107,87 +107,108 @@ user_problem_statement: Bulgarian Invoice Management Android App with OCR scanni
+------------ backend:
+------------   - task: "Auth endpoints (session, me, logout)"
+------------     implemented: true
+-------------    working: "NA"
+------------+    working: true
+------------     file: "server.py"
+------------     stuck_count: 0
+------------     priority: "high"
+-------------    needs_retesting: true
+------------+    needs_retesting: false
+------------     status_history:
+------------       - working: "NA"
+------------         agent: "main"
+------------         comment: "Implemented Google OAuth via Emergent Auth with session management"
+------------+      - working: true
+------------+        agent: "testing"
+------------+        comment: "✅ All auth endpoints working correctly. Created test user and session in MongoDB, /api/auth/me returns proper user data with Bearer token authentication"
+------------ 
+------------   - task: "OCR Invoice Scanning with Gemini API"
+------------     implemented: true
+-------------    working: "NA"
+------------+    working: false
+------------     file: "server.py"
+-------------    stuck_count: 0
+------------+    stuck_count: 1
+------------     priority: "high"
+-------------    needs_retesting: true
+------------+    needs_retesting: false
+------------     status_history:
+------------       - working: "NA"
+------------         agent: "main"
+------------         comment: "Implemented OCR using Emergent LLM key with Gemini for Bulgarian invoice text extraction"
+------------+      - working: false
+------------+        agent: "testing"
+------------+        comment: "❌ OCR endpoint failing with error: UserMessage.__init__() got an unexpected keyword argument 'image_contents'. This is an Emergent LLM library API issue that needs research to fix the correct parameter name/structure"
+------------ 
+------------   - task: "Invoice CRUD operations"
+------------     implemented: true
+-------------    working: "NA"
+------------+    working: true
+------------     file: "server.py"
+------------     stuck_count: 0
+------------     priority: "high"
+-------------    needs_retesting: true
+------------+    needs_retesting: false
+------------     status_history:
+------------       - working: "NA"
+------------         agent: "main"
+------------         comment: "Full CRUD for invoices with search and filtering"
+------------+      - working: true
+------------+        agent: "testing"
+------------+        comment: "✅ All invoice CRUD operations working perfectly. Successfully created invoice with Bulgarian supplier name, retrieved invoice list, and search by supplier name works correctly"
+------------ 
+------------   - task: "Daily Revenue management"
+------------     implemented: true
+-------------    working: "NA"
+------------+    working: true
+------------     file: "server.py"
+------------     stuck_count: 0
+------------     priority: "high"
+-------------    needs_retesting: true
+------------+    needs_retesting: false
+------------     status_history:
+------------       - working: "NA"
+------------         agent: "main"
+------------         comment: "Fiscal revenue and pocket money tracking"
+------------+      - working: true
+------------+        agent: "testing"
+------------+        comment: "✅ Daily revenue endpoint working correctly. Successfully created daily revenue entry with fiscal_revenue: 500.00 and pocket_money: 100.00"
+------------ 
+------------   - task: "Non-Invoice Expenses (В канала)"
+------------     implemented: true
+-------------    working: "NA"
+------------+    working: true
+------------     file: "server.py"
+------------     stuck_count: 0
+------------     priority: "medium"
+-------------    needs_retesting: true
+------------+    needs_retesting: false
+------------     status_history:
+------------       - working: "NA"
+------------         agent: "main"
+------------         comment: "Expense tracking without invoices"
+------------+      - working: true
+------------+        agent: "testing"
+------------+        comment: "✅ Expenses endpoint working correctly. Successfully created expense with Bulgarian description 'Гориво за кола' and amount 80.00"
+------------ 
+------------   - task: "Statistics and VAT calculations"
+------------     implemented: true
+-------------    working: "NA"
+------------+    working: true
+------------     file: "server.py"
+------------     stuck_count: 0
+------------     priority: "high"
+-------------    needs_retesting: true
+------------+    needs_retesting: false
+------------     status_history:
+------------       - working: "NA"
+------------         agent: "main"
+------------         comment: "VAT calculation from fiscal revenue minus invoice VAT credit"
+------------+      - working: true
+------------+        agent: "testing"
+------------+        comment: "✅ Statistics endpoints working perfectly. Summary shows correct VAT calculations: fiscal_vat: 83.33, vat_to_pay: 63.33, profit: 400.0. Chart data endpoint also functional"
+------------ 
+------------   - task: "Export Excel/PDF"
+------------     implemented: true
+-------------    working: "NA"
+------------+    working: true
+------------     file: "server.py"
+------------     stuck_count: 0
+------------     priority: "medium"
+-------------    needs_retesting: true
+------------+    needs_retesting: false
+------------     status_history:
+------------       - working: "NA"
+------------         agent: "main"
+------------         comment: "Export invoices to Excel and PDF formats"
+------------+      - working: true
+------------+        agent: "testing"
+------------+        comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
+------------ 
+------------ frontend:
+------------   - task: "Login screen with Google OAuth"
+------------@@ -270,13 +291,14 @@ metadata:
+------------ 
+------------ test_plan:
+------------   current_focus:
+-------------    - "Auth endpoints"
+-------------    - "Invoice CRUD"
+-------------    - "Statistics API"
+-------------  stuck_tasks: []
+------------+    - "OCR Invoice Scanning with Gemini API"
+------------+  stuck_tasks:
+------------+    - "OCR Invoice Scanning with Gemini API"
+------------   test_all: false
+-------------  test_priority: "high_first"
+------------+  test_priority: "stuck_first"
+------------ 
+------------ agent_communication:
+------------   - agent: "main"
+-------------    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+------------\ No newline at end of file
+------------+    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+------------+  - agent: "testing"
+------------+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+------------\ No newline at end of file
+-------diff --git a/test_result.md b/test_result.md
+-------index 38875f4..2238af3 100644
+---------- a/test_result.md
+-------+++ b/test_result.md
+-------@@ -210,6 +210,21 @@ backend:
+-------         agent: "testing"
+-------         comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
+------- 
+-------+  - task: "Advanced Supplier Statistics Endpoints"
+-------+    implemented: true
+-------+    working: true
+-------+    file: "server.py"
+-------+    stuck_count: 0
+-------+    priority: "high"
+-------+    needs_retesting: false
+-------+    status_history:
+-------+      - working: "NA"
+-------+        agent: "main"
+-------+        comment: "New advanced supplier statistics endpoints: /api/statistics/suppliers, /api/statistics/supplier/{name}/detailed, /api/statistics/suppliers/compare"
+-------+      - working: true
+-------+        agent: "testing"
+-------+        comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
+-------+
+------- frontend:
+-------   - task: "Login screen with Google OAuth"
+-------     implemented: true
+-------@@ -301,4 +316,6 @@ agent_communication:
+-------   - agent: "main"
+-------     message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+-------   - agent: "testing"
+--------    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+-------\ No newline at end of file
+-------+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+-------+  - agent: "testing"
+-------+    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
+-------\ No newline at end of file
 ------diff --git a/test_result.md b/test_result.md
-------index 38875f4..2238af3 100644
+------index 2238af3..284e7ca 100644
 --------- a/test_result.md
 ------+++ b/test_result.md
-------@@ -210,6 +210,21 @@ backend:
+------@@ -225,6 +225,18 @@ backend:
 ------         agent: "testing"
-------         comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
+------         comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
 ------ 
-------+  - task: "Advanced Supplier Statistics Endpoints"
+------+  - task: "Item Price Tracking API Endpoints"
 ------+    implemented: true
 ------+    working: true
 ------+    file: "server.py"
@@ -1233,190 +1274,154 @@ index 880f5d1..e69de29 100644
 ------+    priority: "high"
 ------+    needs_retesting: false
 ------+    status_history:
-------+      - working: "NA"
-------+        agent: "main"
-------+        comment: "New advanced supplier statistics endpoints: /api/statistics/suppliers, /api/statistics/supplier/{name}/detailed, /api/statistics/suppliers/compare"
 ------+      - working: true
 ------+        agent: "testing"
-------+        comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
+------+        comment: "✅ All item price tracking endpoints working perfectly. Successfully tested: POST /api/invoices with items (creates price history and alerts), GET /api/items/price-alerts (returns price alerts with 17.65% increase for Кафе), GET /api/items/price-alert-settings (threshold 10%, enabled), GET /api/statistics/items (item statistics with top lists), GET /api/items/price-history/кафе (price history with 2 records, avg 9.25 лв), GET /api/statistics/items/кафе/by-supplier (supplier comparison). Price alerts correctly triggered for items exceeding 10% threshold. All Bulgarian text handling working correctly."
 ------+
 ------ frontend:
 ------   - task: "Login screen with Google OAuth"
 ------     implemented: true
-------@@ -301,4 +316,6 @@ agent_communication:
-------   - agent: "main"
-------     message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+------@@ -318,4 +330,6 @@ agent_communication:
 ------   - agent: "testing"
--------    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+------     message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+------   - agent: "testing"
+-------    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
 ------\ No newline at end of file
-------+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
-------+  - agent: "testing"
 ------+    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
+------+  - agent: "testing"
+------+    message: "Item Price Tracking API testing completed successfully. All 7 endpoints working perfectly: ✅ POST /api/invoices with items (creates price history and alerts automatically), ✅ GET /api/items/price-alerts (returns price alerts with correct calculations), ✅ GET /api/items/price-alert-settings (threshold management), ✅ GET /api/statistics/items (comprehensive item statistics), ✅ GET /api/items/price-history/{item} (price history tracking), ✅ GET /api/statistics/items/{item}/by-supplier (supplier price comparison). Price alerts correctly triggered for 17.6% coffee price increase. Bulgarian text handling working correctly. All features ready for production."
 ------\ No newline at end of file
 -----diff --git a/test_result.md b/test_result.md
------index 2238af3..284e7ca 100644
+-----index fc8d914..b18ea79 100644
 -------- a/test_result.md
 -----+++ b/test_result.md
------@@ -225,6 +225,18 @@ backend:
------         agent: "testing"
------         comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
+-----@@ -239,51 +239,63 @@ backend:
 ----- 
------+  - task: "Item Price Tracking API Endpoints"
------+    implemented: true
+-----   - task: "Budget Management API Endpoints"
+-----     implemented: true
+------    working: "NA"
 -----+    working: true
------+    file: "server.py"
------+    stuck_count: 0
------+    priority: "high"
+-----     file: "server.py"
+-----     stuck_count: 0
+-----     priority: "high"
+------    needs_retesting: true
 -----+    needs_retesting: false
------+    status_history:
+-----     status_history:
+-----       - working: "NA"
+-----         agent: "main"
+-----         comment: "Added budget endpoints: GET/POST /api/budget (get/create budgets), GET /api/budget/status (current month status with spending percentage), GET/POST/DELETE /api/recurring-expenses (periodic expense management)"
 -----+      - working: true
 -----+        agent: "testing"
------+        comment: "✅ All item price tracking endpoints working perfectly. Successfully tested: POST /api/invoices with items (creates price history and alerts), GET /api/items/price-alerts (returns price alerts with 17.65% increase for Кафе), GET /api/items/price-alert-settings (threshold 10%, enabled), GET /api/statistics/items (item statistics with top lists), GET /api/items/price-history/кафе (price history with 2 records, avg 9.25 лв), GET /api/statistics/items/кафе/by-supplier (supplier comparison). Price alerts correctly triggered for items exceeding 10% threshold. All Bulgarian text handling working correctly."
------+
+-----+        comment: "✅ All budget management endpoints working perfectly. Successfully tested: GET /api/budget/status (returns has_budget: false initially, then true after creation with spending percentage), POST /api/budget (creates budget for current month with limit 5000 and threshold 80%), GET /api/budget (retrieves all budgets correctly), GET/POST/DELETE /api/recurring-expenses (creates 'Наем офис' 500 лв recurring expense, retrieves it, and deletes successfully). All Bulgarian text handling working correctly."
+----- 
+-----   - task: "Export Excel/PDF Enhanced Endpoints"
+-----     implemented: true
+------    working: "NA"
+-----+    working: true
+-----     file: "server.py"
+-----     stuck_count: 0
+-----     priority: "medium"
+------    needs_retesting: true
+-----+    needs_retesting: false
+-----     status_history:
+-----       - working: "NA"
+-----         agent: "main"
+-----         comment: "Added enhanced export endpoints: GET /api/export/invoices/excel and GET /api/export/invoices/pdf with company info and improved formatting"
+-----+      - working: true
+-----+        agent: "testing"
+-----+        comment: "✅ Both enhanced export endpoints working perfectly. GET /api/export/invoices/excel returns proper Excel file (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, 5404 bytes) with correct filename attachment. GET /api/export/invoices/pdf returns proper PDF file (application/pdf, 2156 bytes) with correct filename attachment. Both endpoints handle authentication properly and return expected content types."
+----- 
+-----   - task: "Forecast API Endpoints"
+-----     implemented: true
+------    working: "NA"
+-----+    working: true
+-----     file: "server.py"
+-----     stuck_count: 0
+-----     priority: "medium"
+------    needs_retesting: true
+-----+    needs_retesting: false
+-----     status_history:
+-----       - working: "NA"
+-----         agent: "main"
+-----         comment: "Added forecast endpoints: GET /api/forecast/expenses and GET /api/forecast/revenue for financial projections"
+-----+      - working: true
+-----+        agent: "testing"
+-----+        comment: "✅ Both forecast endpoints working correctly. GET /api/forecast/expenses?months_ahead=3 returns forecast data with proper structure (forecast array and summary with total_predicted and avg_monthly). GET /api/forecast/revenue?months_ahead=3 returns revenue forecast with same structure. Both endpoints handle authentication properly and return expected response formats."
+----- 
+-----   - task: "Audit Log API Endpoints"
+-----     implemented: true
+------    working: "NA"
+-----+    working: true
+-----     file: "server.py"
+-----     stuck_count: 0
+-----     priority: "low"
+------    needs_retesting: true
+-----+    needs_retesting: false
+-----     status_history:
+-----       - working: "NA"
+-----         agent: "main"
+-----         comment: "Added audit log endpoint: GET /api/audit-logs with filtering by action and entity_type (Owner/Manager only)"
+-----+      - working: true
+-----+        agent: "testing"
+-----+        comment: "✅ Audit log endpoints working correctly. GET /api/audit-logs returns audit logs with proper structure (logs array and total count). GET /api/audit-logs?action=create&entity_type=invoice returns filtered results correctly. Both endpoints handle authentication properly. Access control working as expected (may return 403 for non-Owner/Manager users)."
+----- 
 ----- frontend:
 -----   - task: "Login screen with Google OAuth"
------     implemented: true
------@@ -318,4 +330,6 @@ agent_communication:
+-----@@ -382,4 +394,6 @@ agent_communication:
 -----   - agent: "testing"
------     message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
------   - agent: "testing"
-------    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
+-----     message: "Item Price Tracking API testing completed successfully. All 7 endpoints working perfectly: ✅ POST /api/invoices with items (creates price history and alerts automatically), ✅ GET /api/items/price-alerts (returns price alerts with correct calculations), ✅ GET /api/items/price-alert-settings (threshold management), ✅ GET /api/statistics/items (comprehensive item statistics), ✅ GET /api/items/price-history/{item} (price history tracking), ✅ GET /api/statistics/items/{item}/by-supplier (supplier price comparison). Price alerts correctly triggered for 17.6% coffee price increase. Bulgarian text handling working correctly. All features ready for production."
+-----   - agent: "main"
+------    message: "Added Budget and Export screens with full functionality. Budget screen includes: monthly budget tracking with progress visualization, alerts for exceeding limits, recurring expenses management. Export screen includes: Excel and PDF export options with sharing capability. Added translations for both Bulgarian and English. Profile screen now has links to Budget and Export. Please test the new budget and export endpoints: GET/POST /api/budget, GET /api/budget/status, GET/POST/DELETE /api/recurring-expenses, GET /api/export/invoices/excel, GET /api/export/invoices/pdf"
 -----\ No newline at end of file
------+    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
+-----+    message: "Added Budget and Export screens with full functionality. Budget screen includes: monthly budget tracking with progress visualization, alerts for exceeding limits, recurring expenses management. Export screen includes: Excel and PDF export options with sharing capability. Added translations for both Bulgarian and English. Profile screen now has links to Budget and Export. Please test the new budget and export endpoints: GET/POST /api/budget, GET /api/budget/status, GET/POST/DELETE /api/recurring-expenses, GET /api/export/invoices/excel, GET /api/export/invoices/pdf"
 -----+  - agent: "testing"
------+    message: "Item Price Tracking API testing completed successfully. All 7 endpoints working perfectly: ✅ POST /api/invoices with items (creates price history and alerts automatically), ✅ GET /api/items/price-alerts (returns price alerts with correct calculations), ✅ GET /api/items/price-alert-settings (threshold management), ✅ GET /api/statistics/items (comprehensive item statistics), ✅ GET /api/items/price-history/{item} (price history tracking), ✅ GET /api/statistics/items/{item}/by-supplier (supplier price comparison). Price alerts correctly triggered for 17.6% coffee price increase. Bulgarian text handling working correctly. All features ready for production."
+-----+    message: "Budget and Export API testing completed successfully. All 4 new endpoint groups working perfectly: ✅ Budget Management (GET/POST /api/budget, GET /api/budget/status with proper has_budget logic and spending calculations), ✅ Recurring Expenses (GET/POST/DELETE /api/recurring-expenses with Bulgarian text support), ✅ Enhanced Export (GET /api/export/invoices/excel and /api/export/invoices/pdf with proper content types and file attachments), ✅ Forecast APIs (GET /api/forecast/expenses and /api/forecast/revenue with structured responses), ✅ Audit Logs (GET /api/audit-logs with filtering and proper access control). All 15 tests passed with 100% success rate. Authentication working correctly. Bulgarian text handling working correctly. All features ready for production."
 -----\ No newline at end of file
-----diff --git a/test_result.md b/test_result.md
-----index fc8d914..b18ea79 100644
-------- a/test_result.md
-----+++ b/test_result.md
-----@@ -239,51 +239,63 @@ backend:
----- 
-----   - task: "Budget Management API Endpoints"
-----     implemented: true
------    working: "NA"
-----+    working: true
-----     file: "server.py"
-----     stuck_count: 0
-----     priority: "high"
------    needs_retesting: true
-----+    needs_retesting: false
-----     status_history:
-----       - working: "NA"
-----         agent: "main"
-----         comment: "Added budget endpoints: GET/POST /api/budget (get/create budgets), GET /api/budget/status (current month status with spending percentage), GET/POST/DELETE /api/recurring-expenses (periodic expense management)"
-----+      - working: true
-----+        agent: "testing"
-----+        comment: "✅ All budget management endpoints working perfectly. Successfully tested: GET /api/budget/status (returns has_budget: false initially, then true after creation with spending percentage), POST /api/budget (creates budget for current month with limit 5000 and threshold 80%), GET /api/budget (retrieves all budgets correctly), GET/POST/DELETE /api/recurring-expenses (creates 'Наем офис' 500 лв recurring expense, retrieves it, and deletes successfully). All Bulgarian text handling working correctly."
----- 
-----   - task: "Export Excel/PDF Enhanced Endpoints"
-----     implemented: true
------    working: "NA"
-----+    working: true
-----     file: "server.py"
-----     stuck_count: 0
-----     priority: "medium"
------    needs_retesting: true
-----+    needs_retesting: false
-----     status_history:
-----       - working: "NA"
-----         agent: "main"
-----         comment: "Added enhanced export endpoints: GET /api/export/invoices/excel and GET /api/export/invoices/pdf with company info and improved formatting"
-----+      - working: true
-----+        agent: "testing"
-----+        comment: "✅ Both enhanced export endpoints working perfectly. GET /api/export/invoices/excel returns proper Excel file (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, 5404 bytes) with correct filename attachment. GET /api/export/invoices/pdf returns proper PDF file (application/pdf, 2156 bytes) with correct filename attachment. Both endpoints handle authentication properly and return expected content types."
----- 
-----   - task: "Forecast API Endpoints"
-----     implemented: true
------    working: "NA"
-----+    working: true
-----     file: "server.py"
-----     stuck_count: 0
-----     priority: "medium"
------    needs_retesting: true
-----+    needs_retesting: false
-----     status_history:
-----       - working: "NA"
-----         agent: "main"
-----         comment: "Added forecast endpoints: GET /api/forecast/expenses and GET /api/forecast/revenue for financial projections"
-----+      - working: true
-----+        agent: "testing"
-----+        comment: "✅ Both forecast endpoints working correctly. GET /api/forecast/expenses?months_ahead=3 returns forecast data with proper structure (forecast array and summary with total_predicted and avg_monthly). GET /api/forecast/revenue?months_ahead=3 returns revenue forecast with same structure. Both endpoints handle authentication properly and return expected response formats."
----- 
-----   - task: "Audit Log API Endpoints"
-----     implemented: true
------    working: "NA"
-----+    working: true
-----     file: "server.py"
-----     stuck_count: 0
-----     priority: "low"
------    needs_retesting: true
-----+    needs_retesting: false
-----     status_history:
-----       - working: "NA"
-----         agent: "main"
-----         comment: "Added audit log endpoint: GET /api/audit-logs with filtering by action and entity_type (Owner/Manager only)"
-----+      - working: true
-----+        agent: "testing"
-----+        comment: "✅ Audit log endpoints working correctly. GET /api/audit-logs returns audit logs with proper structure (logs array and total count). GET /api/audit-logs?action=create&entity_type=invoice returns filtered results correctly. Both endpoints handle authentication properly. Access control working as expected (may return 403 for non-Owner/Manager users)."
----- 
----- frontend:
-----   - task: "Login screen with Google OAuth"
-----@@ -382,4 +394,6 @@ agent_communication:
-----   - agent: "testing"
-----     message: "Item Price Tracking API testing completed successfully. All 7 endpoints working perfectly: ✅ POST /api/invoices with items (creates price history and alerts automatically), ✅ GET /api/items/price-alerts (returns price alerts with correct calculations), ✅ GET /api/items/price-alert-settings (threshold management), ✅ GET /api/statistics/items (comprehensive item statistics), ✅ GET /api/items/price-history/{item} (price history tracking), ✅ GET /api/statistics/items/{item}/by-supplier (supplier price comparison). Price alerts correctly triggered for 17.6% coffee price increase. Bulgarian text handling working correctly. All features ready for production."
-----   - agent: "main"
------    message: "Added Budget and Export screens with full functionality. Budget screen includes: monthly budget tracking with progress visualization, alerts for exceeding limits, recurring expenses management. Export screen includes: Excel and PDF export options with sharing capability. Added translations for both Bulgarian and English. Profile screen now has links to Budget and Export. Please test the new budget and export endpoints: GET/POST /api/budget, GET /api/budget/status, GET/POST/DELETE /api/recurring-expenses, GET /api/export/invoices/excel, GET /api/export/invoices/pdf"
-----\ No newline at end of file
-----+    message: "Added Budget and Export screens with full functionality. Budget screen includes: monthly budget tracking with progress visualization, alerts for exceeding limits, recurring expenses management. Export screen includes: Excel and PDF export options with sharing capability. Added translations for both Bulgarian and English. Profile screen now has links to Budget and Export. Please test the new budget and export endpoints: GET/POST /api/budget, GET /api/budget/status, GET/POST/DELETE /api/recurring-expenses, GET /api/export/invoices/excel, GET /api/export/invoices/pdf"
-----+  - agent: "testing"
-----+    message: "Budget and Export API testing completed successfully. All 4 new endpoint groups working perfectly: ✅ Budget Management (GET/POST /api/budget, GET /api/budget/status with proper has_budget logic and spending calculations), ✅ Recurring Expenses (GET/POST/DELETE /api/recurring-expenses with Bulgarian text support), ✅ Enhanced Export (GET /api/export/invoices/excel and /api/export/invoices/pdf with proper content types and file attachments), ✅ Forecast APIs (GET /api/forecast/expenses and /api/forecast/revenue with structured responses), ✅ Audit Logs (GET /api/audit-logs with filtering and proper access control). All 15 tests passed with 100% success rate. Authentication working correctly. Bulgarian text handling working correctly. All features ready for production."
-----\ No newline at end of file
--diff --git a/test_result.md b/test_result.md
--index fec8cbd..41af183 100644
----- a/test_result.md
--+++ b/test_result.md
--@@ -297,6 +297,21 @@ backend:
--         agent: "testing"
--         comment: "✅ Audit log endpoints working correctly. GET /api/audit-logs returns audit logs with proper structure (logs array and total count). GET /api/audit-logs?action=create&entity_type=invoice returns filtered results correctly. Both endpoints handle authentication properly. Access control working as expected (may return 403 for non-Owner/Manager users)."
-- 
--+  - task: "AI Item Merging API Endpoints"
--+    implemented: true
--+    working: false
--+    file: "server.py"
--+    stuck_count: 1
--+    priority: "high"
--+    needs_retesting: false
--+    status_history:
--+      - working: "NA"
--+        agent: "main"
--+        comment: "Added AI Item Merging feature using Gemini. New endpoints: POST /api/items/ai-merge (triggers AI analysis to find similar products), GET /api/items/merge-mappings (returns current merge mappings), DELETE /api/items/merge-mappings/{name} (removes a merge), GET /api/statistics/items/merged (returns item statistics with merges applied). Backend stores merge mappings and applies them to statistics in real-time without data duplication."
--+      - working: false
--+        agent: "testing"
--+        comment: "❌ CRITICAL BUG in POST /api/items/ai-merge endpoint: LlmChat initialization error - 'model' parameter should not be passed to constructor. Error: 'LlmChat.__init__() got an unexpected keyword argument 'model''. Other endpoints working: ✅ GET /api/items/merge-mappings (returns mappings correctly), ✅ DELETE /api/items/merge-mappings/{name} (deletes mappings), ✅ GET /api/statistics/items/merged (returns statistics with merge_applied flag). Authentication working correctly. Bulgarian text handling working correctly. FIX NEEDED: Remove 'model' parameter from LlmChat constructor and use .with_model() method instead (like in OCR endpoint)."
--+
-- frontend:
--   - task: "Login screen with Google OAuth"
--     implemented: true
--@@ -378,9 +393,10 @@ metadata:
-- 
-- test_plan:
--   current_focus:
---    - "OCR Invoice Scanning with Gemini API"
--+    - "AI Item Merging API Endpoints"
--   stuck_tasks:
--     - "OCR Invoice Scanning with Gemini API"
--+    - "AI Item Merging API Endpoints"
--   test_all: false
--   test_priority: "stuck_first"
-- 
--@@ -400,4 +416,6 @@ agent_communication:
--   - agent: "main"
--     message: "Added AI Item Merging feature using Gemini. New endpoints: POST /api/items/ai-merge (triggers AI analysis to find similar products), GET /api/items/merge-mappings (returns current merge mappings), DELETE /api/items/merge-mappings/{name} (removes a merge), GET /api/statistics/items/merged (returns item statistics with merges applied). Backend stores merge mappings and applies them to statistics in real-time without data duplication."
--   - agent: "testing"
---    message: "Budget and Export API testing completed successfully. All 4 new endpoint groups working perfectly: ✅ Budget Management (GET/POST /api/budget, GET /api/budget/status with proper has_budget logic and spending calculations), ✅ Recurring Expenses (GET/POST/DELETE /api/recurring-expenses with Bulgarian text support), ✅ Enhanced Export (GET /api/export/invoices/excel and /api/export/invoices/pdf with proper content types and file attachments), ✅ Forecast APIs (GET /api/forecast/expenses and /api/forecast/revenue with structured responses), ✅ Audit Logs (GET /api/audit-logs with filtering and proper access control). All 15 tests passed with 100% success rate. Authentication working correctly. Bulgarian text handling working correctly. All features ready for production."
--\ No newline at end of file
--+    message: "Budget and Export API testing completed successfully. All 4 new endpoint groups working perfectly: ✅ Budget Management (GET/POST /api/budget, GET /api/budget/status with proper has_budget logic and spending calculations), ✅ Recurring Expenses (GET/POST/DELETE /api/recurring-expenses with Bulgarian text support), ✅ Enhanced Export (GET /api/export/invoices/excel and /api/export/invoices/pdf with proper content types and file attachments), ✅ Forecast APIs (GET /api/forecast/expenses and /api/forecast/revenue with structured responses), ✅ Audit Logs (GET /api/audit-logs with filtering and proper access control). All 15 tests passed with 100% success rate. Authentication working correctly. Bulgarian text handling working correctly. All features ready for production."
--+  - agent: "testing"
--+    message: "AI Item Merging API testing completed. CRITICAL BUG FOUND: ❌ POST /api/items/ai-merge endpoint failing with LlmChat initialization error - 'model' parameter incorrectly passed to constructor. Other endpoints working: ✅ GET /api/items/merge-mappings (returns mappings correctly), ✅ DELETE /api/items/merge-mappings/{name} (deletes mappings), ✅ GET /api/statistics/items/merged (returns statistics with merge_applied flag and proper totals). Authentication working correctly. Bulgarian text handling working correctly. URGENT FIX NEEDED: In server.py line 3006-3009, change LlmChat(api_key=..., model=...) to LlmChat(api_key=...).with_model('gemini', 'gemini-2.5-flash') like in OCR endpoint."
--\ No newline at end of file
+--diff --git a/test_result.md b/test_result.md
+--index fec8cbd..41af183 100644
+----- a/test_result.md
+--+++ b/test_result.md
+--@@ -297,6 +297,21 @@ backend:
+--         agent: "testing"
+--         comment: "✅ Audit log endpoints working correctly. GET /api/audit-logs returns audit logs with proper structure (logs array and total count). GET /api/audit-logs?action=create&entity_type=invoice returns filtered results correctly. Both endpoints handle authentication properly. Access control working as expected (may return 403 for non-Owner/Manager users)."
+-- 
+--+  - task: "AI Item Merging API Endpoints"
+--+    implemented: true
+--+    working: false
+--+    file: "server.py"
+--+    stuck_count: 1
+--+    priority: "high"
+--+    needs_retesting: false
+--+    status_history:
+--+      - working: "NA"
+--+        agent: "main"
+--+        comment: "Added AI Item Merging feature using Gemini. New endpoints: POST /api/items/ai-merge (triggers AI analysis to find similar products), GET /api/items/merge-mappings (returns current merge mappings), DELETE /api/items/merge-mappings/{name} (removes a merge), GET /api/statistics/items/merged (returns item statistics with merges applied). Backend stores merge mappings and applies them to statistics in real-time without data duplication."
+--+      - working: false
+--+        agent: "testing"
+--+        comment: "❌ CRITICAL BUG in POST /api/items/ai-merge endpoint: LlmChat initialization error - 'model' parameter should not be passed to constructor. Error: 'LlmChat.__init__() got an unexpected keyword argument 'model''. Other endpoints working: ✅ GET /api/items/merge-mappings (returns mappings correctly), ✅ DELETE /api/items/merge-mappings/{name} (deletes mappings), ✅ GET /api/statistics/items/merged (returns statistics with merge_applied flag). Authentication working correctly. Bulgarian text handling working correctly. FIX NEEDED: Remove 'model' parameter from LlmChat constructor and use .with_model() method instead (like in OCR endpoint)."
+--+
+-- frontend:
+--   - task: "Login screen with Google OAuth"
+--     implemented: true
+--@@ -378,9 +393,10 @@ metadata:
+-- 
+-- test_plan:
+--   current_focus:
+---    - "OCR Invoice Scanning with Gemini API"
+--+    - "AI Item Merging API Endpoints"
+--   stuck_tasks:
+--     - "OCR Invoice Scanning with Gemini API"
+--+    - "AI Item Merging API Endpoints"
+--   test_all: false
+--   test_priority: "stuck_first"
+-- 
+--@@ -400,4 +416,6 @@ agent_communication:
+--   - agent: "main"
+--     message: "Added AI Item Merging feature using Gemini. New endpoints: POST /api/items/ai-merge (triggers AI analysis to find similar products), GET /api/items/merge-mappings (returns current merge mappings), DELETE /api/items/merge-mappings/{name} (removes a merge), GET /api/statistics/items/merged (returns item statistics with merges applied). Backend stores merge mappings and applies them to statistics in real-time without data duplication."
+--   - agent: "testing"
+---    message: "Budget and Export API testing completed successfully. All 4 new endpoint groups working perfectly: ✅ Budget Management (GET/POST /api/budget, GET /api/budget/status with proper has_budget logic and spending calculations), ✅ Recurring Expenses (GET/POST/DELETE /api/recurring-expenses with Bulgarian text support), ✅ Enhanced Export (GET /api/export/invoices/excel and /api/export/invoices/pdf with proper content types and file attachments), ✅ Forecast APIs (GET /api/forecast/expenses and /api/forecast/revenue with structured responses), ✅ Audit Logs (GET /api/audit-logs with filtering and proper access control). All 15 tests passed with 100% success rate. Authentication working correctly. Bulgarian text handling working correctly. All features ready for production."
+--\ No newline at end of file
+--+    message: "Budget and Export API testing completed successfully. All 4 new endpoint groups working perfectly: ✅ Budget Management (GET/POST /api/budget, GET /api/budget/status with proper has_budget logic and spending calculations), ✅ Recurring Expenses (GET/POST/DELETE /api/recurring-expenses with Bulgarian text support), ✅ Enhanced Export (GET /api/export/invoices/excel and /api/export/invoices/pdf with proper content types and file attachments), ✅ Forecast APIs (GET /api/forecast/expenses and /api/forecast/revenue with structured responses), ✅ Audit Logs (GET /api/audit-logs with filtering and proper access control). All 15 tests passed with 100% success rate. Authentication working correctly. Bulgarian text handling working correctly. All features ready for production."
+--+  - agent: "testing"
+--+    message: "AI Item Merging API testing completed. CRITICAL BUG FOUND: ❌ POST /api/items/ai-merge endpoint failing with LlmChat initialization error - 'model' parameter incorrectly passed to constructor. Other endpoints working: ✅ GET /api/items/merge-mappings (returns mappings correctly), ✅ DELETE /api/items/merge-mappings/{name} (deletes mappings), ✅ GET /api/statistics/items/merged (returns statistics with merge_applied flag and proper totals). Authentication working correctly. Bulgarian text handling working correctly. URGENT FIX NEEDED: In server.py line 3006-3009, change LlmChat(api_key=..., model=...) to LlmChat(api_key=...).with_model('gemini', 'gemini-2.5-flash') like in OCR endpoint."
+--\ No newline at end of file
