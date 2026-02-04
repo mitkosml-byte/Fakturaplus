@@ -208,24 +208,26 @@ class BudgetAndExportTester:
                     data = await response.json()
                     budgets = data.get("budgets", [])
                     
-                    # Look for our created budget
-                    feb_budget = next((b for b in budgets if b.get("month") == "2025-02"), None)
+                    # Look for our created budget (current month)
+                    from datetime import datetime, timezone
+                    current_month = datetime.now(timezone.utc).strftime('%Y-%m')
+                    current_budget = next((b for b in budgets if b.get("month") == current_month), None)
                     
-                    if feb_budget:
-                        expense_limit = feb_budget.get("expense_limit", 0)
-                        alert_threshold = feb_budget.get("alert_threshold", 0)
+                    if current_budget:
+                        expense_limit = current_budget.get("expense_limit", 0)
+                        alert_threshold = current_budget.get("alert_threshold", 0)
                         
                         self.log_result(
                             "Get Budgets", 
                             True, 
-                            f"Found {len(budgets)} budgets. Feb 2025: limit {expense_limit}, threshold {alert_threshold}%"
+                            f"Found {len(budgets)} budgets. {current_month}: limit {expense_limit}, threshold {alert_threshold}%"
                         )
                         return True
                     else:
                         self.log_result(
                             "Get Budgets", 
                             True, 
-                            f"Retrieved {len(budgets)} budgets (Feb 2025 budget not found - may be expected)"
+                            f"Retrieved {len(budgets)} budgets ({current_month} budget not found - may be expected)"
                         )
                         return True
                 else:
