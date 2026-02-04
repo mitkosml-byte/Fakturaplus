@@ -271,6 +271,35 @@ export default function ScanScreen() {
                     />
                   </View>
 
+                  {/* Date of Issue */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Дата на издаване *</Text>
+                    <TouchableOpacity 
+                      style={styles.dateInputButton}
+                      onPress={() => setDatePickerVisible(true)}
+                    >
+                      <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                      <Text style={styles.dateInputText}>
+                        {format(invoiceDate, 'd MMMM yyyy', { locale: bg })}
+                      </Text>
+                      <Ionicons name="chevron-down" size={20} color="#64748B" />
+                    </TouchableOpacity>
+                  </View>
+                  
+                  <DateTimePickerModal
+                    isVisible={isDatePickerVisible}
+                    mode="date"
+                    date={invoiceDate}
+                    onConfirm={(date) => {
+                      setInvoiceDate(date);
+                      setDatePickerVisible(false);
+                    }}
+                    onCancel={() => setDatePickerVisible(false)}
+                    confirmTextIOS="Избери"
+                    cancelTextIOS="Отказ"
+                    locale="bg"
+                  />
+
                   <View style={styles.row}>
                     <View style={[styles.inputGroup, { flex: 1 }]}>
                       <Text style={styles.inputLabel}>Без ДДС</Text>
