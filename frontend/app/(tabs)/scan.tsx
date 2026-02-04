@@ -92,6 +92,8 @@ export default function ScanScreen() {
 
   const processImage = async (base64: string) => {
     setIsScanning(true);
+    setOcrCorrections([]);
+    setOcrConfidence(null);
     try {
       const result = await api.scanInvoice(base64);
       setOcrResult(result);
@@ -100,6 +102,14 @@ export default function ScanScreen() {
       setAmountWithoutVat(result.amount_without_vat.toString());
       setVatAmount(result.vat_amount.toString());
       setTotalAmount(result.total_amount.toString());
+      
+      // Save corrections info
+      if (result.corrections && result.corrections.length > 0) {
+        setOcrCorrections(result.corrections);
+      }
+      if (result.confidence) {
+        setOcrConfidence(result.confidence);
+      }
       
       // Set invoice date from OCR if available
       if (result.invoice_date) {
