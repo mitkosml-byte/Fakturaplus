@@ -422,7 +422,7 @@ export default function HomeScreen() {
                   >
                     <Ionicons name="calendar" size={20} color="#8B5CF6" />
                     <Text style={styles.dateText}>
-                      {format(expenseDate, 'd MMMM yyyy', { locale: bg })}
+                      {format(expenseDate, 'd MMMM yyyy', { locale: dateLocale })}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity 
@@ -444,15 +444,15 @@ export default function HomeScreen() {
                   setExpenseDatePickerVisible(false);
                 }}
                 onCancel={() => setExpenseDatePickerVisible(false)}
-                confirmTextIOS="Избери"
-                cancelTextIOS="Отказ"
-                locale="bg"
+                confirmTextIOS={t('common.select')}
+                cancelTextIOS={t('common.cancel')}
+                locale={language}
               />
 
               {/* Daily Expenses List */}
               <View style={styles.dayExpensesSection}>
                 <Text style={styles.dayExpensesTitle}>
-                  Разходи за {format(expenseDate, 'd MMM', { locale: bg })}:
+                  {t('expenses.forDate')} {format(expenseDate, 'd MMM', { locale: dateLocale })}:
                 </Text>
                 
                 {loadingExpenses ? (
@@ -479,15 +479,15 @@ export default function HomeScreen() {
                       </View>
                     ))}
                     <View style={styles.expensesTotalRow}>
-                      <Text style={styles.expensesTotalLabel}>Общо за деня:</Text>
+                      <Text style={styles.expensesTotalLabel}>{t('expenses.totalForDay')}:</Text>
                       <Text style={styles.expensesTotalValue}>
                         {dayExpenses.reduce((sum, e) => sum + e.amount, 0).toFixed(2)} €
                       </Text>
                     </View>
                   </>
                 ) : (
-                  <Text style={styles.noExpensesText}>Няма записани разходи за тази дата</Text>
-                )}
+                  <Text style={styles.noExpensesText}>{t('expenses.noExpenses')}</Text>
+                )}}
               </View>
 
               {/* Add New Expense Form */}
