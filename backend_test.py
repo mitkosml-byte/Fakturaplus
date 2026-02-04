@@ -12,7 +12,7 @@ import sys
 import os
 
 # Get backend URL from frontend .env
-BACKEND_URL = "https://invoicer-25.preview.emergentagent.com/api"
+BACKEND_URL = "https://invtrack-43.preview.emergentagent.com/api"
 
 class ItemPriceTrackingTester:
     def __init__(self):

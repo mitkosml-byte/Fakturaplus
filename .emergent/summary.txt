@@ -13,124 +13,104 @@ Create an Android APK application for managing incoming invoices in Bulgarian. T
 8.  **Design:** Modern, intuitive mobile interface.
 9.  **Storage:** Local storage with Google Drive backup.
 
-**Evolved PRODUCT REQUIREMENTS (Added in previous sessions):**
-*   Add a proper calendar for selecting dates.
-*   Fix UI layout issues (tab bar overlapping).
-*   OCR should extract the invoice issue date.
-*   Add duplicate invoice detection.
-*   Introduce a Company concept for shared data.
-*   Add pull-to-refresh.
-*   Implement Google Drive backup.
-*   Numerous optimizations and smaller features (monthly stats, cumulative entries, supplier stats, help section).
-
 **Evolved PRODUCT REQUIREMENTS (Added in this session):**
-1.  **Full Internationalization (i18n):** Make the app fully bilingual (Bulgarian/English).
-2.  **Full Multi-Tenant & User Roles:**
-    *   Users belong to a company, with data isolated by .
-    *   New users get their own company and become 'Owner'.
-    *   Implement 'Owner', 'Manager', and 'Staff' roles.
-    *   'Owner' can invite/manage users via a generated link/code.
-3.  **Production-Ready Enhancements:**
-    *   Implement Email/Password authentication alongside Google SSO.
-    *   Add mandatory legal pages (Privacy Policy, Terms of Service).
-    *   Implement offline detection and a global banner.
-    *   Improve UI consistency with reusable components for Loading/Empty states.
-4.  **Advanced Supplier Statistics:** Overhaul the supplier statistics screen to provide in-depth analysis, including trends, dependency indicators, advanced rankings, and anomaly detection.
+1.  **Advanced Supplier Statistics:** Overhaul the supplier statistics screen to provide in-depth analysis, including trends, dependency indicators, advanced rankings, and anomaly detection.
+2.  **Item-Level Price Analysis:** For each new invoice, compare the price of each item against previous purchases from the same supplier. Trigger an alert if the price difference exceeds a configurable threshold (e.g., 5-10%). Store item price history and provide statistics on top items.
+3.  **AI-Powered OCR Correction:** Implement an AI module that automatically corrects and standardizes data extracted via OCR to clean up syntactical and formatting errors for data consistency.
+4.  **Language Selector in Settings:** Add a functional language switcher to the Profile/Settings screen.
+5.  **Fine-Tuning & Pro Features:** A comprehensive set of enhancements including PDF/Excel export, budgeting tools, financial forecasting, recurring expense tracking, and an audit log.
+6.  **Backend Refactoring:** Break down the monolithic  into a modular structure using FastAPI routers.
+7.  **Database Optimization:** Add database indexes to improve query performance.
 </original_problem_statement>
 
 **User's preferred language**: Bulgarian (Български)
 
 **what currently exists?**
-A full-stack Expo (React Native) and FastAPI application that is nearly feature-complete and production-ready.
+A near-production-ready, full-stack Expo and FastAPI application with a multi-tenant architecture, dual authentication (Google/Email), and full i18n support (Bulgarian/English).
 
-**Key features implemented:**
--   **Authentication:** Dual auth system supporting both Google Sign-In and standard Email/Password registration/login.
--   **Multi-Tenancy:** A robust multi-company architecture is in place. All data (invoices, expenses, users) is scoped by .
--   **User Roles & Management:** Backend and frontend support for 'Owner', 'Manager', and 'Staff' roles. A dedicated screen () allows Owners to invite new users via a generated link and manage existing user roles.
--   **Internationalization (i18n):** The application is fully translated into Bulgarian and English using , with a language selector on the login screen.
--   **Production Readiness:**
-    -   Legal pages (, ) have been created and linked.
-    -   A global banner appears when the device is offline.
-    -   Reusable components for  and  have been created.
--   **Core Functionality:** All initial features like OCR scanning, manual data entry, and basic statistics are functional.
+**Key features implemented in this session:**
+-   **Advanced Supplier Statistics:** A completely new statistics tab for suppliers with multiple chart types (pie, bar, line), TOP 10 lists, dependency indicators, and trend analysis.
+-   **Item Price Analysis:** Backend logic to track item prices per invoice, compare them against historical data, and generate alerts on price hikes. A new Items tab has been added to the statistics screen to visualize this data.
+-   **AI OCR Correction:** The OCR endpoint now uses an AI (Gemini) to clean and standardize extracted data, with the corrections being displayed to the user in the UI for review.
+-   **Language Settings:** A functional language switcher has been added to the user profile screen.
+-   **Backend Refactor (Started):** The project structure for refactoring the monolithic  has been created (, ), but the logic has not yet been moved.
+-   **New Feature Stubs:** New endpoints and frontend screens (, ) have been created for upcoming fine-tuning features, but are not yet implemented.
 
 **Last working item**:
--   Last item agent was working: The agent began implementing the Advanced Supplier Statistics feature. It significantly overhauled the backend endpoint () in  to calculate a wide range of new metrics (trends, totals, averages, etc.). The agent was about to start the frontend work.
+-   Last item agent was working: The agent was executing a large fine-tuning plan requested by the user. It began a major backend refactor by creating a new directory structure ( and ). However, instead of moving existing code, it added **new** endpoints for export, budgeting, forecasts, and audit logs directly into the **old monolithic  file**. It also created placeholder frontend screens (, ) and added the corresponding API methods and translations.
 -   Status: IN PROGRESS
 -   Agent Testing Done: N
 -   Which testing method agent to use? both
 -   User Testing Done: N
 
 **All Pending/In progress Issue list**:
--   Issue 1: (P2) Camera frame for OCR is stuck in landscape mode.
--   Issue 2: (P1) Google Drive backup functionality is unstable/untested.
+-   **Issue 1: (P1) Expo Go QR code scan fails with **
+-   **Issue 2: (P2) Camera frame for OCR is stuck in landscape mode.**
+-   **Issue 3: (P2) Google Drive backup functionality is unstable/untested.**
 
 Issues Detail:
--   **Issue 1: Camera frame for OCR is stuck in landscape mode**
-    -   **Attempted fixes:** None in this session. The user explicitly de-prioritized this, stating the camera is not a problem.
+-   **Issue 1: Expo Go QR code scan fails**
+    -   **Attempted fixes:** The agent identified and fixed several underlying issues: multiple TypeScript errors in  and , a backend timezone-related crash, and invalid EAS/new architecture settings in . After these fixes, the Android bundle started compiling successfully, but the user did not confirm if the QR code issue was resolved before giving a new task.
     -   **Next debug checklist:**
-        1.  Verify styles in .
-        2.  Try setting explicit  and  for the  style.
-        3.  Take a screenshot to confirm any visual changes.
-    -   **Why fix this issue and what will be achieved with the fix?** Provides a better user experience for the core OCR feature, as invoices are portrait-oriented.
+        1. Ask the user to re-scan the QR code and confirm if the  error still occurs on their device.
+        2. If it persists, inspect Metro bundler logs for any resolution or bundling errors specific to the mobile build.
+        3. Check  for any misconfiguration, although it appeared correct.
+        4. Re-verify  for any other settings that might interfere with Expo Go updates.
+    -   **Why fix this issue and what will be achieved with the fix?** This is a critical issue that prevents the user from testing the application on a real device via Expo Go.
+    -   **Status:** USER VERIFICATION PENDING
+    -   **Is recurring issue?** Y
+    -   **Should Test frontend/backend/both after fix?** Frontend
+    -   **Blocked on other issue:** None
+
+-   **Issue 2: Camera frame for OCR is stuck in landscape mode**
+    -   **Attempted fixes:** None in this session. This issue was de-prioritized.
+    -   **Next debug checklist:** Inspect styles in  related to the camera view and overlay.
+    -   **Why fix this issue and what will be achieved with the fix?** Improves the usability of the core OCR scanning feature.
     -   **Status:** NOT STARTED
     -   **Is recurring issue?** Y
     -   **Should Test frontend/backend/both after fix?** Frontend
     -   **Blocked on other issue:** None
 
--   **Issue 2: Google Drive backup functionality is unstable/untested**
-    -   **Attempted fixes:** A crash was fixed in a previous session, but the feature has not been tested end-to-end since.
-    -   **Next debug checklist:**
-        1.  Perform a full end-to-end test: log in, create a backup, and verify the file appears in Google Drive.
-        2.  Check for any console or backend errors during the process.
-        3.  The  functionality has not been implemented or tested at all.
-    -   **Why fix this issue and what will be achieved with the fix?** This is a key data safety feature. It must be reliable.
-    -   **Status:** TESTING PENDING
+-   **Issue 3: Google Drive backup functionality is unstable/untested**
+    -   **Attempted fixes:** A TypeScript error in  was fixed, but the feature's end-to-end flow remains completely untested.
+    -   **Next debug checklist:** Perform a full test: log in, create a backup, verify the file in Google Drive, and (if implemented) test the restore functionality.
+    -   **Why fix this issue and what will be achieved with the fix?** Ensures data safety and reliability, a key user requirement.
+    -   **Status:** NOT STARTED
     -   **Is recurring issue?** N
-    -   **Should Test frontend/backend/both after fix?** Frontend
+    -   **Should Test frontend/backend/both after fix?** Both
     -   **Blocked on other issue:** None
 
 **In progress Task List**:
--   Task 1: (P0) Complete the Advanced Supplier Statistics feature.
+-   Task 1: (P0) Complete the Fine-Tuning and Backend Refactoring phase.
 
 Task Detail:
--   **Task 1: Complete the Advanced Supplier Statistics feature.**
-    -   **Where to resume:**
-        1.  The backend endpoint ( in ) has been created.
-        2.  **Next Step:** Add the corresponding API call method to .
-        3.  **Then:** Overhaul the UI of the Suppliers tab within  to display all the new data provided by the backend (supplier overview, trends, dependency indicators, etc.).
-        4.  Implement the UI for advanced TOP 10 lists and supplier comparison.
-    -   **What will be achieved with this?** The statistics section will be transformed into a powerful business intelligence tool for analyzing supplier data.
+-   **Task 1: Complete the Fine-Tuning and Backend Refactoring phase.**
+    -   **Where to resume:** The backend is in an inconsistent state. The immediate next step is to **complete the refactor**.
+        1.  **Move logic:** Systematically move all related endpoint logic from the monolithic  into the appropriate new router files (e.g., , , etc.).
+        2.  **Integrate routers:** In , remove the moved endpoint logic and instead import and include the new routers using .
+        3.  **Implement Frontend:** Build out the UI and logic for the new features on the placeholder screens:  and .
+        4.  **Implement other features:** Add UI for recurring expenses, forecasts, and viewing the audit log.
+    -   **What will be achieved with this?** This will make the backend maintainable, scalable, and will deliver the advanced features requested by the user.
     -   **Status:** IN PROGRESS
     -   **Should Test frontend/backend/both after fix?** Both
     -   **Blocked on something:** None
 
 **Upcoming and Future Tasks**
--   **(P1) Enforce User Roles:** While roles ('Owner', 'Manager', 'Staff') are assigned, they are not yet fully enforced across the app. For example, a 'Staff' user might still be able to see screens they shouldn't (like company-wide statistics or settings). Access control logic needs to be added to the frontend to hide/disable functionality based on the user's role.
+-   **(P1) Enforce User Roles:** While roles ('Owner', 'Manager', 'Staff') are assigned, they are not yet enforced on the frontend. UI elements and routes should be conditionally rendered/protected based on the user's role.
+-   **(P2) Migrate to TanStack Query:** The agent proposed migrating data-fetching logic to TanStack Query to improve performance, caching, and state management, but this has not been started.
 
 **Completed work in this session**
--   **Full Internationalization (i18n):** Completed the translation of the entire app into Bulgarian and English. All hardcoded strings were replaced with  from .
--   **Multi-Tenant & User Roles:**
-    -   Implemented backend logic for a full multi-tenant system with roles ('Owner', 'Manager', 'Staff').
-    -   Created an invitation system where Owners can generate a code to invite new users to their company.
-    -   Created a new screen () for user management.
-    -   Updated the Profile screen to show company name/role and link to user management.
--   **Email/Password Authentication:** Added a complete email/password registration and login system alongside the existing Google SSO. The login screen was redesigned with tabs.
--   **Production-Ready Enhancements:**
-    -   Created and linked legal pages (, ).
-    -   Implemented a global offline banner using .
-    -   Created reusable UI components: , , .
--   **Code Audit and Bug Fixes:**
-    -   Performed a deep dive review of the codebase.
-    -   Fixed remaining hardcoded strings in alert messages.
-    -   **Crucially, fixed App Store compliance issue:** Translated permission descriptions in  from Bulgarian to English.
+-   **Advanced Supplier Statistics:** Implemented the full feature, including a complex backend endpoint and a completely redesigned frontend tab with multiple chart types and detailed analytics.
+-   **Item-Level Price Analysis:** Implemented the backend logic for tracking item price history and flagging anomalies, along with a new frontend tab in statistics to display this data.
+-   **AI OCR Correction:** Integrated an AI-powered data correction step into the OCR process and added UI to show the suggested changes to the user.
+-   **Language Switcher in Settings:** Added a functional language selection modal to the Profile screen.
+-   **Syntax Error Resolution:** Fixed a major syntax error in  caused by incorrect nested ternary operators and resolved persistent Metro bundler caching issues.
+-   **Multi-language Fixes:** Performed a thorough review of translations, fixed numerous hardcoded strings (x, ед., -), and refactored a bad practice ( on a translated string).
+-   **Bug Fixes:** Resolved several TypeScript errors (, ) and a backend timezone comparison error.
 
 **Earlier issues found/mentioned but not fixed**
--   **Issue 1: Camera frame for OCR is stuck in landscape mode.**
-    -   **Debug checklist:** See All Pending/In progress Issue list.
-    -   **Why to solve this issue and what will be achieved with this?** Improves usability of a core feature.
-    -   **Should Test frontend/backend/both after fix:** Frontend
-    -   **Is recurring issue?** Y
+-   **Issue 1: Camera frame for OCR is stuck in landscape mode.** (See All Pending/In progress Issue list)
+-   **Issue 2: Google Drive backup functionality is unstable/untested.** (See All Pending/In progress Issue list)
 
 **Known issue recurrence from previous fork**
 -   None.
@@ -139,90 +119,94 @@ Task Detail:
 
 
 **Key Technical Concepts**
--   **Frontend:** Expo SDK, React Native, TypeScript, Expo Router, Zustand, Axios, , , .
--   **Backend:** FastAPI, Python, MongoDB (), Pydantic,  for password hashing.
--   **Integrations:** Google Sign-In, Gemini API (OCR), Google Drive API.
--   **Architecture:** Multi-tenant, role-based access control (RBAC), dual authentication providers (Google, Email/Password).
+-   **Frontend:** Expo SDK, React Native, TypeScript, Expo Router, Zustand, Axios, , .
+-   **Backend:** FastAPI, Python, MongoDB (), Pydantic, , .
+-   **Integrations:** Google Sign-In, Gemini API (for OCR & data correction), Google Drive API,  (for PDF generation).
+-   **Architecture:** Multi-tenant, role-based access control (RBAC), AI-assisted data processing.
 
 **key DB schema**
 -   **companies**: 
 -   **users**: 
--   **invitations**: 
 -   **invoices**: 
--   **daily_revenues**: 
--   **non_invoice_expenses**: 
+-   **invoice_items**:  (NEW - implicitly inside )
+-   **item_price_history**:  (NEW)
+-   **price_alerts**:  (NEW)
+-   **audit_log**:  (NEW)
 
 **changes in tech stack**
--   **Backend:** Added  for password hashing.
--   **Frontend:** Added  for network status and  for copying invitation links.
+-   **Backend:** Added , .
+-   **Frontend:** No major library changes, but significant usage of .
 
 **All files of reference**
--   : Heavily modified and now extremely large. Contains all new logic for auth, roles, invitations, and advanced stats.
--   : The next file to be significantly modified for the advanced statistics feature.
--   : The completely redesigned login/registration screen.
--   : The new screen for managing company users.
--   : Contains API methods for all new features.
--   : Updated with English permission descriptions for App Store compliance.
+-   : **CRITICAL.** Still contains almost all logic, but a refactor has begun. New endpoints for budget, export, etc., were added here.
+-   : **CRITICAL.** New directory for the planned refactor. Currently contains empty placeholder files.
+-   : Heavily modified to include three tabs (Overview, Suppliers, Items) with complex conditional rendering and charting.
+-   : Modified to display AI corrections from the OCR process.
+-   : Modified to include a working language selection modal.
+-   , : New placeholder files for future features.
 
 **Areas that need refactoring**:
--   **:** At over 1800 lines, this file is critically oversized and difficult to maintain. It MUST be broken down into separate FastAPI routers for each domain (auth, users, companies, invoices, stats).
--   **State Management/Data Fetching:** The app relies on manual  calls after mutations. Migrating to a library like TanStack Query would automate caching, background refetching, and state invalidation, making the app more robust and reactive, fulfilling one of the production-ready goals.
+-   **:** **TOP PRIORITY.** The monolithic backend is now over 2000-3000 lines and is unmaintainable. The agent started a refactor but left it half-done. This MUST be completed by moving all endpoint logic into the files within the  directory.
+-   **:** This file has become extremely large and complex with nested conditional rendering for its three tabs. It could be broken down into smaller components for each tab (, , ).
 
 **key api endpoints**
--   **Auth:** , 
--   **Invitations:** , 
--   **User Management:** , , 
--   **Statistics:**  (New & advanced)
+-   **Items:** , , 
+-   **Export:**  (New, stubbed)
+-   **Budget:**  (New, stubbed)
+-   **Forecast:**  (New, stubbed)
+-   **Audit Log:**  (New, stubbed)
 
 **Critical Info for New Agent**
 -   **Language:** You MUST respond to the user in **Bulgarian (Български)**.
--   **Top Priority Task (P0):** Your immediate task is to complete the **Advanced Supplier Statistics** feature. Start by updating , then rebuild the UI in .
--   **De-prioritized Bug:** The user has explicitly stated that the camera aspect ratio bug is not a current priority. Focus on the feature request first.
--   **Untested Feature:** The Google Drive backup feature is implemented but has not been properly tested. It should be verified before considering the app complete.
--   **Architecture:** The app is now fully multi-tenant and role-based. All data access must be considered within the context of the logged-in user's  and .
+-   **Top Priority Task (P0):** Your immediate task is to **fix and complete the backend refactor**. Move the logic from  into the newly created router files in . Do not add more features until this is done. Afterwards, proceed with implementing the frontend for the new features (Budgeting, Export, etc.).
+-   **Unverified Bug Fix:** The fix for the Expo Go QR code issue has not been confirmed by the user. Be prepared to revisit this if the user reports it's still broken.
+-   **Messy Code State:** Be aware that the last agent left the backend in an inconsistent state (new structure created, but new code added to the old monolith). Your first job is to clean this up.
 
 **documents created in this job**
--   
--   
--   
--   
--   
--   
+-    and other model files.
+-    and other router files.
 -   
 -   
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User:** Improve everything except what already exists, at your discretion. (Approving the Production-Ready plan)
-2.  **Agent:** Implements Email/Pass auth, legal pages, offline banner. (Completed)
-3.  **User:** Make a deep dive. (Requesting a full code review)
-4.  **Agent:** Performs review, fixes hardcoded strings and a critical  issue. (Completed)
-5.  **User:** (Implicitly via agent's ) Requests advanced supplier statistics. (This is the current task)
+-   **User:** Approves the agent's fine-tuning plan and asks for it all to be implemented. (In Progress)
+-   **Agent:** Summarizes the completed AI OCR Correction feature. (Completed)
+-   **User:** Asks for a functional language switcher in the Settings menu. (Completed)
+-   **Agent:** Asks for more details on the Expo Go crash. (Completed)
+-   **User:** Reports the specific error . (In Progress)
+-   **Agent:** Reports the successful compilation of the Android bundle and asks the user to try again. (User verification pending)
+-   **User:** Reports that scanning the QR code with Expo Go doesn't work. (In Progress)
+-   **Agent:** Summarizes the completed translation fixes. (Completed)
+-   **User:** Asks the agent to check and fix any multi-language inconsistencies. (Completed)
+-   **Agent:** Reports that the syntax error in  is fixed. (Completed)
 
 **Project Health Check:**
 -   **Broken:**
     -   OCR Camera (): The camera frame's aspect ratio is incorrect (landscape instead of portrait). This is a known, but de-prioritized, bug.
+    -   Expo Go Deployment: The application may fail to load on mobile devices via QR code scan. This is a high-priority issue pending user verification.
 -   **Mocked:**
     -   None.
 
 **3rd Party Integrations**
 -   **Google Sign-In:** For user authentication.
 -   **Custom Email/Password Auth:** Using .
--   **Gemini (via Emergent Integrations):** For OCR. Uses the Emergent LLM Key.
--   **Google Drive API:** For backups (needs testing). Uses .
+-   **Gemini (via Emergent Integrations):** For OCR and AI data correction. Uses the Emergent LLM Key.
+-   **Google Drive API:** For backups (untested).
 -   **@react-native-community/netinfo:** For offline detection.
+-   **fastapi-limiter:** For backend rate limiting.
+-   **fpdf:** For PDF generation (backend).
 
 **Testing status**
--   **Testing agent used after significant changes:** NO
--   **Troubleshoot agent used after agent stuck in loop:** NO
+-   **Testing agent used after significant changes:** YES (for backend endpoints before the refactor started).
+-   **Troubleshoot agent used after agent stuck in loop:** NO (but should have been used during the Metro cache saga).
 -   **Test files created:** None.
--   **Known regressions:** None.
+-   **Known regressions:** The Expo Go QR code functionality, which previously worked, is now broken or unstable.
 
 **Credentials to test flow:**
--   Users can be created via Google SSO or the new Email/Password registration form on the login screen.
+-   Users can be created via Google SSO or the Email/Password registration form on the login screen.
 
 **What agent forgot to execute**
--   The agent did not forget the camera bug, but rather followed the user's instruction to de-prioritize it.
--   The agent did not fully test the major features it added, particularly the end-to-end flows for the new invitation system and the existing Google Drive backup. This testing should be done before final delivery.
--   While roles were created, the *enforcement* of these roles (e.g., hiding UI elements from 'Staff' users) has not been implemented and remains an upcoming task.
-
+-   The agent did not complete the backend refactoring it started, leaving the codebase in an inconsistent and messy state.
+-   The agent did not follow up to get user confirmation on the Expo Go QR code bug fix.
+-   The Enforce User Roles task, carried over from the previous session, remains unimplemented.
 </analysis>
