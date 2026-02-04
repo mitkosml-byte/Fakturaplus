@@ -119,7 +119,7 @@ export default function ScanScreen() {
 
   const handleSaveInvoice = async () => {
     if (!supplier || !invoiceNumber || !totalAmount) {
-      Alert.alert('Грешка', 'Попълнете задължителните полета');
+      Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;
     }
 
@@ -135,10 +135,10 @@ export default function ScanScreen() {
         image_base64: capturedImage || undefined,
         notes: notes || undefined,
       });
-      Alert.alert('Успех', 'Фактурата е записана');
+      Alert.alert(t('common.success'), t('msg.invoiceSaved'));
       resetForm();
     } catch (error: any) {
-      Alert.alert('Грешка', error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setIsSaving(false);
     }
