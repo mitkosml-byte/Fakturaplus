@@ -598,4 +598,132 @@ const styles = StyleSheet.create({
     color: 'white',
     marginTop: 4,
   },
+  tabSelector: {
+    flexDirection: 'row',
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 8,
+  },
+  tabButtonActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  tabButtonText: {
+    fontSize: 14,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  tabButtonTextActive: {
+    color: 'white',
+  },
+  suppliersContainer: {
+    flex: 1,
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#64748B',
+    marginTop: 12,
+  },
+  supplierTotalsCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+  },
+  supplierTotalsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  supplierTotalsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 12,
+  },
+  supplierTotalItem: {
+    alignItems: 'center',
+  },
+  supplierTotalValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#8B5CF6',
+  },
+  supplierTotalLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 4,
+  },
+  topSuppliersCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+  },
+  topSuppliersHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  topSuppliersTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  supplierItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+  },
+  supplierRank: {
+    width: 32,
+    alignItems: 'center',
+  },
+  supplierRankText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#64748B',
+  },
+  supplierInfo: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  supplierName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+  },
+  supplierMeta: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  supplierAmounts: {
+    alignItems: 'flex-end',
+  },
+  supplierAmount: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#10B981',
+  },
+  supplierVat: {
+    fontSize: 11,
+    color: '#64748B',
+  },
 });
