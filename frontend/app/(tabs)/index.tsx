@@ -1146,4 +1146,146 @@ const styles = StyleSheet.create({
     color: 'white',
     marginBottom: 16,
   },
+  // Personal Expenses & ROI Styles
+  roiSection: {
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 32,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  roiHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  roiTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  roiTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#8B5CF6',
+  },
+  addPersonalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    padding: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 8,
+  },
+  addPersonalText: {
+    fontSize: 12,
+    color: '#8B5CF6',
+    fontWeight: '600',
+  },
+  roiStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  roiStatItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  roiStatLabel: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginBottom: 4,
+  },
+  roiStatValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  roiStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 16,
+  },
+  roiStatusText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  aiInsights: {
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderRadius: 10,
+    padding: 14,
+  },
+  aiInsightsTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8B5CF6',
+    marginBottom: 10,
+  },
+  aiInsightText: {
+    fontSize: 13,
+    color: '#CBD5E1',
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  noRoiData: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  noRoiDataText: {
+    fontSize: 14,
+    color: '#94A3B8',
+    marginBottom: 4,
+  },
+  noRoiDataSubtext: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  typeSelector: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  typeButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
+  },
+  typeButtonActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  typeButtonText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  typeButtonTextActive: {
+    color: 'white',
+  },
+  categoryScroll: {
+    flexGrow: 0,
+  },
+  categoryChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: '#0F172A',
+    marginRight: 8,
+  },
+  categoryChipActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  categoryChipText: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  categoryChipTextActive: {
+    color: 'white',
+  },
 });
