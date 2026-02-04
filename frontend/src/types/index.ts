@@ -77,6 +77,8 @@ export interface OCRResult {
   vat_amount: number;
   total_amount: number;
   invoice_date?: string;  // Дата на издаване от фактурата
+  corrections?: string[];  // AI корекции
+  confidence?: number;  // Увереност в резултата
 }
 
 export interface Summary {
