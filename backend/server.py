@@ -97,6 +97,7 @@ class UserSession(BaseModel):
 class Invoice(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
+    company_id: Optional[str] = None  # Връзка към фирмата
     supplier: str
     invoice_number: str
     amount_without_vat: float
