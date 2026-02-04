@@ -608,4 +608,32 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  datePickerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    overflow: 'hidden',
+  },
+  dateButton: {
+    padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dateDisplay: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    gap: 8,
+  },
+  dateText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
+  },
 });
