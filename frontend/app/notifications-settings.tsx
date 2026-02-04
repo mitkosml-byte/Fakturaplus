@@ -16,12 +16,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { api } from '@/src/services/api';
 import { NotificationSettings } from '@/src/types';
+import { useLanguageStore } from '../src/i18n';
 
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function NotificationsSettingsScreen() {
   const router = useRouter();
+  const { language } = useLanguageStore();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -57,10 +59,13 @@ export default function NotificationsSettingsScreen() {
         periodic_enabled: periodicEnabled,
         periodic_dates: selectedDates,
       });
-      Alert.alert('Успех', 'Настройките са запазени');
+      Alert.alert(
+        language === 'bg' ? 'Успех' : 'Success', 
+        language === 'bg' ? 'Настройките са запазени' : 'Settings saved'
+      );
       router.back();
     } catch (error: any) {
-      Alert.alert('Грешка', error.message);
+      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
     } finally {
       setSaving(false);
     }
