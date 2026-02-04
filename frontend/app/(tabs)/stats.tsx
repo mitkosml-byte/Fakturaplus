@@ -1143,13 +1143,13 @@ export default function StatsScreen() {
                                 {item.item_name}
                               </Text>
                               <Text style={styles.supplierMeta}>
-                                {item.frequency} {t('stats.invoices')} • {item.supplier_count} {t('stats.suppliers').toLowerCase()}
+                                {item.frequency} {t('stats.invoices')} • {item.supplier_count} {t('stats.suppliersLower')}
                               </Text>
                             </View>
                             <View style={styles.supplierAmounts}>
                               <Text style={styles.supplierAmount}>
                                 {itemRankingType === 'quantity' 
-                                  ? `${item.quantity.toFixed(1)} ед.`
+                                  ? `${item.quantity.toFixed(1)} ${t('units.pieces')}`
                                   : `${item.total_value.toFixed(2)} €`}
                               </Text>
                               <View style={styles.itemTrendBadge}>
