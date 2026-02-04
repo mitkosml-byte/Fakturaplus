@@ -173,6 +173,46 @@ class ApiService {
       body: JSON.stringify(settings),
     });
   }
+
+  // Company
+  async getCompany(): Promise<Company | null> {
+    return this.fetch('/company');
+  }
+
+  async createOrUpdateCompany(company: {
+    name: string;
+    eik: string;
+    vat_number?: string;
+    mol?: string;
+    address?: string;
+    city?: string;
+    phone?: string;
+    email?: string;
+    bank_name?: string;
+    bank_iban?: string;
+  }): Promise<Company> {
+    return this.fetch('/company', {
+      method: 'POST',
+      body: JSON.stringify(company),
+    });
+  }
+
+  async updateCompany(company: Partial<Company>): Promise<Company> {
+    return this.fetch('/company', {
+      method: 'PUT',
+      body: JSON.stringify(company),
+    });
+  }
+
+  async joinCompanyByEik(eik: string): Promise<{ message: string; company: Company }> {
+    return this.fetch(`/company/join/${eik}`, {
+      method: 'POST',
+    });
+  }
+
+  async getCompanyUsers(): Promise<User[]> {
+    return this.fetch('/company/users');
+  }
 }
 
 export const api = new ApiService();
