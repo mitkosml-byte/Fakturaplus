@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Backend API Testing for Bulgarian Invoice Management System
-Tests all endpoints according to the review request specifications
+Focus: Testing new advanced supplier statistics endpoints
 """
 
 import requests
@@ -26,6 +26,7 @@ BASE_URL = get_backend_url()
 API_URL = f"{BASE_URL}/api"
 
 print(f"Testing Bulgarian Invoice Management API at: {API_URL}")
+print("Focus: Advanced Supplier Statistics Endpoints")
 print("=" * 60)
 
 # Global session token for authenticated requests
