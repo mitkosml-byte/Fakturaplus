@@ -29,12 +29,24 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 export default function HomeScreen() {
   const { t } = useTranslation();
   const { language } = useLanguageStore();
+  const { isOwner } = useAuth();
   const dateLocale = language === 'bg' ? bg : enUS;
   
   const [summary, setSummary] = useState<Summary | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [revenueModalVisible, setRevenueModalVisible] = useState(false);
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
+  const [personalExpenseModalVisible, setPersonalExpenseModalVisible] = useState(false);
+  
+  // ROI state (owner only)
+  const [roiData, setRoiData] = useState<any>(null);
+  const [loadingRoi, setLoadingRoi] = useState(false);
+  
+  // Personal expense form
+  const [personalAmount, setPersonalAmount] = useState('');
+  const [personalDescription, setPersonalDescription] = useState('');
+  const [personalType, setPersonalType] = useState('recurring');
+  const [personalCategory, setPersonalCategory] = useState('other');
   
   // Revenue form
   const [fiscalRevenue, setFiscalRevenue] = useState('');
