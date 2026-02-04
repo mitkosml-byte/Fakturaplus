@@ -658,7 +658,7 @@ class BudgetAndExportTester:
 
 async def main():
     """Main test runner"""
-    tester = ItemPriceTrackingTester()
+    tester = BudgetAndExportTester()
     success = await tester.run_all_tests()
     
     if success:
