@@ -172,6 +172,32 @@ const styles = StyleSheet.create({
   gradient: {
     flex: 1,
   },
+  languageSelector: {
+    flexDirection: 'row',
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    backgroundColor: 'rgba(30, 41, 59, 0.9)',
+    borderRadius: 12,
+    padding: 4,
+    zIndex: 10,
+  },
+  langButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  langButtonActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  langButtonText: {
+    color: '#94A3B8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  langButtonTextActive: {
+    color: 'white',
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
