@@ -307,7 +307,7 @@ export default function ScanScreen() {
 
                   <View style={styles.row}>
                     <View style={[styles.inputGroup, { flex: 1 }]}>
-                      <Text style={styles.inputLabel}>Без ДДС</Text>
+                      <Text style={styles.inputLabel}>{t('scan.amountWithoutVAT')}</Text>
                       <TextInput
                         style={styles.input}
                         value={amountWithoutVat}
@@ -318,7 +318,7 @@ export default function ScanScreen() {
                       />
                     </View>
                     <View style={[styles.inputGroup, { flex: 1 }]}>
-                      <Text style={styles.inputLabel}>ДДС</Text>
+                      <Text style={styles.inputLabel}>{t('scan.vatAmount')}</Text>
                       <TextInput
                         style={styles.input}
                         value={vatAmount}
@@ -331,7 +331,7 @@ export default function ScanScreen() {
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Обща сума *</Text>
+                    <Text style={styles.inputLabel}>{t('scan.totalAmount')} *</Text>
                     <TextInput
                       style={styles.input}
                       value={totalAmount}
@@ -343,12 +343,12 @@ export default function ScanScreen() {
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Бележки</Text>
+                    <Text style={styles.inputLabel}>{t('scan.notes')}</Text>
                     <TextInput
                       style={[styles.input, styles.textArea]}
                       value={notes}
                       onChangeText={setNotes}
-                      placeholder="Допълнителни бележки..."
+                      placeholder={language === 'bg' ? 'Допълнителни бележки...' : 'Additional notes...'}
                       placeholderTextColor="#64748B"
                       multiline
                       numberOfLines={3}
@@ -365,7 +365,7 @@ export default function ScanScreen() {
                     ) : (
                       <>
                         <Ionicons name="checkmark-circle" size={24} color="white" />
-                        <Text style={styles.saveButtonText}>Запиши фактурата</Text>
+                        <Text style={styles.saveButtonText}>{t('scan.saveInvoice')}</Text>
                       </>
                     )}
                   </TouchableOpacity>
