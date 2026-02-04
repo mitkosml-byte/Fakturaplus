@@ -35,7 +35,7 @@ export default function StatsScreen() {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'suppliers'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'suppliers' | 'items'>('overview');
   
   // Advanced supplier stats
   const [supplierOverview, setSupplierOverview] = useState<SupplierOverviewResponse | null>(null);
@@ -47,6 +47,17 @@ export default function StatsScreen() {
   const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
   const [supplierDetail, setSupplierDetail] = useState<SupplierDetailedResponse | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  
+  // Item statistics
+  const [itemStats, setItemStats] = useState<any>(null);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [priceAlerts, setPriceAlerts] = useState<any[]>([]);
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const [itemRankingType, setItemRankingType] = useState<'quantity' | 'value' | 'frequency'>('value');
+  const [selectedItem, setSelectedItem] = useState<string | null>(null);
+  const [itemPriceHistory, setItemPriceHistory] = useState<any>(null);
+  const [itemBySupplier, setItemBySupplier] = useState<any>(null);
+  const [loadingItemDetail, setLoadingItemDetail] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
