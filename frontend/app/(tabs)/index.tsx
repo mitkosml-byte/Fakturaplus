@@ -65,13 +65,14 @@ export default function HomeScreen() {
 
     try {
       await api.createDailyRevenue({
-        date: format(new Date(), 'yyyy-MM-dd'),
+        date: format(revenueDate, 'yyyy-MM-dd'),
         fiscal_revenue: parseFloat(fiscalRevenue) || 0,
         pocket_money: parseFloat(pocketMoney) || 0,
       });
       setRevenueModalVisible(false);
       setFiscalRevenue('');
       setPocketMoney('');
+      setRevenueDate(new Date());
       loadData();
       Alert.alert('Успех', 'Дневният оборот е записан');
     } catch (error: any) {
@@ -89,11 +90,12 @@ export default function HomeScreen() {
       await api.createExpense({
         description: expenseDescription,
         amount: parseFloat(expenseAmount),
-        date: format(new Date(), 'yyyy-MM-dd'),
+        date: format(expenseDate, 'yyyy-MM-dd'),
       });
       setExpenseModalVisible(false);
       setExpenseDescription('');
       setExpenseAmount('');
+      setExpenseDate(new Date());
       loadData();
       Alert.alert('Успех', 'Разходът е записан');
     } catch (error: any) {
