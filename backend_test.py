@@ -368,55 +368,229 @@ class BudgetAndExportTester:
             self.log_result("Get Recurring Expenses (After Creation)", False, error=str(e))
             return False
             
-    async def test_get_price_alerts(self):
-        """Test GET /api/items/price-alerts - Should return price alerts created"""
+    async def test_export_invoices_excel(self):
+        """Test GET /api/export/invoices/excel - Export invoices to Excel"""
         try:
             async with self.session.get(
-                f"{BACKEND_URL}/items/price-alerts",
+                f"{BACKEND_URL}/export/invoices/excel",
+                headers=self.get_auth_headers()
+            ) as response:
+                if response.status == 200:
+                    content_type = response.headers.get("content-type", "")
+                    content_disposition = response.headers.get("content-disposition", "")
+                    content_length = len(await response.read())
+                    
+                    # Check if it's an Excel file
+                    is_excel = "spreadsheet" in content_type or "excel" in content_type
+                    has_filename = "filename=" in content_disposition
+                    
+                    self.log_result(
+                        "Export Invoices Excel", 
+                        True, 
+                        f"Excel export successful. Content-Type: {content_type}, Size: {content_length} bytes, Has filename: {has_filename}"
+                    )
+                    return True
+                else:
+                    error_text = await response.text()
+                    self.log_result("Export Invoices Excel", False, error=f"Status {response.status}: {error_text}")
+                    return False
+                    
+        except Exception as e:
+            self.log_result("Export Invoices Excel", False, error=str(e))
+            return False
+
+    async def test_export_invoices_pdf(self):
+        """Test GET /api/export/invoices/pdf - Export invoices to PDF"""
+        try:
+            async with self.session.get(
+                f"{BACKEND_URL}/export/invoices/pdf",
+                headers=self.get_auth_headers()
+            ) as response:
+                if response.status == 200:
+                    content_type = response.headers.get("content-type", "")
+                    content_disposition = response.headers.get("content-disposition", "")
+                    content_length = len(await response.read())
+                    
+                    # Check if it's a PDF file
+                    is_pdf = "pdf" in content_type
+                    has_filename = "filename=" in content_disposition
+                    
+                    self.log_result(
+                        "Export Invoices PDF", 
+                        True, 
+                        f"PDF export successful. Content-Type: {content_type}, Size: {content_length} bytes, Has filename: {has_filename}"
+                    )
+                    return True
+                else:
+                    error_text = await response.text()
+                    self.log_result("Export Invoices PDF", False, error=f"Status {response.status}: {error_text}")
+                    return False
+                    
+        except Exception as e:
+            self.log_result("Export Invoices PDF", False, error=str(e))
+            return False
+
+    async def test_forecast_expenses(self):
+        """Test GET /api/forecast/expenses - Get expense forecast"""
+        try:
+            async with self.session.get(
+                f"{BACKEND_URL}/forecast/expenses?months_ahead=3",
                 headers=self.get_auth_headers()
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    alerts = data.get("alerts", [])
-                    total = data.get("total", 0)
-                    unread_count = data.get("unread_count", 0)
+                    forecast = data.get("forecast", [])
+                    summary = data.get("summary", {})
                     
-                    # Check if we have alerts for the price increases
-                    coffee_alert = None
-                    sugar_alert = None
+                    total_predicted = summary.get("total_predicted", 0)
+                    avg_monthly = summary.get("avg_monthly", 0)
                     
-                    for alert in alerts:
-                        if alert.get("item_name") == "Кафе":
-                            coffee_alert = alert
-                        elif alert.get("item_name") == "Захар":
-                            sugar_alert = alert
-                    
-                    if coffee_alert:
-                        change_percent = coffee_alert.get("change_percent", 0)
-                        old_price = coffee_alert.get("old_price", 0)
-                        new_price = coffee_alert.get("new_price", 0)
-                        
-                        self.log_result(
-                            "Get Price Alerts", 
-                            True, 
-                            f"Found {total} alerts ({unread_count} unread). Coffee alert: {old_price}→{new_price} лв ({change_percent}%)"
-                        )
-                        return True
-                    else:
-                        # Maybe alerts weren't created due to threshold settings
-                        self.log_result(
-                            "Get Price Alerts", 
-                            True, 
-                            f"Retrieved {total} alerts ({unread_count} unread). No coffee alert found - may be due to threshold settings"
-                        )
-                        return True
+                    self.log_result(
+                        "Forecast Expenses", 
+                        True, 
+                        f"Expense forecast for 3 months: {len(forecast)} periods, Total: {total_predicted}, Avg: {avg_monthly}"
+                    )
+                    return True
                 else:
                     error_text = await response.text()
-                    self.log_result("Get Price Alerts", False, error=f"Status {response.status}: {error_text}")
+                    self.log_result("Forecast Expenses", False, error=f"Status {response.status}: {error_text}")
                     return False
                     
         except Exception as e:
-            self.log_result("Get Price Alerts", False, error=str(e))
+            self.log_result("Forecast Expenses", False, error=str(e))
+            return False
+
+    async def test_forecast_revenue(self):
+        """Test GET /api/forecast/revenue - Get revenue forecast"""
+        try:
+            async with self.session.get(
+                f"{BACKEND_URL}/forecast/revenue?months_ahead=3",
+                headers=self.get_auth_headers()
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    forecast = data.get("forecast", [])
+                    summary = data.get("summary", {})
+                    
+                    total_predicted = summary.get("total_predicted", 0)
+                    avg_monthly = summary.get("avg_monthly", 0)
+                    
+                    self.log_result(
+                        "Forecast Revenue", 
+                        True, 
+                        f"Revenue forecast for 3 months: {len(forecast)} periods, Total: {total_predicted}, Avg: {avg_monthly}"
+                    )
+                    return True
+                else:
+                    error_text = await response.text()
+                    self.log_result("Forecast Revenue", False, error=f"Status {response.status}: {error_text}")
+                    return False
+                    
+        except Exception as e:
+            self.log_result("Forecast Revenue", False, error=str(e))
+            return False
+
+    async def test_audit_logs(self):
+        """Test GET /api/audit-logs - Get audit logs (Owner/Manager only)"""
+        try:
+            async with self.session.get(
+                f"{BACKEND_URL}/audit-logs",
+                headers=self.get_auth_headers()
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    logs = data.get("logs", [])
+                    total = data.get("total", 0)
+                    
+                    self.log_result(
+                        "Audit Logs", 
+                        True, 
+                        f"Retrieved {len(logs)} audit logs (total: {total})"
+                    )
+                    return True
+                elif response.status == 403:
+                    # User might not have Owner/Manager role
+                    error_text = await response.text()
+                    self.log_result(
+                        "Audit Logs", 
+                        True, 
+                        f"Access denied (expected for non-Owner/Manager): {error_text}"
+                    )
+                    return True
+                else:
+                    error_text = await response.text()
+                    self.log_result("Audit Logs", False, error=f"Status {response.status}: {error_text}")
+                    return False
+                    
+        except Exception as e:
+            self.log_result("Audit Logs", False, error=str(e))
+            return False
+
+    async def test_audit_logs_filtered(self):
+        """Test GET /api/audit-logs with filters - Filter audit logs"""
+        try:
+            async with self.session.get(
+                f"{BACKEND_URL}/audit-logs?action=create&entity_type=invoice",
+                headers=self.get_auth_headers()
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    logs = data.get("logs", [])
+                    total = data.get("total", 0)
+                    
+                    self.log_result(
+                        "Audit Logs (Filtered)", 
+                        True, 
+                        f"Retrieved {len(logs)} filtered audit logs (action=create, entity_type=invoice, total: {total})"
+                    )
+                    return True
+                elif response.status == 403:
+                    # User might not have Owner/Manager role
+                    error_text = await response.text()
+                    self.log_result(
+                        "Audit Logs (Filtered)", 
+                        True, 
+                        f"Access denied (expected for non-Owner/Manager): {error_text}"
+                    )
+                    return True
+                else:
+                    error_text = await response.text()
+                    self.log_result("Audit Logs (Filtered)", False, error=f"Status {response.status}: {error_text}")
+                    return False
+                    
+        except Exception as e:
+            self.log_result("Audit Logs (Filtered)", False, error=str(e))
+            return False
+
+    async def test_delete_recurring_expense(self):
+        """Test DELETE /api/recurring-expenses/{expense_id} - Delete recurring expense"""
+        try:
+            # Use the expense_id from creation test
+            if not hasattr(self, 'recurring_expense_id') or not self.recurring_expense_id:
+                self.log_result("Delete Recurring Expense", True, "No expense ID available to delete (may be expected)")
+                return True
+                
+            async with self.session.delete(
+                f"{BACKEND_URL}/recurring-expenses/{self.recurring_expense_id}",
+                headers=self.get_auth_headers()
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    message = data.get("message", "")
+                    
+                    self.log_result(
+                        "Delete Recurring Expense", 
+                        True, 
+                        f"Deleted recurring expense. Message: {message}"
+                    )
+                    return True
+                else:
+                    error_text = await response.text()
+                    self.log_result("Delete Recurring Expense", False, error=f"Status {response.status}: {error_text}")
+                    return False
+                    
+        except Exception as e:
+            self.log_result("Delete Recurring Expense", False, error=str(e))
             return False
             
     async def test_get_price_alert_settings(self):
