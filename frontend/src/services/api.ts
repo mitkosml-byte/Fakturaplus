@@ -244,6 +244,46 @@ class ApiService {
       body: JSON.stringify(backupData),
     });
   }
+
+  // Revenue by date
+  async getRevenueByDate(date: string): Promise<{
+    date: string;
+    fiscal_revenue: number;
+    pocket_money: number;
+  }> {
+    return this.fetch(`/daily-revenue/by-date/${date}`);
+  }
+
+  async getTodayRevenue(): Promise<{
+    date: string;
+    fiscal_revenue: number;
+    pocket_money: number;
+  }> {
+    return this.fetch('/daily-revenue/today');
+  }
+
+  // Supplier statistics
+  async getSupplierStatistics(params?: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<any> {
+    const queryParams = new URLSearchParams();
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    const query = queryParams.toString();
+    return this.fetch(`/statistics/suppliers${query ? `?${query}` : ''}`);
+  }
+
+  async getSingleSupplierStats(supplierName: string, params?: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<any> {
+    const queryParams = new URLSearchParams();
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    const query = queryParams.toString();
+    return this.fetch(`/statistics/supplier/${encodeURIComponent(supplierName)}${query ? `?${query}` : ''}`);
+  }
 }
 
 export const api = new ApiService();
