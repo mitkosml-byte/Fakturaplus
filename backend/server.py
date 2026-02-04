@@ -2264,6 +2264,392 @@ async def get_backup_status(current_user: User = Depends(get_current_user)):
         "last_backup_date": None
     }
 
+# ===================== ITEM PRICE TRACKING =====================
+
+@api_router.get("/items/price-alerts")
+async def get_price_alerts(
+    status: Optional[str] = None,  # unread, read, dismissed
+    current_user: User = Depends(get_current_user)
+):
+    """Връща ценови аларми за фирмата"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"alerts": [], "total": 0, "unread_count": 0}
+    
+    query = {"company_id": company_id}
+    if status:
+        query["status"] = status
+    
+    alerts = await db.price_alerts.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    # Count unread
+    unread_count = await db.price_alerts.count_documents({"company_id": company_id, "status": "unread"})
+    
+    return {
+        "alerts": alerts,
+        "total": len(alerts),
+        "unread_count": unread_count
+    }
+
+@api_router.put("/items/price-alerts/{alert_id}")
+async def update_price_alert(
+    alert_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """Обновява статус на аларма (read, dismissed)"""
+    body = await request.json()
+    status = body.get("status")
+    
+    if status not in ["read", "dismissed"]:
+        raise HTTPException(status_code=400, detail="Невалиден статус")
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    result = await db.price_alerts.update_one(
+        {"id": alert_id, "company_id": company_id},
+        {"$set": {"status": status}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Алармата не е намерена")
+    
+    return {"message": "Статусът е обновен"}
+
+@api_router.get("/items/price-alert-settings")
+async def get_price_alert_settings(current_user: User = Depends(get_current_user)):
+    """Връща настройки за ценови аларми"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"threshold_percent": 10.0, "enabled": True}
+    
+    settings = await db.price_alert_settings.find_one({"company_id": company_id}, {"_id": 0})
+    
+    if not settings:
+        return {"threshold_percent": 10.0, "enabled": True}
+    
+    return {
+        "threshold_percent": settings.get("threshold_percent", 10.0),
+        "enabled": settings.get("enabled", True)
+    }
+
+@api_router.put("/items/price-alert-settings")
+async def update_price_alert_settings(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """Обновява настройки за ценови аларми"""
+    body = await request.json()
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+    
+    update_data = {}
+    if "threshold_percent" in body:
+        update_data["threshold_percent"] = float(body["threshold_percent"])
+    if "enabled" in body:
+        update_data["enabled"] = bool(body["enabled"])
+    
+    existing = await db.price_alert_settings.find_one({"company_id": company_id})
+    
+    if existing:
+        await db.price_alert_settings.update_one(
+            {"company_id": company_id},
+            {"$set": update_data}
+        )
+    else:
+        settings = PriceAlertSettings(company_id=company_id, **update_data)
+        await db.price_alert_settings.insert_one(settings.dict())
+    
+    return {"message": "Настройките са запазени"}
+
+@api_router.get("/items/price-history/{item_name}")
+async def get_item_price_history(
+    item_name: str,
+    supplier: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Връща история на цените за артикул"""
+    from urllib.parse import unquote
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"history": [], "statistics": {}}
+    
+    item_name = unquote(item_name).strip().lower()
+    
+    query = {
+        "company_id": company_id,
+        "item_name": item_name
+    }
+    if supplier:
+        query["supplier"] = {"$regex": f"^{unquote(supplier)}$", "$options": "i"}
+    
+    history = await db.item_price_history.find(query, {"_id": 0}).sort("invoice_date", 1).to_list(1000)
+    
+    if not history:
+        return {"history": [], "statistics": {}}
+    
+    # Calculate statistics
+    prices = [h["unit_price"] for h in history]
+    avg_price = sum(prices) / len(prices) if prices else 0
+    min_price = min(prices) if prices else 0
+    max_price = max(prices) if prices else 0
+    
+    # Calculate variance
+    if len(prices) > 1:
+        variance = sum((p - avg_price) ** 2 for p in prices) / len(prices)
+        std_dev = variance ** 0.5
+    else:
+        std_dev = 0
+    
+    # Trend (last 3 vs first 3)
+    if len(prices) >= 6:
+        first_avg = sum(prices[:3]) / 3
+        last_avg = sum(prices[-3:]) / 3
+        trend_percent = ((last_avg - first_avg) / first_avg * 100) if first_avg > 0 else 0
+    else:
+        trend_percent = 0
+    
+    # Format history for response
+    formatted_history = []
+    for h in history:
+        date_val = h.get("invoice_date")
+        date_str = date_val.strftime("%Y-%m-%d") if isinstance(date_val, datetime) else str(date_val)[:10]
+        formatted_history.append({
+            "date": date_str,
+            "supplier": h.get("supplier"),
+            "unit_price": h.get("unit_price"),
+            "quantity": h.get("quantity"),
+            "unit": h.get("unit"),
+            "invoice_number": h.get("invoice_number")
+        })
+    
+    return {
+        "item_name": item_name,
+        "history": formatted_history,
+        "statistics": {
+            "avg_price": round(avg_price, 2),
+            "min_price": round(min_price, 2),
+            "max_price": round(max_price, 2),
+            "std_dev": round(std_dev, 2),
+            "trend_percent": round(trend_percent, 1),
+            "total_records": len(history)
+        }
+    }
+
+@api_router.get("/statistics/items")
+async def get_item_statistics(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    top_n: int = 10,
+    current_user: User = Depends(get_current_user)
+):
+    """Връща статистика за артикули - топ N по брой и стойност"""
+    from collections import defaultdict
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {
+            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0},
+            "top_by_quantity": [],
+            "top_by_value": [],
+            "top_by_frequency": [],
+            "price_trends": []
+        }
+    
+    # Build date query
+    query = {"company_id": company_id}
+    if start_date or end_date:
+        query["invoice_date"] = {}
+        if start_date:
+            query["invoice_date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
+        if end_date:
+            query["invoice_date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    
+    # Get all price history records
+    history = await db.item_price_history.find(query, {"_id": 0}).to_list(10000)
+    
+    if not history:
+        return {
+            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0},
+            "top_by_quantity": [],
+            "top_by_value": [],
+            "top_by_frequency": [],
+            "price_trends": []
+        }
+    
+    # Aggregate by item
+    item_stats = defaultdict(lambda: {
+        "quantity": 0,
+        "total_value": 0,
+        "frequency": 0,
+        "prices": [],
+        "suppliers": set()
+    })
+    
+    for record in history:
+        name = record["item_name"]
+        price = record["unit_price"]
+        qty = record["quantity"]
+        
+        item_stats[name]["quantity"] += qty
+        item_stats[name]["total_value"] += price * qty
+        item_stats[name]["frequency"] += 1
+        item_stats[name]["prices"].append(price)
+        item_stats[name]["suppliers"].add(record["supplier"])
+    
+    # Calculate statistics for each item
+    items_list = []
+    for name, stats in item_stats.items():
+        prices = stats["prices"]
+        avg_price = sum(prices) / len(prices) if prices else 0
+        
+        # Price variance
+        if len(prices) > 1:
+            variance = sum((p - avg_price) ** 2 for p in prices) / len(prices)
+            price_variance = (variance ** 0.5) / avg_price * 100 if avg_price > 0 else 0
+        else:
+            price_variance = 0
+        
+        # Trend
+        if len(prices) >= 4:
+            first_half = sum(prices[:len(prices)//2]) / (len(prices)//2)
+            second_half = sum(prices[len(prices)//2:]) / (len(prices) - len(prices)//2)
+            trend = ((second_half - first_half) / first_half * 100) if first_half > 0 else 0
+        else:
+            trend = 0
+        
+        items_list.append({
+            "item_name": name,
+            "quantity": round(stats["quantity"], 2),
+            "total_value": round(stats["total_value"], 2),
+            "frequency": stats["frequency"],
+            "avg_price": round(avg_price, 2),
+            "min_price": round(min(prices), 2) if prices else 0,
+            "max_price": round(max(prices), 2) if prices else 0,
+            "price_variance": round(price_variance, 1),
+            "trend_percent": round(trend, 1),
+            "supplier_count": len(stats["suppliers"])
+        })
+    
+    # Sort by different criteria
+    top_by_quantity = sorted(items_list, key=lambda x: x["quantity"], reverse=True)[:top_n]
+    top_by_value = sorted(items_list, key=lambda x: x["total_value"], reverse=True)[:top_n]
+    top_by_frequency = sorted(items_list, key=lambda x: x["frequency"], reverse=True)[:top_n]
+    
+    # Items with significant price changes
+    price_trends = sorted(
+        [i for i in items_list if abs(i["trend_percent"]) > 5],
+        key=lambda x: abs(x["trend_percent"]),
+        reverse=True
+    )[:top_n]
+    
+    # Totals
+    total_quantity = sum(i["quantity"] for i in items_list)
+    total_value = sum(i["total_value"] for i in items_list)
+    
+    return {
+        "totals": {
+            "total_items": round(total_quantity, 2),
+            "total_value": round(total_value, 2),
+            "unique_items": len(items_list)
+        },
+        "top_by_quantity": top_by_quantity,
+        "top_by_value": top_by_value,
+        "top_by_frequency": top_by_frequency,
+        "price_trends": price_trends
+    }
+
+@api_router.get("/statistics/items/{item_name}/by-supplier")
+async def get_item_by_supplier(
+    item_name: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Сравнява цените на артикул между различни доставчици"""
+    from collections import defaultdict
+    from urllib.parse import unquote
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"item_name": item_name, "suppliers": []}
+    
+    normalized_name = unquote(item_name).strip().lower()
+    
+    history = await db.item_price_history.find(
+        {"company_id": company_id, "item_name": normalized_name},
+        {"_id": 0}
+    ).to_list(10000)
+    
+    if not history:
+        return {"item_name": item_name, "suppliers": [], "recommendation": None}
+    
+    # Group by supplier
+    supplier_data = defaultdict(lambda: {"prices": [], "quantities": [], "dates": []})
+    
+    for record in history:
+        supplier = record["supplier"]
+        supplier_data[supplier]["prices"].append(record["unit_price"])
+        supplier_data[supplier]["quantities"].append(record["quantity"])
+        date_val = record.get("invoice_date")
+        if isinstance(date_val, datetime):
+            supplier_data[supplier]["dates"].append(date_val)
+    
+    # Calculate stats per supplier
+    suppliers = []
+    for supplier, data in supplier_data.items():
+        prices = data["prices"]
+        avg = sum(prices) / len(prices) if prices else 0
+        last_date = max(data["dates"]) if data["dates"] else None
+        
+        suppliers.append({
+            "supplier": supplier,
+            "avg_price": round(avg, 2),
+            "min_price": round(min(prices), 2) if prices else 0,
+            "max_price": round(max(prices), 2) if prices else 0,
+            "last_price": round(prices[-1], 2) if prices else 0,
+            "purchase_count": len(prices),
+            "total_quantity": round(sum(data["quantities"]), 2),
+            "last_purchase": last_date.strftime("%Y-%m-%d") if last_date else None
+        })
+    
+    # Sort by average price (cheapest first)
+    suppliers.sort(key=lambda x: x["avg_price"])
+    
+    # Recommendation
+    recommendation = None
+    if len(suppliers) >= 2:
+        cheapest = suppliers[0]
+        most_expensive = suppliers[-1]
+        if cheapest["avg_price"] > 0:
+            savings_percent = ((most_expensive["avg_price"] - cheapest["avg_price"]) / most_expensive["avg_price"] * 100)
+            if savings_percent > 5:
+                recommendation = {
+                    "best_supplier": cheapest["supplier"],
+                    "avg_price": cheapest["avg_price"],
+                    "potential_savings_percent": round(savings_percent, 1)
+                }
+    
+    return {
+        "item_name": item_name,
+        "suppliers": suppliers,
+        "recommendation": recommendation
+    }
+
 # ===================== HEALTH CHECK =====================
 
 @api_router.get("/")
