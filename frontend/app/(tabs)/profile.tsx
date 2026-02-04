@@ -82,7 +82,7 @@ export default function ProfileScreen() {
                   </View>
                 )}
               </View>
-              <Text style={styles.userName}>{user?.name || t('profile.title')}</Text>
+              <Text style={styles.userName}>{user?.name || t('role.user')}</Text>
               <Text style={styles.userEmail}>{user?.email || ''}</Text>
               <View style={styles.roleContainer}>
                 <Ionicons 
@@ -91,7 +91,7 @@ export default function ProfileScreen() {
                   color={user?.role === 'accountant' ? '#8B5CF6' : '#64748B'} 
                 />
                 <Text style={[styles.roleText, user?.role === 'accountant' && styles.roleTextAccountant]}>
-                  {user?.role === 'accountant' ? t('profile.title') : t('profile.title')}
+                  {user?.role === 'accountant' ? t('role.accountant') : t('role.user')}
                 </Text>
               </View>
         </View>
