@@ -73,7 +73,8 @@ export default function BackupScreen() {
       
       // Create file
       const fileName = `invoice_backup_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.json`;
-      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+      const docDir = FileSystem.documentDirectory || FileSystem.cacheDirectory || '';
+      const fileUri = `${docDir}${fileName}`;
       
       await FileSystem.writeAsStringAsync(fileUri, jsonString);
       
