@@ -43,6 +43,8 @@ export default function ScanScreen() {
   const [vatAmount, setVatAmount] = useState('');
   const [totalAmount, setTotalAmount] = useState('');
   const [notes, setNotes] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(new Date());
+  const [isDatePickerVisible, setDatePickerVisible] = useState(false);
 
   // Tap to focus - triggers refocus
   const handleTapToFocus = useCallback(() => {
