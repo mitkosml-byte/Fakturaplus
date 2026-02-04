@@ -209,37 +209,73 @@ def test_detailed_supplier_stats():
         print(f"❌ Detailed supplier statistics error: {e}")
         return False
 
-def test_daily_revenue():
-    """Test Daily Revenue endpoint"""
-    print("\n5. TESTING DAILY REVENUE")
+def test_compare_suppliers():
+    """Test GET /api/statistics/suppliers/compare endpoint"""
+    print("\n5. TESTING SUPPLIER COMPARISON")
     print("-" * 40)
     
     if not session_token:
         print("❌ No session token available")
         return False
     
-    headers = {"Authorization": f"Bearer {session_token}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {session_token}"}
     
+    # First create another test invoice with different supplier
     try:
-        revenue_data = {
-            "date": "2025-01-30",
-            "fiscal_revenue": 500.00,
-            "pocket_money": 100.00
+        invoice_data = {
+            "supplier": "Another Supplier Ltd",
+            "invoice_number": "INV002",
+            "amount_without_vat": 200,
+            "vat_amount": 40,
+            "total_amount": 240,
+            "date": "2025-02-01T00:00:00Z"
         }
         
-        response = requests.post(f"{API_URL}/daily-revenue", headers=headers, json=revenue_data)
-        print(f"POST /api/daily-revenue - Status: {response.status_code}")
+        response = requests.post(f"{API_URL}/invoices", headers=headers, json=invoice_data)
+        if response.status_code != 200:
+            print(f"⚠️ Could not create second test invoice: {response.text}")
+    except Exception as e:
+        print(f"⚠️ Error creating second test invoice: {e}")
+    
+    # Test comparison with multiple suppliers
+    try:
+        suppliers = "Test Supplier,Another Supplier Ltd"
+        response = requests.get(f"{API_URL}/statistics/suppliers/compare?suppliers={suppliers}", headers=headers)
+        print(f"GET /api/statistics/suppliers/compare?suppliers={suppliers} - Status: {response.status_code}")
         
         if response.status_code == 200:
-            created_revenue = response.json()
-            print(f"✅ Daily revenue created: {json.dumps(created_revenue, indent=2)}")
+            data = response.json()
+            print(f"✅ Supplier comparison retrieved successfully")
+            
+            # Verify response structure
+            expected_keys = ["period", "comparison", "summary"]
+            missing_keys = [key for key in expected_keys if key not in data]
+            if missing_keys:
+                print(f"⚠️ Missing expected keys: {missing_keys}")
+                return False
+            
+            comparison = data.get("comparison", [])
+            if comparison:
+                # Check first supplier structure
+                first_supplier = comparison[0]
+                supplier_keys = [
+                    "supplier", "total_amount", "invoice_count", "avg_invoice",
+                    "first_delivery", "last_delivery", "is_active"
+                ]
+                missing_supplier_keys = [key for key in supplier_keys if key not in first_supplier]
+                if missing_supplier_keys:
+                    print(f"⚠️ Missing supplier keys: {missing_supplier_keys}")
+                    return False
+            
+            print(f"✅ Comparison response structure is correct")
+            print(f"Compared suppliers: {len(comparison)}")
             return True
         else:
-            print(f"❌ Daily revenue creation failed: {response.text}")
+            print(f"❌ Supplier comparison failed: {response.text}")
             return False
             
     except Exception as e:
-        print(f"❌ Daily revenue error: {e}")
+        print(f"❌ Supplier comparison error: {e}")
         return False
 
 def test_expenses():
