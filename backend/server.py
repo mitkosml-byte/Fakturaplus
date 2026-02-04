@@ -615,35 +615,55 @@ async def update_notification_settings(
 
 @api_router.post("/company", response_model=Company)
 async def create_or_update_company(company_data: CompanyCreate, current_user: User = Depends(get_current_user)):
-    """Създава нова фирма или обновява съществуваща (търси по ЕИК)"""
+    """Създава нова фирма или обновява съществуваща (само Owner може да редактира)"""
     
-    # Check if company with this EIK already exists
-    existing_company = await db.companies.find_one({"eik": company_data.eik}, {"_id": 0})
+    # Check if user already has a company
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
     
-    if existing_company:
+    if user_doc and user_doc.get("company_id"):
+        # User has a company - only owner can edit
+        if user_doc.get("role") != "owner":
+            raise HTTPException(status_code=403, detail="Само титулярят може да редактира данните на фирмата")
+        
         # Update existing company
         update_data = {k: v for k, v in company_data.dict().items() if v is not None}
         update_data["updated_at"] = datetime.now(timezone.utc)
         
+        # Don't allow EIK change if company has other users
+        other_users = await db.users.count_documents({
+            "company_id": user_doc["company_id"],
+            "user_id": {"$ne": current_user.user_id}
+        })
+        if other_users > 0 and "eik" in update_data:
+            existing = await db.companies.find_one({"id": user_doc["company_id"]})
+            if existing and existing.get("eik") != update_data["eik"]:
+                raise HTTPException(status_code=400, detail="Не може да се промени ЕИК на фирма с други потребители")
+        
         await db.companies.update_one(
-            {"eik": company_data.eik},
+            {"id": user_doc["company_id"]},
             {"$set": update_data}
         )
         
-        updated_company = await db.companies.find_one({"eik": company_data.eik}, {"_id": 0})
-        company = Company(**updated_company)
+        updated_company = await db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
+        return Company(**updated_company)
     else:
+        # Check if company with this EIK already exists
+        existing_company = await db.companies.find_one({"eik": company_data.eik}, {"_id": 0})
+        
+        if existing_company:
+            raise HTTPException(status_code=400, detail="Фирма с този ЕИК вече съществува. Използвайте код за присъединяване.")
+        
         # Create new company
         company = Company(**company_data.dict())
         await db.companies.insert_one(company.dict())
-    
-    # Link current user to this company
-    await db.users.update_one(
-        {"user_id": current_user.user_id},
-        {"$set": {"company_id": company.id}}
-    )
-    
-    return company
+        
+        # Link current user to this company as owner
+        await db.users.update_one(
+            {"user_id": current_user.user_id},
+            {"$set": {"company_id": company.id, "role": "owner"}}
+        )
+        
+        return company
 
 @api_router.get("/company", response_model=Optional[Company])
 async def get_my_company(current_user: User = Depends(get_current_user)):
