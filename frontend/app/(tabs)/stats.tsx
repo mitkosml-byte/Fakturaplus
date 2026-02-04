@@ -2125,4 +2125,207 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#10B981',
   },
+  
+  // Alert Badge on Tab
+  alertBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -8,
+    backgroundColor: '#EF4444',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  alertBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  
+  // Price Alerts Card
+  priceAlertsCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#EF4444',
+  },
+  priceAlertsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  priceAlertsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#EF4444',
+    flex: 1,
+  },
+  alertCountBadge: {
+    backgroundColor: '#EF4444',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  alertCountText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  alertItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  alertItemUnread: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#EF4444',
+  },
+  alertInfo: {
+    flex: 1,
+  },
+  alertItemName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+  },
+  alertSupplier: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  alertPrices: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  alertOldPrice: {
+    fontSize: 12,
+    color: '#64748B',
+    textDecorationLine: 'line-through',
+  },
+  alertNewPrice: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#EF4444',
+  },
+  alertChangeBadge: {
+    backgroundColor: '#EF444420',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  alertChangeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#EF4444',
+  },
+  alertActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  alertActionBtn: {
+    padding: 8,
+    backgroundColor: '#1E293B',
+    borderRadius: 8,
+  },
+  
+  // Item Trend Badge
+  itemTrendBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 2,
+  },
+  itemTrendText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  itemAvgPrice: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  
+  // Recommendation Banner
+  recommendationBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#10B98120',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  recommendationTitle: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#10B981',
+  },
+  recommendationText: {
+    fontSize: 14,
+    color: 'white',
+    marginTop: 2,
+  },
+  recommendationSavings: {
+    fontSize: 11,
+    color: '#10B981',
+    marginTop: 4,
+  },
+  
+  // Supplier Compare
+  supplierCompareItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  supplierCompareRank: {
+    width: 30,
+    alignItems: 'center',
+  },
+  supplierCompareRankText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#64748B',
+  },
+  supplierCompareInfo: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  supplierCompareName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+  },
+  supplierCompareMeta: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  supplierComparePrices: {
+    alignItems: 'flex-end',
+  },
+  supplierComparePrice: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#8B5CF6',
+  },
+  supplierComparePriceLabel: {
+    fontSize: 10,
+    color: '#64748B',
+  },
 });
