@@ -40,12 +40,52 @@ logger = logging.getLogger(__name__)
 
 # ===================== MODELS =====================
 
+class Company(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str  # Име на фирмата
+    eik: str  # ЕИК/Булстат
+    vat_number: Optional[str] = None  # ДДС номер (BG + ЕИК)
+    mol: Optional[str] = None  # МОЛ (Материално отговорно лице)
+    address: Optional[str] = None  # Адрес
+    city: Optional[str] = None  # Град
+    phone: Optional[str] = None  # Телефон
+    email: Optional[str] = None  # Имейл
+    bank_name: Optional[str] = None  # Банка
+    bank_iban: Optional[str] = None  # IBAN
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class CompanyCreate(BaseModel):
+    name: str
+    eik: str
+    vat_number: Optional[str] = None
+    mol: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_iban: Optional[str] = None
+
+class CompanyUpdate(BaseModel):
+    name: Optional[str] = None
+    eik: Optional[str] = None
+    vat_number: Optional[str] = None
+    mol: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_iban: Optional[str] = None
+
 class User(BaseModel):
     user_id: str
     email: str
     name: str
     picture: Optional[str] = None
     role: str = "user"  # "accountant" or "user"
+    company_id: Optional[str] = None  # Връзка към фирмата
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserSession(BaseModel):
