@@ -32,38 +32,35 @@ print("=" * 60)
 # Global session token for authenticated requests
 session_token = None
 
-def test_health_endpoints():
-    """Test health check endpoints"""
-    print("\n1. TESTING HEALTH ENDPOINTS")
+def register_test_user():
+    """Register a test user as specified in review request"""
+    print("\n1. REGISTERING TEST USER")
     print("-" * 40)
     
-    # Test root endpoint
-    try:
-        response = requests.get(f"{API_URL}/")
-        print(f"GET /api/ - Status: {response.status_code}")
-        if response.status_code == 200:
-            print(f"Response: {response.json()}")
-            print("✅ Root endpoint working")
-        else:
-            print(f"❌ Root endpoint failed: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ Root endpoint error: {e}")
-        return False
+    global session_token
     
-    # Test health endpoint
     try:
-        response = requests.get(f"{API_URL}/health")
-        print(f"GET /api/health - Status: {response.status_code}")
+        user_data = {
+            "email": "test@test.com",
+            "password": "Test1234",
+            "name": "Test User"
+        }
+        
+        response = requests.post(f"{API_URL}/auth/register", json=user_data)
+        print(f"POST /api/auth/register - Status: {response.status_code}")
+        
         if response.status_code == 200:
-            print(f"Response: {response.json()}")
-            print("✅ Health endpoint working")
+            result = response.json()
+            session_token = result.get('session_token')
+            print(f"✅ User registered successfully")
+            print(f"Session token: {session_token}")
             return True
         else:
-            print(f"❌ Health endpoint failed: {response.text}")
+            print(f"❌ User registration failed: {response.text}")
             return False
+            
     except Exception as e:
-        print(f"❌ Health endpoint error: {e}")
+        print(f"❌ User registration error: {e}")
         return False
 
 def create_test_user_and_session():
