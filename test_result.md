@@ -393,9 +393,10 @@ metadata:
 
 test_plan:
   current_focus:
-    - "OCR Invoice Scanning with Gemini API"
+    - "AI Item Merging API Endpoints"
   stuck_tasks:
     - "OCR Invoice Scanning with Gemini API"
+    - "AI Item Merging API Endpoints"
   test_all: false
   test_priority: "stuck_first"
 
