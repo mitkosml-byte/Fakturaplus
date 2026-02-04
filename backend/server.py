@@ -1712,6 +1712,328 @@ async def delete_expense(expense_id: str, current_user: User = Depends(get_curre
         raise HTTPException(status_code=404, detail="Разходът не е намерен")
     return {"message": "Разходът е изтрит"}
 
+# ===================== PERSONAL EXPENSES & ROI ENDPOINTS =====================
+
+@api_router.post("/personal-expenses")
+async def create_personal_expense(
+    expense: PersonalExpenseCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Създава личен разход/инвестиция (само за собственик)"""
+    # Check if user is owner
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярът може да управлява лични разходи")
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Няма свързана фирма")
+    
+    expense_obj = PersonalExpense(
+        user_id=current_user.user_id,
+        company_id=company_id,
+        amount=expense.amount,
+        description=expense.description,
+        expense_type=PersonalExpenseType(expense.expense_type),
+        category=PersonalExpenseCategory(expense.category),
+        period_month=expense.period_month,
+        period_year=expense.period_year,
+        supplier_id=expense.supplier_id,
+        project_name=expense.project_name,
+        notes=expense.notes
+    )
+    
+    await db.personal_expenses.insert_one(expense_obj.dict())
+    return {"message": "Личният разход е записан", "id": expense_obj.id}
+
+@api_router.get("/personal-expenses")
+async def get_personal_expenses(
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    expense_type: Optional[str] = None,
+    category: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Връща личните разходи (само за собственик)"""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярът може да вижда лични разходи")
+    
+    query = {"user_id": current_user.user_id}
+    
+    if month:
+        query["period_month"] = month
+    if year:
+        query["period_year"] = year
+    if expense_type:
+        query["expense_type"] = expense_type
+    if category:
+        query["category"] = category
+    
+    expenses = await db.personal_expenses.find(query, {"_id": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(1000)
+    return {"personal_expenses": expenses}
+
+@api_router.delete("/personal-expenses/{expense_id}")
+async def delete_personal_expense(
+    expense_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Изтрива личен разход (само за собственик)"""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярът може да управлява лични разходи")
+    
+    result = await db.personal_expenses.delete_one({
+        "id": expense_id,
+        "user_id": current_user.user_id
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Разходът не е намерен")
+    
+    return {"message": "Личният разход е изтрит"}
+
+@api_router.get("/roi/analysis")
+async def get_roi_analysis(
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    ROI анализ - изчислява възвръщаемост на личната инвестиция.
+    Само за собственик.
+    """
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярът има достъп до ROI анализ")
+    
+    # Default to current month/year
+    now = datetime.now(timezone.utc)
+    target_month = month or now.month
+    target_year = year or now.year
+    
+    # Build period dates
+    period_start = f"{target_year}-{target_month:02d}-01"
+    if target_month == 12:
+        period_end = f"{target_year + 1}-01-01"
+    else:
+        period_end = f"{target_year}-{target_month + 1:02d}-01"
+    
+    # Get personal expenses for period
+    personal_expenses = await db.personal_expenses.find({
+        "user_id": current_user.user_id,
+        "period_month": target_month,
+        "period_year": target_year
+    }, {"_id": 0, "amount": 1, "expense_type": 1}).to_list(1000)
+    
+    total_personal = sum(e.get("amount", 0) for e in personal_expenses)
+    total_investment = sum(e.get("amount", 0) for e in personal_expenses if e.get("expense_type") == "investment")
+    
+    # Get business revenue for period
+    revenues = await db.daily_revenue.find({
+        "user_id": current_user.user_id,
+        "date": {"$gte": period_start, "$lt": period_end}
+    }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
+    
+    total_revenue = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
+    
+    # Get business expenses (invoices + non-invoice expenses)
+    invoices = await db.invoices.find({
+        "user_id": current_user.user_id,
+        "date": {
+            "$gte": datetime.fromisoformat(period_start + "T00:00:00+00:00"),
+            "$lt": datetime.fromisoformat(period_end + "T00:00:00+00:00")
+        }
+    }, {"_id": 0, "total_amount": 1}).to_list(1000)
+    
+    business_expenses = await db.expenses.find({
+        "user_id": current_user.user_id,
+        "date": {"$gte": period_start, "$lt": period_end}
+    }, {"_id": 0, "amount": 1}).to_list(1000)
+    
+    total_business_expense = sum(i.get("total_amount", 0) for i in invoices) + sum(e.get("amount", 0) for e in business_expenses)
+    
+    # Calculate profit and ROI
+    total_profit = total_revenue - total_business_expense
+    
+    # ROI = (Печалба / Лична инвестиция) * 100
+    if total_personal > 0:
+        roi_percent = (total_profit / total_personal) * 100
+    else:
+        roi_percent = 0 if total_profit <= 0 else 100
+    
+    is_profitable = total_profit > 0
+    investment_covered = total_profit >= total_personal
+    
+    # Generate AI insights
+    ai_insights = await generate_roi_insights(
+        total_personal=total_personal,
+        total_investment=total_investment,
+        total_revenue=total_revenue,
+        total_profit=total_profit,
+        roi_percent=roi_percent,
+        is_profitable=is_profitable,
+        investment_covered=investment_covered
+    )
+    
+    return {
+        "period": {"month": target_month, "year": target_year},
+        "period_start": period_start,
+        "period_end": period_end,
+        "total_personal_investment": round(total_personal, 2),
+        "total_investment_only": round(total_investment, 2),
+        "total_revenue": round(total_revenue, 2),
+        "total_business_expense": round(total_business_expense, 2),
+        "total_profit": round(total_profit, 2),
+        "roi_percent": round(roi_percent, 1),
+        "is_profitable": is_profitable,
+        "investment_covered": investment_covered,
+        "ai_insights": ai_insights
+    }
+
+async def generate_roi_insights(
+    total_personal: float,
+    total_investment: float,
+    total_revenue: float,
+    total_profit: float,
+    roi_percent: float,
+    is_profitable: bool,
+    investment_covered: bool
+) -> List[str]:
+    """Генерира AI управленски предложения за ROI"""
+    insights = []
+    
+    # Basic insights без AI (винаги налични)
+    if total_personal == 0:
+        insights.append("📊 Няма въведени лични разходи за периода")
+        return insights
+    
+    if investment_covered:
+        insights.append("✅ Бизнесът покрива личната инвестиция за периода")
+    elif is_profitable:
+        diff = total_personal - total_profit
+        insights.append(f"⚠️ Печалбата не покрива напълно личната инвестиция (остават {diff:.2f} лв)")
+    else:
+        insights.append("❌ Работиш повече за бизнеса, отколкото бизнесът за теб")
+    
+    if roi_percent > 100:
+        insights.append(f"🚀 Отличен ROI: {roi_percent:.1f}% - инвестицията се изплаща многократно")
+    elif roi_percent > 50:
+        insights.append(f"📈 Добър ROI: {roi_percent:.1f}%")
+    elif roi_percent > 0:
+        insights.append(f"📉 Нисък ROI: {roi_percent:.1f}% - има място за подобрение")
+    elif roi_percent < -50:
+        insights.append(f"🔴 Отрицателен ROI: {roi_percent:.1f}% - необходим е анализ на разходите")
+    
+    # Personal contribution ratio
+    if total_revenue > 0:
+        personal_ratio = (total_personal / total_revenue) * 100
+        if personal_ratio > 50:
+            insights.append(f"⚠️ Личната контрибуция ({personal_ratio:.1f}%) е висока спрямо оборота")
+        elif personal_ratio > 30:
+            insights.append(f"📊 Личната контрибуция е {personal_ratio:.1f}% от оборота")
+    
+    # Try to get AI enhanced insights
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        
+        llm = LlmChat(
+            api_key=os.getenv("EMERGENT_LLM_KEY"),
+            session_id=f"roi_{uuid.uuid4().hex[:8]}",
+            system_message="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български."
+        ).with_model("gemini", "gemini-2.5-flash")
+        
+        prompt = f"""Анализирай тези финансови показатели за малък бизнес:
+- Лична инвестиция на собственика: {total_personal:.2f} лв
+- Общ оборот: {total_revenue:.2f} лв
+- Печалба: {total_profit:.2f} лв
+- ROI: {roi_percent:.1f}%
+
+Дай ЕДНА кратка препоръка (до 15 думи) какво може да направи собственикът за подобрение.
+Отговори директно с препоръката, без въвеждащ текст."""
+
+        response = await llm.send_message(UserMessage(text=prompt))
+        ai_recommendation = response.strip() if isinstance(response, str) else str(response)
+        
+        if ai_recommendation and len(ai_recommendation) < 200:
+            insights.append(f"💡 AI препоръка: {ai_recommendation}")
+    except Exception as e:
+        logger.warning(f"AI insights generation failed: {str(e)}")
+    
+    return insights
+
+@api_router.get("/roi/trend")
+async def get_roi_trend(
+    months: int = 6,
+    current_user: User = Depends(get_current_user)
+):
+    """Връща ROI тренд за последните N месеца (само за собственик)"""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярът има достъп до ROI тренд")
+    
+    now = datetime.now(timezone.utc)
+    trend_data = []
+    
+    for i in range(months - 1, -1, -1):
+        # Calculate target month
+        target_month = now.month - i
+        target_year = now.year
+        
+        while target_month <= 0:
+            target_month += 12
+            target_year -= 1
+        
+        # Get ROI for this month
+        period_start = f"{target_year}-{target_month:02d}-01"
+        if target_month == 12:
+            period_end = f"{target_year + 1}-01-01"
+        else:
+            period_end = f"{target_year}-{target_month + 1:02d}-01"
+        
+        # Personal expenses
+        personal = await db.personal_expenses.find({
+            "user_id": current_user.user_id,
+            "period_month": target_month,
+            "period_year": target_year
+        }, {"_id": 0, "amount": 1}).to_list(1000)
+        total_personal = sum(p.get("amount", 0) for p in personal)
+        
+        # Revenue
+        revenues = await db.daily_revenue.find({
+            "user_id": current_user.user_id,
+            "date": {"$gte": period_start, "$lt": period_end}
+        }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
+        total_revenue = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
+        
+        # Business expenses
+        invoices = await db.invoices.find({
+            "user_id": current_user.user_id,
+            "date": {
+                "$gte": datetime.fromisoformat(period_start + "T00:00:00+00:00"),
+                "$lt": datetime.fromisoformat(period_end + "T00:00:00+00:00")
+            }
+        }, {"_id": 0, "total_amount": 1}).to_list(1000)
+        
+        expenses = await db.expenses.find({
+            "user_id": current_user.user_id,
+            "date": {"$gte": period_start, "$lt": period_end}
+        }, {"_id": 0, "amount": 1}).to_list(1000)
+        
+        total_expense = sum(i.get("total_amount", 0) for i in invoices) + sum(e.get("amount", 0) for e in expenses)
+        total_profit = total_revenue - total_expense
+        
+        roi = (total_profit / total_personal * 100) if total_personal > 0 else (0 if total_profit <= 0 else 100)
+        
+        trend_data.append({
+            "month": target_month,
+            "year": target_year,
+            "label": f"{target_month:02d}/{target_year}",
+            "personal_investment": round(total_personal, 2),
+            "revenue": round(total_revenue, 2),
+            "profit": round(total_profit, 2),
+            "roi_percent": round(roi, 1)
+        })
+    
+    return {"trend": trend_data, "months": months}
+
 # ===================== STATISTICS ENDPOINTS =====================
 
 @api_router.get("/statistics/summary")
