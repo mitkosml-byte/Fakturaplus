@@ -362,6 +362,106 @@ async def update_notification_settings(
     updated = await db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
     return NotificationSettings(**updated)
 
+# ===================== COMPANY ENDPOINTS =====================
+
+@api_router.post("/company", response_model=Company)
+async def create_or_update_company(company_data: CompanyCreate, current_user: User = Depends(get_current_user)):
+    """Създава нова фирма или обновява съществуваща (търси по ЕИК)"""
+    
+    # Check if company with this EIK already exists
+    existing_company = await db.companies.find_one({"eik": company_data.eik}, {"_id": 0})
+    
+    if existing_company:
+        # Update existing company
+        update_data = {k: v for k, v in company_data.dict().items() if v is not None}
+        update_data["updated_at"] = datetime.now(timezone.utc)
+        
+        await db.companies.update_one(
+            {"eik": company_data.eik},
+            {"$set": update_data}
+        )
+        
+        updated_company = await db.companies.find_one({"eik": company_data.eik}, {"_id": 0})
+        company = Company(**updated_company)
+    else:
+        # Create new company
+        company = Company(**company_data.dict())
+        await db.companies.insert_one(company.dict())
+    
+    # Link current user to this company
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$set": {"company_id": company.id}}
+    )
+    
+    return company
+
+@api_router.get("/company", response_model=Optional[Company])
+async def get_my_company(current_user: User = Depends(get_current_user)):
+    """Връща фирмата на текущия потребител"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    
+    if not user_doc or not user_doc.get("company_id"):
+        return None
+    
+    company = await db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
+    if not company:
+        return None
+    
+    return Company(**company)
+
+@api_router.put("/company", response_model=Company)
+async def update_company(company_update: CompanyUpdate, current_user: User = Depends(get_current_user)):
+    """Обновява фирмата на текущия потребител"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    
+    if not user_doc or not user_doc.get("company_id"):
+        raise HTTPException(status_code=404, detail="Нямате свързана фирма. Първо създайте фирма.")
+    
+    update_data = {k: v for k, v in company_update.dict().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Няма данни за обновяване")
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    
+    await db.companies.update_one(
+        {"id": user_doc["company_id"]},
+        {"$set": update_data}
+    )
+    
+    updated_company = await db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
+    return Company(**updated_company)
+
+@api_router.post("/company/join/{eik}")
+async def join_company_by_eik(eik: str, current_user: User = Depends(get_current_user)):
+    """Присъединява потребител към съществуваща фирма по ЕИК"""
+    company = await db.companies.find_one({"eik": eik}, {"_id": 0})
+    
+    if not company:
+        raise HTTPException(status_code=404, detail=f"Фирма с ЕИК {eik} не е намерена")
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$set": {"company_id": company["id"]}}
+    )
+    
+    return {"message": f"Успешно се присъединихте към {company['name']}", "company": Company(**company)}
+
+@api_router.get("/company/users")
+async def get_company_users(current_user: User = Depends(get_current_user)):
+    """Връща всички потребители от същата фирма"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    
+    if not user_doc or not user_doc.get("company_id"):
+        return []
+    
+    users = await db.users.find(
+        {"company_id": user_doc["company_id"]},
+        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "picture": 1}
+    ).to_list(1000)
+    
+    return users
+
 # ===================== OCR ENDPOINT =====================
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
