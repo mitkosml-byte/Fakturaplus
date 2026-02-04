@@ -76,11 +76,57 @@ export default function HomeScreen() {
     }
   }, [revenueModalVisible, revenueDate, loadCurrentDayRevenue]);
 
+  // Load expenses for selected date when expense modal opens or date changes
+  const loadDayExpenses = useCallback(async (date: Date) => {
+    setLoadingExpenses(true);
+    try {
+      const dateStr = format(date, 'yyyy-MM-dd');
+      const expenses = await api.getExpenses({
+        start_date: dateStr,
+        end_date: dateStr
+      });
+      setDayExpenses(expenses);
+    } catch (error) {
+      setDayExpenses([]);
+    } finally {
+      setLoadingExpenses(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (expenseModalVisible) {
+      loadDayExpenses(expenseDate);
+    }
+  }, [expenseModalVisible, expenseDate, loadDayExpenses]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
   }, [loadData]);
+
+  const handleDeleteExpense = async (expenseId: string) => {
+    Alert.alert(
+      'Изтриване',
+      'Сигурни ли сте, че искате да изтриете този разход?',
+      [
+        { text: 'Отказ', style: 'cancel' },
+        {
+          text: 'Изтрий',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.deleteExpense(expenseId);
+              loadDayExpenses(expenseDate);
+              loadData();
+            } catch (error: any) {
+              Alert.alert('Грешка', error.message);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const handleAddRevenue = async () => {
     if (!fiscalRevenue && !pocketMoney) {
