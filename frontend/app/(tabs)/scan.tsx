@@ -126,7 +126,7 @@ export default function ScanScreen() {
         amount_without_vat: parseFloat(amountWithoutVat) || 0,
         vat_amount: parseFloat(vatAmount) || 0,
         total_amount: parseFloat(totalAmount) || 0,
-        date: new Date().toISOString(),
+        date: invoiceDate.toISOString(),
         image_base64: capturedImage || undefined,
         notes: notes || undefined,
       });
