@@ -225,6 +225,18 @@ backend:
         agent: "testing"
         comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
 
+  - task: "Item Price Tracking API Endpoints"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ All item price tracking endpoints working perfectly. Successfully tested: POST /api/invoices with items (creates price history and alerts), GET /api/items/price-alerts (returns price alerts with 17.65% increase for Кафе), GET /api/items/price-alert-settings (threshold 10%, enabled), GET /api/statistics/items (item statistics with top lists), GET /api/items/price-history/кафе (price history with 2 records, avg 9.25 лв), GET /api/statistics/items/кафе/by-supplier (supplier comparison). Price alerts correctly triggered for items exceeding 10% threshold. All Bulgarian text handling working correctly."
+
 frontend:
   - task: "Login screen with Google OAuth"
     implemented: true
