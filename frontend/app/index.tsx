@@ -65,28 +65,62 @@ export default function Index() {
   };
 
   const handleGoogleLogin = async () => {
-    const redirectUrl = Platform.OS === 'web'
-      ? (typeof window !== 'undefined' ? window.location.origin + '/' : '/')
-      : Linking.createURL('/');
-    
-    const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-    
-    if (Platform.OS === 'web') {
-      window.location.href = authUrl;
-    } else {
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
-      if (result.type === 'success' && result.url) {
-        const url = result.url;
-        let sessionId = null;
-        if (url.includes('#session_id=')) {
-          sessionId = url.split('#session_id=')[1]?.split('&')[0];
-        } else if (url.includes('?session_id=')) {
-          sessionId = url.split('?session_id=')[1]?.split('&')[0];
-        }
-        if (sessionId) {
-          await handleSessionId(sessionId);
+    try {
+      // For Expo Go, use exp:// scheme; for standalone app use custom scheme
+      const redirectUrl = Platform.OS === 'web'
+        ? (typeof window !== 'undefined' ? window.location.origin + '/' : '/')
+        : Linking.createURL('/');
+      
+      console.log('Google login redirect URL:', redirectUrl);
+      
+      const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+      
+      if (Platform.OS === 'web') {
+        window.location.href = authUrl;
+      } else {
+        setIsProcessing(true);
+        const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
+        console.log('WebBrowser result:', result);
+        
+        if (result.type === 'success' && result.url) {
+          const url = result.url;
+          console.log('Received URL:', url);
+          
+          let sessionId = null;
+          // Try different URL formats
+          if (url.includes('#session_id=')) {
+            sessionId = url.split('#session_id=')[1]?.split('&')[0];
+          } else if (url.includes('?session_id=')) {
+            sessionId = url.split('?session_id=')[1]?.split('&')[0];
+          } else if (url.includes('session_id=')) {
+            sessionId = url.split('session_id=')[1]?.split('&')[0];
+          }
+          
+          console.log('Extracted sessionId:', sessionId);
+          
+          if (sessionId) {
+            await handleSessionId(sessionId);
+          } else {
+            setIsProcessing(false);
+            Alert.alert(
+              language === 'bg' ? 'Грешка' : 'Error',
+              language === 'bg' ? 'Не беше получен session ID' : 'No session ID received'
+            );
+          }
+        } else if (result.type === 'cancel') {
+          console.log('User cancelled');
+          setIsProcessing(false);
+        } else {
+          setIsProcessing(false);
         }
       }
+    } catch (error) {
+      console.error('Google login error:', error);
+      setIsProcessing(false);
+      Alert.alert(
+        language === 'bg' ? 'Грешка' : 'Error',
+        language === 'bg' ? 'Грешка при вход с Google' : 'Google login failed'
+      );
     }
   };
 
