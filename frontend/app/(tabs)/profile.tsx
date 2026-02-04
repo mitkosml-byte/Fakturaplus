@@ -267,6 +267,49 @@ export default function ProfileScreen() {
           </ScrollView>
         </SafeAreaView>
       </View>
+      
+      {/* Language Selection Modal */}
+      <Modal
+        visible={showLanguageModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLanguageModal(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1}
+          onPress={() => setShowLanguageModal(false)}
+        >
+          <View style={styles.languageModalContent}>
+            <Text style={styles.languageModalTitle}>{t('login.selectLanguage')}</Text>
+            
+            <TouchableOpacity 
+              style={[styles.languageOption, language === 'bg' && styles.languageOptionActive]}
+              onPress={() => handleLanguageChange('bg')}
+            >
+              <Text style={styles.languageFlag}>🇧🇬</Text>
+              <Text style={styles.languageText}>Български</Text>
+              {language === 'bg' && <Ionicons name="checkmark-circle" size={24} color="#8B5CF6" />}
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.languageOption, language === 'en' && styles.languageOptionActive]}
+              onPress={() => handleLanguageChange('en')}
+            >
+              <Text style={styles.languageFlag}>🇬🇧</Text>
+              <Text style={styles.languageText}>English</Text>
+              {language === 'en' && <Ionicons name="checkmark-circle" size={24} color="#8B5CF6" />}
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.languageModalCancel}
+              onPress={() => setShowLanguageModal(false)}
+            >
+              <Text style={styles.languageModalCancelText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ImageBackground>
   );
 }
