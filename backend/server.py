@@ -772,8 +772,19 @@ async def delete_expense(expense_id: str, current_user: User = Depends(get_curre
 async def get_summary(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    current_month_only: bool = True,  # Default to current month
     current_user: User = Depends(get_current_user)
 ):
+    # If no dates provided and current_month_only is True, use current month
+    if not start_date and not end_date and current_month_only:
+        now = datetime.now(timezone.utc)
+        start_date = now.replace(day=1).strftime("%Y-%m-%d")
+        # End of month
+        if now.month == 12:
+            end_date = now.replace(year=now.year + 1, month=1, day=1).strftime("%Y-%m-%d")
+        else:
+            end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
+    
     query = {"user_id": current_user.user_id}
     date_query = {}
     
