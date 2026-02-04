@@ -95,6 +95,60 @@ export default function StatsScreen() {
       setLoadingDetail(false);
     }
   }, []);
+  
+  // Item statistics functions
+  const loadItemStats = useCallback(async () => {
+    setLoadingItems(true);
+    try {
+      const [statsData, alertsData] = await Promise.all([
+        api.getItemStatistics(),
+        api.getPriceAlerts()
+      ]);
+      setItemStats(statsData);
+      setPriceAlerts(alertsData.alerts || []);
+      setUnreadAlerts(alertsData.unread_count || 0);
+    } catch (error) {
+      console.error('Error loading item stats:', error);
+    } finally {
+      setLoadingItems(false);
+    }
+  }, []);
+  
+  const loadItemDetail = useCallback(async (itemName: string) => {
+    setLoadingItemDetail(true);
+    try {
+      const [historyData, supplierData] = await Promise.all([
+        api.getItemPriceHistory(itemName),
+        api.getItemBySupplier(itemName)
+      ]);
+      setItemPriceHistory(historyData);
+      setItemBySupplier(supplierData);
+    } catch (error) {
+      console.error('Error loading item detail:', error);
+    } finally {
+      setLoadingItemDetail(false);
+    }
+  }, []);
+  
+  const markAlertAsRead = async (alertId: string) => {
+    try {
+      await api.updatePriceAlert(alertId, 'read');
+      setPriceAlerts(prev => prev.map(a => a.id === alertId ? {...a, status: 'read'} : a));
+      setUnreadAlerts(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error('Error updating alert:', error);
+    }
+  };
+  
+  const dismissAlert = async (alertId: string) => {
+    try {
+      await api.updatePriceAlert(alertId, 'dismissed');
+      setPriceAlerts(prev => prev.filter(a => a.id !== alertId));
+      setUnreadAlerts(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error('Error dismissing alert:', error);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -105,22 +159,49 @@ export default function StatsScreen() {
       loadSupplierStats();
     }
   }, [activeTab, supplierOverview, loadSupplierStats]);
+  
+  useEffect(() => {
+    if (activeTab === 'items' && !itemStats) {
+      loadItemStats();
+    }
+  }, [activeTab, itemStats, loadItemStats]);
 
   useEffect(() => {
     if (selectedSupplier) {
       loadSupplierDetail(selectedSupplier);
     }
   }, [selectedSupplier, loadSupplierDetail]);
+  
+  useEffect(() => {
+    if (selectedItem) {
+      loadItemDetail(selectedItem);
+    }
+  }, [selectedItem, loadItemDetail]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     if (activeTab === 'overview') {
       await loadData();
-    } else {
+    } else if (activeTab === 'suppliers') {
       await loadSupplierStats();
+    } else {
+      await loadItemStats();
     }
     setRefreshing(false);
-  }, [loadData, loadSupplierStats, activeTab]);
+  }, [loadData, loadSupplierStats, loadItemStats, activeTab]);
+  
+  // Get current item ranking
+  const getCurrentItemRanking = () => {
+    if (!itemStats) return [];
+    switch (itemRankingType) {
+      case 'quantity':
+        return itemStats.top_by_quantity || [];
+      case 'frequency':
+        return itemStats.top_by_frequency || [];
+      default:
+        return itemStats.top_by_value || [];
+    }
+  };
 
   // Chart data for overview
   const incomeBarData = chartData.map((item) => ({
