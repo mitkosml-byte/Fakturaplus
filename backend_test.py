@@ -63,63 +63,40 @@ def register_test_user():
         print(f"❌ User registration error: {e}")
         return False
 
-def create_test_user_and_session():
-    """Create test user and session in MongoDB"""
-    print("\n2. CREATING TEST USER AND SESSION")
+def create_test_invoice():
+    """Create a test invoice to have data for supplier statistics"""
+    print("\n2. CREATING TEST INVOICE")
     print("-" * 40)
     
-    global session_token
+    if not session_token:
+        print("❌ No session token available")
+        return False
+    
+    headers = {"Authorization": f"Bearer {session_token}", "Content-Type": "application/json"}
     
     try:
-        # Create test user and session using mongosh
-        mongo_script = """
-use('test_database');
-var userId = 'user_test123';
-var sessionToken = 'test_session_' + Date.now();
-db.users.deleteMany({user_id: userId});
-db.user_sessions.deleteMany({user_id: userId});
-db.users.insertOne({
-  user_id: userId,
-  email: 'test@example.com',
-  name: 'Test User',
-  role: 'accountant',
-  created_at: new Date()
-});
-db.user_sessions.insertOne({
-  user_id: userId,
-  session_token: sessionToken,
-  expires_at: new Date(Date.now() + 7*24*60*60*1000),
-  created_at: new Date()
-});
-print('Session token: ' + sessionToken);
-"""
+        invoice_data = {
+            "supplier": "Test Supplier",
+            "invoice_number": "INV001",
+            "amount_without_vat": 100,
+            "vat_amount": 20,
+            "total_amount": 120,
+            "date": "2025-02-01T00:00:00Z"
+        }
         
-        result = subprocess.run(
-            ['mongosh', '--eval', mongo_script],
-            capture_output=True,
-            text=True
-        )
+        response = requests.post(f"{API_URL}/invoices", headers=headers, json=invoice_data)
+        print(f"POST /api/invoices - Status: {response.status_code}")
         
-        if result.returncode == 0:
-            # Extract session token from output
-            for line in result.stdout.split('\n'):
-                if 'Session token:' in line:
-                    session_token = line.split('Session token: ')[1].strip()
-                    break
-            
-            if session_token:
-                print(f"✅ Test user and session created successfully")
-                print(f"Session token: {session_token}")
-                return True
-            else:
-                print(f"❌ Could not extract session token from: {result.stdout}")
-                return False
+        if response.status_code == 200:
+            created_invoice = response.json()
+            print(f"✅ Test invoice created: {created_invoice.get('invoice_number')}")
+            return True
         else:
-            print(f"❌ MongoDB script failed: {result.stderr}")
+            print(f"❌ Invoice creation failed: {response.text}")
             return False
             
     except Exception as e:
-        print(f"❌ Error creating test user: {e}")
+        print(f"❌ Invoice creation error: {e}")
         return False
 
 def test_auth_endpoint():
