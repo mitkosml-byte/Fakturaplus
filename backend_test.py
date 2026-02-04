@@ -163,8 +163,12 @@ class BudgetAndExportTester:
     async def test_create_budget(self):
         """Test POST /api/budget - Create budget for current month"""
         try:
+            # Use current month
+            from datetime import datetime, timezone
+            current_month = datetime.now(timezone.utc).strftime('%Y-%m')
+            
             budget_data = {
-                "month": "2025-02",
+                "month": current_month,
                 "expense_limit": 5000,
                 "alert_threshold": 80
             }
@@ -181,7 +185,7 @@ class BudgetAndExportTester:
                     self.log_result(
                         "Create Budget", 
                         True, 
-                        f"Budget created/updated for 2025-02: limit 5000, threshold 80%. Message: {message}"
+                        f"Budget created/updated for {current_month}: limit 5000, threshold 80%. Message: {message}"
                     )
                     return True
                 else:
