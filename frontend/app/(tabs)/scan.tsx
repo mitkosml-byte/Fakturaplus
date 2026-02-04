@@ -265,6 +265,31 @@ export default function ScanScreen() {
                 <View style={styles.formContainer}>
                   <Text style={styles.formTitle}>{language === 'bg' ? 'Данни от фактурата' : 'Invoice Data'}</Text>
                   <Text style={styles.formHint}>{language === 'bg' ? 'Редактирайте при нужда' : 'Edit if needed'}</Text>
+                  
+                  {/* AI Corrections Info */}
+                  {ocrCorrections.length > 0 && (
+                    <View style={styles.correctionsContainer}>
+                      <View style={styles.correctionsHeader}>
+                        <Ionicons name="sparkles" size={18} color="#10B981" />
+                        <Text style={styles.correctionsTitle}>
+                          {language === 'bg' ? 'AI корекции' : 'AI Corrections'}
+                        </Text>
+                        {ocrConfidence && (
+                          <View style={styles.confidenceBadge}>
+                            <Text style={styles.confidenceText}>
+                              {Math.round(ocrConfidence * 100)}%
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      {ocrCorrections.map((correction, index) => (
+                        <View key={index} style={styles.correctionItem}>
+                          <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                          <Text style={styles.correctionText}>{correction}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
 
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.supplier')} *</Text>
