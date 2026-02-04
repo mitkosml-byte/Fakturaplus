@@ -432,6 +432,57 @@ class ApiService {
   }> {
     return this.fetch(`/statistics/items/${encodeURIComponent(itemName)}/by-supplier`);
   }
+
+  // Budget API
+  async getBudgetStatus(): Promise<any> {
+    return this.fetch('/budget/status');
+  }
+
+  async getBudgets(): Promise<{ budgets: any[] }> {
+    return this.fetch('/budget');
+  }
+
+  async createBudget(budget: { month: string; expense_limit: number; alert_threshold: number }): Promise<{ message: string }> {
+    return this.fetch('/budget', {
+      method: 'POST',
+      body: JSON.stringify(budget),
+    });
+  }
+
+  // Recurring Expenses
+  async getRecurringExpenses(): Promise<{ recurring_expenses: any[] }> {
+    return this.fetch('/recurring-expenses');
+  }
+
+  async createRecurringExpense(expense: { description: string; amount: number; day_of_month: number; category?: string }): Promise<{ message: string; id: string }> {
+    return this.fetch('/recurring-expenses', {
+      method: 'POST',
+      body: JSON.stringify(expense),
+    });
+  }
+
+  async deleteRecurringExpense(id: string): Promise<{ message: string }> {
+    return this.fetch(`/recurring-expenses/${id}`, { method: 'DELETE' });
+  }
+
+  // Forecast API
+  async getExpenseForecast(monthsAhead: number = 3): Promise<any> {
+    return this.fetch(`/forecast/expenses?months_ahead=${monthsAhead}`);
+  }
+
+  async getRevenueForecast(monthsAhead: number = 3): Promise<any> {
+    return this.fetch(`/forecast/revenue?months_ahead=${monthsAhead}`);
+  }
+
+  // Audit Logs
+  async getAuditLogs(params?: { action?: string; entity_type?: string; limit?: number }): Promise<{ logs: any[] }> {
+    const queryParams = new URLSearchParams();
+    if (params?.action) queryParams.set('action', params.action);
+    if (params?.entity_type) queryParams.set('entity_type', params.entity_type);
+    if (params?.limit) queryParams.set('limit', params.limit.toString());
+    const query = queryParams.toString();
+    return this.fetch(`/audit-logs${query ? `?${query}` : ''}`);
+  }
 }
 
 export const api = new ApiService();
