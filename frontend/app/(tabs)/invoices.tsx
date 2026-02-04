@@ -211,15 +211,15 @@ export default function InvoicesScreen() {
       <Modal visible={exportModalVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Експорт на фактури</Text>
+            <Text style={styles.modalTitle}>{t('invoices.exportTitle')}</Text>
 
             <TouchableOpacity style={styles.exportOption} onPress={() => handleExport('excel')}>
               <View style={[styles.exportIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
                 <Ionicons name="document" size={24} color="#10B981" />
               </View>
               <View>
-                <Text style={styles.exportOptionTitle}>Excel (а.xlsx)</Text>
-                <Text style={styles.exportOptionHint}>За редактиране и анализ</Text>
+                <Text style={styles.exportOptionTitle}>{t('invoices.excelTitle')}</Text>
+                <Text style={styles.exportOptionHint}>{t('invoices.excelHint')}</Text>
               </View>
             </TouchableOpacity>
 
@@ -229,12 +229,12 @@ export default function InvoicesScreen() {
               </View>
               <View>
                 <Text style={styles.exportOptionTitle}>PDF</Text>
-                <Text style={styles.exportOptionHint}>За печат и архив</Text>
+                <Text style={styles.exportOptionHint}>{t('invoices.pdfHint')}</Text>
               </View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.cancelButton} onPress={() => setExportModalVisible(false)}>
-              <Text style={styles.cancelButtonText}>Отказ</Text>
+              <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>
