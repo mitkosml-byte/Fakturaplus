@@ -521,6 +521,58 @@ class ApiService {
     const query = queryParams.toString();
     return this.fetch(`/audit-logs${query ? `?${query}` : ''}`);
   }
-}
 
-export const api = new ApiService();
+  // Personal Expenses (Owner only)
+  async getPersonalExpenses(params?: { month?: number; year?: number; expense_type?: string; category?: string }): Promise<{ personal_expenses: any[] }> {
+    const queryParams = new URLSearchParams();
+    if (params?.month) queryParams.set('month', params.month.toString());
+    if (params?.year) queryParams.set('year', params.year.toString());
+    if (params?.expense_type) queryParams.set('expense_type', params.expense_type);
+    if (params?.category) queryParams.set('category', params.category);
+    const query = queryParams.toString();
+    return this.fetch(`/personal-expenses${query ? `?${query}` : ''}`);
+  }
+
+  async createPersonalExpense(expense: {
+    amount: number;
+    description: string;
+    expense_type: string;
+    category: string;
+    period_month: number;
+    period_year: number;
+    supplier_id?: string;
+    project_name?: string;
+    notes?: string;
+  }): Promise<{ message: string; id: string }> {
+    return this.fetch('/personal-expenses', {
+      method: 'POST',
+      body: JSON.stringify(expense),
+    });
+  }
+
+  async deletePersonalExpense(id: string): Promise<{ message: string }> {
+    return this.fetch(`/personal-expenses/${id}`, { method: 'DELETE' });
+  }
+
+  // ROI Analysis (Owner only)
+  async getROIAnalysis(params?: { month?: number; year?: number }): Promise<{
+    period: { month: number; year: number };
+    total_personal_investment: number;
+    total_revenue: number;
+    total_profit: number;
+    roi_percent: number;
+    is_profitable: boolean;
+    investment_covered: boolean;
+    ai_insights: string[];
+  }> {
+    const queryParams = new URLSearchParams();
+    if (params?.month) queryParams.set('month', params.month.toString());
+    if (params?.year) queryParams.set('year', params.year.toString());
+    const query = queryParams.toString();
+    return this.fetch(`/roi/analysis${query ? `?${query}` : ''}`);
+  }
+
+  async getROITrend(months: number = 6): Promise<{ trend: any[]; months: number }> {
+    return this.fetch(`/roi/trend?months=${months}`);
+  }
+}
