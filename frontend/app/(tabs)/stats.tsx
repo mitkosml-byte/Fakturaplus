@@ -487,7 +487,7 @@ export default function StatsScreen() {
                 style={[styles.tabButton, activeTab === 'overview' && styles.tabButtonActive]}
                 onPress={() => setActiveTab('overview')}
               >
-                <Ionicons name="bar-chart" size={18} color={activeTab === 'overview' ? 'white' : '#64748B'} />
+                <Ionicons name="bar-chart" size={16} color={activeTab === 'overview' ? 'white' : '#64748B'} />
                 <Text style={[styles.tabButtonText, activeTab === 'overview' && styles.tabButtonTextActive]}>
                   {t('stats.overview')}
                 </Text>
@@ -496,9 +496,25 @@ export default function StatsScreen() {
                 style={[styles.tabButton, activeTab === 'suppliers' && styles.tabButtonActive]}
                 onPress={() => setActiveTab('suppliers')}
               >
-                <Ionicons name="business" size={18} color={activeTab === 'suppliers' ? 'white' : '#64748B'} />
+                <Ionicons name="business" size={16} color={activeTab === 'suppliers' ? 'white' : '#64748B'} />
                 <Text style={[styles.tabButtonText, activeTab === 'suppliers' && styles.tabButtonTextActive]}>
                   {t('stats.suppliers')}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'items' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('items')}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="pricetags" size={16} color={activeTab === 'items' ? 'white' : '#64748B'} />
+                  {unreadAlerts > 0 && (
+                    <View style={styles.alertBadge}>
+                      <Text style={styles.alertBadgeText}>{unreadAlerts}</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={[styles.tabButtonText, activeTab === 'items' && styles.tabButtonTextActive]}>
+                  {t('stats.items')}
                 </Text>
               </TouchableOpacity>
             </View>
