@@ -125,8 +125,8 @@ export default function StatsScreen() {
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
           >
             <View style={styles.header}>
-              <Text style={styles.title}>Статистики</Text>
-              <Text style={styles.subtitle}>Анализ на приходи и разходи</Text>
+              <Text style={styles.title}>{t('stats.title')}</Text>
+              <Text style={styles.subtitle}>{t('stats.subtitle')}</Text>
             </View>
 
             {/* Tab Selector */}
@@ -137,7 +137,7 @@ export default function StatsScreen() {
               >
                 <Ionicons name="bar-chart" size={18} color={activeTab === 'overview' ? 'white' : '#64748B'} />
                 <Text style={[styles.tabButtonText, activeTab === 'overview' && styles.tabButtonTextActive]}>
-                  Общ преглед
+                  {t('stats.overview')}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -146,7 +146,7 @@ export default function StatsScreen() {
               >
                 <Ionicons name="business" size={18} color={activeTab === 'suppliers' ? 'white' : '#64748B'} />
                 <Text style={[styles.tabButtonText, activeTab === 'suppliers' && styles.tabButtonTextActive]}>
-                  Доставчици
+                  {t('stats.suppliers')}
                 </Text>
               </TouchableOpacity>
             </View>
