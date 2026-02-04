@@ -249,11 +249,11 @@ export default function HomeScreen() {
         <View style={styles.statsGrid}>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
-            <Text style={styles.statLabel}>Фактури</Text>
+            <Text style={styles.statLabel}>{t('home.invoices')}</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0}</Text>
-            <Text style={styles.statLabel}>Фискален оборот</Text>
+            <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0}</Text>
