@@ -194,3 +194,77 @@ export interface SupplierDetailedResponse {
 }
 
 export type ChartType = 'pie' | 'bar' | 'line';
+
+// Invoice Item types
+export interface InvoiceItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  total_price: number;
+  vat_amount: number;
+}
+
+export interface InvoiceItemCreate {
+  name: string;
+  quantity?: number;
+  unit?: string;
+  unit_price: number;
+  total_price?: number;
+  vat_amount?: number;
+}
+
+// Price Alert types
+export interface PriceAlert {
+  id: string;
+  company_id: string;
+  item_name: string;
+  supplier: string;
+  old_price: number;
+  new_price: number;
+  change_percent: number;
+  invoice_id: string;
+  invoice_number: string;
+  status: 'unread' | 'read' | 'dismissed';
+  created_at: string;
+}
+
+export interface PriceAlertSettings {
+  threshold_percent: number;
+  enabled: boolean;
+}
+
+export interface ItemPriceHistory {
+  date: string;
+  supplier: string;
+  unit_price: number;
+  quantity: number;
+  unit: string;
+  invoice_number: string;
+}
+
+export interface ItemStatistics {
+  item_name: string;
+  quantity: number;
+  total_value: number;
+  frequency: number;
+  avg_price: number;
+  min_price: number;
+  max_price: number;
+  price_variance: number;
+  trend_percent: number;
+  supplier_count: number;
+}
+
+export interface ItemStatsResponse {
+  totals: {
+    total_items: number;
+    total_value: number;
+    unique_items: number;
+  };
+  top_by_quantity: ItemStatistics[];
+  top_by_value: ItemStatistics[];
+  top_by_frequency: ItemStatistics[];
+  price_trends: ItemStatistics[];
+}
