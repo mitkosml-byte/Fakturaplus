@@ -1003,6 +1003,214 @@ async def export_pdf(
         headers={"Content-Disposition": "attachment; filename=fakturi.pdf"}
     )
 
+# ===================== BACKUP ENDPOINTS =====================
+
+class BackupData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    company_id: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    invoices: List[dict] = []
+    daily_revenues: List[dict] = []
+    expenses: List[dict] = []
+    company: Optional[dict] = None
+
+class BackupMetadata(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    file_name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    size_bytes: int
+    invoice_count: int
+    revenue_count: int
+    expense_count: int
+    google_drive_file_id: Optional[str] = None
+
+@api_router.post("/backup/create")
+async def create_backup(current_user: User = Depends(get_current_user)):
+    """Създава backup на всички данни на потребителя"""
+    import json
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    # Събиране на фактури
+    invoices = await db.invoices.find(
+        {"user_id": current_user.user_id},
+        {"_id": 0}
+    ).to_list(10000)
+    
+    # Конвертиране на datetime обекти
+    for inv in invoices:
+        if isinstance(inv.get("date"), datetime):
+            inv["date"] = inv["date"].isoformat()
+        if isinstance(inv.get("created_at"), datetime):
+            inv["created_at"] = inv["created_at"].isoformat()
+    
+    # Събиране на дневни обороти
+    revenues = await db.daily_revenue.find(
+        {"user_id": current_user.user_id},
+        {"_id": 0}
+    ).to_list(10000)
+    
+    for rev in revenues:
+        if isinstance(rev.get("date"), datetime):
+            rev["date"] = rev["date"].isoformat()
+        if isinstance(rev.get("created_at"), datetime):
+            rev["created_at"] = rev["created_at"].isoformat()
+    
+    # Събиране на разходи
+    expenses = await db.expenses.find(
+        {"user_id": current_user.user_id},
+        {"_id": 0}
+    ).to_list(10000)
+    
+    for exp in expenses:
+        if isinstance(exp.get("date"), datetime):
+            exp["date"] = exp["date"].isoformat()
+        if isinstance(exp.get("created_at"), datetime):
+            exp["created_at"] = exp["created_at"].isoformat()
+    
+    # Събиране на данни за фирма
+    company_data = None
+    if company_id:
+        company_data = await db.companies.find_one({"id": company_id}, {"_id": 0})
+        if company_data:
+            if isinstance(company_data.get("created_at"), datetime):
+                company_data["created_at"] = company_data["created_at"].isoformat()
+            if isinstance(company_data.get("updated_at"), datetime):
+                company_data["updated_at"] = company_data["updated_at"].isoformat()
+    
+    backup_data = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.user_id,
+        "user_email": current_user.email,
+        "user_name": current_user.name,
+        "company_id": company_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "app_version": "1.0.0",
+        "invoices": invoices,
+        "daily_revenues": revenues,
+        "expenses": expenses,
+        "company": company_data,
+        "statistics": {
+            "invoice_count": len(invoices),
+            "revenue_count": len(revenues),
+            "expense_count": len(expenses)
+        }
+    }
+    
+    # Записване на metadata за backup
+    backup_json = json.dumps(backup_data, ensure_ascii=False)
+    metadata = BackupMetadata(
+        user_id=current_user.user_id,
+        file_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+        size_bytes=len(backup_json.encode('utf-8')),
+        invoice_count=len(invoices),
+        revenue_count=len(revenues),
+        expense_count=len(expenses)
+    )
+    
+    await db.backup_metadata.insert_one(metadata.dict())
+    
+    return backup_data
+
+@api_router.get("/backup/list")
+async def list_backups(current_user: User = Depends(get_current_user)):
+    """Връща списък с всички backups на потребителя"""
+    backups = await db.backup_metadata.find(
+        {"user_id": current_user.user_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    return {"backups": backups}
+
+@api_router.post("/backup/restore")
+async def restore_backup(backup_data: dict, current_user: User = Depends(get_current_user)):
+    """Възстановява данни от backup"""
+    
+    restored_counts = {
+        "invoices": 0,
+        "revenues": 0,
+        "expenses": 0
+    }
+    
+    # Възстановяване на фактури
+    if "invoices" in backup_data:
+        for invoice in backup_data["invoices"]:
+            # Проверка за дублиране
+            existing = await db.invoices.find_one({
+                "user_id": current_user.user_id,
+                "id": invoice.get("id")
+            })
+            if not existing:
+                invoice["user_id"] = current_user.user_id
+                if isinstance(invoice.get("date"), str):
+                    invoice["date"] = datetime.fromisoformat(invoice["date"].replace("Z", "+00:00"))
+                if isinstance(invoice.get("created_at"), str):
+                    invoice["created_at"] = datetime.fromisoformat(invoice["created_at"].replace("Z", "+00:00"))
+                await db.invoices.insert_one(invoice)
+                restored_counts["invoices"] += 1
+    
+    # Възстановяване на дневни обороти
+    if "daily_revenues" in backup_data:
+        for revenue in backup_data["daily_revenues"]:
+            existing = await db.daily_revenue.find_one({
+                "user_id": current_user.user_id,
+                "id": revenue.get("id")
+            })
+            if not existing:
+                revenue["user_id"] = current_user.user_id
+                if isinstance(revenue.get("date"), str):
+                    revenue["date"] = datetime.fromisoformat(revenue["date"].replace("Z", "+00:00"))
+                await db.daily_revenue.insert_one(revenue)
+                restored_counts["revenues"] += 1
+    
+    # Възстановяване на разходи
+    if "expenses" in backup_data:
+        for expense in backup_data["expenses"]:
+            existing = await db.expenses.find_one({
+                "user_id": current_user.user_id,
+                "id": expense.get("id")
+            })
+            if not existing:
+                expense["user_id"] = current_user.user_id
+                if isinstance(expense.get("date"), str):
+                    expense["date"] = datetime.fromisoformat(expense["date"].replace("Z", "+00:00"))
+                await db.expenses.insert_one(expense)
+                restored_counts["expenses"] += 1
+    
+    return {
+        "success": True,
+        "message": "Данните са възстановени успешно",
+        "restored": restored_counts
+    }
+
+@api_router.get("/backup/status")
+async def get_backup_status(current_user: User = Depends(get_current_user)):
+    """Връща статус на последния backup"""
+    last_backup = await db.backup_metadata.find_one(
+        {"user_id": current_user.user_id},
+        {"_id": 0}
+    )
+    
+    if last_backup:
+        return {
+            "has_backup": True,
+            "last_backup_date": last_backup.get("created_at"),
+            "file_name": last_backup.get("file_name"),
+            "statistics": {
+                "invoices": last_backup.get("invoice_count", 0),
+                "revenues": last_backup.get("revenue_count", 0),
+                "expenses": last_backup.get("expense_count", 0)
+            }
+        }
+    
+    return {
+        "has_backup": False,
+        "last_backup_date": None
+    }
+
 # ===================== HEALTH CHECK =====================
 
 @api_router.get("/")
