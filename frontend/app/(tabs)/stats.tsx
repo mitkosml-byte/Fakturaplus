@@ -369,7 +369,7 @@ export default function StatsScreen() {
                 <View style={styles.detailDateItem}>
                   <Ionicons name="calendar-outline" size={16} color="#64748B" />
                   <Text style={styles.detailDateLabel}>{t('stats.firstDelivery')}: </Text>
-                  <Text style={styles.detailDateValue}>{supplierDetail.overview?.first_delivery || '-'}</Text>
+                  <Text style={styles.detailDateValue}>{supplierDetail.overview?.first_delivery || t('stats.noValue')}</Text>
                 </View>
                 <View style={styles.detailDateItem}>
                   <Ionicons name="time-outline" size={16} color="#64748B" />
