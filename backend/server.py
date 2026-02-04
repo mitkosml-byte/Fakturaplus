@@ -49,6 +49,10 @@ app = FastAPI(
     redoc_url=None if IS_PRODUCTION else "/redoc"
 )
 
+# Add rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
