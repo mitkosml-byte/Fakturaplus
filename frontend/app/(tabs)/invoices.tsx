@@ -60,19 +60,19 @@ export default function InvoicesScreen() {
 
   const handleDeleteInvoice = async (id: string) => {
     Alert.alert(
-      'Изтриване',
-      'Сигурни ли сте, че искате да изтриете тази фактура?',
+      t('invoices.delete'),
+      t('invoices.deleteConfirm'),
       [
-        { text: 'Отказ', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Изтрий',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await api.deleteInvoice(id);
               loadInvoices();
             } catch (error: any) {
-              Alert.alert('Грешка', error.message);
+              Alert.alert(t('common.error'), error.message);
             }
           },
         },
@@ -93,13 +93,13 @@ export default function InvoicesScreen() {
       }
       setExportModalVisible(false);
     } catch (error: any) {
-      Alert.alert('Грешка', 'Не можах да изтегля файла');
+      Alert.alert(t('common.error'), language === 'bg' ? 'Не можах да изтегля файла' : 'Could not download file');
     }
   };
 
   const formatDate = (dateStr: string) => {
     try {
-      return format(new Date(dateStr), 'd MMM yyyy', { locale: bg });
+      return format(new Date(dateStr), 'd MMM yyyy', { locale: dateLocale });
     } catch {
       return dateStr;
     }
