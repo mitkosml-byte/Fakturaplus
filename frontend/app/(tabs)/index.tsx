@@ -803,4 +803,93 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  loadingContainer: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  dayExpensesSection: {
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  dayExpensesTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F59E0B',
+    marginBottom: 12,
+  },
+  expenseItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  expenseItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+  },
+  expenseItemIndex: {
+    fontSize: 12,
+    color: '#64748B',
+    width: 20,
+  },
+  expenseItemDescription: {
+    fontSize: 14,
+    color: 'white',
+    flex: 1,
+  },
+  expenseItemRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  expenseItemAmount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F59E0B',
+  },
+  expenseDeleteButton: {
+    padding: 4,
+  },
+  expensesTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  expensesTotalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  expensesTotalValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#F59E0B',
+  },
+  noExpensesText: {
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  addExpenseSection: {
+    marginTop: 8,
+  },
+  addExpenseTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'white',
+    marginBottom: 16,
+  },
 });
