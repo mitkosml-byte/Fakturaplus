@@ -1,127 +1,134 @@
 <analysis>
 <original_problem_statement>
-Create an Android APK application for managing incoming invoices in Bulgarian with a professional and modern mobile design.
+Create an Android APK application for managing incoming invoices in Bulgarian. The application should have a professional and modern mobile design.
 
-**PRODUCT REQUIREMENTS (Initial):**
+**Initial PRODUCT REQUIREMENTS:**
 1.  **OCR Invoice Scanning:** Extract supplier, invoice number, amount without VAT, VAT, total. Allow manual editing.
-2.  **Daily Fiscal Revenue:** Input for daily revenue and pocket money (not for VAT).
+2.  **Daily Fiscal Revenue:** Input for daily revenue and pocket money.
 3.  **Non-invoiced Expenses:** A button to enter expenses without invoices.
 4.  **Automatic Calculations:** Real-time VAT, income, and expense totals.
 5.  **Invoice List:** Search, filter, and export to Excel/PDF.
 6.  **Statistics and Forecasts:** Graphs and visualizations for turnover.
-7.  **Multi-user Support:** Accountant vs. Regular User roles.
+7.  **Multi-user Support & Roles:** Accountant vs. Regular User roles.
 8.  **Design:** Modern, intuitive mobile interface.
 9.  **Storage:** Local storage with Google Drive backup.
 
-**PRODUCT REQUIREMENTS (Evolved during this session):**
-*   Add a proper calendar for selecting dates for revenue/expenses.
-*   Fix UI layout issues (tab bar overlapping Android navigation).
-*   OCR should extract the **invoice issue date**, not use the scan date.
+**Evolved PRODUCT REQUIREMENTS (Added in previous sessions):**
+*   Add a proper calendar for selecting dates.
+*   Fix UI layout issues (tab bar overlapping).
+*   OCR should extract the invoice issue date.
 *   Add duplicate invoice detection.
-*   Introduce a Company concept: a shared database for all users in a company, with company-wide duplicate detection.
-*   Add pull-to-refresh on all screens.
+*   Introduce a Company concept for shared data.
+*   Add pull-to-refresh.
 *   Implement Google Drive backup.
-*   A large list of optimizations:
-    *   Home page stats should be for the current month only.
-    *   Daily revenue/expense entries should be cumulative (summed up).
-    *   The expense entry modal (В канала) should show a list of expenses for the selected day with a delete option.
-    *   Supplier search should be case-insensitive and partial.
-    *   Add a new Suppliers statistics section.
-    *   Add a HELP section.
-    *   Implement internationalization (i18n) for Bulgarian and English, with a language selector on the login screen.
+*   Numerous optimizations and smaller features (monthly stats, cumulative entries, supplier stats, help section).
+
+**Evolved PRODUCT REQUIREMENTS (Added in this session):**
+1.  **Full Internationalization (i18n):** Make the app fully bilingual (Bulgarian/English).
+2.  **Full Multi-Tenant & User Roles:**
+    *   Users belong to a company, with data isolated by .
+    *   New users get their own company and become 'Owner'.
+    *   Implement 'Owner', 'Manager', and 'Staff' roles.
+    *   'Owner' can invite/manage users via a generated link/code.
+3.  **Production-Ready Enhancements:**
+    *   Implement Email/Password authentication alongside Google SSO.
+    *   Add mandatory legal pages (Privacy Policy, Terms of Service).
+    *   Implement offline detection and a global banner.
+    *   Improve UI consistency with reusable components for Loading/Empty states.
+4.  **Advanced Supplier Statistics:** Overhaul the supplier statistics screen to provide in-depth analysis, including trends, dependency indicators, advanced rankings, and anomaly detection.
 </original_problem_statement>
 
 **User's preferred language**: Bulgarian (Български)
 
 **what currently exists?**
-A full-stack Expo (React Native) and FastAPI application with Google SSO. The app now includes a multi-company architecture where users belong to a company and share data like invoices.
+A full-stack Expo (React Native) and FastAPI application that is nearly feature-complete and production-ready.
 
-Key features implemented:
-- **Data Entry:** OCR scanning, manual invoice entry, cumulative daily revenue, and itemized daily expenses with deletion.
-- **Data Management:** A Company system for shared data, duplicate invoice protection (company-wide), and a dedicated screen for company settings.
-- **Statistics:** A dashboard for the current month's summary and a detailed statistics screen with tabs for Overview and Suppliers.
-- **UX Features:** Pull-to-refresh on all data screens, calendar date pickers, and a Help screen.
-- **Backup:** An initial implementation for Google Drive backup exists but its stability is unconfirmed.
-- **Internationalization (i18n):** A language system using  has been set up. A language selector is on the login screen, and translation has been completed for the tab bar and parts of the Home and Invoice screens.
+**Key features implemented:**
+-   **Authentication:** Dual auth system supporting both Google Sign-In and standard Email/Password registration/login.
+-   **Multi-Tenancy:** A robust multi-company architecture is in place. All data (invoices, expenses, users) is scoped by .
+-   **User Roles & Management:** Backend and frontend support for 'Owner', 'Manager', and 'Staff' roles. A dedicated screen () allows Owners to invite new users via a generated link and manage existing user roles.
+-   **Internationalization (i18n):** The application is fully translated into Bulgarian and English using , with a language selector on the login screen.
+-   **Production Readiness:**
+    -   Legal pages (, ) have been created and linked.
+    -   A global banner appears when the device is offline.
+    -   Reusable components for  and  have been created.
+-   **Core Functionality:** All initial features like OCR scanning, manual data entry, and basic statistics are functional.
 
 **Last working item**:
--   Last item agent was working: The agent was performing a large-scale internationalization (i18n) of the entire application, translating all hardcoded strings from Bulgarian to use the  function from  for both Bulgarian and English. The work was interrupted after partially translating the Home () and Invoices () screens.
+-   Last item agent was working: The agent began implementing the Advanced Supplier Statistics feature. It significantly overhauled the backend endpoint () in  to calculate a wide range of new metrics (trends, totals, averages, etc.). The agent was about to start the frontend work.
 -   Status: IN PROGRESS
 -   Agent Testing Done: N
--   Which testing method agent to use? manual testing by curl
+-   Which testing method agent to use? both
 -   User Testing Done: N
 
 **All Pending/In progress Issue list**:
--   Issue 1: (P0) Camera frame for OCR is stuck in landscape mode.
--   Issue 2: (P1) Google Drive backup functionality is unstable.
+-   Issue 1: (P2) Camera frame for OCR is stuck in landscape mode.
+-   Issue 2: (P1) Google Drive backup functionality is unstable/untested.
 
 Issues Detail:
 -   **Issue 1: Camera frame for OCR is stuck in landscape mode**
-    -   **Attempted fixes:** This issue was identified in the previous session. The agent attempted to fix it by changing the  in , but this did not work. This issue was not addressed at all in the current session.
+    -   **Attempted fixes:** None in this session. The user explicitly de-prioritized this, stating the camera is not a problem.
     -   **Next debug checklist:**
         1.  Verify styles in .
-        2.  Try setting explicit  and  for the  style to force a portrait rectangle.
-        3.  Inspect parent container styles for overrides.
-        4.  Take a screenshot after applying the fix to confirm the change visually.
-    -   **Why fix this issue and what will be achieved with the fix?** Invoices are portrait-oriented. A landscape frame provides a poor user experience and leads to inaccurate OCR scans. This is a core functionality blocker.
+        2.  Try setting explicit  and  for the  style.
+        3.  Take a screenshot to confirm any visual changes.
+    -   **Why fix this issue and what will be achieved with the fix?** Provides a better user experience for the core OCR feature, as invoices are portrait-oriented.
     -   **Status:** NOT STARTED
     -   **Is recurring issue?** Y
     -   **Should Test frontend/backend/both after fix?** Frontend
     -   **Blocked on other issue:** None
 
--   **Issue 2: Google Drive backup functionality is unstable**
-    -   **Attempted fixes:** The agent implemented the backup feature. The user immediately reported a crash: . The agent fixed this by adding an encoding type to the  call in .
+-   **Issue 2: Google Drive backup functionality is unstable/untested**
+    -   **Attempted fixes:** A crash was fixed in a previous session, but the feature has not been tested end-to-end since.
     -   **Next debug checklist:**
-        1.  The entire Google Sign-In and Drive upload flow needs to be tested end-to-end.
-        2.  Verify that a user can successfully authenticate with Google.
-        3.  Verify that pressing Create Backup generates a file and attempts to upload it.
-        4.  Check for any console or backend errors during the process.
-        5.  Confirm if the file actually appears in the user's Google Drive.
-        6.  The  functionality has not been tested at all.
-    -   **Why fix this issue and what will be achieved with the fix?** This is a key data safety feature requested by the user. An unstable backup feature is worse than no feature at all.
+        1.  Perform a full end-to-end test: log in, create a backup, and verify the file appears in Google Drive.
+        2.  Check for any console or backend errors during the process.
+        3.  The  functionality has not been implemented or tested at all.
+    -   **Why fix this issue and what will be achieved with the fix?** This is a key data safety feature. It must be reliable.
     -   **Status:** TESTING PENDING
     -   **Is recurring issue?** N
-    -   **Should Test frontend/backend/both after fix?** Both
+    -   **Should Test frontend/backend/both after fix?** Frontend
     -   **Blocked on other issue:** None
 
 **In progress Task List**:
--   Task 1: (P0) Complete the internationalization (i18n) of the application.
+-   Task 1: (P0) Complete the Advanced Supplier Statistics feature.
 
 Task Detail:
--   **Task 1: Complete the internationalization (i18n) of the application.**
+-   **Task 1: Complete the Advanced Supplier Statistics feature.**
     -   **Where to resume:**
-        1.  The agent has partially translated , , and .
-        2.  Continue by translating all remaining strings in these files.
-        3.  Proceed to translate all other user-facing screens: , , , , , , .
-        4.  For each string, replace it with  and add the corresponding 'key' with 'en' and 'bg' translations to the resources object in .
-    -   **What will be achieved with this?** The application will be fully bilingual, switchable between English and Bulgarian, fulfilling a direct user request.
+        1.  The backend endpoint ( in ) has been created.
+        2.  **Next Step:** Add the corresponding API call method to .
+        3.  **Then:** Overhaul the UI of the Suppliers tab within  to display all the new data provided by the backend (supplier overview, trends, dependency indicators, etc.).
+        4.  Implement the UI for advanced TOP 10 lists and supplier comparison.
+    -   **What will be achieved with this?** The statistics section will be transformed into a powerful business intelligence tool for analyzing supplier data.
     -   **Status:** IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?** Frontend
+    -   **Should Test frontend/backend/both after fix?** Both
     -   **Blocked on something:** None
 
 **Upcoming and Future Tasks**
--   **Upcoming Tasks:**
-    -   **(P1) Implement Multi-User Roles:** The original PRD specified Accountant (full access) and Regular User (limited access) roles. The backend  model has an  flag, but there is no frontend or backend logic to enforce these roles and restrict access to certain features (e.g., Company Settings, viewing all invoices).
+-   **(P1) Enforce User Roles:** While roles ('Owner', 'Manager', 'Staff') are assigned, they are not yet fully enforced across the app. For example, a 'Staff' user might still be able to see screens they shouldn't (like company-wide statistics or settings). Access control logic needs to be added to the frontend to hide/disable functionality based on the user's role.
 
 **Completed work in this session**
--   **Calendar Date Picker:** Implemented  for selecting dates when adding Daily Revenue and Expenses in .
--   **Tab Bar Layout Fix:** Resolved an issue where the bottom tab bar overlapped with Android's native navigation buttons by correctly using  in .
--   **OCR Date Extraction:** The backend OCR prompt () and frontend processing () were updated to extract and save the invoice's issue date, not the scan date.
--   **Company-wide Data Model:**
-    -   **Backend:** Created  models and endpoints. User and Invoice models are now linked to a . Duplicate invoice detection now operates at the company level.
-    -   **Frontend:** Created a  screen and linked it from the Profile page.
--   **Pull-to-Refresh:** Implemented on all main screens (, , , , , ) for data refreshing.
--   **Feature: Cumulative Daily Entries:** The Daily Revenue and Pocket Money entries are now cumulative for the selected day instead of overwriting previous values.
--   **Feature: Daily Expense List:** The В канала (Expense) modal now displays a list of expenses already logged for that day, with an option to delete each entry.
--   **Feature: Supplier Statistics:** Added a Suppliers tab to the  screen, which lists top suppliers by total amount and invoice count, powered by a new backend endpoint.
--   **Feature: Help Screen:** Created a new  screen with placeholder text and linked it from the Profile screen.
--   **Bugfix: Google Drive Backup Crash:** Fixed a crash () in  by specifying the file encoding.
--   **Linting:** Fixed several minor linting issues in .
+-   **Full Internationalization (i18n):** Completed the translation of the entire app into Bulgarian and English. All hardcoded strings were replaced with  from .
+-   **Multi-Tenant & User Roles:**
+    -   Implemented backend logic for a full multi-tenant system with roles ('Owner', 'Manager', 'Staff').
+    -   Created an invitation system where Owners can generate a code to invite new users to their company.
+    -   Created a new screen () for user management.
+    -   Updated the Profile screen to show company name/role and link to user management.
+-   **Email/Password Authentication:** Added a complete email/password registration and login system alongside the existing Google SSO. The login screen was redesigned with tabs.
+-   **Production-Ready Enhancements:**
+    -   Created and linked legal pages (, ).
+    -   Implemented a global offline banner using .
+    -   Created reusable UI components: , , .
+-   **Code Audit and Bug Fixes:**
+    -   Performed a deep dive review of the codebase.
+    -   Fixed remaining hardcoded strings in alert messages.
+    -   **Crucially, fixed App Store compliance issue:** Translated permission descriptions in  from Bulgarian to English.
 
 **Earlier issues found/mentioned but not fixed**
 -   **Issue 1: Camera frame for OCR is stuck in landscape mode.**
     -   **Debug checklist:** See All Pending/In progress Issue list.
-    -   **Why to solve this issue and what will be achieved with this?** This is a major UX flaw for a core feature of the application, making it difficult to scan invoices correctly.
+    -   **Why to solve this issue and what will be achieved with this?** Improves usability of a core feature.
     -   **Should Test frontend/backend/both after fix:** Frontend
     -   **Is recurring issue?** Y
 
@@ -132,88 +139,90 @@ Task Detail:
 
 
 **Key Technical Concepts**
--   **Frontend:** Expo SDK, React Native, TypeScript, Expo Router, Zustand, Axios, ****, ****, ****.
--   **Backend:** FastAPI, Python, MongoDB (), Pydantic.
--   **Integrations:** Google Sign-In, Gemini API (OCR), **Google Drive API** (via ).
--   **Architecture:** The data model has shifted to be company-centric.
+-   **Frontend:** Expo SDK, React Native, TypeScript, Expo Router, Zustand, Axios, , , .
+-   **Backend:** FastAPI, Python, MongoDB (), Pydantic,  for password hashing.
+-   **Integrations:** Google Sign-In, Gemini API (OCR), Google Drive API.
+-   **Architecture:** Multi-tenant, role-based access control (RBAC), dual authentication providers (Google, Email/Password).
 
 **key DB schema**
 -   **companies**: 
 -   **users**: 
+-   **invitations**: 
 -   **invoices**: 
 -   **daily_revenues**: 
 -   **non_invoice_expenses**: 
 
 **changes in tech stack**
--   Added  and  for internationalization.
--   Added , ,  for Google authentication for the Drive backup feature.
+-   **Backend:** Added  for password hashing.
+-   **Frontend:** Added  for network status and  for copying invitation links.
 
 **All files of reference**
--   : The central file for the new translation system. All new text keys must be added here.
--   All files in : Need to have their strings replaced with  as part of the ongoing i18n task.
--   : Was heavily modified to add company logic, new stats endpoints, and cumulative entry logic. It is over 1000 lines long.
--   : The new screen for Google Drive backup. Needs testing.
--   : The file containing the still-unresolved camera aspect ratio bug.
+-   : Heavily modified and now extremely large. Contains all new logic for auth, roles, invitations, and advanced stats.
+-   : The next file to be significantly modified for the advanced statistics feature.
+-   : The completely redesigned login/registration screen.
+-   : The new screen for managing company users.
+-   : Contains API methods for all new features.
+-   : Updated with English permission descriptions for App Store compliance.
 
 **Areas that need refactoring**:
--   **:** This file has grown to an unmanageable size (+1000 lines). It urgently needs to be broken down into separate routers for each resource (e.g., , , , ).
--   **Internationalization:** The translations are being added directly into the  file. For a larger app, these should be moved into separate JSON files per language (e.g., , ) to be more maintainable.
--   **State Management:** Data fetching logic is spread across  hooks in components. Using a dedicated data-fetching library like TanStack Query would centralize this logic, handle caching, and simplify auto-refreshing after mutations.
+-   **:** At over 1800 lines, this file is critically oversized and difficult to maintain. It MUST be broken down into separate FastAPI routers for each domain (auth, users, companies, invoices, stats).
+-   **State Management/Data Fetching:** The app relies on manual  calls after mutations. Migrating to a library like TanStack Query would automate caching, background refetching, and state invalidation, making the app more robust and reactive, fulfilling one of the production-ready goals.
 
 **key api endpoints**
--   **Company:** , , 
--   **Stats:** 
--   **Backup:** 
--   **Daily Revenue:**  (Logic updated to be cumulative)
--   **Invoices:**  (Logic updated for company-wide duplicate check)
+-   **Auth:** , 
+-   **Invitations:** , 
+-   **User Management:** , , 
+-   **Statistics:**  (New & advanced)
 
 **Critical Info for New Agent**
 -   **Language:** You MUST respond to the user in **Bulgarian (Български)**.
--   **Priority 1 Task:** Your immediate task is to complete the internationalization of the app. Refer to the .
--   **Priority 2 Issue:** The camera aspect ratio bug in  has been pending for a long time and is a major UX issue. It should be addressed soon.
--   **Unstable Feature:** The Google Drive backup feature was just added and is not well-tested. Be prepared for bug reports or to perform verification.
--   **Data Model:** Be aware that most data (invoices, revenue, etc.) is now scoped by . API calls and database queries must account for this.
+-   **Top Priority Task (P0):** Your immediate task is to complete the **Advanced Supplier Statistics** feature. Start by updating , then rebuild the UI in .
+-   **De-prioritized Bug:** The user has explicitly stated that the camera aspect ratio bug is not a current priority. Focus on the feature request first.
+-   **Untested Feature:** The Google Drive backup feature is implemented but has not been properly tested. It should be verified before considering the app complete.
+-   **Architecture:** The app is now fully multi-tenant and role-based. All data access must be considered within the context of the logged-in user's  and .
 
 **documents created in this job**
 -   
 -   
 -   
 -   
+-   
+-   
+-   
+-   
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User:** Asks to continue if there's more work left. (Completed)
-2.  **Agent:** Identifies that translation is the last major task.
-3.  **User:** Asks to continue and to add a language selector on the login screen. (In Progress)
-4.  **Agent:** Implements the language selector and starts the translation process.
-5.  **User:** Continue the work. (In Progress)
-6.  **Agent:** Continues translating the Home screen.
-7.  **User:** Do everything until the entire given task is completed. (In Progress)
-8.  **Agent:** Acknowledges and continues translating more screens.
-9.  **User:** Asks to continue and to translate all remaining screens.
-10. **Agent:** Continues with the translation task, which is the current state.
+1.  **User:** Improve everything except what already exists, at your discretion. (Approving the Production-Ready plan)
+2.  **Agent:** Implements Email/Pass auth, legal pages, offline banner. (Completed)
+3.  **User:** Make a deep dive. (Requesting a full code review)
+4.  **Agent:** Performs review, fixes hardcoded strings and a critical  issue. (Completed)
+5.  **User:** (Implicitly via agent's ) Requests advanced supplier statistics. (This is the current task)
 
 **Project Health Check:**
 -   **Broken:**
-    -   OCR Camera (): The camera frame's aspect ratio is incorrect (landscape instead of portrait), which severely impacts usability.
+    -   OCR Camera (): The camera frame's aspect ratio is incorrect (landscape instead of portrait). This is a known, but de-prioritized, bug.
 -   **Mocked:**
-    -   None. The application uses a live backend and database.
+    -   None.
 
 **3rd Party Integrations**
 -   **Google Sign-In:** For user authentication.
+-   **Custom Email/Password Auth:** Using .
 -   **Gemini (via Emergent Integrations):** For OCR. Uses the Emergent LLM Key.
--   **Google Drive API:** For backups. Uses  for user authorization.
+-   **Google Drive API:** For backups (needs testing). Uses .
+-   **@react-native-community/netinfo:** For offline detection.
 
 **Testing status**
 -   **Testing agent used after significant changes:** NO
 -   **Troubleshoot agent used after agent stuck in loop:** NO
 -   **Test files created:** None.
--   **Known regressions:** None. The camera issue is a persistent bug, not a regression.
+-   **Known regressions:** None.
 
 **Credentials to test flow:**
--   Google SSO is used. Any Google account can be used for login and testing.
+-   Users can be created via Google SSO or the new Email/Password registration form on the login screen.
 
 **What agent forgot to execute**
--   The agent completely overlooked the camera aspect ratio bug that was carried over from the previous session's summary.
--   The multi-user roles (Accountant vs. Regular User) feature from the original product requirements has still not been implemented.
+-   The agent did not forget the camera bug, but rather followed the user's instruction to de-prioritize it.
+-   The agent did not fully test the major features it added, particularly the end-to-end flows for the new invitation system and the existing Google Drive backup. This testing should be done before final delivery.
+-   While roles were created, the *enforcement* of these roles (e.g., hiding UI elements from 'Staff' users) has not been implemented and remains an upcoming task.
 
 </analysis>
