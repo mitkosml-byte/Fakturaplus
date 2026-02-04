@@ -258,7 +258,7 @@ export default function CompanySettingsScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>ЕИК/Булстат *</Text>
+                  <Text style={styles.inputLabel}>{t('company.eik')} *</Text>
                   <TextInput
                     style={styles.input}
                     value={eik}
@@ -269,12 +269,12 @@ export default function CompanySettingsScreen() {
                     editable={!company}
                   />
                   {company && (
-                    <Text style={styles.inputHint}>ЕИК не може да се променя</Text>
+                    <Text style={styles.inputHint}>{t('company.eikCantChange')}</Text>
                   )}
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>ДДС номер</Text>
+                  <Text style={styles.inputLabel}>{t('company.vatNumber')}</Text>
                   <TextInput
                     style={styles.input}
                     value={vatNumber}
@@ -285,34 +285,34 @@ export default function CompanySettingsScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>МОЛ</Text>
+                  <Text style={styles.inputLabel}>{t('company.mol')}</Text>
                   <TextInput
                     style={styles.input}
                     value={mol}
                     onChangeText={setMol}
-                    placeholder="Иван Иванов"
+                    placeholder="John Doe"
                     placeholderTextColor="#64748B"
                   />
                 </View>
 
                 <View style={styles.row}>
                   <View style={[styles.inputGroup, { flex: 2 }]}>
-                    <Text style={styles.inputLabel}>Адрес</Text>
+                    <Text style={styles.inputLabel}>{t('company.address')}</Text>
                     <TextInput
                       style={styles.input}
                       value={address}
                       onChangeText={setAddress}
-                      placeholder="ул. Примерна 1"
+                      placeholder="Example St. 1"
                       placeholderTextColor="#64748B"
                     />
                   </View>
                   <View style={[styles.inputGroup, { flex: 1 }]}>
-                    <Text style={styles.inputLabel}>Град</Text>
+                    <Text style={styles.inputLabel}>{t('company.city')}</Text>
                     <TextInput
                       style={styles.input}
                       value={city}
                       onChangeText={setCity}
-                      placeholder="София"
+                      placeholder="Sofia"
                       placeholderTextColor="#64748B"
                     />
                   </View>
@@ -320,7 +320,7 @@ export default function CompanySettingsScreen() {
 
                 <View style={styles.row}>
                   <View style={[styles.inputGroup, { flex: 1 }]}>
-                    <Text style={styles.inputLabel}>Телефон</Text>
+                    <Text style={styles.inputLabel}>{t('company.phone')}</Text>
                     <TextInput
                       style={styles.input}
                       value={phone}
@@ -331,12 +331,12 @@ export default function CompanySettingsScreen() {
                     />
                   </View>
                   <View style={[styles.inputGroup, { flex: 1 }]}>
-                    <Text style={styles.inputLabel}>Имейл</Text>
+                    <Text style={styles.inputLabel}>{t('company.email')}</Text>
                     <TextInput
                       style={styles.input}
                       value={email}
                       onChangeText={setEmail}
-                      placeholder="office@firma.bg"
+                      placeholder="office@company.com"
                       placeholderTextColor="#64748B"
                       keyboardType="email-address"
                       autoCapitalize="none"
@@ -344,20 +344,20 @@ export default function CompanySettingsScreen() {
                   </View>
                 </View>
 
-                <Text style={styles.sectionSubtitle}>Банкови данни</Text>
+                <Text style={styles.sectionSubtitle}>{t('company.bankDetails')}</Text>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Банка</Text>
+                  <Text style={styles.inputLabel}>{t('company.bankName')}</Text>
                   <TextInput
                     style={styles.input}
                     value={bankName}
                     onChangeText={setBankName}
-                    placeholder="Име на банката"
+                    placeholder="Bank name"
                     placeholderTextColor="#64748B"
                   />
                 </View>
 
-                <View style={styles.inputGroup}>
+                <View style={styles.inputGroup}>>
                   <Text style={styles.inputLabel}>IBAN</Text>
                   <TextInput
                     style={styles.input}
