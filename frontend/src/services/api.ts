@@ -433,6 +433,44 @@ class ApiService {
     return this.fetch(`/statistics/items/${encodeURIComponent(itemName)}/by-supplier`);
   }
 
+  // AI Item Merging
+  async triggerAiMerge(): Promise<{
+    merged_groups: Array<{ canonical_name: string; variants: string[] }>;
+    total_merged: number;
+    message: string;
+  }> {
+    return this.fetch('/items/ai-merge', { method: 'POST' });
+  }
+
+  async getMergeMappings(): Promise<{
+    mappings: Array<{
+      canonical_name: string;
+      display_name: string;
+      variants: string[];
+    }>;
+  }> {
+    return this.fetch('/items/merge-mappings');
+  }
+
+  async deleteMergeMapping(canonicalName: string): Promise<{ message: string }> {
+    return this.fetch(`/items/merge-mappings/${encodeURIComponent(canonicalName)}`, { method: 'DELETE' });
+  }
+
+  async getMergedItemStatistics(params?: { start_date?: string; end_date?: string; top_n?: number }): Promise<{
+    totals: { total_items: number; total_value: number; unique_items: number; merged_items: number };
+    top_by_quantity: any[];
+    top_by_value: any[];
+    merge_applied: boolean;
+    merge_groups_count: number;
+  }> {
+    const queryParams = new URLSearchParams();
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    if (params?.top_n) queryParams.set('top_n', params.top_n.toString());
+    const query = queryParams.toString();
+    return this.fetch(`/statistics/items/merged${query ? `?${query}` : ''}`);
+  }
+
   // Budget API
   async getBudgetStatus(): Promise<any> {
     return this.fetch('/budget/status');
