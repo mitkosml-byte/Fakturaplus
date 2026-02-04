@@ -134,6 +134,7 @@ class OCRResult(BaseModel):
     amount_without_vat: float
     vat_amount: float
     total_amount: float
+    invoice_date: Optional[str] = None  # Дата на издаване от фактурата
 
 class SessionDataResponse(BaseModel):
     id: str
