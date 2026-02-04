@@ -317,3 +317,5 @@ agent_communication:
     message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
   - agent: "testing"
     message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+  - agent: "testing"
+    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
