@@ -195,19 +195,19 @@ export default function BudgetScreen() {
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.spent')}</Text>
                     <Text style={[styles.budgetStatValue, { color: '#EF4444' }]}>
-                      {budgetStatus.total_spent.toFixed(2)} €
+                      {budgetStatus.total_spent.toFixed(2)} лв
                     </Text>
                   </View>
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.remaining')}</Text>
                     <Text style={[styles.budgetStatValue, { color: '#10B981' }]}>
-                      {budgetStatus.remaining.toFixed(2)} €
+                      {budgetStatus.remaining.toFixed(2)} лв
                     </Text>
                   </View>
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.limit')}</Text>
                     <Text style={styles.budgetStatValue}>
-                      {budgetStatus.expense_limit.toFixed(2)} €
+                      {budgetStatus.expense_limit.toFixed(2)} лв
                     </Text>
                   </View>
                 </View>
@@ -257,7 +257,7 @@ export default function BudgetScreen() {
                       {t('budget.everyMonth')} {expense.day_of_month}
                     </Text>
                   </View>
-                  <Text style={styles.recurringAmount}>{expense.amount.toFixed(2)} €</Text>
+                  <Text style={styles.recurringAmount}>{expense.amount.toFixed(2)} лв</Text>
                   <TouchableOpacity onPress={() => deleteRecurring(expense.id)}>
                     <Ionicons name="trash-outline" size={20} color="#EF4444" />
                   </TouchableOpacity>
