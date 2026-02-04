@@ -355,7 +355,186 @@ export default function HomeScreen() {
             <Text style={styles.actionButtonText}>{t('home.expenses')}</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Personal Expenses & ROI Section (Owner Only) */}
+        {isOwner && (
+          <View style={styles.roiSection}>
+            <View style={styles.roiHeader}>
+              <View style={styles.roiTitleRow}>
+                <Ionicons name="person-circle" size={24} color="#8B5CF6" />
+                <Text style={styles.roiTitle}>{t('personal.title')}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.addPersonalButton}
+                onPress={() => setPersonalExpenseModalVisible(true)}
+              >
+                <Ionicons name="add-circle" size={20} color="#8B5CF6" />
+                <Text style={styles.addPersonalText}>{t('personal.addExpense')}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {loadingRoi ? (
+              <ActivityIndicator size="small" color="#8B5CF6" style={{ marginVertical: 20 }} />
+            ) : roiData ? (
+              <>
+                {/* ROI Stats */}
+                <View style={styles.roiStats}>
+                  <View style={styles.roiStatItem}>
+                    <Text style={styles.roiStatLabel}>{t('roi.totalInvestment')}</Text>
+                    <Text style={[styles.roiStatValue, { color: '#EF4444' }]}>
+                      {roiData.total_personal_investment.toFixed(2)} лв
+                    </Text>
+                  </View>
+                  <View style={styles.roiStatItem}>
+                    <Text style={styles.roiStatLabel}>{t('roi.totalProfit')}</Text>
+                    <Text style={[styles.roiStatValue, { color: roiData.total_profit >= 0 ? '#10B981' : '#EF4444' }]}>
+                      {roiData.total_profit.toFixed(2)} лв
+                    </Text>
+                  </View>
+                  <View style={styles.roiStatItem}>
+                    <Text style={styles.roiStatLabel}>{t('roi.roiPercent')}</Text>
+                    <Text style={[styles.roiStatValue, { color: roiData.roi_percent >= 0 ? '#10B981' : '#EF4444' }]}>
+                      {roiData.roi_percent.toFixed(1)}%
+                    </Text>
+                  </View>
+                </View>
+
+                {/* ROI Status Indicator */}
+                <View style={[
+                  styles.roiStatus,
+                  { backgroundColor: roiData.investment_covered ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }
+                ]}>
+                  <Ionicons 
+                    name={roiData.investment_covered ? "checkmark-circle" : "alert-circle"} 
+                    size={20} 
+                    color={roiData.investment_covered ? '#10B981' : '#EF4444'} 
+                  />
+                  <Text style={[
+                    styles.roiStatusText,
+                    { color: roiData.investment_covered ? '#10B981' : '#EF4444' }
+                  ]}>
+                    {roiData.investment_covered ? t('roi.investmentCovered') : t('roi.investmentNotCovered')}
+                  </Text>
+                </View>
+
+                {/* AI Insights */}
+                {roiData.ai_insights && roiData.ai_insights.length > 0 && (
+                  <View style={styles.aiInsights}>
+                    <Text style={styles.aiInsightsTitle}>{t('roi.aiInsights')}</Text>
+                    {roiData.ai_insights.map((insight: string, index: number) => (
+                      <Text key={index} style={styles.aiInsightText}>{insight}</Text>
+                    ))}
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={styles.noRoiData}>
+                <Text style={styles.noRoiDataText}>{t('roi.noData')}</Text>
+                <Text style={styles.noRoiDataSubtext}>{t('personal.subtitle')}</Text>
+              </View>
+            )}
+          </View>
+        )}
       </ScrollView>
+
+      {/* Personal Expense Modal (Owner Only) */}
+      {isOwner && (
+        <Modal visible={personalExpenseModalVisible} animationType="slide" transparent>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{t('personal.addExpense')}</Text>
+                <TouchableOpacity onPress={() => setPersonalExpenseModalVisible(false)}>
+                  <Ionicons name="close" size={28} color="#94A3B8" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{t('personal.amount')}</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="0.00"
+                  placeholderTextColor="#64748B"
+                  keyboardType="decimal-pad"
+                  value={personalAmount}
+                  onChangeText={setPersonalAmount}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{t('personal.description')}</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder={language === 'bg' ? 'напр. Наем, Заплати...' : 'e.g. Rent, Salaries...'}
+                  placeholderTextColor="#64748B"
+                  value={personalDescription}
+                  onChangeText={setPersonalDescription}
+                />
+              </View>
+
+              {/* Expense Type Selector */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{language === 'bg' ? 'Тип' : 'Type'}</Text>
+                <View style={styles.typeSelector}>
+                  <TouchableOpacity
+                    style={[styles.typeButton, personalType === 'investment' && styles.typeButtonActive]}
+                    onPress={() => setPersonalType('investment')}
+                  >
+                    <Text style={[styles.typeButtonText, personalType === 'investment' && styles.typeButtonTextActive]}>
+                      {t('personal.typeInvestment')}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.typeButton, personalType === 'recurring' && styles.typeButtonActive]}
+                    onPress={() => setPersonalType('recurring')}
+                  >
+                    <Text style={[styles.typeButtonText, personalType === 'recurring' && styles.typeButtonTextActive]}>
+                      {t('personal.typeRecurring')}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.typeButton, personalType === 'one_time' && styles.typeButtonActive]}
+                    onPress={() => setPersonalType('one_time')}
+                  >
+                    <Text style={[styles.typeButtonText, personalType === 'one_time' && styles.typeButtonTextActive]}>
+                      {t('personal.typeOneTime')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Category Selector */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{language === 'bg' ? 'Категория' : 'Category'}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+                  {[
+                    { key: 'goods', label: t('personal.categoryGoods') },
+                    { key: 'service', label: t('personal.categoryService') },
+                    { key: 'personnel', label: t('personal.categoryPersonnel') },
+                    { key: 'rent', label: t('personal.categoryRent') },
+                    { key: 'extraordinary', label: t('personal.categoryExtraordinary') },
+                    { key: 'other', label: t('personal.categoryOther') },
+                  ].map((cat) => (
+                    <TouchableOpacity
+                      key={cat.key}
+                      style={[styles.categoryChip, personalCategory === cat.key && styles.categoryChipActive]}
+                      onPress={() => setPersonalCategory(cat.key)}
+                    >
+                      <Text style={[styles.categoryChipText, personalCategory === cat.key && styles.categoryChipTextActive]}>
+                        {cat.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              <TouchableOpacity style={styles.submitButton} onPress={handleCreatePersonalExpense}>
+                <Text style={styles.submitButtonText}>{t('common.save')}</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      )}
 
       {/* Revenue Modal */}
       <Modal visible={revenueModalVisible} animationType="slide" transparent>
