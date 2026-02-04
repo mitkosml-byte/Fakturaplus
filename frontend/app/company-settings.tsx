@@ -70,6 +70,12 @@ export default function CompanySettingsScreen() {
     loadCompany();
   }, [loadCompany]);
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadCompany();
+    setRefreshing(false);
+  }, [loadCompany]);
+
   const handleSave = async () => {
     if (!name.trim()) {
       Alert.alert('Грешка', 'Въведете име на фирмата');
