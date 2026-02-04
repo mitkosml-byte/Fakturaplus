@@ -127,6 +127,30 @@ export default function StatsScreen() {
               <Text style={styles.subtitle}>Анализ на приходи и разходи</Text>
             </View>
 
+            {/* Tab Selector */}
+            <View style={styles.tabSelector}>
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'overview' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('overview')}
+              >
+                <Ionicons name="bar-chart" size={18} color={activeTab === 'overview' ? 'white' : '#64748B'} />
+                <Text style={[styles.tabButtonText, activeTab === 'overview' && styles.tabButtonTextActive]}>
+                  Общ преглед
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'suppliers' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('suppliers')}
+              >
+                <Ionicons name="business" size={18} color={activeTab === 'suppliers' ? 'white' : '#64748B'} />
+                <Text style={[styles.tabButtonText, activeTab === 'suppliers' && styles.tabButtonTextActive]}>
+                  Доставчици
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {activeTab === 'overview' ? (
+              <>
             {/* Period Selector */}
         <View style={styles.periodSelector}>
           {(['week', 'month', 'year'] as const).map((p) => (
