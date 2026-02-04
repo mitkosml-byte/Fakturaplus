@@ -118,6 +118,63 @@ export default function HomeScreen() {
     }
   }, [expenseModalVisible, expenseDate, loadDayExpenses]);
 
+  // Load ROI data for owner
+  const loadRoiData = useCallback(async () => {
+    if (!isOwner) return;
+    
+    setLoadingRoi(true);
+    try {
+      const data = await api.getROIAnalysis();
+      setRoiData(data);
+    } catch (error) {
+      console.error('Error loading ROI:', error);
+      setRoiData(null);
+    } finally {
+      setLoadingRoi(false);
+    }
+  }, [isOwner]);
+
+  useEffect(() => {
+    if (isOwner) {
+      loadRoiData();
+    }
+  }, [isOwner, loadRoiData]);
+
+  // Create personal expense
+  const handleCreatePersonalExpense = async () => {
+    const amount = parseFloat(personalAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert(t('common.error'), t('budget.invalidAmount'));
+      return;
+    }
+    if (!personalDescription.trim()) {
+      Alert.alert(t('common.error'), t('common.fillAllFields'));
+      return;
+    }
+
+    const now = new Date();
+    try {
+      await api.createPersonalExpense({
+        amount,
+        description: personalDescription.trim(),
+        expense_type: personalType,
+        category: personalCategory,
+        period_month: now.getMonth() + 1,
+        period_year: now.getFullYear(),
+      });
+      
+      Alert.alert(t('common.success'), t('personal.created'));
+      setPersonalAmount('');
+      setPersonalDescription('');
+      setPersonalType('recurring');
+      setPersonalCategory('other');
+      setPersonalExpenseModalVisible(false);
+      loadRoiData();
+    } catch (error) {
+      Alert.alert(t('common.error'), t('common.operationFailed'));
+    }
+  };
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
