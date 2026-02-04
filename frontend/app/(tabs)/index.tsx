@@ -39,6 +39,8 @@ export default function HomeScreen() {
   const [expenseDescription, setExpenseDescription] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseDate, setExpenseDate] = useState(new Date());
+  const [dayExpenses, setDayExpenses] = useState<Array<{id: string; description: string; amount: number; date: string}>>([]);
+  const [loadingExpenses, setLoadingExpenses] = useState(false);
   
   // Date picker states
   const [isRevenueDatePickerVisible, setRevenueDatePickerVisible] = useState(false);
