@@ -1171,6 +1171,210 @@ export const translations: Translations = {
     bg: 'няма',
     en: 'none',
   },
+  
+  // Budget Screen
+  'budget.title': {
+    bg: 'Бюджет',
+    en: 'Budget',
+  },
+  'budget.monthlyBudget': {
+    bg: 'Месечен бюджет',
+    en: 'Monthly Budget',
+  },
+  'budget.spent': {
+    bg: 'Изхарчени',
+    en: 'Spent',
+  },
+  'budget.remaining': {
+    bg: 'Остават',
+    en: 'Remaining',
+  },
+  'budget.limit': {
+    bg: 'Лимит',
+    en: 'Limit',
+  },
+  'budget.exceeded': {
+    bg: 'Бюджетът е надхвърлен!',
+    en: 'Budget exceeded!',
+  },
+  'budget.nearLimit': {
+    bg: 'Близо до лимита!',
+    en: 'Near limit!',
+  },
+  'budget.noBudget': {
+    bg: 'Няма зададен бюджет',
+    en: 'No budget set',
+  },
+  'budget.tapToCreate': {
+    bg: 'Натиснете за създаване',
+    en: 'Tap to create',
+  },
+  'budget.setBudget': {
+    bg: 'Задай бюджет',
+    en: 'Set Budget',
+  },
+  'budget.monthlyLimit': {
+    bg: 'Месечен лимит (лв)',
+    en: 'Monthly Limit (BGN)',
+  },
+  'budget.alertAt': {
+    bg: 'Предупреждение при (%)',
+    en: 'Alert at (%)',
+  },
+  'budget.saved': {
+    bg: 'Бюджетът е запазен',
+    en: 'Budget saved',
+  },
+  'budget.saveError': {
+    bg: 'Грешка при запазване',
+    en: 'Error saving',
+  },
+  'budget.invalidAmount': {
+    bg: 'Въведете валидна сума',
+    en: 'Enter valid amount',
+  },
+  'budget.invalidData': {
+    bg: 'Невалидни данни',
+    en: 'Invalid data',
+  },
+  'budget.recurring': {
+    bg: 'Периодични разходи',
+    en: 'Recurring Expenses',
+  },
+  'budget.addRecurring': {
+    bg: 'Добави периодичен разход',
+    en: 'Add Recurring Expense',
+  },
+  'budget.everyMonth': {
+    bg: 'Всеки месец на',
+    en: 'Every month on',
+  },
+  'budget.noRecurring': {
+    bg: 'Няма периодични разходи',
+    en: 'No recurring expenses',
+  },
+  'budget.description': {
+    bg: 'Описание',
+    en: 'Description',
+  },
+  'budget.amount': {
+    bg: 'Сума (лв)',
+    en: 'Amount (BGN)',
+  },
+  'budget.dayOfMonth': {
+    bg: 'Ден от месеца (1-28)',
+    en: 'Day of month (1-28)',
+  },
+  'budget.descPlaceholder': {
+    bg: 'напр. Наем, Интернет...',
+    en: 'e.g. Rent, Internet...',
+  },
+  'budget.recurringCreated': {
+    bg: 'Периодичният разход е създаден',
+    en: 'Recurring expense created',
+  },
+  'budget.deleteRecurringConfirm': {
+    bg: 'Сигурни ли сте, че искате да изтриете този периодичен разход?',
+    en: 'Are you sure you want to delete this recurring expense?',
+  },
+  'budget.deleteError': {
+    bg: 'Грешка при изтриване',
+    en: 'Error deleting',
+  },
+  
+  // Export Screen  
+  'export.title': {
+    bg: 'Експорт',
+    en: 'Export',
+  },
+  'export.subtitle': {
+    bg: 'Експортирайте вашите данни',
+    en: 'Export your data',
+  },
+  'export.excel': {
+    bg: 'Excel файл (.xlsx)',
+    en: 'Excel File (.xlsx)',
+  },
+  'export.excelDesc': {
+    bg: 'За редактиране и анализ в Excel',
+    en: 'For editing and analysis in Excel',
+  },
+  'export.pdf': {
+    bg: 'PDF документ',
+    en: 'PDF Document',
+  },
+  'export.pdfDesc': {
+    bg: 'За печат и архивиране',
+    en: 'For printing and archiving',
+  },
+  'export.info': {
+    bg: 'Експортът включва всички ваши фактури, приходи и разходи за текущия период.',
+    en: 'Export includes all your invoices, revenues and expenses for the current period.',
+  },
+  'export.notLoggedIn': {
+    bg: 'Не сте влезли в системата',
+    en: 'Not logged in',
+  },
+  'export.fileSaved': {
+    bg: 'Файлът е запазен',
+    en: 'File saved',
+  },
+  'export.failed': {
+    bg: 'Грешка при експорт',
+    en: 'Export failed',
+  },
+  
+  // Profile screen budget & export links
+  'profile.budget': {
+    bg: 'Бюджет',
+    en: 'Budget',
+  },
+  'profile.budgetDesc': {
+    bg: 'Управление на месечен бюджет',
+    en: 'Manage monthly budget',
+  },
+  'profile.export': {
+    bg: 'Експорт',
+    en: 'Export',
+  },
+  'profile.exportDesc': {
+    bg: 'Изтегли данни в Excel/PDF',
+    en: 'Download data as Excel/PDF',
+  },
+  
+  // User Management
+  'users.title': {
+    bg: 'Управление на потребители',
+    en: 'User Management',
+  },
+  'users.invite': {
+    bg: 'Покани',
+    en: 'Invite',
+  },
+  'users.roleOwner': {
+    bg: 'Титуляр',
+    en: 'Owner',
+  },
+  'users.roleManager': {
+    bg: 'Мениджър',
+    en: 'Manager',
+  },
+  'users.roleStaff': {
+    bg: 'Служител',
+    en: 'Staff',
+  },
+  'users.changeRole': {
+    bg: 'Промени роля',
+    en: 'Change Role',
+  },
+  'users.remove': {
+    bg: 'Премахни',
+    en: 'Remove',
+  },
+  'users.removeConfirm': {
+    bg: 'Сигурни ли сте, че искате да премахнете този потребител?',
+    en: 'Are you sure you want to remove this user?',
+  },
 };
 
 // Zustand store for language
