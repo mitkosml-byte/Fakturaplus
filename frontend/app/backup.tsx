@@ -202,26 +202,26 @@ export default function BackupScreen() {
             <View style={styles.infoCard}>
               <Ionicons name="cloud-upload" size={32} color="#10B981" />
               <View style={styles.infoTextContainer}>
-                <Text style={styles.infoTitle}>Google Drive Backup</Text>
+                <Text style={styles.infoTitle}>{t('backup.infoTitle')}</Text>
                 <Text style={styles.infoDescription}>
-                  Създайте backup на вашите данни и го запазете в Google Drive или друго облачно хранилище.
+                  {t('backup.infoDescription')}
                 </Text>
               </View>
             </View>
 
             {/* Status Card */}
             <View style={styles.statusCard}>
-              <Text style={styles.sectionTitle}>Статус на backup</Text>
+              <Text style={styles.sectionTitle}>{t('backup.status')}</Text>
               
               {backupStatus?.has_backup ? (
                 <>
                   <View style={styles.statusRow}>
                     <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                    <Text style={styles.statusText}>Последен backup:</Text>
+                    <Text style={styles.statusText}>{t('backup.lastBackup')}:</Text>
                     <Text style={styles.statusValue}>
                       {backupStatus.last_backup_date 
-                        ? format(new Date(backupStatus.last_backup_date), "d MMM yyyy, HH:mm", { locale: bg })
-                        : 'Неизвестно'}
+                        ? format(new Date(backupStatus.last_backup_date), "d MMM yyyy, HH:mm", { locale: dateLocale })
+                        : t('backup.unknown')}
                     </Text>
                   </View>
                   
@@ -230,17 +230,17 @@ export default function BackupScreen() {
                       <View style={styles.statItem}>
                         <Ionicons name="document-text" size={18} color="#8B5CF6" />
                         <Text style={styles.statValue}>{backupStatus.statistics.invoices}</Text>
-                        <Text style={styles.statLabel}>Фактури</Text>
+                        <Text style={styles.statLabel}>{t('backup.invoices')}</Text>
                       </View>
                       <View style={styles.statItem}>
                         <Ionicons name="cash" size={18} color="#10B981" />
                         <Text style={styles.statValue}>{backupStatus.statistics.revenues}</Text>
-                        <Text style={styles.statLabel}>Обороти</Text>
+                        <Text style={styles.statLabel}>{t('backup.revenues')}</Text>
                       </View>
                       <View style={styles.statItem}>
                         <Ionicons name="cart" size={18} color="#EF4444" />
                         <Text style={styles.statValue}>{backupStatus.statistics.expenses}</Text>
-                        <Text style={styles.statLabel}>Разходи</Text>
+                        <Text style={styles.statLabel}>{t('backup.expenses')}</Text>
                       </View>
                     </View>
                   )}
@@ -248,7 +248,7 @@ export default function BackupScreen() {
               ) : (
                 <View style={styles.statusRow}>
                   <Ionicons name="alert-circle" size={20} color="#F59E0B" />
-                  <Text style={styles.statusText}>Няма създаден backup</Text>
+                  <Text style={styles.statusText}>{t('backup.noBackup')}</Text>
                 </View>
               )}
             </View>
