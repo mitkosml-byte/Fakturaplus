@@ -297,6 +297,21 @@ backend:
         agent: "testing"
         comment: "✅ Audit log endpoints working correctly. GET /api/audit-logs returns audit logs with proper structure (logs array and total count). GET /api/audit-logs?action=create&entity_type=invoice returns filtered results correctly. Both endpoints handle authentication properly. Access control working as expected (may return 403 for non-Owner/Manager users)."
 
+  - task: "AI Item Merging API Endpoints"
+    implemented: true
+    working: false
+    file: "server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added AI Item Merging feature using Gemini. New endpoints: POST /api/items/ai-merge (triggers AI analysis to find similar products), GET /api/items/merge-mappings (returns current merge mappings), DELETE /api/items/merge-mappings/{name} (removes a merge), GET /api/statistics/items/merged (returns item statistics with merges applied). Backend stores merge mappings and applies them to statistics in real-time without data duplication."
+      - working: false
+        agent: "testing"
+        comment: "❌ CRITICAL BUG in POST /api/items/ai-merge endpoint: LlmChat initialization error - 'model' parameter should not be passed to constructor. Error: 'LlmChat.__init__() got an unexpected keyword argument 'model''. Other endpoints working: ✅ GET /api/items/merge-mappings (returns mappings correctly), ✅ DELETE /api/items/merge-mappings/{name} (deletes mappings), ✅ GET /api/statistics/items/merged (returns statistics with merge_applied flag). Authentication working correctly. Bulgarian text handling working correctly. FIX NEEDED: Remove 'model' parameter from LlmChat constructor and use .with_model() method instead (like in OCR endpoint)."
+
 frontend:
   - task: "Login screen with Google OAuth"
     implemented: true
