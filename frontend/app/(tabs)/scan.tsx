@@ -148,6 +148,7 @@ export default function ScanScreen() {
     setVatAmount('');
     setTotalAmount('');
     setNotes('');
+    setInvoiceDate(new Date());
   };
 
   const openCamera = async () => {
