@@ -183,7 +183,7 @@ export default function BackupScreen() {
             <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Backup & Restore</Text>
+            <Text style={styles.headerTitle}>{t('backup.title')}</Text>
             <View style={styles.headerRight} />
           </View>
 
