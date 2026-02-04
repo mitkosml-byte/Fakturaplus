@@ -163,10 +163,10 @@ export default function HomeScreen() {
         amount: parseFloat(expenseAmount),
         date: format(expenseDate, 'yyyy-MM-dd'),
       });
-      setExpenseModalVisible(false);
+      // Don't close modal, just clear fields and refresh list
       setExpenseDescription('');
       setExpenseAmount('');
-      setExpenseDate(new Date());
+      loadDayExpenses(expenseDate);
       loadData();
       Alert.alert('Успех', 'Разходът е записан');
     } catch (error: any) {
