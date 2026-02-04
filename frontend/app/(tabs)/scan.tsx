@@ -240,7 +240,7 @@ export default function ScanScreen() {
                 <Image source={{ uri: capturedImage }} style={styles.previewImage} resizeMode="contain" />
                 <TouchableOpacity style={styles.retakeButton} onPress={resetForm}>
                   <Ionicons name="refresh" size={20} color="white" />
-                  <Text style={styles.retakeText}>Ново сканиране</Text>
+                  <Text style={styles.retakeText}>{t('scan.newScan')}</Text>
                 </TouchableOpacity>
               </View>
 
