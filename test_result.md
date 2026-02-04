@@ -269,15 +269,18 @@ backend:
 
   - task: "Forecast API Endpoints"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Added forecast endpoints: GET /api/forecast/expenses and GET /api/forecast/revenue for financial projections"
+      - working: true
+        agent: "testing"
+        comment: "✅ Both forecast endpoints working correctly. GET /api/forecast/expenses?months_ahead=3 returns forecast data with proper structure (forecast array and summary with total_predicted and avg_monthly). GET /api/forecast/revenue?months_ahead=3 returns revenue forecast with same structure. Both endpoints handle authentication properly and return expected response formats."
 
   - task: "Audit Log API Endpoints"
     implemented: true
