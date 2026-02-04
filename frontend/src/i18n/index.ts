@@ -947,6 +947,10 @@ export const translations: Translations = {
     bg: 'Тези доставчици представляват повече от 30% от покупките ви. Помислете за диверсификация.',
     en: 'These suppliers represent more than 30% of your purchases. Consider diversification.',
   },
+  'stats.priceTrendsDesc': {
+    bg: 'Тези артикули имат значителни ценови промени. Следете ги внимателно.',
+    en: 'These items have significant price changes. Monitor them closely.',
+  },
   'stats.supplierOverview': {
     bg: 'Преглед на доставчика',
     en: 'Supplier Overview',
