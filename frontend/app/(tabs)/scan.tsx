@@ -221,16 +221,16 @@ export default function ScanScreen() {
                 <View style={styles.scanIconContainer}>
                   <Ionicons name="camera" size={48} color="#8B5CF6" />
                 </View>
-                <Text style={styles.scanButtonText}>Снимай фактура</Text>
-                <Text style={styles.scanButtonHint}>Използвай камерата</Text>
+                <Text style={styles.scanButtonText}>{t('scan.takePhoto')}</Text>
+                <Text style={styles.scanButtonHint}>{language === 'bg' ? 'Използвай камерата' : 'Use the camera'}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.scanButton} onPress={handlePickImage}>
                 <View style={styles.scanIconContainer}>
                   <Ionicons name="image" size={48} color="#8B5CF6" />
                 </View>
-                <Text style={styles.scanButtonText}>Избери снимка</Text>
-                <Text style={styles.scanButtonHint}>От галерията</Text>
+                <Text style={styles.scanButtonText}>{t('scan.fromGallery')}</Text>
+                <Text style={styles.scanButtonHint}>{language === 'bg' ? 'От галерията' : 'From gallery'}</Text>
               </TouchableOpacity>
             </View>
           ) : (
