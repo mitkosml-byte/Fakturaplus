@@ -357,8 +357,8 @@ export default function CompanySettingsScreen() {
                   />
                 </View>
 
-                <View style={styles.inputGroup}>>
-                  <Text style={styles.inputLabel}>IBAN</Text>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('company.iban')}</Text>
                   <TextInput
                     style={styles.input}
                     value={bankIban}
@@ -379,7 +379,7 @@ export default function CompanySettingsScreen() {
                   ) : (
                     <>
                       <Ionicons name="checkmark-circle" size={24} color="white" />
-                      <Text style={styles.saveButtonText}>Запази</Text>
+                      <Text style={styles.saveButtonText}>{t('common.save')}</Text>
                     </>
                   )}
                 </TouchableOpacity>
