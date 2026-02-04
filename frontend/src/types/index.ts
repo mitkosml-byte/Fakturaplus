@@ -45,6 +45,7 @@ export interface OCRResult {
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;
+  invoice_date?: string;  // Дата на издаване от фактурата
 }
 
 export interface Summary {
