@@ -189,8 +189,8 @@ export default function ScanScreen() {
                 <View style={[styles.corner, styles.bottomLeft]} />
                 <View style={[styles.corner, styles.bottomRight]} />
               </View>
-              <Text style={styles.cameraHint}>Докоснете екрана за фокусиране</Text>
-              <Text style={styles.cameraHint2}>Позиционирайте фактурата в рамката</Text>
+              <Text style={styles.cameraHint}>{t('scan.tapToFocus')}</Text>
+              <Text style={styles.cameraHint2}>{t('scan.positionInvoice')}</Text>
               <TouchableOpacity style={styles.captureButton} onPress={handleTakePhoto}>
                 <Ionicons name="camera" size={36} color="white" />
               </TouchableOpacity>
