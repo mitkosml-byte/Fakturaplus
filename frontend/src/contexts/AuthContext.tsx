@@ -9,19 +9,20 @@ interface AuthContextType {
   login: (sessionId: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  setUser: (user: User | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { user, isLoading, isAuthenticated, login, logout, checkAuth, refreshUser } = useAuthStore();
+  const { user, isLoading, isAuthenticated, login, logout, checkAuth, refreshUser, setUser } = useAuthStore();
 
   useEffect(() => {
     checkAuth();
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated, login, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, isLoading, isAuthenticated, login, logout, refreshUser, setUser }}>
       {children}
     </AuthContext.Provider>
   );
