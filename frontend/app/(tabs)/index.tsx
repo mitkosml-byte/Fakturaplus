@@ -287,8 +287,25 @@ export default function HomeScreen() {
               locale="bg"
             />
 
+            {/* Current totals display */}
+            {(currentDayRevenue.fiscal_revenue > 0 || currentDayRevenue.pocket_money > 0) && (
+              <View style={styles.currentTotalsCard}>
+                <Text style={styles.currentTotalsTitle}>Натрупано за {format(revenueDate, 'd MMM', { locale: bg })}:</Text>
+                <View style={styles.currentTotalsRow}>
+                  <View style={styles.currentTotalItem}>
+                    <Text style={styles.currentTotalValue}>{currentDayRevenue.fiscal_revenue.toFixed(2)} €</Text>
+                    <Text style={styles.currentTotalLabel}>Фискален</Text>
+                  </View>
+                  <View style={styles.currentTotalItem}>
+                    <Text style={styles.currentTotalValue}>{currentDayRevenue.pocket_money.toFixed(2)} €</Text>
+                    <Text style={styles.currentTotalLabel}>Джобче</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Фискализиран оборот (€)</Text>
+              <Text style={styles.inputLabel}>Добави фискализиран оборот (€)</Text>
               <TextInput
                 style={styles.input}
                 value={fiscalRevenue}
@@ -297,11 +314,11 @@ export default function HomeScreen() {
                 placeholder="0.00"
                 placeholderTextColor="#64748B"
               />
-              <Text style={styles.inputHint}>Влиза в ДДС изчислението</Text>
+              <Text style={styles.inputHint}>Ще се добави към съществуващото • Влиза в ДДС</Text>
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Джобче (€)</Text>
+              <Text style={styles.inputLabel}>Добави към джобче (€)</Text>
               <TextInput
                 style={styles.input}
                 value={pocketMoney}
@@ -310,7 +327,7 @@ export default function HomeScreen() {
                 placeholder="0.00"
                 placeholderTextColor="#64748B"
               />
-              <Text style={styles.inputHint}>НЕ влиза в ДДС, само в статистиката</Text>
+              <Text style={styles.inputHint}>Ще се добави към съществуващото • НЕ влиза в ДДС</Text>
             </View>
 
             <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue}>
