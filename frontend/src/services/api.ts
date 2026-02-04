@@ -1,4 +1,4 @@
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -47,6 +47,52 @@ class ApiService {
 
   async logout(): Promise<void> {
     await this.fetch('/auth/logout', { method: 'POST' });
+  }
+  
+  // User Management
+  async getCompanyUsers(): Promise<User[]> {
+    return this.fetch('/auth/users');
+  }
+  
+  async updateUserRole(userId: string, role: string): Promise<{ message: string }> {
+    return this.fetch(`/auth/role/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    });
+  }
+  
+  async removeUserFromCompany(userId: string): Promise<{ message: string }> {
+    return this.fetch(`/auth/users/${userId}`, { method: 'DELETE' });
+  }
+  
+  // Invitations
+  async createInvitation(data: { email?: string; phone?: string; role: string }): Promise<{
+    message: string;
+    invitation: { id: string; code: string; expires_at: string; company_name: string };
+  }> {
+    return this.fetch('/invitations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+  
+  async getInvitations(): Promise<Invitation[]> {
+    return this.fetch('/invitations');
+  }
+  
+  async cancelInvitation(invitationId: string): Promise<{ message: string }> {
+    return this.fetch(`/invitations/${invitationId}`, { method: 'DELETE' });
+  }
+  
+  async acceptInvitation(code: string): Promise<{ message: string; company: Company }> {
+    return this.fetch('/invitations/accept', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+  
+  async leaveCompany(): Promise<{ message: string }> {
+    return this.fetch('/company/leave', { method: 'POST' });
   }
 
   // OCR
