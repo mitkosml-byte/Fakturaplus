@@ -149,7 +149,7 @@ export default function InvoicesScreen() {
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
-            <Text style={styles.title}>Фактури</Text>
+            <Text style={styles.title}>{t('invoices.title')}</Text>
             <TouchableOpacity style={styles.exportButton} onPress={() => setExportModalVisible(true)}>
               <Ionicons name="download" size={24} color="#8B5CF6" />
             </TouchableOpacity>
@@ -162,7 +162,7 @@ export default function InvoicesScreen() {
               style={styles.searchInput}
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Търси по доставчик..."
+              placeholder={t('invoices.searchPlaceholder')}
               placeholderTextColor="#64748B"
               onSubmitEditing={loadInvoices}
             />
@@ -176,15 +176,15 @@ export default function InvoicesScreen() {
           {/* Summary */}
           <View style={styles.summaryBar}>
             <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>Брой:</Text>
+              <Text style={styles.summaryLabel}>{t('invoices.count')}:</Text>
               <Text style={styles.summaryValue}>{invoices.length}</Text>
             </View>
             <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>ДДС:</Text>
+              <Text style={styles.summaryLabel}>{t('stats.vat')}:</Text>
               <Text style={styles.summaryValue}>{totalVat.toFixed(2)} €</Text>
             </View>
             <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>Общо:</Text>
+              <Text style={styles.summaryLabel}>{t('invoices.total')}:</Text>
               <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>{totalAmount.toFixed(2)} €</Text>
             </View>
           </View>
