@@ -1,4 +1,4 @@
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
