@@ -31,6 +31,7 @@ interface SupplierStats {
 }
 
 export default function StatsScreen() {
+  const { t } = useTranslation();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
