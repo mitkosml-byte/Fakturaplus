@@ -9,12 +9,13 @@ import {
   Image,
   ImageBackground,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useRouter } from 'expo-router';
-import { useTranslation, useLanguageStore } from '../../src/i18n';
+import { useTranslation, useLanguageStore, Language } from '../../src/i18n';
 import { api } from '../../src/services/api';
 import { Company } from '../../src/types';
 
