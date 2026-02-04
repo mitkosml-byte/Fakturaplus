@@ -6,16 +6,24 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
 import base64
 import httpx
 import io
+import re
+from passlib.context import CryptContext
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# Environment
+IS_PRODUCTION = os.environ.get('ENVIRONMENT', 'development') == 'production'
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # MongoDB connection
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
@@ -26,14 +34,20 @@ db = client[os.environ.get('DB_NAME', 'test_database')]
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 # Create the main app
-app = FastAPI()
+app = FastAPI(
+    title="Invoice Manager API",
+    version="1.0.0",
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc"
+)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-# Configure logging
+# Configure logging - less verbose in production
+log_level = logging.WARNING if IS_PRODUCTION else logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
