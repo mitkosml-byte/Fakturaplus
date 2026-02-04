@@ -14,7 +14,7 @@ import os
 # Get backend URL from frontend .env
 BACKEND_URL = "https://invtrack-43.preview.emergentagent.com/api"
 
-class ItemPriceTrackingTester:
+class BudgetAndExportTester:
     def __init__(self):
         self.session = None
         self.auth_token = None
