@@ -146,18 +146,18 @@ export default function ProfileScreen() {
         <View style={styles.menuSection}>
           <Text style={styles.menuSectionTitle}>Информация</Text>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/help')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
               <Ionicons name="help-circle" size={20} color="#6366F1" />
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>Помощ</Text>
-              <Text style={styles.menuSubtitle}>Често задавани въпроси</Text>
+              <Text style={styles.menuSubtitle}>Как да използвате приложението</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/help')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
               <Ionicons name="information-circle" size={20} color="#EC4899" />
             </View>
