@@ -1135,6 +1135,30 @@ export const translations: Translations = {
     bg: 'Внимание: Повишение на цена!',
     en: 'Warning: Price Increase!',
   },
+  
+  // Units
+  'units.pieces': {
+    bg: 'ед.',
+    en: 'pcs',
+  },
+  'units.kg': {
+    bg: 'кг',
+    en: 'kg',
+  },
+  'units.liters': {
+    bg: 'л',
+    en: 'L',
+  },
+  'units.meters': {
+    bg: 'м',
+    en: 'm',
+  },
+  
+  // Supplier stats lowercase
+  'stats.suppliersLower': {
+    bg: 'доставчици',
+    en: 'suppliers',
+  },
 };
 
 // Zustand store for language
