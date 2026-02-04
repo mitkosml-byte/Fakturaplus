@@ -455,6 +455,422 @@ export const translations: Translations = {
     bg: 'Тази фактура вече съществува',
     en: 'This invoice already exists',
   },
+  'msg.deleteConfirmExpense': {
+    bg: 'Сигурни ли сте, че искате да изтриете този разход?',
+    en: 'Are you sure you want to delete this expense?',
+  },
+  'msg.enterAtLeastOne': {
+    bg: 'Въведете поне една стойност',
+    en: 'Enter at least one value',
+  },
+  'msg.fillAllFields': {
+    bg: 'Попълнете всички полета',
+    en: 'Fill in all fields',
+  },
+  
+  // Invoice details
+  'invoices.invoiceNo': {
+    bg: '№ Фактура',
+    en: 'Invoice No.',
+  },
+  'invoices.withoutVAT': {
+    bg: 'Без ДДС',
+    en: 'Without VAT',
+  },
+  'invoices.total': {
+    bg: 'Общо',
+    en: 'Total',
+  },
+  'invoices.count': {
+    bg: 'Брой',
+    en: 'Count',
+  },
+  'invoices.exportTitle': {
+    bg: 'Експорт на фактури',
+    en: 'Export Invoices',
+  },
+  'invoices.excelTitle': {
+    bg: 'Excel (.xlsx)',
+    en: 'Excel (.xlsx)',
+  },
+  'invoices.excelHint': {
+    bg: 'За редактиране и анализ',
+    en: 'For editing and analysis',
+  },
+  'invoices.pdfHint': {
+    bg: 'За печат и архив',
+    en: 'For printing and archive',
+  },
+  'invoices.details': {
+    bg: 'Детайли',
+    en: 'Details',
+  },
+  'invoices.supplier': {
+    bg: 'Доставчик',
+    en: 'Supplier',
+  },
+  'invoices.dateLabel': {
+    bg: 'Дата',
+    en: 'Date',
+  },
+  'invoices.vatPercent': {
+    bg: 'ДДС (20%)',
+    en: 'VAT (20%)',
+  },
+  'invoices.totalAmount': {
+    bg: 'Обща сума',
+    en: 'Total Amount',
+  },
+  'invoices.notes': {
+    bg: 'Бележки',
+    en: 'Notes',
+  },
+  'invoices.deleteInvoice': {
+    bg: 'Изтрий фактурата',
+    en: 'Delete Invoice',
+  },
+  'invoices.scanFirst': {
+    bg: 'Сканирайте първата си фактура',
+    en: 'Scan your first invoice',
+  },
+  'invoices.searchPlaceholder': {
+    bg: 'Търси по доставчик...',
+    en: 'Search by supplier...',
+  },
+  'invoices.downloadError': {
+    bg: 'Не можах да изтегля файла',
+    en: 'Could not download file',
+  },
+  
+  // Company Settings
+  'company.title': {
+    bg: 'Настройки на фирма',
+    en: 'Company Settings',
+  },
+  'company.infoText': {
+    bg: 'Фирмените данни се споделят между всички потребители в една фирма. Дублиращите се фактури се проверяват за цялата фирма.',
+    en: 'Company data is shared between all users in a company. Duplicate invoices are checked company-wide.',
+  },
+  'company.joinExisting': {
+    bg: 'Присъединяване към съществуваща фирма',
+    en: 'Join existing company',
+  },
+  'company.joinHint': {
+    bg: 'Въведете ЕИК на фирмата, към която искате да се присъедините',
+    en: 'Enter the EIK of the company you want to join',
+  },
+  'company.enterEik': {
+    bg: 'Въведете ЕИК',
+    en: 'Enter EIK',
+  },
+  'company.join': {
+    bg: 'Присъедини се',
+    en: 'Join',
+  },
+  'company.editCompany': {
+    bg: 'Редактиране на фирма',
+    en: 'Edit Company',
+  },
+  'company.createNew': {
+    bg: 'Създаване на нова фирма',
+    en: 'Create New Company',
+  },
+  'company.name': {
+    bg: 'Име на фирмата',
+    en: 'Company Name',
+  },
+  'company.eik': {
+    bg: 'ЕИК/Булстат',
+    en: 'EIK/Bulstat',
+  },
+  'company.eikCantChange': {
+    bg: 'ЕИК не може да се променя',
+    en: 'EIK cannot be changed',
+  },
+  'company.vatNumber': {
+    bg: 'ДДС номер',
+    en: 'VAT Number',
+  },
+  'company.mol': {
+    bg: 'МОЛ',
+    en: 'Manager',
+  },
+  'company.address': {
+    bg: 'Адрес',
+    en: 'Address',
+  },
+  'company.city': {
+    bg: 'Град',
+    en: 'City',
+  },
+  'company.phone': {
+    bg: 'Телефон',
+    en: 'Phone',
+  },
+  'company.email': {
+    bg: 'Имейл',
+    en: 'Email',
+  },
+  'company.bankDetails': {
+    bg: 'Банкови данни',
+    en: 'Bank Details',
+  },
+  'company.bankName': {
+    bg: 'Банка',
+    en: 'Bank',
+  },
+  'company.iban': {
+    bg: 'IBAN',
+    en: 'IBAN',
+  },
+  'company.enterNameError': {
+    bg: 'Въведете име на фирмата',
+    en: 'Enter company name',
+  },
+  'company.enterEikError': {
+    bg: 'Въведете ЕИК на фирмата',
+    en: 'Enter company EIK',
+  },
+  'company.saved': {
+    bg: 'Данните на фирмата са запазени',
+    en: 'Company data saved',
+  },
+  
+  // Backup Screen
+  'backup.title': {
+    bg: 'Backup & Restore',
+    en: 'Backup & Restore',
+  },
+  'backup.infoTitle': {
+    bg: 'Google Drive Backup',
+    en: 'Google Drive Backup',
+  },
+  'backup.infoDescription': {
+    bg: 'Създайте backup на вашите данни и го запазете в Google Drive или друго облачно хранилище.',
+    en: 'Create a backup of your data and save it to Google Drive or other cloud storage.',
+  },
+  'backup.status': {
+    bg: 'Статус на backup',
+    en: 'Backup Status',
+  },
+  'backup.lastBackup': {
+    bg: 'Последен backup',
+    en: 'Last backup',
+  },
+  'backup.unknown': {
+    bg: 'Неизвестно',
+    en: 'Unknown',
+  },
+  'backup.invoices': {
+    bg: 'Фактури',
+    en: 'Invoices',
+  },
+  'backup.revenues': {
+    bg: 'Обороти',
+    en: 'Revenues',
+  },
+  'backup.expenses': {
+    bg: 'Разходи',
+    en: 'Expenses',
+  },
+  'backup.noBackup': {
+    bg: 'Няма създаден backup',
+    en: 'No backup created',
+  },
+  'backup.create': {
+    bg: 'Създай Backup',
+    en: 'Create Backup',
+  },
+  'backup.restore': {
+    bg: 'Възстанови от файл',
+    en: 'Restore from file',
+  },
+  'backup.howToUse': {
+    bg: 'Как да използвате',
+    en: 'How to use',
+  },
+  'backup.step1': {
+    bg: 'Натиснете "Създай Backup" за да експортирате данните',
+    en: 'Press "Create Backup" to export your data',
+  },
+  'backup.step2': {
+    bg: 'Изберете "Запази в Google Drive" от менюто за споделяне',
+    en: 'Select "Save to Google Drive" from the sharing menu',
+  },
+  'backup.step3': {
+    bg: 'За възстановяване - изберете файла от Google Drive',
+    en: 'To restore - select the file from Google Drive',
+  },
+  'backup.successTitle': {
+    bg: 'Успех!',
+    en: 'Success!',
+  },
+  'backup.backupCreated': {
+    bg: 'Backup файлът е създаден.',
+    en: 'Backup file created.',
+  },
+  'backup.statistics': {
+    bg: 'Статистика',
+    en: 'Statistics',
+  },
+  'backup.saveFile': {
+    bg: 'Запазете файла в Google Drive или друго място за съхранение.',
+    en: 'Save the file to Google Drive or other storage.',
+  },
+  'backup.sharingNotAvailable': {
+    bg: 'Файлът е създаден, но споделянето не е достъпно на това устройство.',
+    en: 'File created, but sharing is not available on this device.',
+  },
+  'backup.file': {
+    bg: 'Файл',
+    en: 'File',
+  },
+  'backup.createError': {
+    bg: 'Неуспешно създаване на backup',
+    en: 'Failed to create backup',
+  },
+  'backup.confirmation': {
+    bg: 'Потвърждение',
+    en: 'Confirmation',
+  },
+  'backup.restoreQuestion': {
+    bg: 'Искате ли да възстановите данните от:',
+    en: 'Do you want to restore data from:',
+  },
+  'backup.restoreWarning': {
+    bg: 'Съществуващи данни няма да бъдат изтрити, само ще се добавят нови.',
+    en: 'Existing data will not be deleted, only new data will be added.',
+  },
+  'backup.restoreButton': {
+    bg: 'Възстанови',
+    en: 'Restore',
+  },
+  'backup.restored': {
+    bg: 'Данните са възстановени успешно!',
+    en: 'Data restored successfully!',
+  },
+  'backup.restoredRecords': {
+    bg: 'Възстановени записи',
+    en: 'Restored records',
+  },
+  'backup.restoreError': {
+    bg: 'Неуспешно възстановяване',
+    en: 'Failed to restore',
+  },
+  'backup.fileSelectError': {
+    bg: 'Неуспешен избор на файл',
+    en: 'Failed to select file',
+  },
+  
+  // Help Screen
+  'help.title': {
+    bg: 'Помощ / Help',
+    en: 'Help',
+  },
+  'help.appTitle': {
+    bg: 'Invoice Manager',
+    en: 'Invoice Manager',
+  },
+  'help.appSubtitle': {
+    bg: 'Управление на фактури и финанси',
+    en: 'Invoice and Finance Management',
+  },
+  'help.version': {
+    bg: 'Версия',
+    en: 'Version',
+  },
+  'help.about': {
+    bg: 'За приложението',
+    en: 'About the App',
+  },
+  'help.aboutText1': {
+    bg: 'Това приложение е създадено за управление на входящи фактури и финансова отчетност за малки и средни бизнеси в България.',
+    en: 'This app is designed for managing incoming invoices and financial reporting for small and medium businesses in Bulgaria.',
+  },
+  'help.aboutText2': {
+    bg: 'Помага за проследяване на приходи, разходи и автоматично изчисляване на ДДС.',
+    en: 'It helps track income, expenses and automatically calculates VAT.',
+  },
+  'help.scanTitle': {
+    bg: 'Сканиране на фактури (OCR)',
+    en: 'Invoice Scanning (OCR)',
+  },
+  'help.dailyRevenueTitle': {
+    bg: 'Дневен оборот',
+    en: 'Daily Revenue',
+  },
+  'help.expensesTitle': {
+    bg: 'В канала (разходи без фактура)',
+    en: 'Expenses (no invoice)',
+  },
+  'help.vatTitle': {
+    bg: 'ДДС изчисление',
+    en: 'VAT Calculation',
+  },
+  'help.statsTitle': {
+    bg: 'Статистики',
+    en: 'Statistics',
+  },
+  'help.companyTitle': {
+    bg: 'Фирмени данни',
+    en: 'Company Data',
+  },
+  'help.backupTitle': {
+    bg: 'Backup',
+    en: 'Backup',
+  },
+  'help.needHelp': {
+    bg: 'Нужда от помощ?',
+    en: 'Need help?',
+  },
+  'help.contactSupport': {
+    bg: 'При въпроси или проблеми, моля свържете се с вашия счетоводител или системен администратор.',
+    en: 'For questions or issues, please contact your accountant or system administrator.',
+  },
+  
+  // Home Screen additional
+  'home.invoices': {
+    bg: 'Фактури',
+    en: 'Invoices',
+  },
+  'home.fiscalRevenue': {
+    bg: 'Фискален оборот',
+    en: 'Fiscal Revenue',
+  },
+  
+  // Stats Screen additional
+  'stats.totalIncome': {
+    bg: 'Общ приход',
+    en: 'Total Income',
+  },
+  'stats.totalExpense': {
+    bg: 'Общ разход',
+    en: 'Total Expense',
+  },
+  'stats.vatToPay': {
+    bg: 'ДДС за плащане',
+    en: 'VAT to Pay',
+  },
+  'stats.profitLabel': {
+    bg: 'Печалба',
+    en: 'Profit',
+  },
+  'stats.expensesNoInvoice': {
+    bg: 'Разходи "в канала"',
+    en: 'Expenses (no invoice)',
+  },
+  'stats.additionalInfo': {
+    bg: 'Допълнителна информация',
+    en: 'Additional Information',
+  },
+  'stats.loadingData': {
+    bg: 'Зареждане на данни...',
+    en: 'Loading data...',
+  },
+  'stats.noSupplierData': {
+    bg: 'Няма данни за доставчици',
+    en: 'No supplier data',
+  },
 };
 
 // Zustand store for language
