@@ -280,7 +280,7 @@ export default function BackupScreen() {
                 ) : (
                   <>
                     <Ionicons name="cloud-download" size={24} color="white" />
-                    <Text style={styles.actionButtonText}>Възстанови от файл</Text>
+                    <Text style={styles.actionButtonText}>{t('backup.restore')}</Text>
                   </>
                 )}
               </TouchableOpacity>
