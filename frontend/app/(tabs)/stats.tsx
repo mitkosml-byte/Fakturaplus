@@ -1003,9 +1003,7 @@ export default function StatsScreen() {
                 )}
                 <View style={{ height: 40 }} />
               </View>
-            )}
-            
-            {activeTab === 'items' && (
+            ) : activeTab === 'items' ? (
               /* ========== ITEMS TAB ========== */
               <View style={styles.suppliersContainer}>
                 {loadingItems ? (
