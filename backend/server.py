@@ -215,6 +215,7 @@ class InvoiceCreate(BaseModel):
     date: str
     image_base64: Optional[str] = None
     notes: Optional[str] = None
+    items: Optional[List[InvoiceItemCreate]] = None  # Артикули
 
 class InvoiceUpdate(BaseModel):
     supplier: Optional[str] = None
