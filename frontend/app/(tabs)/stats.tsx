@@ -966,7 +966,7 @@ export default function StatsScreen() {
                             <View>
                               <Text style={styles.inactiveName}>{supplier.supplier}</Text>
                               <Text style={styles.inactiveMeta}>
-                                {t('stats.lastDelivery')}: {supplier.last_delivery || '-'}
+                                {t('stats.lastDelivery')}: {supplier.last_delivery || t('stats.noValue')}
                               </Text>
                             </View>
                             <View style={styles.inactiveDays}>
