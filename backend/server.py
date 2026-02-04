@@ -3003,11 +3003,6 @@ async def ai_merge_similar_items(
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
         
-        llm = LlmChat(
-            api_key=os.getenv("EMERGENT_LLM_KEY"),
-            model="gemini/gemini-2.5-flash"
-        )
-        
         items_text = "\n".join(unique_items[:100])  # Limit to 100 items
         
         prompt = f"""Анализирай следния списък с имена на продукти и групирай сходните продукти.
@@ -3026,8 +3021,15 @@ async def ai_merge_similar_items(
 Не групирай продукти, които са наистина различни (например "Олио" и "Оцет" са РАЗЛИЧНИ).
 Групирай САМО ако са очевидно същият продукт с различно изписване."""
 
-        response = await llm.send_async(UserMessage(content=prompt))
-        response_text = response.text.strip()
+        llm = LlmChat(
+            api_key=os.getenv("EMERGENT_LLM_KEY"),
+            session_id=f"merge_{uuid.uuid4().hex[:8]}",
+            system_message="Ти си асистент за анализ на продукти. Отговаряй само с валиден JSON."
+        ).with_model("gemini", "gemini-2.5-flash")
+        
+        user_message = UserMessage(text=prompt)
+        response = await llm.send_message(user_message)
+        response_text = response.strip() if isinstance(response, str) else str(response)
         
         # Extract JSON from response
         import re
