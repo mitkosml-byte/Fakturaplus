@@ -201,8 +201,8 @@ export default function InvoicesScreen() {
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons name="document-text-outline" size={64} color="#334155" />
-                <Text style={styles.emptyText}>Няма фактури</Text>
-                <Text style={styles.emptyHint}>Сканирайте първата си фактура</Text>
+                <Text style={styles.emptyText}>{t('invoices.noInvoices')}</Text>
+                <Text style={styles.emptyHint}>{t('invoices.scanFirst')}</Text>
               </View>
             }
           />
