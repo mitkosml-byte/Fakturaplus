@@ -216,6 +216,28 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
 
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/privacy-policy')}>
+            <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+              <Ionicons name="shield-checkmark" size={20} color="#10B981" />
+            </View>
+            <View style={styles.menuContent}>
+              <Text style={styles.menuTitle}>{language === 'bg' ? 'Поверителност' : 'Privacy Policy'}</Text>
+              <Text style={styles.menuSubtitle}>{language === 'bg' ? 'Защита на данните' : 'Data protection'}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/terms-of-service')}>
+            <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+              <Ionicons name="document-text" size={20} color="#F59E0B" />
+            </View>
+            <View style={styles.menuContent}>
+              <Text style={styles.menuTitle}>{language === 'bg' ? 'Условия' : 'Terms of Service'}</Text>
+              <Text style={styles.menuSubtitle}>{language === 'bg' ? 'Правила за ползване' : 'Usage rules'}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/help')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
               <Ionicons name="information-circle" size={20} color="#EC4899" />
