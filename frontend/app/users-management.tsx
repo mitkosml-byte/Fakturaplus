@@ -17,9 +17,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { api } from '@/src/services/api';
-import { User, Invitation } from '@/src/types';
-import { useAuth } from '@/src/contexts/AuthContext';
+import { api } from '../src/services/api';
+import { User, Invitation } from '../src/types';
+import { useAuth } from '../src/contexts/AuthContext';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import * as Clipboard from 'expo-clipboard';
 
