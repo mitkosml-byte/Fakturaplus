@@ -38,6 +38,10 @@ export default function HomeScreen() {
   const [expenseDescription, setExpenseDescription] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseDate, setExpenseDate] = useState(new Date());
+  
+  // Date picker states
+  const [isRevenueDatePickerVisible, setRevenueDatePickerVisible] = useState(false);
+  const [isExpenseDatePickerVisible, setExpenseDatePickerVisible] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
