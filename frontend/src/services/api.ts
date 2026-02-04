@@ -344,6 +344,33 @@ class ApiService {
     const query = queryParams.toString();
     return this.fetch(`/statistics/supplier/${encodeURIComponent(supplierName)}${query ? `?${query}` : ''}`);
   }
+
+  // Advanced Supplier Statistics
+  async getSupplierOverview(params?: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<any> {
+    const queryParams = new URLSearchParams();
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    const query = queryParams.toString();
+    return this.fetch(`/statistics/suppliers${query ? `?${query}` : ''}`);
+  }
+
+  async getSupplierDetailed(supplierName: string): Promise<any> {
+    return this.fetch(`/statistics/supplier/${encodeURIComponent(supplierName)}/detailed`);
+  }
+
+  async compareSuppliers(supplierNames: string[], params?: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<any> {
+    const queryParams = new URLSearchParams();
+    queryParams.set('suppliers', supplierNames.join(','));
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    return this.fetch(`/statistics/suppliers/compare?${queryParams.toString()}`);
+  }
 }
 
 export const api = new ApiService();
