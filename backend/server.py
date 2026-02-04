@@ -275,6 +275,8 @@ class OCRResult(BaseModel):
     vat_amount: float
     total_amount: float
     invoice_date: Optional[str] = None  # Дата на издаване от фактурата
+    corrections: Optional[List[str]] = None  # Списък с направени корекции
+    confidence: Optional[float] = None  # Увереност в резултата (0-1)
 
 class SessionDataResponse(BaseModel):
     id: str
