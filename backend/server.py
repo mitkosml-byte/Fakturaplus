@@ -16,6 +16,11 @@ import io
 import re
 from passlib.context import CryptContext
 
+# Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -24,6 +29,9 @@ IS_PRODUCTION = os.environ.get('ENVIRONMENT', 'development') == 'production'
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 # MongoDB connection
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
