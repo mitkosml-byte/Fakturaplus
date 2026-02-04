@@ -317,6 +317,100 @@ export default function StatsScreen() {
         </View>
 
             <View style={{ height: 40 }} />
+              </>
+            ) : (
+              /* Suppliers Tab */
+              <View style={styles.suppliersContainer}>
+                {loadingSuppliers ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#8B5CF6" />
+                    <Text style={styles.loadingText}>Зареждане на данни...</Text>
+                  </View>
+                ) : supplierStats ? (
+                  <>
+                    {/* Totals Summary */}
+                    <View style={styles.supplierTotalsCard}>
+                      <Text style={styles.supplierTotalsTitle}>Общо за текущия месец</Text>
+                      <View style={styles.supplierTotalsRow}>
+                        <View style={styles.supplierTotalItem}>
+                          <Text style={styles.supplierTotalValue}>
+                            {supplierStats.totals.total_amount.toFixed(2)} €
+                          </Text>
+                          <Text style={styles.supplierTotalLabel}>Обща сума</Text>
+                        </View>
+                        <View style={styles.supplierTotalItem}>
+                          <Text style={styles.supplierTotalValue}>
+                            {supplierStats.totals.total_vat.toFixed(2)} €
+                          </Text>
+                          <Text style={styles.supplierTotalLabel}>ДДС</Text>
+                        </View>
+                      </View>
+                      <View style={styles.supplierTotalsRow}>
+                        <View style={styles.supplierTotalItem}>
+                          <Text style={styles.supplierTotalValue}>
+                            {supplierStats.totals.supplier_count}
+                          </Text>
+                          <Text style={styles.supplierTotalLabel}>Доставчици</Text>
+                        </View>
+                        <View style={styles.supplierTotalItem}>
+                          <Text style={styles.supplierTotalValue}>
+                            {supplierStats.totals.invoice_count}
+                          </Text>
+                          <Text style={styles.supplierTotalLabel}>Фактури</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Top 10 Suppliers */}
+                    <View style={styles.topSuppliersCard}>
+                      <View style={styles.topSuppliersHeader}>
+                        <Ionicons name="trophy" size={24} color="#F59E0B" />
+                        <Text style={styles.topSuppliersTitle}>Топ 10 Доставчици</Text>
+                      </View>
+                      
+                      {supplierStats.top_10.length > 0 ? (
+                        supplierStats.top_10.map((supplier, index) => (
+                          <View key={supplier.supplier} style={styles.supplierItem}>
+                            <View style={styles.supplierRank}>
+                              <Text style={[
+                                styles.supplierRankText,
+                                index < 3 && { color: index === 0 ? '#F59E0B' : index === 1 ? '#94A3B8' : '#CD7F32' }
+                              ]}>
+                                #{index + 1}
+                              </Text>
+                            </View>
+                            <View style={styles.supplierInfo}>
+                              <Text style={styles.supplierName} numberOfLines={1}>
+                                {supplier.supplier}
+                              </Text>
+                              <Text style={styles.supplierMeta}>
+                                {supplier.invoice_count} фактури • Ср. {supplier.avg_invoice.toFixed(0)}€
+                              </Text>
+                            </View>
+                            <View style={styles.supplierAmounts}>
+                              <Text style={styles.supplierAmount}>
+                                {supplier.total_amount.toFixed(2)} €
+                              </Text>
+                              <Text style={styles.supplierVat}>
+                                ДДС: {supplier.total_vat.toFixed(2)} €
+                              </Text>
+                            </View>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={styles.noDataText}>Няма данни за доставчици</Text>
+                      )}
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.noDataContainer}>
+                    <Ionicons name="business-outline" size={48} color="#64748B" />
+                    <Text style={styles.noDataText}>Няма данни за доставчици</Text>
+                  </View>
+                )}
+                <View style={{ height: 40 }} />
+              </View>
+            )}
           </ScrollView>
         </SafeAreaView>
       </View>
