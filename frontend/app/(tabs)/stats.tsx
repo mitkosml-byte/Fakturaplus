@@ -1185,7 +1185,7 @@ export default function StatsScreen() {
                           <Text style={styles.dependencyAlertTitle}>{t('stats.priceTrends')}</Text>
                         </View>
                         <Text style={styles.dependencyAlertDesc}>
-                          {t('stats.highDependencyDesc').replace('доставчици', 'артикули').replace('suppliers', 'items')}
+                          {t('stats.priceTrendsDesc')}
                         </Text>
                         {itemStats.price_trends.slice(0, 5).map((item: any) => (
                           <TouchableOpacity 
