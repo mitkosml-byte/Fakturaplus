@@ -726,4 +726,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#64748B',
   },
+  noDataContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noDataText: {
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: 12,
+  },
 });
