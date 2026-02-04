@@ -162,7 +162,7 @@ export default function StatsScreen() {
               onPress={() => setPeriod(p)}
             >
               <Text style={[styles.periodButtonText, period === p && styles.periodButtonTextActive]}>
-                {p === 'week' ? 'Седмица' : p === 'month' ? 'Месец' : 'Година'}
+                {p === 'week' ? t('stats.week') : p === 'month' ? t('stats.month') : t('stats.year')}
               </Text>
             </TouchableOpacity>
           ))}
@@ -172,28 +172,28 @@ export default function StatsScreen() {
         <View style={styles.summaryGrid}>
           <View style={[styles.summaryCard, { borderLeftColor: '#10B981' }]}>
             <Ionicons name="trending-up" size={24} color="#10B981" />
-            <Text style={styles.cardLabel}>Общ приход</Text>
+            <Text style={styles.cardLabel}>{t('stats.totalIncome')}</Text>
             <Text style={[styles.cardValue, { color: '#10B981' }]}>
               {summary?.total_income.toFixed(2) || '0.00'} €
             </Text>
           </View>
           <View style={[styles.summaryCard, { borderLeftColor: '#EF4444' }]}>
             <Ionicons name="trending-down" size={24} color="#EF4444" />
-            <Text style={styles.cardLabel}>Общ разход</Text>
+            <Text style={styles.cardLabel}>{t('stats.totalExpense')}</Text>
             <Text style={[styles.cardValue, { color: '#EF4444' }]}>
               {summary?.total_expense.toFixed(2) || '0.00'} €
             </Text>
           </View>
           <View style={[styles.summaryCard, { borderLeftColor: '#8B5CF6' }]}>
             <Ionicons name="calculator" size={24} color="#8B5CF6" />
-            <Text style={styles.cardLabel}>ДДС за плащане</Text>
+            <Text style={styles.cardLabel}>{t('stats.vatToPay')}</Text>
             <Text style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
               {summary?.vat_to_pay.toFixed(2) || '0.00'} €
             </Text>
           </View>
           <View style={[styles.summaryCard, { borderLeftColor: '#F59E0B' }]}>
             <Ionicons name="wallet" size={24} color="#F59E0B" />
-            <Text style={styles.cardLabel}>Печалба</Text>
+            <Text style={styles.cardLabel}>{t('stats.profitLabel')}</Text>
             <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
               {summary?.profit.toFixed(2) || '0.00'} €
             </Text>
@@ -204,7 +204,7 @@ export default function StatsScreen() {
         <View style={styles.chartContainer}>
           <View style={styles.chartHeader}>
             <Ionicons name="arrow-up-circle" size={24} color="#10B981" />
-            <Text style={styles.chartTitle}>Приходи</Text>
+            <Text style={styles.chartTitle}>{t('stats.income')}</Text>
           </View>
           {incomeBarData.length > 0 ? (
             <BarChart
@@ -225,7 +225,7 @@ export default function StatsScreen() {
             />
           ) : (
             <View style={styles.noDataContainer}>
-              <Text style={styles.noDataText}>Няма данни</Text>
+              <Text style={styles.noDataText}>{t('stats.noData')}</Text>
             </View>
           )}
         </View>
@@ -234,7 +234,7 @@ export default function StatsScreen() {
         <View style={styles.chartContainer}>
           <View style={styles.chartHeader}>
             <Ionicons name="arrow-down-circle" size={24} color="#EF4444" />
-            <Text style={styles.chartTitle}>Разходи</Text>
+            <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
           </View>
           {expenseBarData.length > 0 ? (
             <BarChart
@@ -255,24 +255,24 @@ export default function StatsScreen() {
             />
           ) : (
             <View style={styles.noDataContainer}>
-              <Text style={styles.noDataText}>Няма данни</Text>
+              <Text style={styles.noDataText}>{t('stats.noData')}</Text>
             </View>
           )}
         </View>
 
         {/* VAT Breakdown */}
         <View style={styles.vatBreakdown}>
-          <Text style={styles.sectionTitle}>ДДС разбивка</Text>
+          <Text style={styles.sectionTitle}>{t('stats.vatBreakdown')}</Text>
           
           <View style={styles.vatRow}>
             <View style={styles.vatItem}>
-              <Text style={styles.vatLabel}>ДДС от продажби</Text>
+              <Text style={styles.vatLabel}>{t('stats.vatFromSales')}</Text>
               <Text style={[styles.vatValue, { color: '#EF4444' }]}>
                 +{summary?.fiscal_vat.toFixed(2) || '0.00'} €
               </Text>
             </View>
             <View style={styles.vatItem}>
-              <Text style={styles.vatLabel}>ДДС кредит (фактури)</Text>
+              <Text style={styles.vatLabel}>{t('stats.vatCredit')}</Text>
               <Text style={[styles.vatValue, { color: '#10B981' }]}>
                 -{summary?.total_invoice_vat.toFixed(2) || '0.00'} €
               </Text>
@@ -280,7 +280,7 @@ export default function StatsScreen() {
           </View>
 
           <View style={styles.vatTotal}>
-            <Text style={styles.vatTotalLabel}>ДДС за плащане</Text>
+            <Text style={styles.vatTotalLabel}>{t('stats.vatToPay')}</Text>
             <Text style={[styles.vatTotalValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
               {summary?.vat_to_pay.toFixed(2) || '0.00'} €
             </Text>
@@ -289,17 +289,17 @@ export default function StatsScreen() {
 
         {/* Additional Stats */}
         <View style={styles.additionalStats}>
-          <Text style={styles.sectionTitle}>Допълнителна информация</Text>
+          <Text style={styles.sectionTitle}>{t('stats.additionalInfo')}</Text>
           
           <View style={styles.statRow}>
             <View style={styles.statItem}>
               <Ionicons name="receipt" size={20} color="#8B5CF6" />
-              <Text style={styles.statLabel}>Брой фактури</Text>
+              <Text style={styles.statLabel}>{t('stats.invoiceCount')}</Text>
               <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
             </View>
             <View style={styles.statItem}>
               <Ionicons name="cash" size={20} color="#10B981" />
-              <Text style={styles.statLabel}>Фискален оборот</Text>
+              <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
               <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0} €</Text>
             </View>
           </View>
@@ -307,12 +307,12 @@ export default function StatsScreen() {
           <View style={styles.statRow}>
             <View style={styles.statItem}>
               <Ionicons name="wallet" size={20} color="#F59E0B" />
-              <Text style={styles.statLabel}>Джобче</Text>
+              <Text style={styles.statLabel}>{t('home.pocket')}</Text>
               <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0} €</Text>
             </View>
             <View style={styles.statItem}>
               <Ionicons name="remove-circle" size={20} color="#EF4444" />
-              <Text style={styles.statLabel}>Разходи "в канала"</Text>
+              <Text style={styles.statLabel}>{t('stats.expensesNoInvoice')}</Text>
               <Text style={styles.statValue}>{summary?.total_non_invoice_expenses.toFixed(0) || 0} €</Text>
             </View>
           </View>
