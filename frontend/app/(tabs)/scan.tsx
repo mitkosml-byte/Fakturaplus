@@ -70,7 +70,7 @@ export default function ScanScreen() {
         await processImage(photo.base64);
       } catch (error) {
         console.error('Error taking photo:', error);
-        Alert.alert('Грешка', 'Не можах да заснема снимка');
+        Alert.alert(t('common.error'), language === 'bg' ? 'Не можах да заснема снимка' : 'Could not take photo');
       }
     }
   };
