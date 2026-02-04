@@ -193,7 +193,7 @@ export default function HomeScreen() {
             {/* Header */}
             <View style={styles.header}>
               <View>
-                <Text style={styles.greeting}>Добре дошли!</Text>
+                <Text style={styles.greeting}>{t('home.welcome')}</Text>
                 <Text style={styles.date}>{today}</Text>
               </View>
               <View style={styles.headerIcon}>
@@ -207,7 +207,7 @@ export default function HomeScreen() {
                 <View style={styles.cardIcon}>
                   <Ionicons name="trending-up" size={24} color="#10B981" />
                 </View>
-                <Text style={styles.cardLabel}>Общ приход</Text>
+                <Text style={styles.cardLabel}>{t('home.totalIncome')}</Text>
                 <Text style={[styles.cardValue, { color: '#10B981' }]}>
                   {summary?.total_income.toFixed(2) || '0.00'} €
                 </Text>
@@ -217,7 +217,7 @@ export default function HomeScreen() {
                 <View style={styles.cardIcon}>
                   <Ionicons name="trending-down" size={24} color="#EF4444" />
             </View>
-            <Text style={styles.cardLabel}>Общ разход</Text>
+            <Text style={styles.cardLabel}>{t('home.totalExpenses')}</Text>
             <Text style={[styles.cardValue, { color: '#EF4444' }]}>
               {summary?.total_expense.toFixed(2) || '0.00'} €
             </Text>
@@ -228,18 +228,18 @@ export default function HomeScreen() {
         <View style={styles.vatCard}>
           <View style={styles.vatHeader}>
             <Ionicons name="calculator" size={24} color="#8B5CF6" />
-            <Text style={styles.vatTitle}>ДДС за плащане</Text>
+            <Text style={styles.vatTitle}>{t('home.vatToPay')}</Text>
           </View>
           <Text style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
             {(summary?.vat_to_pay || 0).toFixed(2)} €
           </Text>
           <View style={styles.vatDetails}>
             <View style={styles.vatDetailRow}>
-              <Text style={styles.vatDetailLabel}>ДДС от продажби:</Text>
+              <Text style={styles.vatDetailLabel}>{t('stats.vatFromSales')}:</Text>
               <Text style={styles.vatDetailValue}>{summary?.fiscal_vat.toFixed(2) || '0.00'} €</Text>
             </View>
             <View style={styles.vatDetailRow}>
-              <Text style={styles.vatDetailLabel}>ДДС кредит (фактури):</Text>
+              <Text style={styles.vatDetailLabel}>{t('stats.vatCredit')}:</Text>
               <Text style={styles.vatDetailValue}>-{summary?.total_invoice_vat.toFixed(2) || '0.00'} €</Text>
             </View>
           </View>
