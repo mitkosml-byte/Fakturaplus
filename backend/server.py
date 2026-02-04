@@ -84,7 +84,7 @@ class User(BaseModel):
     email: str
     name: str
     picture: Optional[str] = None
-    role: str = "user"  # "accountant" or "user"
+    role: str = "staff"  # "owner", "manager", or "staff"
     company_id: Optional[str] = None  # Връзка към фирмата
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -93,6 +93,24 @@ class UserSession(BaseModel):
     session_token: str
     expires_at: datetime
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Invitation model for user invitations
+class Invitation(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    invited_by: str  # user_id на изпращача
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    role: str = "staff"  # Роля за поканения
+    code: str = Field(default_factory=lambda: uuid.uuid4().hex[:8].upper())  # 8-символен код
+    status: str = "pending"  # "pending", "accepted", "cancelled", "expired"
+    expires_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(days=7))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class InvitationCreate(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    role: str = "staff"
 
 class Invoice(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
