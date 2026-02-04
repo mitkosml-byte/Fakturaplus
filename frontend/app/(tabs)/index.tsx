@@ -257,13 +257,13 @@ export default function HomeScreen() {
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0}</Text>
-            <Text style={styles.statLabel}>Джобче</Text>
+            <Text style={styles.statLabel}>{t('home.pocket')}</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
               {summary?.profit.toFixed(0) || 0}
             </Text>
-            <Text style={styles.statLabel}>Печалба</Text>
+            <Text style={styles.statLabel}>{t('home.profit')}</Text>
           </View>
         </View>
 
@@ -274,7 +274,7 @@ export default function HomeScreen() {
             onPress={() => setRevenueModalVisible(true)}
           >
             <Ionicons name="cash" size={24} color="white" />
-            <Text style={styles.actionButtonText}>Дневен оборот</Text>
+            <Text style={styles.actionButtonText}>{t('home.dailyRevenue')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -282,7 +282,7 @@ export default function HomeScreen() {
             onPress={() => setExpenseModalVisible(true)}
           >
             <Ionicons name="remove-circle" size={24} color="white" />
-            <Text style={styles.actionButtonText}>В канала</Text>
+            <Text style={styles.actionButtonText}>{t('home.expenses')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -292,7 +292,7 @@ export default function HomeScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Дневен оборот</Text>
+              <Text style={styles.modalTitle}>{t('home.dailyRevenue')}</Text>
               <TouchableOpacity onPress={() => setRevenueModalVisible(false)}>
                 <Ionicons name="close" size={28} color="#94A3B8" />
               </TouchableOpacity>
