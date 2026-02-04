@@ -121,21 +121,21 @@ export default function InvoicesScreen() {
 
       <View style={styles.invoiceDetails}>
         <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>№ Фактура:</Text>
+          <Text style={styles.detailLabel}>{t('invoices.invoiceNo')}:</Text>
           <Text style={styles.detailValue}>{item.invoice_number}</Text>
         </View>
         <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Без ДДС:</Text>
+          <Text style={styles.detailLabel}>{t('invoices.withoutVAT')}:</Text>
           <Text style={styles.detailValue}>{item.amount_without_vat.toFixed(2)} €</Text>
         </View>
         <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>ДДС:</Text>
+          <Text style={styles.detailLabel}>{t('stats.vat')}:</Text>
           <Text style={styles.detailValue}>{item.vat_amount.toFixed(2)} €</Text>
         </View>
       </View>
 
       <View style={styles.invoiceFooter}>
-        <Text style={styles.totalLabel}>Общо:</Text>
+        <Text style={styles.totalLabel}>{t('invoices.total')}:</Text>
         <Text style={styles.totalValue}>{item.total_amount.toFixed(2)} €</Text>
       </View>
     </TouchableOpacity>
