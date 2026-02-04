@@ -463,4 +463,58 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#EF4444',
   },
+  
+  // Language Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  languageModalContent: {
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    padding: 24,
+    width: '85%',
+    maxWidth: 340,
+  },
+  languageModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  languageOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    gap: 12,
+  },
+  languageOptionActive: {
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    borderWidth: 2,
+    borderColor: '#8B5CF6',
+  },
+  languageFlag: {
+    fontSize: 28,
+  },
+  languageText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    flex: 1,
+  },
+  languageModalCancel: {
+    alignItems: 'center',
+    padding: 12,
+    marginTop: 8,
+  },
+  languageModalCancelText: {
+    fontSize: 16,
+    color: '#64748B',
+  },
 });
