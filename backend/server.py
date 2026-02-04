@@ -1053,13 +1053,112 @@ async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(ge
             )
     
     invoice_dict = invoice.dict()
+    invoice_date = datetime.fromisoformat(invoice_dict["date"].replace("Z", "+00:00"))
+    
+    # Process items and convert to dict format
+    items_list = None
+    price_alerts = []
+    
+    if invoice.items:
+        items_list = []
+        for item in invoice.items:
+            item_dict = item.dict()
+            # Calculate total_price if not provided
+            if item_dict.get("total_price") is None:
+                item_dict["total_price"] = item_dict["quantity"] * item_dict["unit_price"]
+            # Calculate VAT if not provided (20%)
+            if item_dict.get("vat_amount") is None:
+                item_dict["vat_amount"] = item_dict["total_price"] * 0.2
+            
+            item_dict["id"] = str(uuid.uuid4())
+            items_list.append(item_dict)
+            
+            # Check price changes and create alerts if company exists
+            if company_id:
+                normalized_name = item.name.strip().lower()
+                
+                # Find last price for this item from same supplier
+                last_price_record = await db.item_price_history.find_one(
+                    {
+                        "company_id": company_id,
+                        "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"},
+                        "item_name": normalized_name
+                    },
+                    {"_id": 0},
+                    sort=[("invoice_date", -1)]
+                )
+                
+                # Get threshold setting
+                alert_settings = await db.price_alert_settings.find_one(
+                    {"company_id": company_id},
+                    {"_id": 0}
+                )
+                threshold = alert_settings.get("threshold_percent", 10.0) if alert_settings else 10.0
+                alert_enabled = alert_settings.get("enabled", True) if alert_settings else True
+                
+                if last_price_record and alert_enabled:
+                    old_price = last_price_record["unit_price"]
+                    new_price = item.unit_price
+                    
+                    if old_price > 0:
+                        change_percent = ((new_price - old_price) / old_price) * 100
+                        
+                        # Create alert if price increased above threshold
+                        if change_percent >= threshold:
+                            alert = PriceAlert(
+                                company_id=company_id,
+                                item_name=item.name,
+                                supplier=invoice.supplier,
+                                old_price=old_price,
+                                new_price=new_price,
+                                change_percent=round(change_percent, 2),
+                                invoice_id="",  # Will be set after invoice is created
+                                invoice_number=invoice.invoice_number
+                            )
+                            price_alerts.append(alert)
+                
+                # Save to price history
+                price_history = ItemPriceHistory(
+                    company_id=company_id,
+                    supplier=invoice.supplier,
+                    item_name=normalized_name,
+                    unit_price=item.unit_price,
+                    quantity=item.quantity,
+                    unit=item.unit,
+                    invoice_id="",  # Will be set after invoice is created
+                    invoice_number=invoice.invoice_number,
+                    invoice_date=invoice_date
+                )
+                await db.item_price_history.insert_one(price_history.dict())
+    
     invoice_obj = Invoice(
         user_id=current_user.user_id,
         company_id=company_id,
-        date=datetime.fromisoformat(invoice_dict["date"].replace("Z", "+00:00")),
-        **{k: v for k, v in invoice_dict.items() if k != "date"}
+        date=invoice_date,
+        items=items_list,
+        **{k: v for k, v in invoice_dict.items() if k not in ["date", "items"]}
     )
     await db.invoices.insert_one(invoice_obj.dict())
+    
+    # Update price history and alerts with invoice_id
+    if company_id and invoice.items:
+        for item in invoice.items:
+            normalized_name = item.name.strip().lower()
+            await db.item_price_history.update_many(
+                {
+                    "company_id": company_id,
+                    "invoice_number": invoice.invoice_number,
+                    "item_name": normalized_name,
+                    "invoice_id": ""
+                },
+                {"$set": {"invoice_id": invoice_obj.id}}
+            )
+        
+        # Save alerts with invoice_id
+        for alert in price_alerts:
+            alert.invoice_id = invoice_obj.id
+            await db.price_alerts.insert_one(alert.dict())
+    
     return invoice_obj
 
 @api_router.get("/invoices", response_model=List[Invoice])
