@@ -1231,7 +1231,7 @@ async def correct_ocr_data(
 # ===================== OCR ENDPOINT =====================
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
-async def scan_invoice(image_base64: str = None, request: Request = None):
+async def scan_invoice(image_base64: str = None, request: Request = None, current_user: User = Depends(get_current_user)):
     body = await request.json()
     image_data = body.get("image_base64", "")
     
@@ -1241,6 +1241,10 @@ async def scan_invoice(image_base64: str = None, request: Request = None):
     # Remove data URL prefix if present
     if "," in image_data:
         image_data = image_data.split(",")[1]
+    
+    # Get company_id for supplier matching
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
     
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
@@ -1275,19 +1279,29 @@ async def scan_invoice(image_base64: str = None, request: Request = None):
         
         # Parse JSON from response
         import json
-        import re
         
         # Find JSON in response
         json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
         if json_match:
-            result = json.loads(json_match.group())
+            raw_result = json.loads(json_match.group())
+            
+            # Apply AI correction module
+            correction_result = await correct_ocr_data(raw_result, company_id)
+            corrected = correction_result.corrected
+            
+            # Log corrections for debugging
+            if correction_result.corrections_made:
+                logger.info(f"OCR Corrections: {correction_result.corrections_made}")
+            
             return OCRResult(
-                supplier=result.get("supplier", ""),
-                invoice_number=result.get("invoice_number", ""),
-                amount_without_vat=float(result.get("amount_without_vat", 0)),
-                vat_amount=float(result.get("vat_amount", 0)),
-                total_amount=float(result.get("total_amount", 0)),
-                invoice_date=result.get("invoice_date")
+                supplier=corrected.get("supplier", ""),
+                invoice_number=corrected.get("invoice_number", ""),
+                amount_without_vat=float(corrected.get("amount_without_vat", 0)),
+                vat_amount=float(corrected.get("vat_amount", 0)),
+                total_amount=float(corrected.get("total_amount", 0)),
+                invoice_date=corrected.get("invoice_date"),
+                corrections=correction_result.corrections_made,
+                confidence=correction_result.confidence
             )
         else:
             raise HTTPException(status_code=500, detail="Не можах да разпозная фактурата")
