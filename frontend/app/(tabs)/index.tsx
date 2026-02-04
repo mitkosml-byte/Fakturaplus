@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { api } from '../../src/services/api';
 import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
 import { format, addDays, subDays } from 'date-fns';
