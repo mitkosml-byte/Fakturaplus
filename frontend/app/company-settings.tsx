@@ -166,7 +166,7 @@ export default function CompanySettingsScreen() {
               <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={24} color="white" />
               </TouchableOpacity>
-              <Text style={styles.headerTitle}>Настройки на фирма</Text>
+              <Text style={styles.headerTitle}>{t('company.title')}</Text>
               <View style={styles.headerRight} />
             </View>
 
@@ -186,8 +186,7 @@ export default function CompanySettingsScreen() {
               <View style={styles.infoCard}>
                 <Ionicons name="business" size={24} color="#8B5CF6" />
                 <Text style={styles.infoText}>
-                  Фирмените данни се споделят между всички потребители в една фирма.
-                  Дублиращите се фактури се проверяват за цялата фирма.
+                  {t('company.infoText')}
                 </Text>
               </View>
 
@@ -200,7 +199,7 @@ export default function CompanySettingsScreen() {
                   >
                     <Ionicons name="people" size={20} color="#8B5CF6" />
                     <Text style={styles.joinToggleText}>
-                      Присъединяване към съществуваща фирма
+                      {t('company.joinExisting')}
                     </Text>
                     <Ionicons 
                       name={showJoinSection ? "chevron-up" : "chevron-down"} 
@@ -212,13 +211,13 @@ export default function CompanySettingsScreen() {
                   {showJoinSection && (
                     <View style={styles.joinForm}>
                       <Text style={styles.joinHint}>
-                        Въведете ЕИК на фирмата, към която искате да се присъедините
+                        {t('company.joinHint')}
                       </Text>
                       <TextInput
                         style={styles.input}
                         value={joinEik}
                         onChangeText={setJoinEik}
-                        placeholder="Въведете ЕИК"
+                        placeholder={t('company.enterEik')}
                         placeholderTextColor="#64748B"
                         keyboardType="number-pad"
                       />
@@ -232,7 +231,7 @@ export default function CompanySettingsScreen() {
                         ) : (
                           <>
                             <Ionicons name="log-in" size={20} color="white" />
-                            <Text style={styles.joinButtonText}>Присъедини се</Text>
+                            <Text style={styles.joinButtonText}>{t('company.join')}</Text>
                           </>
                         )}
                       </TouchableOpacity>
@@ -244,16 +243,16 @@ export default function CompanySettingsScreen() {
               {/* Company Form */}
               <View style={styles.formContainer}>
                 <Text style={styles.sectionTitle}>
-                  {company ? 'Редактиране на фирма' : 'Създаване на нова фирма'}
+                  {company ? t('company.editCompany') : t('company.createNew')}
                 </Text>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Име на фирмата *</Text>
+                  <Text style={styles.inputLabel}>{t('company.name')} *</Text>
                   <TextInput
                     style={styles.input}
                     value={name}
                     onChangeText={setName}
-                    placeholder="Моята фирма ЕООД"
+                    placeholder="My Company EOOD"
                     placeholderTextColor="#64748B"
                   />
                 </View>
