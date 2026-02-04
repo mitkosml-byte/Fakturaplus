@@ -1346,19 +1346,20 @@ async def get_supplier_statistics(
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    """Get statistics by supplier - Top suppliers, totals, etc."""
+    """Get comprehensive supplier statistics with trends, alerts, and rankings"""
     from collections import defaultdict
+    from datetime import timedelta
     
     # Default to current month if no dates provided
+    now = datetime.now(timezone.utc)
     if not start_date and not end_date:
-        now = datetime.now(timezone.utc)
         start_date = now.replace(day=1).strftime("%Y-%m-%d")
         if now.month == 12:
             end_date = now.replace(year=now.year + 1, month=1, day=1).strftime("%Y-%m-%d")
         else:
             end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
     
-    # Build query
+    # Build query for current period
     query = {"user_id": current_user.user_id}
     if start_date or end_date:
         query["date"] = {}
@@ -1367,6 +1368,7 @@ async def get_supplier_statistics(
         if end_date:
             query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
     
+    # Get all invoices for the period
     invoices = await db.invoices.find(query, {
         "_id": 0, 
         "supplier": 1, 
@@ -1376,56 +1378,316 @@ async def get_supplier_statistics(
         "date": 1
     }).to_list(10000)
     
-    # Group by supplier
+    # Group by supplier with detailed data
     supplier_data = defaultdict(lambda: {
         "total_amount": 0,
         "total_vat": 0,
         "total_net": 0,
         "invoice_count": 0,
-        "invoices": []
+        "dates": [],
+        "amounts": []
     })
     
     for inv in invoices:
         supplier = inv.get("supplier", "Неизвестен")
-        supplier_data[supplier]["total_amount"] += inv.get("total_amount", 0)
+        amount = inv.get("total_amount", 0)
+        supplier_data[supplier]["total_amount"] += amount
         supplier_data[supplier]["total_vat"] += inv.get("vat_amount", 0)
         supplier_data[supplier]["total_net"] += inv.get("amount_without_vat", 0)
         supplier_data[supplier]["invoice_count"] += 1
+        
+        date_val = inv.get("date")
+        if isinstance(date_val, datetime):
+            supplier_data[supplier]["dates"].append(date_val)
+            supplier_data[supplier]["amounts"].append(amount)
     
-    # Convert to list and sort by total amount
+    # Calculate inactivity threshold (30 days)
+    inactivity_days = 30
+    inactive_threshold = now - timedelta(days=inactivity_days)
+    
+    # Build comprehensive supplier list
     suppliers_list = []
+    total_all = 0
+    
     for supplier, data in supplier_data.items():
+        total_all += data["total_amount"]
+        
+        # Calculate first/last delivery
+        sorted_dates = sorted(data["dates"]) if data["dates"] else []
+        first_delivery = sorted_dates[0] if sorted_dates else None
+        last_delivery = sorted_dates[-1] if sorted_dates else None
+        
+        # Determine status
+        is_active = last_delivery and last_delivery > inactive_threshold if last_delivery else False
+        days_inactive = (now - last_delivery).days if last_delivery else 999
+        
+        # Calculate average
+        avg = data["total_amount"] / data["invoice_count"] if data["invoice_count"] > 0 else 0
+        
+        # Calculate standard deviation for anomaly detection
+        amounts = data["amounts"]
+        if len(amounts) >= 2:
+            mean_amount = sum(amounts) / len(amounts)
+            variance = sum((x - mean_amount) ** 2 for x in amounts) / len(amounts)
+            std_dev = variance ** 0.5
+        else:
+            mean_amount = avg
+            std_dev = 0
+        
         suppliers_list.append({
             "supplier": supplier,
             "total_amount": round(data["total_amount"], 2),
             "total_vat": round(data["total_vat"], 2),
             "total_net": round(data["total_net"], 2),
             "invoice_count": data["invoice_count"],
-            "avg_invoice": round(data["total_amount"] / data["invoice_count"], 2) if data["invoice_count"] > 0 else 0
+            "avg_invoice": round(avg, 2),
+            "first_delivery": first_delivery.strftime("%Y-%m-%d") if first_delivery else None,
+            "last_delivery": last_delivery.strftime("%Y-%m-%d") if last_delivery else None,
+            "is_active": is_active,
+            "days_inactive": days_inactive if not is_active else 0,
+            "std_dev": round(std_dev, 2)
         })
     
-    # Sort by total amount descending
-    suppliers_list.sort(key=lambda x: x["total_amount"], reverse=True)
+    # Add dependency percentage
+    for s in suppliers_list:
+        s["dependency_percent"] = round((s["total_amount"] / total_all * 100), 1) if total_all > 0 else 0
+    
+    # Sort by total amount for TOP by amount
+    top_by_amount = sorted(suppliers_list, key=lambda x: x["total_amount"], reverse=True)[:10]
+    
+    # TOP by frequency
+    top_by_frequency = sorted(suppliers_list, key=lambda x: x["invoice_count"], reverse=True)[:10]
+    
+    # TOP by average invoice
+    top_by_avg = sorted(suppliers_list, key=lambda x: x["avg_invoice"], reverse=True)[:10]
+    
+    # Inactive suppliers
+    inactive_suppliers = [s for s in suppliers_list if not s["is_active"]]
+    inactive_suppliers.sort(key=lambda x: x["days_inactive"], reverse=True)
+    
+    # High dependency alert (>30%)
+    high_dependency = [s for s in suppliers_list if s["dependency_percent"] > 30]
     
     # Calculate totals
-    total_all = sum(s["total_amount"] for s in suppliers_list)
     total_vat = sum(s["total_vat"] for s in suppliers_list)
     total_net = sum(s["total_net"] for s in suppliers_list)
+    total_invoices = sum(s["invoice_count"] for s in suppliers_list)
+    
+    # Executive summary
+    top_3_concentration = sum(s["dependency_percent"] for s in top_by_amount[:3]) if len(top_by_amount) >= 3 else 0
+    top_5_concentration = sum(s["dependency_percent"] for s in top_by_amount[:5]) if len(top_by_amount) >= 5 else 0
     
     return {
         "period": {
             "start_date": start_date,
             "end_date": end_date
         },
+        "executive_summary": {
+            "top_3_concentration": round(top_3_concentration, 1),
+            "top_5_concentration": round(top_5_concentration, 1),
+            "total_suppliers": len(suppliers_list),
+            "active_suppliers": len([s for s in suppliers_list if s["is_active"]]),
+            "inactive_suppliers": len(inactive_suppliers),
+            "high_dependency_count": len(high_dependency),
+            "largest_supplier": top_by_amount[0]["supplier"] if top_by_amount else None,
+            "largest_amount": top_by_amount[0]["total_amount"] if top_by_amount else 0
+        },
         "totals": {
             "total_amount": round(total_all, 2),
             "total_vat": round(total_vat, 2),
             "total_net": round(total_net, 2),
             "supplier_count": len(suppliers_list),
-            "invoice_count": sum(s["invoice_count"] for s in suppliers_list)
+            "invoice_count": total_invoices
         },
-        "top_10": suppliers_list[:10],
+        "top_by_amount": top_by_amount,
+        "top_by_frequency": top_by_frequency,
+        "top_by_avg": top_by_avg,
+        "inactive_suppliers": inactive_suppliers[:10],
+        "high_dependency_alerts": high_dependency,
         "all_suppliers": suppliers_list
+    }
+
+@api_router.get("/statistics/supplier/{supplier_name}/detailed")
+async def get_detailed_supplier_stats(
+    supplier_name: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed statistics for a specific supplier with trends"""
+    from collections import defaultdict
+    from urllib.parse import unquote
+    
+    supplier_name = unquote(supplier_name)
+    
+    # Get all invoices for this supplier (no date filter for full history)
+    query = {
+        "user_id": current_user.user_id,
+        "supplier": {"$regex": f"^{supplier_name}$", "$options": "i"}
+    }
+    
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", 1).to_list(10000)
+    
+    if not invoices:
+        return {
+            "supplier": supplier_name,
+            "found": False,
+            "invoice_count": 0
+        }
+    
+    now = datetime.now(timezone.utc)
+    
+    # Basic stats
+    total_amount = sum(inv.get("total_amount", 0) for inv in invoices)
+    total_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
+    total_net = sum(inv.get("amount_without_vat", 0) for inv in invoices)
+    avg_invoice = total_amount / len(invoices) if invoices else 0
+    
+    # Extract dates
+    dates = []
+    amounts = []
+    for inv in invoices:
+        date_val = inv.get("date")
+        if isinstance(date_val, datetime):
+            dates.append(date_val)
+            amounts.append(inv.get("total_amount", 0))
+    
+    first_delivery = min(dates) if dates else None
+    last_delivery = max(dates) if dates else None
+    days_inactive = (now - last_delivery).days if last_delivery else 999
+    is_active = days_inactive <= 30
+    
+    # Monthly breakdown
+    monthly_data = defaultdict(lambda: {"amount": 0, "count": 0})
+    for inv in invoices:
+        date_val = inv.get("date")
+        if isinstance(date_val, datetime):
+            month_key = date_val.strftime("%Y-%m")
+            monthly_data[month_key]["amount"] += inv.get("total_amount", 0)
+            monthly_data[month_key]["count"] += 1
+    
+    # Sort monthly data
+    sorted_months = sorted(monthly_data.keys())
+    monthly_trend = []
+    prev_amount = 0
+    for month in sorted_months[-12:]:  # Last 12 months
+        data = monthly_data[month]
+        growth = ((data["amount"] - prev_amount) / prev_amount * 100) if prev_amount > 0 else 0
+        monthly_trend.append({
+            "month": month,
+            "amount": round(data["amount"], 2),
+            "count": data["count"],
+            "growth_percent": round(growth, 1)
+        })
+        prev_amount = data["amount"]
+    
+    # Calculate anomalies
+    if len(amounts) >= 3:
+        mean_amount = sum(amounts) / len(amounts)
+        variance = sum((x - mean_amount) ** 2 for x in amounts) / len(amounts)
+        std_dev = variance ** 0.5
+        threshold = mean_amount + (2 * std_dev)
+        
+        anomalies = []
+        for inv in invoices:
+            if inv.get("total_amount", 0) > threshold:
+                date_val = inv.get("date")
+                date_str = date_val.strftime("%Y-%m-%d") if isinstance(date_val, datetime) else str(date_val)[:10]
+                anomalies.append({
+                    "date": date_str,
+                    "amount": inv.get("total_amount", 0),
+                    "invoice_number": inv.get("invoice_number"),
+                    "deviation_percent": round((inv.get("total_amount", 0) - mean_amount) / mean_amount * 100, 1)
+                })
+    else:
+        anomalies = []
+    
+    # Recent invoices
+    recent_invoices = []
+    for inv in invoices[-10:][::-1]:
+        date_val = inv.get("date")
+        date_str = date_val.strftime("%Y-%m-%d") if isinstance(date_val, datetime) else str(date_val)[:10]
+        recent_invoices.append({
+            "id": inv.get("id"),
+            "invoice_number": inv.get("invoice_number"),
+            "date": date_str,
+            "total_amount": inv.get("total_amount", 0),
+            "vat_amount": inv.get("vat_amount", 0)
+        })
+    
+    return {
+        "supplier": supplier_name,
+        "found": True,
+        "overview": {
+            "total_amount": round(total_amount, 2),
+            "total_vat": round(total_vat, 2),
+            "total_net": round(total_net, 2),
+            "invoice_count": len(invoices),
+            "avg_invoice": round(avg_invoice, 2),
+            "first_delivery": first_delivery.strftime("%Y-%m-%d") if first_delivery else None,
+            "last_delivery": last_delivery.strftime("%Y-%m-%d") if last_delivery else None,
+            "is_active": is_active,
+            "days_inactive": days_inactive if not is_active else 0
+        },
+        "monthly_trend": monthly_trend,
+        "anomalies": anomalies,
+        "recent_invoices": recent_invoices
+    }
+
+@api_router.get("/statistics/suppliers/compare")
+async def compare_suppliers(
+    suppliers: str,  # comma-separated supplier names
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Compare multiple suppliers"""
+    from urllib.parse import unquote
+    
+    supplier_names = [unquote(s.strip()) for s in suppliers.split(",") if s.strip()]
+    
+    if len(supplier_names) < 2 or len(supplier_names) > 5:
+        raise HTTPException(status_code=400, detail="Изберете между 2 и 5 доставчика за сравнение")
+    
+    # Build date query
+    date_query = {}
+    if start_date:
+        date_query["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
+    if end_date:
+        date_query["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    
+    comparison = []
+    
+    for supplier_name in supplier_names:
+        query = {
+            "user_id": current_user.user_id,
+            "supplier": {"$regex": f"^{supplier_name}$", "$options": "i"}
+        }
+        if date_query:
+            query["date"] = date_query
+        
+        invoices = await db.invoices.find(query, {"_id": 0, "total_amount": 1, "date": 1}).to_list(10000)
+        
+        total = sum(inv.get("total_amount", 0) for inv in invoices)
+        count = len(invoices)
+        avg = total / count if count > 0 else 0
+        
+        comparison.append({
+            "supplier": supplier_name,
+            "total_amount": round(total, 2),
+            "invoice_count": count,
+            "avg_invoice": round(avg, 2)
+        })
+    
+    # Calculate max for percentage calculation
+    max_amount = max(c["total_amount"] for c in comparison) if comparison else 1
+    max_count = max(c["invoice_count"] for c in comparison) if comparison else 1
+    
+    for c in comparison:
+        c["amount_percent"] = round(c["total_amount"] / max_amount * 100, 1) if max_amount > 0 else 0
+        c["count_percent"] = round(c["invoice_count"] / max_count * 100, 1) if max_count > 0 else 0
+    
+    return {
+        "suppliers": comparison,
+        "period": {"start_date": start_date, "end_date": end_date}
     }
 
 @api_router.get("/statistics/supplier/{supplier_name}")
