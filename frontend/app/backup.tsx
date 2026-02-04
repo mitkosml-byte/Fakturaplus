@@ -70,9 +70,7 @@ export default function BackupScreen() {
       const fileName = `invoice_backup_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.json`;
       const fileUri = `${FileSystem.documentDirectory}${fileName}`;
       
-      await FileSystem.writeAsStringAsync(fileUri, jsonString, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
+      await FileSystem.writeAsStringAsync(fileUri, jsonString);
       
       // Проверка дали споделянето е налично
       const isSharingAvailable = await Sharing.isAvailableAsync();
@@ -81,7 +79,6 @@ export default function BackupScreen() {
         await Sharing.shareAsync(fileUri, {
           mimeType: 'application/json',
           dialogTitle: 'Запази backup файл',
-          UTI: 'public.json',
         });
         
         Alert.alert(
