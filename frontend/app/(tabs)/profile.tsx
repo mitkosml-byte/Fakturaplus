@@ -265,6 +265,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
+  companyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  companyName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#8B5CF6',
+    flex: 1,
+  },
   userCard: {
     backgroundColor: '#1E293B',
     borderRadius: 20,
