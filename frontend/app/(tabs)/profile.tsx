@@ -71,6 +71,11 @@ export default function ProfileScreen() {
     );
   };
 
+  const handleLanguageChange = async (newLang: Language) => {
+    await setLanguage(newLang);
+    setShowLanguageModal(false);
+  };
+
   const getRoleName = (role: string) => {
     const roles: Record<string, { bg: string; en: string }> = {
       owner: { bg: 'Титуляр', en: 'Owner' },
