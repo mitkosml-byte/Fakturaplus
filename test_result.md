@@ -210,6 +210,21 @@ backend:
         agent: "testing"
         comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
 
+  - task: "Advanced Supplier Statistics Endpoints"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "New advanced supplier statistics endpoints: /api/statistics/suppliers, /api/statistics/supplier/{name}/detailed, /api/statistics/suppliers/compare"
+      - working: true
+        agent: "testing"
+        comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
+
 frontend:
   - task: "Login screen with Google OAuth"
     implemented: true
