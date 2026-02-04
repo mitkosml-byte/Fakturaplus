@@ -492,21 +492,21 @@ export default function HomeScreen() {
 
               {/* Add New Expense Form */}
               <View style={styles.addExpenseSection}>
-                <Text style={styles.addExpenseTitle}>Добави нов разход:</Text>
+                <Text style={styles.addExpenseTitle}>{t('expenses.addNew')}:</Text>
                 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Описание</Text>
+                  <Text style={styles.inputLabel}>{t('expenses.description')}</Text>
                   <TextInput
                     style={styles.input}
                     value={expenseDescription}
                     onChangeText={setExpenseDescription}
-                    placeholder="Напр. гориво, материали..."
+                    placeholder={t('expenses.placeholder')}
                     placeholderTextColor="#64748B"
                   />
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Сума (€)</Text>
+                  <Text style={styles.inputLabel}>{t('expenses.amount')} (€)</Text>
                   <TextInput
                     style={styles.input}
                     value={expenseAmount}
@@ -519,7 +519,7 @@ export default function HomeScreen() {
 
                 <TouchableOpacity style={[styles.submitButton, { backgroundColor: '#F59E0B' }]} onPress={handleAddExpense}>
                   <Ionicons name="add-circle" size={20} color="white" />
-                  <Text style={styles.submitButtonText}>Добави разход</Text>
+                  <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
