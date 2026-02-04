@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Фактура+",
+    "name": "Faktura+",
     "slug": "faktura-plus",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,9 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.fakturaplus.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "Сканиране на фактури с камерата",
-        "NSPhotoLibraryUsageDescription": "Избор на снимки на фактури"
+        "NSCameraUsageDescription": "Scan invoices using your camera for automatic data extraction",
+        "NSPhotoLibraryUsageDescription": "Select invoice photos from your gallery to import",
+        "CFBundleAllowMixedLocalizations": true
       }
     },
     "android": {
@@ -23,7 +25,9 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE"
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
       ],
       "package": "com.fakturaplus.app"
     },
@@ -46,18 +50,27 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Разрешете достъп до камерата за сканиране на фактури"
+          "cameraPermission": "Allow camera access to scan invoices and extract data automatically"
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Разрешете достъп до галерията за избор на снимки на фактури"
+          "photosPermission": "Allow gallery access to select invoice photos for import"
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "faktura-plus"
+      }
+    },
+    "locales": {
+      "bg": "./locales/bg.json",
+      "en": "./locales/en.json"
     }
   }
 }
