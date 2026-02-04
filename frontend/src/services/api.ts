@@ -270,10 +270,6 @@ class ApiService {
     });
   }
 
-  async getCompanyUsers(): Promise<User[]> {
-    return this.fetch('/company/users');
-  }
-
   // Backup
   async createBackup(): Promise<any> {
     return this.fetch('/backup/create', {
