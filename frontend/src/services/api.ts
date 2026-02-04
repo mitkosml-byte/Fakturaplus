@@ -367,6 +367,71 @@ class ApiService {
     if (params?.end_date) queryParams.set('end_date', params.end_date);
     return this.fetch(`/statistics/suppliers/compare?${queryParams.toString()}`);
   }
+
+  // Item Price Tracking
+  async getPriceAlerts(status?: string): Promise<{
+    alerts: any[];
+    total: number;
+    unread_count: number;
+  }> {
+    const query = status ? `?status=${status}` : '';
+    return this.fetch(`/items/price-alerts${query}`);
+  }
+
+  async updatePriceAlert(alertId: string, status: 'read' | 'dismissed'): Promise<{ message: string }> {
+    return this.fetch(`/items/price-alerts/${alertId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async getPriceAlertSettings(): Promise<{ threshold_percent: number; enabled: boolean }> {
+    return this.fetch('/items/price-alert-settings');
+  }
+
+  async updatePriceAlertSettings(settings: { threshold_percent?: number; enabled?: boolean }): Promise<{ message: string }> {
+    return this.fetch('/items/price-alert-settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async getItemPriceHistory(itemName: string, supplier?: string): Promise<{
+    item_name: string;
+    history: any[];
+    statistics: {
+      avg_price: number;
+      min_price: number;
+      max_price: number;
+      std_dev: number;
+      trend_percent: number;
+      total_records: number;
+    };
+  }> {
+    const query = supplier ? `?supplier=${encodeURIComponent(supplier)}` : '';
+    return this.fetch(`/items/price-history/${encodeURIComponent(itemName)}${query}`);
+  }
+
+  async getItemStatistics(params?: {
+    start_date?: string;
+    end_date?: string;
+    top_n?: number;
+  }): Promise<any> {
+    const queryParams = new URLSearchParams();
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    if (params?.top_n) queryParams.set('top_n', params.top_n.toString());
+    const query = queryParams.toString();
+    return this.fetch(`/statistics/items${query ? `?${query}` : ''}`);
+  }
+
+  async getItemBySupplier(itemName: string): Promise<{
+    item_name: string;
+    suppliers: any[];
+    recommendation: { best_supplier: string; avg_price: number; potential_savings_percent: number } | null;
+  }> {
+    return this.fetch(`/statistics/items/${encodeURIComponent(itemName)}/by-supplier`);
+  }
 }
 
 export const api = new ApiService();
