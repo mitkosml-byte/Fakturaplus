@@ -150,6 +150,60 @@ class Invoice(BaseModel):
     date: datetime
     image_base64: Optional[str] = None
     notes: Optional[str] = None
+    items: Optional[List[dict]] = None  # Списък с артикули
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Invoice Item models
+class InvoiceItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str  # Име на артикула
+    quantity: float = 1  # Количество
+    unit: str = "бр."  # Мерна единица (бр., кг., л., м.)
+    unit_price: float  # Единична цена без ДДС
+    total_price: float  # Обща цена без ДДС
+    vat_amount: float = 0  # ДДС за артикула
+
+class InvoiceItemCreate(BaseModel):
+    name: str
+    quantity: float = 1
+    unit: str = "бр."
+    unit_price: float
+    total_price: Optional[float] = None  # Ако не е подадено, се изчислява
+    vat_amount: Optional[float] = None
+
+# Item Price History - за проследяване на цените
+class ItemPriceHistory(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    supplier: str  # Доставчик
+    item_name: str  # Нормализирано име на артикул
+    unit_price: float  # Единична цена
+    quantity: float  # Количество
+    unit: str  # Мерна единица
+    invoice_id: str  # Връзка към фактурата
+    invoice_number: str
+    invoice_date: datetime
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Price Alert settings
+class PriceAlertSettings(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    threshold_percent: float = 10.0  # Праг за аларма в %
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class PriceAlert(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    item_name: str
+    supplier: str
+    old_price: float
+    new_price: float
+    change_percent: float
+    invoice_id: str
+    invoice_number: str
+    status: str = "unread"  # unread, read, dismissed
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class InvoiceCreate(BaseModel):
