@@ -222,7 +222,7 @@ async def get_current_user(request: Request) -> User:
 async def get_current_user_optional(request: Request) -> Optional[User]:
     try:
         return await get_current_user(request)
-    except:
+    except Exception:
         return None
 
 # ===================== AUTH ENDPOINTS =====================
