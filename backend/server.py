@@ -345,14 +345,16 @@ async def scan_invoice(image_base64: str = None, request: Request = None):
             Анализирай изображението и извлечи следните данни:
             - Доставчик (име на фирмата)
             - Номер на фактура
+            - Дата на издаване на фактурата (във формат YYYY-MM-DD)
             - Сума без ДДС
             - ДДС (обикновено 20%)
             - Обща сума
             
             Отговори САМО в JSON формат:
-            {"supplier": "...", "invoice_number": "...", "amount_without_vat": 0.00, "vat_amount": 0.00, "total_amount": 0.00}
+            {"supplier": "...", "invoice_number": "...", "invoice_date": "YYYY-MM-DD", "amount_without_vat": 0.00, "vat_amount": 0.00, "total_amount": 0.00}
             
-            Ако не можеш да прочетеш някоя стойност, използвай празен низ за текст или 0 за числа."""
+            Ако не можеш да прочетеш някоя стойност, използвай празен низ за текст или 0 за числа.
+            За датата: ако не може да се прочете, върни null."""
         ).with_model("gemini", "gemini-2.5-flash")
         
         image_content = ImageContent(image_base64=image_data)
