@@ -53,9 +53,9 @@ class BudgetAndExportTester:
         """Register a test user for authentication"""
         try:
             user_data = {
-                "email": "items_test@test.com",
+                "email": "budget_test@test.com",
                 "password": "Test1234",
-                "name": "Items Tester"
+                "name": "Budget Tester"
             }
             
             async with self.session.post(
