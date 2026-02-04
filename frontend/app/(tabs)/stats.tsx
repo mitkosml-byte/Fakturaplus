@@ -54,15 +54,37 @@ export default function StatsScreen() {
     }
   }, [period]);
 
+  const loadSupplierStats = useCallback(async () => {
+    setLoadingSuppliers(true);
+    try {
+      const data = await api.getSupplierStatistics();
+      setSupplierStats(data);
+    } catch (error) {
+      console.error('Error loading supplier stats:', error);
+    } finally {
+      setLoadingSuppliers(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (activeTab === 'suppliers' && !supplierStats) {
+      loadSupplierStats();
+    }
+  }, [activeTab, supplierStats, loadSupplierStats]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadData();
+    if (activeTab === 'overview') {
+      await loadData();
+    } else {
+      await loadSupplierStats();
+    }
     setRefreshing(false);
-  }, [loadData]);
+  }, [loadData, loadSupplierStats, activeTab]);
 
   const incomeBarData = chartData.map((item) => ({
     value: item.income,
