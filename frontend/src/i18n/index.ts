@@ -1140,6 +1140,60 @@ export const translations: Translations = {
     en: 'Warning: Price Increase!',
   },
   
+  // AI Item Merging
+  'items.aiMerge': {
+    bg: 'AI Сливане',
+    en: 'AI Merge',
+  },
+  'items.aiMergeDescription': {
+    bg: 'Автоматично откриване на сходни продукти',
+    en: 'Auto-detect similar products',
+  },
+  'items.mergeGroups': {
+    bg: 'Групи сходни продукти',
+    en: 'Similar product groups',
+  },
+  'items.noMergeGroups': {
+    bg: 'Няма открити сходни продукти',
+    en: 'No similar products found',
+  },
+  'items.mergeApplied': {
+    bg: 'Сливането е приложено',
+    en: 'Merge applied',
+  },
+  'items.mergedItems': {
+    bg: 'Обединени артикули',
+    en: 'Merged items',
+  },
+  'items.variants': {
+    bg: 'Варианти',
+    en: 'Variants',
+  },
+  'items.runAiMerge': {
+    bg: 'Стартирай AI анализ',
+    en: 'Run AI analysis',
+  },
+  'items.analyzing': {
+    bg: 'Анализиране...',
+    en: 'Analyzing...',
+  },
+  'items.mergeSuccess': {
+    bg: 'Намерени {{count}} групи сходни продукти',
+    en: 'Found {{count}} groups of similar products',
+  },
+  'items.deleteMerge': {
+    bg: 'Премахни сливане',
+    en: 'Remove merge',
+  },
+  'items.deleteMergeConfirm': {
+    bg: 'Сигурни ли сте, че искате да премахнете това сливане?',
+    en: 'Are you sure you want to remove this merge?',
+  },
+  'items.viewMerged': {
+    bg: 'Обединена статистика',
+    en: 'Merged statistics',
+  },
+  
   // Units
   'units.pieces': {
     bg: 'ед.',
