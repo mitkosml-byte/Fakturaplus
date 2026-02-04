@@ -268,7 +268,7 @@ def test_compare_suppliers():
                     return False
             
             print(f"✅ Comparison response structure is correct")
-            print(f"Compared suppliers: {len(comparison)}")
+            print(f"Compared suppliers: {len(suppliers)}")
             return True
         else:
             print(f"❌ Supplier comparison failed: {response.text}")
