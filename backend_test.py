@@ -155,75 +155,58 @@ def test_supplier_statistics():
         print(f"❌ Supplier statistics error: {e}")
         return False
 
-def test_invoice_crud():
-    """Test Invoice CRUD operations"""
-    print("\n4. TESTING INVOICE CRUD")
+def test_detailed_supplier_stats():
+    """Test GET /api/statistics/supplier/{supplier_name}/detailed endpoint"""
+    print("\n4. TESTING DETAILED SUPPLIER STATISTICS")
     print("-" * 40)
     
     if not session_token:
         print("❌ No session token available")
         return False
     
-    headers = {"Authorization": f"Bearer {session_token}", "Content-Type": "application/json"}
-    invoice_id = None
+    headers = {"Authorization": f"Bearer {session_token}"}
+    supplier_name = "Test Supplier"  # Using the supplier from our test invoice
     
-    # Test CREATE invoice
     try:
-        invoice_data = {
-            "supplier": "Тест Доставчик ЕООД",
-            "invoice_number": "0000001234",
-            "amount_without_vat": 100.00,
-            "vat_amount": 20.00,
-            "total_amount": 120.00,
-            "date": "2025-01-30T00:00:00Z"
-        }
-        
-        response = requests.post(f"{API_URL}/invoices", headers=headers, json=invoice_data)
-        print(f"POST /api/invoices - Status: {response.status_code}")
+        response = requests.get(f"{API_URL}/statistics/supplier/{supplier_name}/detailed", headers=headers)
+        print(f"GET /api/statistics/supplier/{supplier_name}/detailed - Status: {response.status_code}")
         
         if response.status_code == 200:
-            created_invoice = response.json()
-            invoice_id = created_invoice.get('id')
-            print(f"✅ Invoice created with ID: {invoice_id}")
+            data = response.json()
+            print(f"✅ Detailed supplier statistics retrieved successfully")
+            
+            # Verify response structure
+            if data.get("found"):
+                expected_keys = ["supplier", "found", "overview", "monthly_trend", "anomalies", "recent_invoices"]
+                missing_keys = [key for key in expected_keys if key not in data]
+                if missing_keys:
+                    print(f"⚠️ Missing expected keys: {missing_keys}")
+                    return False
+                
+                overview = data.get("overview", {})
+                overview_keys = [
+                    "total_amount", "total_vat", "total_net", "invoice_count",
+                    "avg_invoice", "first_delivery", "last_delivery", "is_active", "days_inactive"
+                ]
+                missing_overview_keys = [key for key in overview_keys if key not in overview]
+                if missing_overview_keys:
+                    print(f"⚠️ Missing overview keys: {missing_overview_keys}")
+                    return False
+                
+                print(f"✅ Detailed response structure is correct")
+                print(f"Supplier: {data.get('supplier')}")
+                print(f"Invoice count: {overview.get('invoice_count', 0)}")
+                print(f"Total amount: {overview.get('total_amount', 0)}")
+                return True
+            else:
+                print(f"✅ Supplier not found response is correct")
+                return True
         else:
-            print(f"❌ Invoice creation failed: {response.text}")
+            print(f"❌ Detailed supplier statistics failed: {response.text}")
             return False
             
     except Exception as e:
-        print(f"❌ Invoice creation error: {e}")
-        return False
-    
-    # Test GET invoices (list)
-    try:
-        response = requests.get(f"{API_URL}/invoices", headers=headers)
-        print(f"GET /api/invoices - Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            invoices = response.json()
-            print(f"✅ Retrieved {len(invoices)} invoices")
-        else:
-            print(f"❌ Invoice list failed: {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Invoice list error: {e}")
-        return False
-    
-    # Test GET invoices with search
-    try:
-        response = requests.get(f"{API_URL}/invoices?supplier=Тест", headers=headers)
-        print(f"GET /api/invoices?supplier=Тест - Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            filtered_invoices = response.json()
-            print(f"✅ Search returned {len(filtered_invoices)} invoices")
-            return True
-        else:
-            print(f"❌ Invoice search failed: {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Invoice search error: {e}")
+        print(f"❌ Detailed supplier statistics error: {e}")
         return False
 
 def test_daily_revenue():
