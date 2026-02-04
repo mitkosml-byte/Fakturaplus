@@ -78,14 +78,8 @@ agenthub/agents/youtube/db
 # Mobile development
 android-sdk/
 
-# Local environment files (keep .env for deployment)
+# Local environment files only (keep .env for deployment)
 .env.local
-.env.*.local
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
+.env.development.local
+.env.test.local
+.env.production.local
