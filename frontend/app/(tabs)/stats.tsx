@@ -1342,7 +1342,7 @@ export default function StatsScreen() {
                       <View style={styles.supplierCompareInfo}>
                         <Text style={styles.supplierCompareName} numberOfLines={1}>{sup.supplier}</Text>
                         <Text style={styles.supplierCompareMeta}>
-                          {sup.purchase_count}x • {t('stats.lastDelivery')}: {sup.last_purchase || '-'}
+                          {sup.purchase_count} {t('stats.times')} • {t('stats.lastDelivery')}: {sup.last_purchase || t('stats.noValue')}
                         </Text>
                       </View>
                       <View style={styles.supplierComparePrices}>
