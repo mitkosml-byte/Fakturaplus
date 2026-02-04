@@ -4,12 +4,30 @@ export interface User {
   name: string;
   picture?: string;
   role: 'user' | 'accountant';
+  company_id?: string;
   created_at: string;
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  eik: string;
+  vat_number?: string;
+  mol?: string;
+  address?: string;
+  city?: string;
+  phone?: string;
+  email?: string;
+  bank_name?: string;
+  bank_iban?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Invoice {
   id: string;
   user_id: string;
+  company_id?: string;
   supplier: string;
   invoice_number: string;
   amount_without_vat: number;
