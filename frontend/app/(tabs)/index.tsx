@@ -487,7 +487,7 @@ export default function HomeScreen() {
                   </>
                 ) : (
                   <Text style={styles.noExpensesText}>{t('expenses.noExpenses')}</Text>
-                )}}
+                )}
               </View>
 
               {/* Add New Expense Form */}
