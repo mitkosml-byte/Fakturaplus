@@ -168,7 +168,18 @@ export default function CompanySettingsScreen() {
               <View style={styles.headerRight} />
             </View>
 
-            <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+            <ScrollView 
+              style={styles.scrollView} 
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={['#8B5CF6']}
+                  tintColor="#8B5CF6"
+                />
+              }
+            >
               {/* Info Card */}
               <View style={styles.infoCard}>
                 <Ionicons name="business" size={24} color="#8B5CF6" />
