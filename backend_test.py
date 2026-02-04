@@ -90,7 +90,7 @@ class BudgetAndExportTester:
         """Login with existing user credentials"""
         try:
             login_data = {
-                "email": "items_test@test.com",
+                "email": "budget_test@test.com",
                 "password": "Test1234"
             }
             
