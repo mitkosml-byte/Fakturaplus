@@ -247,26 +247,26 @@ export default function ScanScreen() {
               {isScanning ? (
                 <View style={styles.scanningContainer}>
                   <ActivityIndicator size="large" color="#8B5CF6" />
-                  <Text style={styles.scanningText}>Сканиране с OCR...</Text>
+                  <Text style={styles.scanningText}>{t('scan.processing')}</Text>
                 </View>
               ) : (
                 <View style={styles.formContainer}>
-                  <Text style={styles.formTitle}>Данни от фактурата</Text>
-                  <Text style={styles.formHint}>Редактирайте при нужда</Text>
+                  <Text style={styles.formTitle}>{language === 'bg' ? 'Данни от фактурата' : 'Invoice Data'}</Text>
+                  <Text style={styles.formHint}>{language === 'bg' ? 'Редактирайте при нужда' : 'Edit if needed'}</Text>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Доставчик *</Text>
+                    <Text style={styles.inputLabel}>{t('scan.supplier')} *</Text>
                     <TextInput
                       style={styles.input}
                       value={supplier}
                       onChangeText={setSupplier}
-                      placeholder="Име на фирмата"
+                      placeholder={language === 'bg' ? 'Име на фирмата' : 'Company name'}
                       placeholderTextColor="#64748B"
                     />
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>№ Фактура *</Text>
+                    <Text style={styles.inputLabel}>{t('scan.invoiceNumber')} *</Text>
                     <TextInput
                       style={styles.input}
                       value={invoiceNumber}
@@ -278,14 +278,14 @@ export default function ScanScreen() {
 
                   {/* Date of Issue */}
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Дата на издаване *</Text>
+                    <Text style={styles.inputLabel}>{t('scan.issueDate')} *</Text>
                     <TouchableOpacity 
                       style={styles.dateInputButton}
                       onPress={() => setDatePickerVisible(true)}
                     >
                       <Ionicons name="calendar" size={20} color="#8B5CF6" />
                       <Text style={styles.dateInputText}>
-                        {format(invoiceDate, 'd MMMM yyyy', { locale: bg })}
+                        {format(invoiceDate, 'd MMMM yyyy', { locale: dateLocale })}
                       </Text>
                       <Ionicons name="chevron-down" size={20} color="#64748B" />
                     </TouchableOpacity>
@@ -300,9 +300,9 @@ export default function ScanScreen() {
                       setDatePickerVisible(false);
                     }}
                     onCancel={() => setDatePickerVisible(false)}
-                    confirmTextIOS="Избери"
-                    cancelTextIOS="Отказ"
-                    locale="bg"
+                    confirmTextIOS={t('common.select')}
+                    cancelTextIOS={t('common.cancel')}
+                    locale={language}
                   />
 
                   <View style={styles.row}>
