@@ -393,6 +393,19 @@ async def scan_invoice(image_base64: str = None, request: Request = None):
 
 @api_router.post("/invoices", response_model=Invoice)
 async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(get_current_user)):
+    # Check for duplicate invoice (same invoice_number and supplier for this user)
+    existing_invoice = await db.invoices.find_one({
+        "user_id": current_user.user_id,
+        "invoice_number": invoice.invoice_number,
+        "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"}  # Case-insensitive match
+    }, {"_id": 0, "id": 1, "date": 1})
+    
+    if existing_invoice:
+        raise HTTPException(
+            status_code=409,  # Conflict
+            detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече съществува в системата!"
+        )
+    
     invoice_dict = invoice.dict()
     invoice_obj = Invoice(
         user_id=current_user.user_id,
