@@ -32,6 +32,7 @@ const CHART_COLORS = [
 
 export default function StatsScreen() {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
