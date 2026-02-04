@@ -648,13 +648,16 @@ async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User =
     }, {"_id": 0})
     
     if existing:
-        # Update existing
+        # ADD to existing values instead of replacing
+        new_fiscal = existing.get("fiscal_revenue", 0) + revenue.fiscal_revenue
+        new_pocket = existing.get("pocket_money", 0) + revenue.pocket_money
+        
         await db.daily_revenue.update_one(
             {"id": existing["id"]},
-            {"$set": {"fiscal_revenue": revenue.fiscal_revenue, "pocket_money": revenue.pocket_money}}
+            {"$set": {"fiscal_revenue": new_fiscal, "pocket_money": new_pocket}}
         )
-        existing["fiscal_revenue"] = revenue.fiscal_revenue
-        existing["pocket_money"] = revenue.pocket_money
+        existing["fiscal_revenue"] = new_fiscal
+        existing["pocket_money"] = new_pocket
         return DailyRevenue(**existing)
     
     revenue_obj = DailyRevenue(
@@ -665,6 +668,47 @@ async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User =
     )
     await db.daily_revenue.insert_one(revenue_obj.dict())
     return revenue_obj
+
+@api_router.get("/daily-revenue/today")
+async def get_today_revenue(current_user: User = Depends(get_current_user)):
+    """Get today's revenue totals"""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    existing = await db.daily_revenue.find_one({
+        "user_id": current_user.user_id,
+        "date": today
+    }, {"_id": 0})
+    
+    if existing:
+        return {
+            "date": today,
+            "fiscal_revenue": existing.get("fiscal_revenue", 0),
+            "pocket_money": existing.get("pocket_money", 0)
+        }
+    return {
+        "date": today,
+        "fiscal_revenue": 0,
+        "pocket_money": 0
+    }
+
+@api_router.get("/daily-revenue/by-date/{date}")
+async def get_revenue_by_date(date: str, current_user: User = Depends(get_current_user)):
+    """Get revenue for a specific date"""
+    existing = await db.daily_revenue.find_one({
+        "user_id": current_user.user_id,
+        "date": date
+    }, {"_id": 0})
+    
+    if existing:
+        return {
+            "date": date,
+            "fiscal_revenue": existing.get("fiscal_revenue", 0),
+            "pocket_money": existing.get("pocket_money", 0)
+        }
+    return {
+        "date": date,
+        "fiscal_revenue": 0,
+        "pocket_money": 0
+    }
 
 @api_router.get("/daily-revenue", response_model=List[DailyRevenue])
 async def get_daily_revenues(
