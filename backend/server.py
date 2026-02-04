@@ -330,12 +330,28 @@ async def logout(request: Request, response: Response):
     return {"message": "Успешно излязохте"}
 
 @api_router.put("/auth/role/{user_id}")
-async def update_user_role(user_id: str, role: str, current_user: User = Depends(get_current_user)):
-    if current_user.role != "accountant":
-        raise HTTPException(status_code=403, detail="Нямате права за тази операция")
+async def update_user_role(user_id: str, request: Request, current_user: User = Depends(get_current_user)):
+    body = await request.json()
+    role = body.get("role")
     
-    if role not in ["user", "accountant"]:
-        raise HTTPException(status_code=400, detail="Невалидна роля")
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да променя роли")
+    
+    if role not in ["owner", "manager", "staff"]:
+        raise HTTPException(status_code=400, detail="Невалидна роля. Допустими: owner, manager, staff")
+    
+    # Get target user
+    target_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Потребителят не е намерен")
+    
+    # Ensure same company
+    if target_user.get("company_id") != current_user.company_id:
+        raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
+    
+    # Cannot change own role if owner
+    if user_id == current_user.user_id and current_user.role == "owner":
+        raise HTTPException(status_code=400, detail="Не можете да променяте собствената си роля на собственик")
     
     result = await db.users.update_one(
         {"user_id": user_id},
@@ -348,11 +364,216 @@ async def update_user_role(user_id: str, role: str, current_user: User = Depends
 
 @api_router.get("/auth/users")
 async def get_all_users(current_user: User = Depends(get_current_user)):
-    if current_user.role != "accountant":
+    if current_user.role not in ["owner", "manager"]:
         raise HTTPException(status_code=403, detail="Нямате права за тази операция")
     
-    users = await db.users.find({}, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "picture": 1}).to_list(1000)
+    if not current_user.company_id:
+        return []
+    
+    users = await db.users.find(
+        {"company_id": current_user.company_id},
+        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "picture": 1, "created_at": 1}
+    ).to_list(1000)
     return users
+
+@api_router.delete("/auth/users/{user_id}")
+async def remove_user_from_company(user_id: str, current_user: User = Depends(get_current_user)):
+    """Премахва потребител от фирмата (само Owner)"""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да премахва потребители")
+    
+    if user_id == current_user.user_id:
+        raise HTTPException(status_code=400, detail="Не можете да премахнете себе си")
+    
+    target_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Потребителят не е намерен")
+    
+    if target_user.get("company_id") != current_user.company_id:
+        raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
+    
+    # Remove company_id from user (don't delete user)
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
+    )
+    
+    return {"message": "Потребителят е премахнат от фирмата"}
+
+# ===================== INVITATION ENDPOINTS =====================
+
+@api_router.post("/invitations")
+async def create_invitation(invitation_data: InvitationCreate, current_user: User = Depends(get_current_user)):
+    """Създава покана за нов потребител (само Owner)"""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да изпраща покани")
+    
+    if not current_user.company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+    
+    if not invitation_data.email and not invitation_data.phone:
+        raise HTTPException(status_code=400, detail="Въведете имейл или телефон")
+    
+    if invitation_data.role not in ["manager", "staff"]:
+        raise HTTPException(status_code=400, detail="Невалидна роля за покана")
+    
+    # Check if user with this email already exists in the company
+    if invitation_data.email:
+        existing_user = await db.users.find_one({
+            "email": invitation_data.email,
+            "company_id": current_user.company_id
+        })
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Потребител с този имейл вече е член на фирмата")
+    
+    # Check for pending invitation
+    pending = await db.invitations.find_one({
+        "company_id": current_user.company_id,
+        "$or": [
+            {"email": invitation_data.email} if invitation_data.email else {"email": None},
+            {"phone": invitation_data.phone} if invitation_data.phone else {"phone": None}
+        ],
+        "status": "pending"
+    })
+    if pending:
+        raise HTTPException(status_code=400, detail="Вече има активна покана за този контакт")
+    
+    invitation = Invitation(
+        company_id=current_user.company_id,
+        invited_by=current_user.user_id,
+        email=invitation_data.email,
+        phone=invitation_data.phone,
+        role=invitation_data.role
+    )
+    
+    await db.invitations.insert_one(invitation.dict())
+    
+    # Get company name for response
+    company = await db.companies.find_one({"id": current_user.company_id}, {"name": 1})
+    company_name = company.get("name", "Unknown") if company else "Unknown"
+    
+    return {
+        "message": "Поканата е създадена",
+        "invitation": {
+            "id": invitation.id,
+            "code": invitation.code,
+            "expires_at": invitation.expires_at.isoformat(),
+            "company_name": company_name
+        }
+    }
+
+@api_router.get("/invitations")
+async def get_invitations(current_user: User = Depends(get_current_user)):
+    """Връща всички покани за фирмата (само Owner)"""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да вижда покани")
+    
+    if not current_user.company_id:
+        return []
+    
+    invitations = await db.invitations.find(
+        {"company_id": current_user.company_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    return invitations
+
+@api_router.delete("/invitations/{invitation_id}")
+async def cancel_invitation(invitation_id: str, current_user: User = Depends(get_current_user)):
+    """Отменя покана (само Owner)"""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да отменя покани")
+    
+    invitation = await db.invitations.find_one({
+        "id": invitation_id,
+        "company_id": current_user.company_id
+    })
+    
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Поканата не е намерена")
+    
+    if invitation["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Поканата вече не е активна")
+    
+    await db.invitations.update_one(
+        {"id": invitation_id},
+        {"$set": {"status": "cancelled"}}
+    )
+    
+    return {"message": "Поканата е отменена"}
+
+@api_router.post("/invitations/accept")
+async def accept_invitation(request: Request, current_user: User = Depends(get_current_user)):
+    """Приема покана по код"""
+    body = await request.json()
+    code = body.get("code", "").upper().strip()
+    
+    if not code:
+        raise HTTPException(status_code=400, detail="Въведете код на поканата")
+    
+    # Find valid invitation
+    invitation = await db.invitations.find_one({
+        "code": code,
+        "status": "pending"
+    })
+    
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Невалиден или изтекъл код")
+    
+    # Check expiry
+    expires_at = invitation["expires_at"]
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    
+    if expires_at < datetime.now(timezone.utc):
+        await db.invitations.update_one(
+            {"id": invitation["id"]},
+            {"$set": {"status": "expired"}}
+        )
+        raise HTTPException(status_code=400, detail="Поканата е изтекла")
+    
+    # Check if user already has a company
+    if current_user.company_id:
+        raise HTTPException(status_code=400, detail="Вече сте член на фирма. Първо напуснете текущата фирма.")
+    
+    # Accept invitation - link user to company
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$set": {
+            "company_id": invitation["company_id"],
+            "role": invitation["role"]
+        }}
+    )
+    
+    # Mark invitation as accepted
+    await db.invitations.update_one(
+        {"id": invitation["id"]},
+        {"$set": {"status": "accepted"}}
+    )
+    
+    # Get company info
+    company = await db.companies.find_one({"id": invitation["company_id"]}, {"_id": 0})
+    
+    return {
+        "message": f"Успешно се присъединихте към {company['name'] if company else 'фирмата'}",
+        "company": company
+    }
+
+@api_router.post("/company/leave")
+async def leave_company(current_user: User = Depends(get_current_user)):
+    """Напускане на фирма (не може Owner)"""
+    if not current_user.company_id:
+        raise HTTPException(status_code=400, detail="Не сте член на фирма")
+    
+    if current_user.role == "owner":
+        raise HTTPException(status_code=400, detail="Титулярят не може да напусне фирмата. Прехвърлете собствеността първо.")
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
+    )
+    
+    return {"message": "Успешно напуснахте фирмата"}
 
 # ===================== NOTIFICATION SETTINGS ENDPOINTS =====================
 
