@@ -54,7 +54,17 @@ export default function ProfileScreen() {
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
-          <ScrollView style={styles.scrollView}>
+          <ScrollView 
+            style={styles.scrollView}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={['#8B5CF6']}
+                tintColor="#8B5CF6"
+              />
+            }
+          >
             <View style={styles.header}>
               <Text style={styles.title}>Профил</Text>
             </View>
