@@ -785,7 +785,6 @@ async def get_summary(
         else:
             end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
     
-    query = {"user_id": current_user.user_id}
     date_query = {}
     
     if start_date:
