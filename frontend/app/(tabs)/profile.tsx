@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,25 +14,42 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useRouter } from 'expo-router';
-import { useTranslation } from '../../src/i18n';
+import { useTranslation, useLanguageStore } from '../../src/i18n';
+import { api } from '../../src/services/api';
+import { Company } from '../../src/types';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function ProfileScreen() {
   const { t } = useTranslation();
+  const { language } = useLanguageStore();
   const { user, logout, refreshUser } = useAuth();
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
+  const [company, setCompany] = useState<Company | null>(null);
+
+  const loadCompany = useCallback(async () => {
+    try {
+      const data = await api.getCompany();
+      setCompany(data);
+    } catch (error) {
+      // No company yet
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCompany();
+  }, [loadCompany]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refreshUser();
+      await Promise.all([refreshUser(), loadCompany()]);
     } catch (error) {
       console.error('Error refreshing profile:', error);
     }
     setRefreshing(false);
-  }, [refreshUser]);
+  }, [refreshUser, loadCompany]);
 
   const handleLogout = () => {
     Alert.alert(
@@ -50,6 +67,24 @@ export default function ProfileScreen() {
         },
       ]
     );
+  };
+
+  const getRoleName = (role: string) => {
+    const roles: Record<string, { bg: string; en: string }> = {
+      owner: { bg: 'Титуляр', en: 'Owner' },
+      manager: { bg: 'Мениджър', en: 'Manager' },
+      staff: { bg: 'Служител', en: 'Staff' },
+    };
+    return roles[role]?.[language] || role;
+  };
+
+  const getRoleColor = (role: string) => {
+    const colors: Record<string, string> = {
+      owner: '#8B5CF6',
+      manager: '#3B82F6',
+      staff: '#64748B',
+    };
+    return colors[role] || '#64748B';
   };
 
   return (
@@ -71,6 +106,14 @@ export default function ProfileScreen() {
               <Text style={styles.title}>{t('profile.title')}</Text>
             </View>
 
+            {/* Company Banner */}
+            {company && (
+              <View style={styles.companyBanner}>
+                <Ionicons name="business" size={20} color="#8B5CF6" />
+                <Text style={styles.companyName}>{company.name}</Text>
+              </View>
+            )}
+
             {/* User Card */}
             <View style={styles.userCard}>
               <View style={styles.avatarContainer}>
@@ -86,18 +129,18 @@ export default function ProfileScreen() {
               <Text style={styles.userEmail}>{user?.email || ''}</Text>
               <View style={styles.roleContainer}>
                 <Ionicons 
-                  name={user?.role === 'accountant' ? 'briefcase' : 'person'} 
+                  name={user?.role === 'owner' ? 'star' : user?.role === 'manager' ? 'briefcase' : 'person'} 
                   size={16} 
-                  color={user?.role === 'accountant' ? '#8B5CF6' : '#64748B'} 
+                  color={getRoleColor(user?.role || 'staff')} 
                 />
-                <Text style={[styles.roleText, user?.role === 'accountant' && styles.roleTextAccountant]}>
-                  {user?.role === 'accountant' ? t('role.accountant') : t('role.user')}
+                <Text style={[styles.roleText, { color: getRoleColor(user?.role || 'staff') }]}>
+                  {getRoleName(user?.role || 'staff')}
                 </Text>
               </View>
         </View>
 
         {/* Menu Items */}
-        <View style={styles.menuSection}>
+        <View style={styles.menuSection}>>
           <Text style={styles.menuSectionTitle}>{t('profile.settings')}</Text>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/company-settings')}>
