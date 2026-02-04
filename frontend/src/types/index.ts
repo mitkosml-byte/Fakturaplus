@@ -111,3 +111,86 @@ export interface NotificationSettings {
   created_at: string;
   updated_at: string;
 }
+
+// Advanced Supplier Statistics Types
+export interface SupplierStats {
+  supplier: string;
+  total_amount: number;
+  total_vat: number;
+  total_net: number;
+  invoice_count: number;
+  avg_invoice: number;
+  first_delivery?: string;
+  last_delivery?: string;
+  is_active: boolean;
+  days_inactive: number;
+  dependency_percent: number;
+  std_dev: number;
+}
+
+export interface SupplierOverviewResponse {
+  period: {
+    start_date: string;
+    end_date: string;
+  };
+  executive_summary: {
+    top_3_concentration: number;
+    top_5_concentration: number;
+    total_suppliers: number;
+    active_suppliers: number;
+    inactive_suppliers: number;
+    high_dependency_count: number;
+    largest_supplier: string | null;
+    largest_amount: number;
+  };
+  totals: {
+    total_amount: number;
+    total_vat: number;
+    total_net: number;
+    supplier_count: number;
+    invoice_count: number;
+  };
+  top_by_amount: SupplierStats[];
+  top_by_frequency: SupplierStats[];
+  top_by_avg: SupplierStats[];
+  inactive_suppliers: SupplierStats[];
+  high_dependency_alerts: SupplierStats[];
+  all_suppliers: SupplierStats[];
+}
+
+export interface SupplierDetailedResponse {
+  supplier: string;
+  found: boolean;
+  overview?: {
+    total_amount: number;
+    total_vat: number;
+    total_net: number;
+    invoice_count: number;
+    avg_invoice: number;
+    first_delivery?: string;
+    last_delivery?: string;
+    is_active: boolean;
+    days_inactive: number;
+  };
+  monthly_trend?: {
+    month: string;
+    amount: number;
+    count: number;
+    growth_percent: number;
+  }[];
+  anomalies?: {
+    date: string;
+    amount: number;
+    invoice_number: string;
+    deviation_percent: number;
+  }[];
+  recent_invoices?: {
+    id: string;
+    invoice_number: string;
+    date: string;
+    total_amount: number;
+    vat_amount: number;
+  }[];
+}
+
+export type ChartType = 'pie' | 'bar' | 'line';
