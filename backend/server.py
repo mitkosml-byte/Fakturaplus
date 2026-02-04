@@ -264,6 +264,58 @@ class NonInvoiceExpenseCreate(BaseModel):
     amount: float
     date: str
 
+# ===================== PERSONAL EXPENSES & ROI MODELS =====================
+
+class PersonalExpenseType(str, Enum):
+    INVESTMENT = "investment"  # Инвестиция
+    RECURRING = "recurring"    # Текущ разход
+    ONE_TIME = "one_time"      # Еднократен
+
+class PersonalExpenseCategory(str, Enum):
+    GOODS = "goods"            # Стока
+    SERVICE = "service"        # Услуга
+    PERSONNEL = "personnel"    # Персонал
+    RENT = "rent"              # Наем
+    EXTRAORDINARY = "extraordinary"  # Извънреден
+    OTHER = "other"            # Друго
+
+class PersonalExpense(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    company_id: str
+    amount: float
+    description: str
+    expense_type: PersonalExpenseType = PersonalExpenseType.RECURRING
+    category: PersonalExpenseCategory = PersonalExpenseCategory.OTHER
+    period_month: int  # 1-12
+    period_year: int
+    supplier_id: Optional[str] = None  # Връзка с доставчик (ако има)
+    project_name: Optional[str] = None  # Връзка с проект (ако има)
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class PersonalExpenseCreate(BaseModel):
+    amount: float
+    description: str
+    expense_type: str = "recurring"
+    category: str = "other"
+    period_month: int
+    period_year: int
+    supplier_id: Optional[str] = None
+    project_name: Optional[str] = None
+    notes: Optional[str] = None
+
+class ROIAnalysis(BaseModel):
+    period_start: str
+    period_end: str
+    total_personal_investment: float
+    total_revenue: float
+    total_profit: float
+    roi_percent: float
+    is_profitable: bool
+    investment_covered: bool
+    ai_insights: List[str]
+
 class NotificationSettings(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
