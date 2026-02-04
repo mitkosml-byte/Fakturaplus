@@ -151,7 +151,7 @@ export default function ProfileScreen() {
           <Text style={styles.menuSectionTitle}>{t('profile.settings')}</Text>
 
           {/* Users Management - Only for Owner */}
-          {user?.role === 'owner' && (
+          {hasPermission('manage_users') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/users-management')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
                 <Ionicons name="people" size={20} color="#EC4899" />
@@ -164,16 +164,19 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/company-settings')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-              <Ionicons name="business" size={20} color="#3B82F6" />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.company')}</Text>
-              <Text style={styles.menuSubtitle}>{t('profile.companyData')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
-          </TouchableOpacity>
+          {/* Company Settings - Only for Owner */}
+          {hasPermission('manage_company') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/company-settings')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+                <Ionicons name="business" size={20} color="#3B82F6" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('profile.company')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.companyData')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
@@ -186,27 +189,33 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/budget')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-              <Ionicons name="wallet" size={20} color="#8B5CF6" />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.budget')}</Text>
-              <Text style={styles.menuSubtitle}>{t('profile.budgetDesc')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
-          </TouchableOpacity>
+          {/* Budget - Owner and Manager only */}
+          {hasPermission('manage_budget') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/budget')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+                <Ionicons name="wallet" size={20} color="#8B5CF6" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('profile.budget')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.budgetDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/export')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
-              <Ionicons name="download" size={20} color="#EC4899" />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.export')}</Text>
-              <Text style={styles.menuSubtitle}>{t('profile.exportDesc')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
-          </TouchableOpacity>
+          {/* Export - Owner and Manager only */}
+          {hasPermission('export_data') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/export')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
+                <Ionicons name="download" size={20} color="#EC4899" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('profile.export')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.exportDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/backup')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
