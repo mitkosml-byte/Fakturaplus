@@ -65,43 +65,43 @@ export default function BackupScreen() {
   const handleCreateBackup = async () => {
     setIsCreatingBackup(true);
     try {
-      // Създаване на backup от сървъра
+      // Create backup from server
       const backupData = await api.createBackup();
       
-      // Конвертиране в JSON string
+      // Convert to JSON string
       const jsonString = JSON.stringify(backupData, null, 2);
       
-      // Създаване на файл
+      // Create file
       const fileName = `invoice_backup_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.json`;
       const fileUri = `${FileSystem.documentDirectory}${fileName}`;
       
       await FileSystem.writeAsStringAsync(fileUri, jsonString);
       
-      // Проверка дали споделянето е налично
+      // Check if sharing is available
       const isSharingAvailable = await Sharing.isAvailableAsync();
       
       if (isSharingAvailable) {
         await Sharing.shareAsync(fileUri, {
           mimeType: 'application/json',
-          dialogTitle: 'Запази backup файл',
+          dialogTitle: t('backup.saveFile'),
         });
         
         Alert.alert(
-          'Успех! ✅',
-          `Backup файлът е създаден.\n\n📊 Статистика:\n• Фактури: ${backupData.statistics.invoice_count}\n• Обороти: ${backupData.statistics.revenue_count}\n• Разходи: ${backupData.statistics.expense_count}\n\nЗапазете файла в Google Drive или друго място за съхранение.`
+          t('backup.successTitle'),
+          `${t('backup.backupCreated')}\n\n📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${backupData.statistics.invoice_count}\n• ${t('backup.revenues')}: ${backupData.statistics.revenue_count}\n• ${t('backup.expenses')}: ${backupData.statistics.expense_count}\n\n${t('backup.saveFile')}`
         );
       } else {
         Alert.alert(
-          'Backup създаден',
-          `Файлът е създаден, но споделянето не е достъпно на това устройство.\n\nФайл: ${fileName}`
+          t('backup.backupCreated'),
+          `${t('backup.sharingNotAvailable')}\n\n${t('backup.file')}: ${fileName}`
         );
       }
       
-      // Обновяване на статуса
+      // Update status
       await loadBackupStatus();
       
     } catch (error: any) {
-      Alert.alert('Грешка', error.message || 'Неуспешно създаване на backup');
+      Alert.alert(t('common.error'), error.message || t('backup.createError'));
     } finally {
       setIsCreatingBackup(false);
     }
@@ -109,7 +109,7 @@ export default function BackupScreen() {
 
   const handleRestoreBackup = async () => {
     try {
-      // Избор на файл
+      // Select file
       const result = await DocumentPicker.getDocumentAsync({
         type: 'application/json',
         copyToCacheDirectory: true,
@@ -121,34 +121,34 @@ export default function BackupScreen() {
       
       const file = result.assets[0];
       
-      // Показване на потвърждение
+      // Show confirmation
       Alert.alert(
-        'Потвърждение',
-        `Искате ли да възстановите данните от:\n${file.name}?\n\n⚠️ Съществуващи данни няма да бъдат изтрити, само ще се добавят нови.`,
+        t('backup.confirmation'),
+        `${t('backup.restoreQuestion')}\n${file.name}?\n\n⚠️ ${t('backup.restoreWarning')}`,
         [
-          { text: 'Отказ', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Възстанови',
+            text: t('backup.restoreButton'),
             style: 'destructive',
             onPress: async () => {
               setIsRestoring(true);
               try {
-                // Четене на файла
+                // Read file
                 const content = await FileSystem.readAsStringAsync(file.uri);
                 const backupData = JSON.parse(content);
                 
-                // Изпращане към сървъра за възстановяване
-                const result = await api.restoreBackup(backupData);
+                // Send to server for restoration
+                const restoreResult = await api.restoreBackup(backupData);
                 
                 Alert.alert(
-                  'Успех! ✅',
-                  `Данните са възстановени успешно!\n\n📊 Възстановени записи:\n• Фактури: ${result.restored.invoices}\n• Обороти: ${result.restored.revenues}\n• Разходи: ${result.restored.expenses}`
+                  t('backup.successTitle'),
+                  `${t('backup.restored')}\n\n📊 ${t('backup.restoredRecords')}:\n• ${t('backup.invoices')}: ${restoreResult.restored.invoices}\n• ${t('backup.revenues')}: ${restoreResult.restored.revenues}\n• ${t('backup.expenses')}: ${restoreResult.restored.expenses}`
                 );
                 
                 await loadBackupStatus();
                 
               } catch (error: any) {
-                Alert.alert('Грешка', error.message || 'Неуспешно възстановяване');
+                Alert.alert(t('common.error'), error.message || t('backup.restoreError'));
               } finally {
                 setIsRestoring(false);
               }
