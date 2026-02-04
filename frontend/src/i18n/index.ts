@@ -828,6 +828,16 @@ export const translations: Translations = {
     en: 'For questions or issues, please contact your accountant or system administrator.',
   },
   
+  // Roles
+  'role.accountant': {
+    bg: 'Счетоводител',
+    en: 'Accountant',
+  },
+  'role.user': {
+    bg: 'Потребител',
+    en: 'User',
+  },
+  
   // Home Screen additional
   'home.invoices': {
     bg: 'Фактури',
