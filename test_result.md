@@ -254,15 +254,18 @@ backend:
 
   - task: "Export Excel/PDF Enhanced Endpoints"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Added enhanced export endpoints: GET /api/export/invoices/excel and GET /api/export/invoices/pdf with company info and improved formatting"
+      - working: true
+        agent: "testing"
+        comment: "✅ Both enhanced export endpoints working perfectly. GET /api/export/invoices/excel returns proper Excel file (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, 5404 bytes) with correct filename attachment. GET /api/export/invoices/pdf returns proper PDF file (application/pdf, 2156 bytes) with correct filename attachment. Both endpoints handle authentication properly and return expected content types."
 
   - task: "Forecast API Endpoints"
     implemented: true
