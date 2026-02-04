@@ -41,6 +41,20 @@ class ApiService {
     });
   }
 
+  async register(email: string, password: string, name: string): Promise<{ user: User; session_token: string }> {
+    return this.fetch('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name }),
+    });
+  }
+
+  async login(email: string, password: string): Promise<{ user: User; session_token: string }> {
+    return this.fetch('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  }
+
   async getMe(): Promise<User> {
     return this.fetch('/auth/me');
   }
