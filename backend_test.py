@@ -39,9 +39,13 @@ def register_test_user():
     
     global session_token
     
+    # Try to register with unique email
+    import time
+    unique_email = f"test{int(time.time())}@test.com"
+    
     try:
         user_data = {
-            "email": "test@test.com",
+            "email": unique_email,
             "password": "Test1234",
             "name": "Test User"
         }
@@ -56,11 +60,28 @@ def register_test_user():
             print(f"Session token: {session_token}")
             return True
         else:
-            print(f"❌ User registration failed: {response.text}")
-            return False
+            # If registration fails, try login with original credentials
+            print(f"Registration failed, trying login: {response.text}")
+            login_data = {
+                "email": "test@test.com",
+                "password": "Test1234"
+            }
+            
+            login_response = requests.post(f"{API_URL}/auth/login", json=login_data)
+            print(f"POST /api/auth/login - Status: {login_response.status_code}")
+            
+            if login_response.status_code == 200:
+                result = login_response.json()
+                session_token = result.get('session_token')
+                print(f"✅ User logged in successfully")
+                print(f"Session token: {session_token}")
+                return True
+            else:
+                print(f"❌ Login also failed: {login_response.text}")
+                return False
             
     except Exception as e:
-        print(f"❌ User registration error: {e}")
+        print(f"❌ User registration/login error: {e}")
         return False
 
 def create_test_invoice():
