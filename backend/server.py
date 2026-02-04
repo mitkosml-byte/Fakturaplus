@@ -100,6 +100,8 @@ class User(BaseModel):
     picture: Optional[str] = None
     role: str = "staff"  # "owner", "manager", or "staff"
     company_id: Optional[str] = None  # Връзка към фирмата
+    password_hash: Optional[str] = None  # За email/password auth
+    auth_provider: str = "email"  # "google" or "email"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserSession(BaseModel):
@@ -107,6 +109,16 @@ class UserSession(BaseModel):
     session_token: str
     expires_at: datetime
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Email/Password Auth Models
+class UserRegister(BaseModel):
+    email: str
+    password: str
+    name: str
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
 
 # Invitation model for user invitations
 class Invitation(BaseModel):
