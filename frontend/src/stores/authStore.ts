@@ -76,4 +76,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user: null, token: null, isAuthenticated: false, isLoading: false });
     }
   },
+
+  refreshUser: async () => {
+    try {
+      const user = await api.getMe();
+      set({ user });
+    } catch (error) {
+      console.error('Refresh user error:', error);
+    }
+  },
 }));
