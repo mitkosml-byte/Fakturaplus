@@ -211,8 +211,8 @@ export default function ScanScreen() {
           >
             <ScrollView style={styles.scrollView}>
               <View style={styles.header}>
-                <Text style={styles.title}>Сканирай фактура</Text>
-                <Text style={styles.subtitle}>Използвай OCR за автоматично извличане</Text>
+                <Text style={styles.title}>{t('scan.title')}</Text>
+                <Text style={styles.subtitle}>{language === 'bg' ? 'Използвай OCR за автоматично извличане' : 'Use OCR for automatic extraction'}</Text>
               </View>
 
               {!capturedImage ? (
