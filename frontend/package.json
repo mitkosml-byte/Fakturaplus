@@ -18,7 +18,7 @@
     "@react-navigation/elements": "^2.3.8",
     "@react-navigation/native": "^7.1.6",
     "date-fns": "^4.1.0",
-    "expo": "^54.0.32",
+    "expo": "^54.0.33",
     "expo-blur": "~14.1.5",
     "expo-camera": "^17.0.10",
     "expo-constants": "~17.1.7",
