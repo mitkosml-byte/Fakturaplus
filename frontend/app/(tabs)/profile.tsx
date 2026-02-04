@@ -68,7 +68,7 @@ export default function ProfileScreen() {
             }
           >
             <View style={styles.header}>
-              <Text style={styles.title}>Профил</Text>
+              <Text style={styles.title}>{t('profile.title')}</Text>
             </View>
 
             {/* User Card */}
@@ -82,7 +82,7 @@ export default function ProfileScreen() {
                   </View>
                 )}
               </View>
-              <Text style={styles.userName}>{user?.name || 'Потребител'}</Text>
+              <Text style={styles.userName}>{user?.name || t('profile.title')}</Text>
               <Text style={styles.userEmail}>{user?.email || ''}</Text>
               <View style={styles.roleContainer}>
                 <Ionicons 
@@ -91,22 +91,22 @@ export default function ProfileScreen() {
                   color={user?.role === 'accountant' ? '#8B5CF6' : '#64748B'} 
                 />
                 <Text style={[styles.roleText, user?.role === 'accountant' && styles.roleTextAccountant]}>
-                  {user?.role === 'accountant' ? 'Счетоводител' : 'Потребител'}
+                  {user?.role === 'accountant' ? t('profile.title') : t('profile.title')}
                 </Text>
               </View>
         </View>
 
         {/* Menu Items */}
         <View style={styles.menuSection}>
-          <Text style={styles.menuSectionTitle}>Настройки</Text>
+          <Text style={styles.menuSectionTitle}>{t('profile.settings')}</Text>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/company-settings')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
               <Ionicons name="business" size={20} color="#3B82F6" />
             </View>
             <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>Фирма</Text>
-              <Text style={styles.menuSubtitle}>Данни на фирмата</Text>
+              <Text style={styles.menuTitle}>{t('profile.company')}</Text>
+              <Text style={styles.menuSubtitle}>{t('profile.companyData')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
@@ -116,8 +116,8 @@ export default function ProfileScreen() {
               <Ionicons name="notifications" size={20} color="#8B5CF6" />
             </View>
             <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>Известия</Text>
-              <Text style={styles.menuSubtitle}>Напомняния за ДДС</Text>
+              <Text style={styles.menuTitle}>{t('profile.notifications')}</Text>
+              <Text style={styles.menuSubtitle}>{t('profile.vatNotifications')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
@@ -127,8 +127,8 @@ export default function ProfileScreen() {
               <Ionicons name="cloud-upload" size={20} color="#10B981" />
             </View>
             <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>Google Drive бекъп</Text>
-              <Text style={styles.menuSubtitle}>Backup & Restore</Text>
+              <Text style={styles.menuTitle}>{t('profile.backup')}</Text>
+              <Text style={styles.menuSubtitle}>{t('profile.backupRestore')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
@@ -138,23 +138,23 @@ export default function ProfileScreen() {
               <Ionicons name="language" size={20} color="#F59E0B" />
             </View>
             <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>Език</Text>
-              <Text style={styles.menuSubtitle}>Български</Text>
+              <Text style={styles.menuTitle}>{t('profile.language')}</Text>
+              <Text style={styles.menuSubtitle}>Български / English</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
         </View>
 
         <View style={styles.menuSection}>
-          <Text style={styles.menuSectionTitle}>Информация</Text>
+          <Text style={styles.menuSectionTitle}>{t('profile.info')}</Text>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/help')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
               <Ionicons name="help-circle" size={20} color="#6366F1" />
             </View>
             <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>Помощ</Text>
-              <Text style={styles.menuSubtitle}>Как да използвате приложението</Text>
+              <Text style={styles.menuTitle}>{t('profile.help')}</Text>
+              <Text style={styles.menuSubtitle}>{t('profile.howToUse')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
@@ -164,8 +164,8 @@ export default function ProfileScreen() {
               <Ionicons name="information-circle" size={20} color="#EC4899" />
             </View>
             <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>За приложението</Text>
-              <Text style={styles.menuSubtitle}>Версия 1.0.0</Text>
+              <Text style={styles.menuTitle}>{t('profile.about')}</Text>
+              <Text style={styles.menuSubtitle}>{t('profile.version')} 1.0.0</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
@@ -174,7 +174,7 @@ export default function ProfileScreen() {
             {/* Logout Button */}
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
               <Ionicons name="log-out" size={20} color="#EF4444" />
-              <Text style={styles.logoutText}>Изход</Text>
+              <Text style={styles.logoutText}>{t('profile.logout')}</Text>
             </TouchableOpacity>
 
             <View style={{ height: 40 }} />
