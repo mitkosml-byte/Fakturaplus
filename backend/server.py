@@ -916,6 +916,156 @@ async def get_chart_data(
     
     return chart_data
 
+@api_router.get("/statistics/suppliers")
+async def get_supplier_statistics(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Get statistics by supplier - Top suppliers, totals, etc."""
+    from collections import defaultdict
+    
+    # Default to current month if no dates provided
+    if not start_date and not end_date:
+        now = datetime.now(timezone.utc)
+        start_date = now.replace(day=1).strftime("%Y-%m-%d")
+        if now.month == 12:
+            end_date = now.replace(year=now.year + 1, month=1, day=1).strftime("%Y-%m-%d")
+        else:
+            end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
+    
+    # Build query
+    query = {"user_id": current_user.user_id}
+    if start_date or end_date:
+        query["date"] = {}
+        if start_date:
+            query["date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
+        if end_date:
+            query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    
+    invoices = await db.invoices.find(query, {
+        "_id": 0, 
+        "supplier": 1, 
+        "total_amount": 1, 
+        "vat_amount": 1,
+        "amount_without_vat": 1,
+        "date": 1
+    }).to_list(10000)
+    
+    # Group by supplier
+    supplier_data = defaultdict(lambda: {
+        "total_amount": 0,
+        "total_vat": 0,
+        "total_net": 0,
+        "invoice_count": 0,
+        "invoices": []
+    })
+    
+    for inv in invoices:
+        supplier = inv.get("supplier", "Неизвестен")
+        supplier_data[supplier]["total_amount"] += inv.get("total_amount", 0)
+        supplier_data[supplier]["total_vat"] += inv.get("vat_amount", 0)
+        supplier_data[supplier]["total_net"] += inv.get("amount_without_vat", 0)
+        supplier_data[supplier]["invoice_count"] += 1
+    
+    # Convert to list and sort by total amount
+    suppliers_list = []
+    for supplier, data in supplier_data.items():
+        suppliers_list.append({
+            "supplier": supplier,
+            "total_amount": round(data["total_amount"], 2),
+            "total_vat": round(data["total_vat"], 2),
+            "total_net": round(data["total_net"], 2),
+            "invoice_count": data["invoice_count"],
+            "avg_invoice": round(data["total_amount"] / data["invoice_count"], 2) if data["invoice_count"] > 0 else 0
+        })
+    
+    # Sort by total amount descending
+    suppliers_list.sort(key=lambda x: x["total_amount"], reverse=True)
+    
+    # Calculate totals
+    total_all = sum(s["total_amount"] for s in suppliers_list)
+    total_vat = sum(s["total_vat"] for s in suppliers_list)
+    total_net = sum(s["total_net"] for s in suppliers_list)
+    
+    return {
+        "period": {
+            "start_date": start_date,
+            "end_date": end_date
+        },
+        "totals": {
+            "total_amount": round(total_all, 2),
+            "total_vat": round(total_vat, 2),
+            "total_net": round(total_net, 2),
+            "supplier_count": len(suppliers_list),
+            "invoice_count": sum(s["invoice_count"] for s in suppliers_list)
+        },
+        "top_10": suppliers_list[:10],
+        "all_suppliers": suppliers_list
+    }
+
+@api_router.get("/statistics/supplier/{supplier_name}")
+async def get_single_supplier_stats(
+    supplier_name: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed statistics for a specific supplier"""
+    query = {
+        "user_id": current_user.user_id,
+        "supplier": {"$regex": f"^{supplier_name}$", "$options": "i"}
+    }
+    
+    if start_date or end_date:
+        query["date"] = {}
+        if start_date:
+            query["date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
+        if end_date:
+            query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
+    
+    if not invoices:
+        return {
+            "supplier": supplier_name,
+            "invoice_count": 0,
+            "total_amount": 0,
+            "invoices": []
+        }
+    
+    total_amount = sum(inv.get("total_amount", 0) for inv in invoices)
+    total_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
+    total_net = sum(inv.get("amount_without_vat", 0) for inv in invoices)
+    
+    # Format invoices
+    formatted_invoices = []
+    for inv in invoices:
+        date_val = inv.get("date")
+        if isinstance(date_val, datetime):
+            date_str = date_val.strftime("%Y-%m-%d")
+        else:
+            date_str = str(date_val)[:10]
+        
+        formatted_invoices.append({
+            "id": inv.get("id"),
+            "invoice_number": inv.get("invoice_number"),
+            "date": date_str,
+            "total_amount": inv.get("total_amount", 0),
+            "vat_amount": inv.get("vat_amount", 0),
+            "amount_without_vat": inv.get("amount_without_vat", 0)
+        })
+    
+    return {
+        "supplier": supplier_name,
+        "invoice_count": len(invoices),
+        "total_amount": round(total_amount, 2),
+        "total_vat": round(total_vat, 2),
+        "total_net": round(total_net, 2),
+        "avg_invoice": round(total_amount / len(invoices), 2) if invoices else 0,
+        "invoices": formatted_invoices
+    }
+
 # ===================== EXPORT ENDPOINTS =====================
 
 @api_router.get("/export/excel")
