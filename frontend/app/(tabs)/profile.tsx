@@ -120,13 +120,13 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/backup')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
               <Ionicons name="cloud-upload" size={20} color="#10B981" />
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>Google Drive бекъп</Text>
-              <Text style={styles.menuSubtitle}>Автоматичен бекъп</Text>
+              <Text style={styles.menuSubtitle}>Backup & Restore</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
