@@ -631,6 +631,37 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginTop: 6,
   },
+  currentTotalsCard: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  currentTotalsTitle: {
+    fontSize: 14,
+    color: '#10B981',
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  currentTotalsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  currentTotalItem: {
+    alignItems: 'center',
+  },
+  currentTotalValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#10B981',
+  },
+  currentTotalLabel: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 4,
+  },
   submitButton: {
     backgroundColor: '#8B5CF6',
     borderRadius: 12,
