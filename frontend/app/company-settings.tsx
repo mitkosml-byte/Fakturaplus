@@ -80,11 +80,11 @@ export default function CompanySettingsScreen() {
 
   const handleSave = async () => {
     if (!name.trim()) {
-      Alert.alert('Грешка', 'Въведете име на фирмата');
+      Alert.alert(t('common.error'), t('company.enterNameError'));
       return;
     }
     if (!eik.trim()) {
-      Alert.alert('Грешка', 'Въведете ЕИК на фирмата');
+      Alert.alert(t('common.error'), t('company.enterEikError'));
       return;
     }
 
@@ -103,9 +103,9 @@ export default function CompanySettingsScreen() {
         bank_iban: bankIban.trim() || undefined,
       });
       setCompany(savedCompany);
-      Alert.alert('Успех', 'Данните на фирмата са запазени');
+      Alert.alert(t('common.success'), t('company.saved'));
     } catch (error: any) {
-      Alert.alert('Грешка', error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setSaving(false);
     }
@@ -113,14 +113,14 @@ export default function CompanySettingsScreen() {
 
   const handleJoinCompany = async () => {
     if (!joinEik.trim()) {
-      Alert.alert('Грешка', 'Въведете ЕИК на фирмата');
+      Alert.alert(t('common.error'), t('company.enterEikError'));
       return;
     }
 
     setSaving(true);
     try {
       const result = await api.joinCompanyByEik(joinEik.trim());
-      Alert.alert('Успех', result.message);
+      Alert.alert(t('common.success'), result.message);
       setCompany(result.company);
       setName(result.company.name || '');
       setEik(result.company.eik || '');
@@ -135,7 +135,7 @@ export default function CompanySettingsScreen() {
       setShowJoinSection(false);
       setJoinEik('');
     } catch (error: any) {
-      Alert.alert('Грешка', error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setSaving(false);
     }
