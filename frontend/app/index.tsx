@@ -83,10 +83,14 @@ export default function Index() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#8B5CF6" />
-        <Text style={styles.loadingText}>Зареждане...</Text>
+        <Text style={styles.loadingText}>{t('common.loading')}</Text>
       </View>
     );
   }
+
+  const handleLanguageToggle = () => {
+    setLanguage(language === 'bg' ? 'en' : 'bg');
+  };
 
   return (
     <ImageBackground 
@@ -98,6 +102,22 @@ export default function Index() {
         colors={['rgba(15, 23, 42, 0.85)', 'rgba(30, 41, 59, 0.75)', 'rgba(15, 23, 42, 0.9)']}
         style={styles.gradient}
       >
+        {/* Language Selector */}
+        <View style={styles.languageSelector}>
+          <TouchableOpacity 
+            style={[styles.langButton, language === 'bg' && styles.langButtonActive]}
+            onPress={() => setLanguage('bg')}
+          >
+            <Text style={[styles.langButtonText, language === 'bg' && styles.langButtonTextActive]}>🇧🇬 BG</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.langButton, language === 'en' && styles.langButtonActive]}
+            onPress={() => setLanguage('en')}
+          >
+            <Text style={[styles.langButtonText, language === 'en' && styles.langButtonTextActive]}>🇬🇧 EN</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.content}>
           <View style={styles.logoContainer}>
             <Image 
@@ -106,23 +126,26 @@ export default function Index() {
               resizeMode="contain"
             />
             <Text style={styles.title}>Фактура+</Text>
-            <Text style={styles.subtitle}>Управление на фактури</Text>
+            <Text style={styles.subtitle}>{t('login.title')}</Text>
           </View>
 
           <View style={styles.featuresContainer}>
-            <FeatureItem icon="scan" text="OCR сканиране" />
-            <FeatureItem icon="calculator" text="ДДС изчисления" />
-            <FeatureItem icon="stats-chart" text="Статистики и графики" />
-            <FeatureItem icon="document-text" text="Експорт Excel/PDF" />
+            <FeatureItem icon="scan" text={language === 'bg' ? 'OCR сканиране' : 'OCR Scanning'} />
+            <FeatureItem icon="calculator" text={language === 'bg' ? 'ДДС изчисления' : 'VAT Calculations'} />
+            <FeatureItem icon="stats-chart" text={language === 'bg' ? 'Статистики и графики' : 'Statistics & Charts'} />
+            <FeatureItem icon="document-text" text={language === 'bg' ? 'Експорт Excel/PDF' : 'Export Excel/PDF'} />
           </View>
 
           <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin}>
             <Ionicons name="logo-google" size={24} color="white" />
-            <Text style={styles.googleButtonText}>Вход с Google</Text>
+            <Text style={styles.googleButtonText}>{t('login.google')}</Text>
           </TouchableOpacity>
 
           <Text style={styles.disclaimer}>
-            Българско приложение за управление на фактури
+            {language === 'bg' 
+              ? 'Българско приложение за управление на фактури'
+              : 'Bulgarian invoice management application'
+            }
           </Text>
         </View>
       </LinearGradient>
