@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Backend Test Suite for Bulgarian Invoice Manager - Item Price Tracking API
-Tests the new item price tracking endpoints with real Bulgarian data.
+Backend Test Suite for Bulgarian Invoice Manager - Budget and Export API
+Tests the new budget management, recurring expenses, export, forecast, and audit endpoints.
 """
 
 import asyncio
