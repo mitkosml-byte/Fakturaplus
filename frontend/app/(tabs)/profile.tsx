@@ -65,12 +65,10 @@ export default function ProfileScreen() {
           onPress: async () => {
             try {
               await logout();
-              // Small delay to ensure state is updated before navigation
-              setTimeout(() => {
-                router.replace('/');
-              }, 100);
             } catch (error) {
               console.error('Logout error:', error);
+            } finally {
+              // Navigate after logout completes
               router.replace('/');
             }
           },
