@@ -356,8 +356,8 @@ export const translations: Translations = {
     en: 'VAT reminders',
   },
   'profile.backup': {
-    bg: 'Google Drive бекъп',
-    en: 'Google Drive Backup',
+    bg: 'Бекъп на данни',
+    en: 'Data Backup',
   },
   'profile.backupRestore': {
     bg: 'Backup & Restore',
