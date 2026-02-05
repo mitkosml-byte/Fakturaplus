@@ -181,10 +181,10 @@ export default function HelpScreen() {
       icon: 'cloud-upload',
       title: 'Backup',
       content: [
-        '☁️ Profile → Google Drive backup',
-        '📤 Create backup and save it to Google Drive',
+        '💾 Profile → Data Backup',
+        '📤 Create backup and save it locally',
         '📥 Restore data from backup file',
-        '🔒 Data is stored securely locally',
+        '🔒 Data is stored securely on your device',
       ],
     },
   ];
