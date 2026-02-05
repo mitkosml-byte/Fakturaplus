@@ -811,6 +811,99 @@ async def cancel_invitation(invitation_id: str, current_user: User = Depends(get
     
     return {"message": "Поканата е отменена"}
 
+@api_router.get("/invitations/verify/{token}")
+async def verify_invitation_token(token: str):
+    """Проверява валидността на токен за покана (публичен endpoint)"""
+    invitation = await db.invitations.find_one({
+        "invite_token": token,
+        "status": "pending"
+    })
+    
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Невалиден или изтекъл линк за покана")
+    
+    # Check expiry
+    expires_at = invitation["expires_at"]
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    
+    if expires_at < datetime.now(timezone.utc):
+        await db.invitations.update_one(
+            {"id": invitation["id"]},
+            {"$set": {"status": "expired"}}
+        )
+        raise HTTPException(status_code=400, detail="Поканата е изтекла")
+    
+    # Get company name
+    company = await db.companies.find_one({"id": invitation["company_id"]}, {"name": 1})
+    role_info = STANDARD_ROLES.get(invitation["role"], {})
+    
+    return {
+        "valid": True,
+        "company_name": company.get("name", "Unknown") if company else "Unknown",
+        "role": invitation["role"],
+        "role_name_bg": role_info.get("name_bg", invitation["role"]),
+        "role_name_en": role_info.get("name_en", invitation["role"]),
+        "expires_at": invitation["expires_at"].isoformat()
+    }
+
+@api_router.post("/invitations/accept-by-token")
+async def accept_invitation_by_token(request: Request, current_user: User = Depends(get_current_user)):
+    """Приема покана по токен (от линк)"""
+    body = await request.json()
+    token = body.get("token", "").strip()
+    
+    if not token:
+        raise HTTPException(status_code=400, detail="Липсва токен на поканата")
+    
+    # Find valid invitation
+    invitation = await db.invitations.find_one({
+        "invite_token": token,
+        "status": "pending"
+    })
+    
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Невалиден или изтекъл линк за покана")
+    
+    # Check expiry
+    expires_at = invitation["expires_at"]
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    
+    if expires_at < datetime.now(timezone.utc):
+        await db.invitations.update_one(
+            {"id": invitation["id"]},
+            {"$set": {"status": "expired"}}
+        )
+        raise HTTPException(status_code=400, detail="Поканата е изтекла")
+    
+    # Check if user already has a company
+    if current_user.company_id:
+        raise HTTPException(status_code=400, detail="Вече сте член на фирма. Първо напуснете текущата фирма.")
+    
+    # Accept invitation - link user to company
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$set": {
+            "company_id": invitation["company_id"],
+            "role": invitation["role"]
+        }}
+    )
+    
+    # Mark invitation as accepted
+    await db.invitations.update_one(
+        {"id": invitation["id"]},
+        {"$set": {"status": "accepted"}}
+    )
+    
+    # Get company info
+    company = await db.companies.find_one({"id": invitation["company_id"]}, {"_id": 0})
+    
+    return {
+        "message": f"Успешно се присъединихте към {company['name'] if company else 'фирмата'}",
+        "company": company
+    }
+
 @api_router.post("/invitations/accept")
 async def accept_invitation(request: Request, current_user: User = Depends(get_current_user)):
     """Приема покана по код"""
