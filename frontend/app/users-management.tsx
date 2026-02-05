@@ -323,7 +323,9 @@ export default function UsersManagementScreen() {
     const roles: Record<string, { bg: string; en: string }> = {
       owner: { bg: 'Титуляр', en: 'Owner' },
       manager: { bg: 'Мениджър', en: 'Manager' },
+      accountant: { bg: 'Счетоводител', en: 'Accountant' },
       staff: { bg: 'Служител', en: 'Staff' },
+      viewer: { bg: 'Само преглед', en: 'Viewer' },
     };
     return roles[role]?.[language] || role;
   };
@@ -332,7 +334,9 @@ export default function UsersManagementScreen() {
     const colors: Record<string, string> = {
       owner: '#8B5CF6',
       manager: '#3B82F6',
+      accountant: '#10B981',
       staff: '#64748B',
+      viewer: '#94A3B8',
     };
     return colors[role] || '#64748B';
   };
