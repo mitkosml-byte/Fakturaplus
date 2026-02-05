@@ -416,11 +416,13 @@ class ApiService {
     start_date?: string;
     end_date?: string;
     top_n?: number;
+    grouped?: boolean;  // Нов параметър за групиран изглед
   }): Promise<any> {
     const queryParams = new URLSearchParams();
     if (params?.start_date) queryParams.set('start_date', params.start_date);
     if (params?.end_date) queryParams.set('end_date', params.end_date);
     if (params?.top_n) queryParams.set('top_n', params.top_n.toString());
+    if (params?.grouped) queryParams.set('grouped', 'true');
     const query = queryParams.toString();
     return this.fetch(`/statistics/items${query ? `?${query}` : ''}`);
   }
@@ -431,6 +433,57 @@ class ApiService {
     recommendation: { best_supplier: string; avg_price: number; potential_savings_percent: number } | null;
   }> {
     return this.fetch(`/statistics/items/${encodeURIComponent(itemName)}/by-supplier`);
+  }
+
+  // ===================== ITEM GROUPS (AI Нормализация) =====================
+
+  async getItemGroups(): Promise<{ groups: any[]; total: number }> {
+    return this.fetch('/items/groups');
+  }
+
+  async createItemGroup(data: { canonical_name: string; variants?: string[]; category?: string }): Promise<any> {
+    return this.fetch('/items/groups', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateItemGroup(groupId: string, data: { canonical_name?: string; variants?: string[]; category?: string }): Promise<any> {
+    return this.fetch(`/items/groups/${groupId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteItemGroup(groupId: string): Promise<{ success: boolean; message: string }> {
+    return this.fetch(`/items/groups/${groupId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async normalizeAllItems(): Promise<{
+    success: boolean;
+    message: string;
+    processed: number;
+    new_groups: number;
+    updated_groups: number;
+  }> {
+    return this.fetch('/items/normalize', {
+      method: 'POST',
+    });
+  }
+
+  async normalizeSingleItem(itemName: string): Promise<{
+    original_name: string;
+    canonical_name: string;
+    category: string | null;
+    confidence: number;
+    is_new_group: boolean;
+  }> {
+    return this.fetch('/items/normalize-single', {
+      method: 'POST',
+      body: JSON.stringify({ item_name: itemName }),
+    });
   }
 }
 
