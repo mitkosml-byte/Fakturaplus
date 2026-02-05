@@ -1261,6 +1261,166 @@ async def correct_ocr_data(
         confidence=confidence
     )
 
+# ===================== AI ITEM NORMALIZATION =====================
+
+async def normalize_item_name_ai(item_name: str, company_id: str, existing_groups: List[dict] = None) -> NormalizationResult:
+    """
+    Използва Gemini AI за нормализиране на име на артикул.
+    Определя каноничното име и категорията.
+    """
+    if not item_name or not item_name.strip():
+        return NormalizationResult(
+            original_name=item_name,
+            canonical_name=item_name,
+            confidence=0.0
+        )
+    
+    item_name = item_name.strip()
+    
+    # Първо проверяваме дали вече имаме група за този артикул
+    if existing_groups is None:
+        existing_groups = await db.item_groups.find(
+            {"company_id": company_id},
+            {"_id": 0}
+        ).to_list(1000)
+    
+    # Проверка в съществуващи групи
+    for group in existing_groups:
+        # Точно съвпадение в варианти
+        if item_name.lower() in [v.lower() for v in group.get("variants", [])]:
+            return NormalizationResult(
+                original_name=item_name,
+                canonical_name=group["canonical_name"],
+                category=group.get("category"),
+                confidence=1.0,
+                is_new_group=False
+            )
+        # Съвпадение с каноничното име
+        if item_name.lower() == group["canonical_name"].lower():
+            return NormalizationResult(
+                original_name=item_name,
+                canonical_name=group["canonical_name"],
+                category=group.get("category"),
+                confidence=1.0,
+                is_new_group=False
+            )
+    
+    # Ако няма съвпадение, използваме AI
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        
+        # Подготвяме списък с текущите групи за контекст
+        groups_context = ""
+        if existing_groups:
+            groups_list = [f"- {g['canonical_name']}: {', '.join(g.get('variants', []))}" for g in existing_groups[:50]]
+            groups_context = f"\n\nСъществуващи групи артикули:\n" + "\n".join(groups_list)
+        
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"normalize_{uuid.uuid4().hex[:8]}",
+            system_message=f"""Ти си асистент за нормализиране на имена на артикули от фактури.
+            
+Твоята задача е да определиш КАНОНИЧНОТО (основното, общото) име на продукт.
+Примери за нормализация:
+- "Олио Първа Преса 1л" → canonical_name: "Олио", category: "Хранителни стоки"
+- "Олио Екстра Верджин" → canonical_name: "Олио", category: "Хранителни стоки"  
+- "Кока-Кола 2л" → canonical_name: "Безалкохолни напитки", category: "Напитки"
+- "Пепси-Кола 1.5л" → canonical_name: "Безалкохолни напитки", category: "Напитки"
+- "Хляб Добруджа 650г" → canonical_name: "Хляб", category: "Хлебни изделия"
+- "Пилешко филе охладено" → canonical_name: "Пилешко месо", category: "Месо"
+- "Домати БГ кг" → canonical_name: "Домати", category: "Зеленчуци"
+- "Захар бяла 1кг" → canonical_name: "Захар", category: "Хранителни стоки"
+
+Правила:
+1. Премахни марки, размери, тегла от името
+2. Групирай сходни продукти под едно име
+3. Използвай кратки, ясни имена на български
+4. Ако артикулът вече съществува в група, използвай съществуващото canonical_name
+{groups_context}
+
+Отговори САМО в JSON формат:
+{{"canonical_name": "...", "category": "...", "confidence": 0.95}}"""
+        ).with_model("gemini", "gemini-2.5-flash")
+        
+        response = await chat.send_message(
+            UserMessage(text=f"Нормализирай този артикул: \"{item_name}\"")
+        )
+        
+        # Parse JSON
+        import json
+        json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+            canonical_name = result.get("canonical_name", item_name)
+            category = result.get("category")
+            confidence = float(result.get("confidence", 0.8))
+            
+            # Проверяваме дали AI върна същото име като съществуваща група
+            is_new = True
+            for group in existing_groups:
+                if canonical_name.lower() == group["canonical_name"].lower():
+                    is_new = False
+                    canonical_name = group["canonical_name"]  # Използваме оригиналното
+                    break
+            
+            return NormalizationResult(
+                original_name=item_name,
+                canonical_name=canonical_name,
+                category=category,
+                confidence=confidence,
+                is_new_group=is_new
+            )
+    except Exception as e:
+        logger.error(f"AI normalization error: {e}")
+    
+    # Fallback - използваме оригиналното име
+    return NormalizationResult(
+        original_name=item_name,
+        canonical_name=item_name,
+        confidence=0.5,
+        is_new_group=True
+    )
+
+
+async def normalize_and_save_item(item_name: str, company_id: str) -> str:
+    """
+    Нормализира артикул и запазва/актуализира групата в базата.
+    Връща каноничното име.
+    """
+    result = await normalize_item_name_ai(item_name, company_id)
+    
+    if result.is_new_group:
+        # Създаваме нова група
+        new_group = ItemGroup(
+            company_id=company_id,
+            canonical_name=result.canonical_name,
+            variants=[item_name],
+            category=result.category,
+            auto_generated=True
+        )
+        await db.item_groups.insert_one(new_group.dict())
+        logger.info(f"Created new item group: {result.canonical_name} for {item_name}")
+    else:
+        # Добавяме варианта към съществуваща група ако го няма
+        existing = await db.item_groups.find_one({
+            "company_id": company_id,
+            "canonical_name": result.canonical_name
+        })
+        
+        if existing:
+            variants = existing.get("variants", [])
+            if item_name not in variants and item_name.lower() not in [v.lower() for v in variants]:
+                await db.item_groups.update_one(
+                    {"_id": existing["_id"]},
+                    {
+                        "$push": {"variants": item_name},
+                        "$set": {"updated_at": datetime.now(timezone.utc)}
+                    }
+                )
+                logger.info(f"Added variant '{item_name}' to group '{result.canonical_name}'")
+    
+    return result.canonical_name
+
 # ===================== OCR ENDPOINT =====================
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
