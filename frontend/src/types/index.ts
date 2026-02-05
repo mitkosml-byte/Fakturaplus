@@ -30,11 +30,20 @@ export interface Invitation {
   invited_by: string;
   email?: string;
   phone?: string;
-  role: 'manager' | 'staff';
+  role: 'manager' | 'accountant' | 'staff' | 'viewer';
   code: string;
+  invite_token: string;
   status: 'pending' | 'accepted' | 'cancelled' | 'expired';
   expires_at: string;
   created_at: string;
+}
+
+export interface Role {
+  id: string;
+  name_bg: string;
+  name_en: string;
+  description_bg: string;
+  description_en: string;
 }
 
 export interface Invoice {
