@@ -706,12 +706,12 @@ export default function StatsScreen() {
                     <View style={styles.statItem}>
                       <Ionicons name="wallet" size={20} color="#F59E0B" />
                       <Text style={styles.statLabel}>{t('home.pocket')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0} €</Text>
+                      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>{summary?.total_pocket_money.toFixed(0) || 0} €</Text>
                     </View>
                     <View style={styles.statItem}>
                       <Ionicons name="remove-circle" size={20} color="#EF4444" />
                       <Text style={styles.statLabel}>{t('stats.expensesNoInvoice')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_non_invoice_expenses.toFixed(0) || 0} €</Text>
+                      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>{summary?.total_non_invoice_expenses.toFixed(0) || 0} €</Text>
                     </View>
                   </View>
                 </View>
