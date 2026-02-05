@@ -647,9 +647,9 @@ class BackendTester:
             return False
 
     async def run_all_tests(self):
-        """Run all invitation API tests"""
-        print("🚀 Starting Bulgarian Invoice Management Backend API Tests")
-        print("=" * 60)
+        """Run all backup API tests"""
+        print("🚀 Starting Bulgarian Invoice Management Backend API Tests - BACKUP FUNCTIONALITY")
+        print("=" * 70)
         
         results = {}
         
@@ -659,34 +659,25 @@ class BackendTester:
             print("❌ Cannot continue without user registration")
             return results
         
-        # 2. Test GET /api/roles
-        results["get_roles"] = await self.test_get_roles()
+        # 2. Test GET /api/backup/status (initial state)
+        results["backup_status_initial"] = await self.test_backup_status()
         
-        # 3. Test POST /api/invitations (staff role)
-        create_result, invite_token = await self.test_create_invitation()
-        results["create_invitation"] = create_result
+        # 3. Test POST /api/backup/create
+        create_result, backup_data = await self.test_create_backup()
+        results["create_backup"] = create_result
         
-        # 4. Test creating invitations with different roles
-        results["create_different_roles"] = await self.test_create_invitation_different_roles()
+        # 4. Test GET /api/backup/status (after creation)
+        results["backup_status_after_create"] = await self.test_backup_status_after_create()
         
-        # 5. Test GET /api/invitations/verify/{token}
-        if invite_token:
-            results["verify_token"] = await self.test_verify_invitation_token(invite_token)
-            
-            # 6. Test invalid token verification
-            results["verify_invalid_token"] = await self.test_verify_invalid_token()
-            
-            # 7. Test POST /api/invitations/accept-by-token
-            results["accept_invitation"] = await self.test_accept_invitation_by_token(invite_token)
-            
-            # 8. Test successful invitation acceptance scenario
-            results["accept_invitation_success"] = await self.test_accept_invitation_success_scenario(invite_token)
+        # 5. Test GET /api/backup/list
+        results["list_backups"] = await self.test_list_backups()
+        
+        # 6. Test POST /api/backup/restore
+        if backup_data:
+            results["restore_backup"] = await self.test_restore_backup(backup_data)
         else:
-            results["verify_token"] = False
-            results["verify_invalid_token"] = False
-            results["accept_invitation"] = False
-            results["accept_invitation_success"] = False
-            print("⚠️  Skipping token verification tests - no token available")
+            results["restore_backup"] = False
+            print("⚠️  Skipping restore test - no backup data available")
         
         return results
 
