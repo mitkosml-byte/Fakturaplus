@@ -433,6 +433,10 @@ export const translations: Translations = {
     bg: 'Избери',
     en: 'Select',
   },
+  'common.merged': {
+    bg: 'обединени',
+    en: 'merged',
+  },
   
   // Messages
   'msg.invoiceSaved': {
