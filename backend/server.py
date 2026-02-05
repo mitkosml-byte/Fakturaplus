@@ -1517,11 +1517,12 @@ async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(ge
         company_users = await db.users.find({"company_id": company_id}, {"user_id": 1}).to_list(1000)
         company_user_ids = [u["user_id"] for u in company_users]
         
+        # Check by invoice_number + supplier (primary check)
         existing_invoice = await db.invoices.find_one({
             "user_id": {"$in": company_user_ids},
             "invoice_number": invoice.invoice_number,
-            "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"}
-        }, {"_id": 0, "id": 1, "date": 1, "user_id": 1})
+            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"}
+        }, {"_id": 0, "id": 1, "date": 1, "user_id": 1, "total_amount": 1})
         
         if existing_invoice:
             # Find who added the duplicate
@@ -1529,20 +1530,52 @@ async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(ge
             added_by_name = added_by_user.get("name", "друг потребител") if added_by_user else "друг потребител"
             raise HTTPException(
                 status_code=409,
-                detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече е добавена от {added_by_name}!"
+                detail=f"Фактурата вече съществува! Номер {invoice.invoice_number} от {invoice.supplier} е добавена от {added_by_name}. | The invoice already exists!"
+            )
+        
+        # Secondary check: same supplier + date + total_amount (catches invoices with different numbers)
+        invoice_date_str = invoice.date[:10] if len(invoice.date) >= 10 else invoice.date
+        existing_by_amount = await db.invoices.find_one({
+            "user_id": {"$in": company_user_ids},
+            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"},
+            "total_amount": invoice.total_amount,
+            "date": {"$regex": f"^{invoice_date_str}"}
+        }, {"_id": 0, "id": 1, "invoice_number": 1, "user_id": 1})
+        
+        if existing_by_amount:
+            added_by_user = await db.users.find_one({"user_id": existing_by_amount["user_id"]}, {"name": 1})
+            added_by_name = added_by_user.get("name", "друг потребител") if added_by_user else "друг потребител"
+            raise HTTPException(
+                status_code=409,
+                detail=f"Фактурата вече съществува! Намерена е фактура със същия доставчик, дата и сума (№{existing_by_amount.get('invoice_number', 'N/A')}). | The invoice already exists!"
             )
     else:
         # No company - check only for current user
         existing_invoice = await db.invoices.find_one({
             "user_id": current_user.user_id,
             "invoice_number": invoice.invoice_number,
-            "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"}
+            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"}
         }, {"_id": 0, "id": 1, "date": 1})
         
         if existing_invoice:
             raise HTTPException(
                 status_code=409,
-                detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече съществува в системата!"
+                detail=f"Фактурата вече съществува! Номер {invoice.invoice_number} от {invoice.supplier}. | The invoice already exists!"
+            )
+        
+        # Secondary check for single user
+        invoice_date_str = invoice.date[:10] if len(invoice.date) >= 10 else invoice.date
+        existing_by_amount = await db.invoices.find_one({
+            "user_id": current_user.user_id,
+            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"},
+            "total_amount": invoice.total_amount,
+            "date": {"$regex": f"^{invoice_date_str}"}
+        }, {"_id": 0, "id": 1, "invoice_number": 1})
+        
+        if existing_by_amount:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Фактурата вече съществува! Намерена е фактура със същия доставчик, дата и сума (№{existing_by_amount.get('invoice_number', 'N/A')}). | The invoice already exists!"
             )
     
     invoice_dict = invoice.dict()
