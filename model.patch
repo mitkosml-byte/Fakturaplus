@@ -1,227 +1,268 @@
 diff --git a/model.patch b/model.patch
-index 823608d..e69de29 100644
+index ef0a74b..e69de29 100644
 --- a/model.patch
 +++ b/model.patch
-@@ -1,246 +0,0 @@
--diff --git a/backend/server.py b/backend/server.py
--index 6017dc7..039a4d2 100644
----- a/backend/server.py
--+++ b/backend/server.py
--@@ -1552,7 +1552,15 @@ async def get_detailed_supplier_stats(
--     
--     first_delivery = min(dates) if dates else None
--     last_delivery = max(dates) if dates else None
---    days_inactive = (now - last_delivery).days if last_delivery else 999
--+    
--+    # Ensure timezone consistency for date calculations
--+    if last_delivery:
--+        if last_delivery.tzinfo is None:
--+            last_delivery = last_delivery.replace(tzinfo=timezone.utc)
--+        days_inactive = (now - last_delivery).days
--+    else:
--+        days_inactive = 999
--+    
--     is_active = days_inactive <= 30
--     
--     # Monthly breakdown
+@@ -1,284 +0,0 @@
 -diff --git a/model.patch b/model.patch
--index dc6e030..e69de29 100644
+-index 823608d..e69de29 100644
 ---- a/model.patch
 -+++ b/model.patch
--@@ -1,184 +0,0 @@
+-@@ -1,246 +0,0 @@
+--diff --git a/backend/server.py b/backend/server.py
+--index 6017dc7..039a4d2 100644
+----- a/backend/server.py
+--+++ b/backend/server.py
+--@@ -1552,7 +1552,15 @@ async def get_detailed_supplier_stats(
+--     
+--     first_delivery = min(dates) if dates else None
+--     last_delivery = max(dates) if dates else None
+---    days_inactive = (now - last_delivery).days if last_delivery else 999
+--+    
+--+    # Ensure timezone consistency for date calculations
+--+    if last_delivery:
+--+        if last_delivery.tzinfo is None:
+--+            last_delivery = last_delivery.replace(tzinfo=timezone.utc)
+--+        days_inactive = (now - last_delivery).days
+--+    else:
+--+        days_inactive = 999
+--+    
+--     is_active = days_inactive <= 30
+--     
+--     # Monthly breakdown
 --diff --git a/model.patch b/model.patch
---index 19bbeb2..e69de29 100644
+--index dc6e030..e69de29 100644
 ----- a/model.patch
 --+++ b/model.patch
---@@ -1,179 +0,0 @@
+--@@ -1,184 +0,0 @@
 ---diff --git a/model.patch b/model.patch
----index 58f48af..e69de29 100644
+---index 19bbeb2..e69de29 100644
 ------ a/model.patch
 ---+++ b/model.patch
----@@ -1,174 +0,0 @@
+---@@ -1,179 +0,0 @@
 ----diff --git a/model.patch b/model.patch
-----index 074293a..e69de29 100644
+----index 58f48af..e69de29 100644
 ------- a/model.patch
 ----+++ b/model.patch
-----@@ -1,169 +0,0 @@
------diff --git a/frontend/app/(tabs)/profile.tsx b/frontend/app/(tabs)/profile.tsx
------index e47ff1c..caed74e 100644
--------- a/frontend/app/(tabs)/profile.tsx
------+++ b/frontend/app/(tabs)/profile.tsx
------@@ -71,7 +71,7 @@ export default function ProfileScreen() {
------         <View style={styles.menuSection}>
------           <Text style={styles.menuSectionTitle}>Настройки</Text>
------ 
-------          <TouchableOpacity style={styles.menuItem}>
------+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
------             <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
------               <Ionicons name="notifications" size={20} color="#8B5CF6" />
------             </View>
+----@@ -1,174 +0,0 @@
 -----diff --git a/model.patch b/model.patch
------index 9efac8f..e69de29 100644
+-----index 074293a..e69de29 100644
 -------- a/model.patch
 -----+++ b/model.patch
------@@ -1,151 +0,0 @@
-------diff --git a/test_result.md b/test_result.md
-------index 30c484c..38875f4 100644
---------- a/test_result.md
-------+++ b/test_result.md
-------@@ -107,87 +107,108 @@ user_problem_statement: Bulgarian Invoice Management Android App with OCR scanni
------- backend:
-------   - task: "Auth endpoints (session, me, logout)"
-------     implemented: true
--------    working: "NA"
-------+    working: true
-------     file: "server.py"
-------     stuck_count: 0
-------     priority: "high"
--------    needs_retesting: true
-------+    needs_retesting: false
-------     status_history:
-------       - working: "NA"
-------         agent: "main"
-------         comment: "Implemented Google OAuth via Emergent Auth with session management"
-------+      - working: true
-------+        agent: "testing"
-------+        comment: "✅ All auth endpoints working correctly. Created test user and session in MongoDB, /api/auth/me returns proper user data with Bearer token authentication"
+-----@@ -1,169 +0,0 @@
+------diff --git a/frontend/app/(tabs)/profile.tsx b/frontend/app/(tabs)/profile.tsx
+------index e47ff1c..caed74e 100644
+--------- a/frontend/app/(tabs)/profile.tsx
+------+++ b/frontend/app/(tabs)/profile.tsx
+------@@ -71,7 +71,7 @@ export default function ProfileScreen() {
+------         <View style={styles.menuSection}>
+------           <Text style={styles.menuSectionTitle}>Настройки</Text>
 ------ 
-------   - task: "OCR Invoice Scanning with Gemini API"
-------     implemented: true
--------    working: "NA"
-------+    working: false
-------     file: "server.py"
--------    stuck_count: 0
-------+    stuck_count: 1
-------     priority: "high"
--------    needs_retesting: true
-------+    needs_retesting: false
-------     status_history:
-------       - working: "NA"
-------         agent: "main"
-------         comment: "Implemented OCR using Emergent LLM key with Gemini for Bulgarian invoice text extraction"
-------+      - working: false
-------+        agent: "testing"
-------+        comment: "❌ OCR endpoint failing with error: UserMessage.__init__() got an unexpected keyword argument 'image_contents'. This is an Emergent LLM library API issue that needs research to fix the correct parameter name/structure"
------- 
-------   - task: "Invoice CRUD operations"
-------     implemented: true
--------    working: "NA"
-------+    working: true
-------     file: "server.py"
-------     stuck_count: 0
-------     priority: "high"
--------    needs_retesting: true
-------+    needs_retesting: false
-------     status_history:
-------       - working: "NA"
-------         agent: "main"
-------         comment: "Full CRUD for invoices with search and filtering"
-------+      - working: true
-------+        agent: "testing"
-------+        comment: "✅ All invoice CRUD operations working perfectly. Successfully created invoice with Bulgarian supplier name, retrieved invoice list, and search by supplier name works correctly"
------- 
-------   - task: "Daily Revenue management"
-------     implemented: true
--------    working: "NA"
-------+    working: true
-------     file: "server.py"
-------     stuck_count: 0
-------     priority: "high"
--------    needs_retesting: true
-------+    needs_retesting: false
-------     status_history:
-------       - working: "NA"
-------         agent: "main"
-------         comment: "Fiscal revenue and pocket money tracking"
-------+      - working: true
-------+        agent: "testing"
-------+        comment: "✅ Daily revenue endpoint working correctly. Successfully created daily revenue entry with fiscal_revenue: 500.00 and pocket_money: 100.00"
------- 
-------   - task: "Non-Invoice Expenses (В канала)"
-------     implemented: true
--------    working: "NA"
-------+    working: true
-------     file: "server.py"
-------     stuck_count: 0
-------     priority: "medium"
--------    needs_retesting: true
-------+    needs_retesting: false
-------     status_history:
-------       - working: "NA"
-------         agent: "main"
-------         comment: "Expense tracking without invoices"
-------+      - working: true
-------+        agent: "testing"
-------+        comment: "✅ Expenses endpoint working correctly. Successfully created expense with Bulgarian description 'Гориво за кола' and amount 80.00"
------- 
-------   - task: "Statistics and VAT calculations"
-------     implemented: true
--------    working: "NA"
-------+    working: true
-------     file: "server.py"
-------     stuck_count: 0
-------     priority: "high"
--------    needs_retesting: true
-------+    needs_retesting: false
-------     status_history:
-------       - working: "NA"
-------         agent: "main"
-------         comment: "VAT calculation from fiscal revenue minus invoice VAT credit"
-------+      - working: true
-------+        agent: "testing"
-------+        comment: "✅ Statistics endpoints working perfectly. Summary shows correct VAT calculations: fiscal_vat: 83.33, vat_to_pay: 63.33, profit: 400.0. Chart data endpoint also functional"
------- 
-------   - task: "Export Excel/PDF"
-------     implemented: true
--------    working: "NA"
-------+    working: true
-------     file: "server.py"
-------     stuck_count: 0
-------     priority: "medium"
--------    needs_retesting: true
-------+    needs_retesting: false
-------     status_history:
-------       - working: "NA"
-------         agent: "main"
-------         comment: "Export invoices to Excel and PDF formats"
-------+      - working: true
-------+        agent: "testing"
-------+        comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
------- 
------- frontend:
-------   - task: "Login screen with Google OAuth"
-------@@ -270,13 +291,14 @@ metadata:
------- 
------- test_plan:
-------   current_focus:
--------    - "Auth endpoints"
--------    - "Invoice CRUD"
--------    - "Statistics API"
--------  stuck_tasks: []
-------+    - "OCR Invoice Scanning with Gemini API"
-------+  stuck_tasks:
-------+    - "OCR Invoice Scanning with Gemini API"
-------   test_all: false
--------  test_priority: "high_first"
-------+  test_priority: "stuck_first"
------- 
------- agent_communication:
-------   - agent: "main"
--------    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
-------\ No newline at end of file
-------+    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
-------+  - agent: "testing"
-------+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
-------\ No newline at end of file
+-------          <TouchableOpacity style={styles.menuItem}>
+------+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
+------             <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+------               <Ionicons name="notifications" size={20} color="#8B5CF6" />
+------             </View>
+------diff --git a/model.patch b/model.patch
+------index 9efac8f..e69de29 100644
+--------- a/model.patch
+------+++ b/model.patch
+------@@ -1,151 +0,0 @@
+-------diff --git a/test_result.md b/test_result.md
+-------index 30c484c..38875f4 100644
+---------- a/test_result.md
+-------+++ b/test_result.md
+-------@@ -107,87 +107,108 @@ user_problem_statement: Bulgarian Invoice Management Android App with OCR scanni
+------- backend:
+-------   - task: "Auth endpoints (session, me, logout)"
+-------     implemented: true
+--------    working: "NA"
+-------+    working: true
+-------     file: "server.py"
+-------     stuck_count: 0
+-------     priority: "high"
+--------    needs_retesting: true
+-------+    needs_retesting: false
+-------     status_history:
+-------       - working: "NA"
+-------         agent: "main"
+-------         comment: "Implemented Google OAuth via Emergent Auth with session management"
+-------+      - working: true
+-------+        agent: "testing"
+-------+        comment: "✅ All auth endpoints working correctly. Created test user and session in MongoDB, /api/auth/me returns proper user data with Bearer token authentication"
+------- 
+-------   - task: "OCR Invoice Scanning with Gemini API"
+-------     implemented: true
+--------    working: "NA"
+-------+    working: false
+-------     file: "server.py"
+--------    stuck_count: 0
+-------+    stuck_count: 1
+-------     priority: "high"
+--------    needs_retesting: true
+-------+    needs_retesting: false
+-------     status_history:
+-------       - working: "NA"
+-------         agent: "main"
+-------         comment: "Implemented OCR using Emergent LLM key with Gemini for Bulgarian invoice text extraction"
+-------+      - working: false
+-------+        agent: "testing"
+-------+        comment: "❌ OCR endpoint failing with error: UserMessage.__init__() got an unexpected keyword argument 'image_contents'. This is an Emergent LLM library API issue that needs research to fix the correct parameter name/structure"
+------- 
+-------   - task: "Invoice CRUD operations"
+-------     implemented: true
+--------    working: "NA"
+-------+    working: true
+-------     file: "server.py"
+-------     stuck_count: 0
+-------     priority: "high"
+--------    needs_retesting: true
+-------+    needs_retesting: false
+-------     status_history:
+-------       - working: "NA"
+-------         agent: "main"
+-------         comment: "Full CRUD for invoices with search and filtering"
+-------+      - working: true
+-------+        agent: "testing"
+-------+        comment: "✅ All invoice CRUD operations working perfectly. Successfully created invoice with Bulgarian supplier name, retrieved invoice list, and search by supplier name works correctly"
+------- 
+-------   - task: "Daily Revenue management"
+-------     implemented: true
+--------    working: "NA"
+-------+    working: true
+-------     file: "server.py"
+-------     stuck_count: 0
+-------     priority: "high"
+--------    needs_retesting: true
+-------+    needs_retesting: false
+-------     status_history:
+-------       - working: "NA"
+-------         agent: "main"
+-------         comment: "Fiscal revenue and pocket money tracking"
+-------+      - working: true
+-------+        agent: "testing"
+-------+        comment: "✅ Daily revenue endpoint working correctly. Successfully created daily revenue entry with fiscal_revenue: 500.00 and pocket_money: 100.00"
+------- 
+-------   - task: "Non-Invoice Expenses (В канала)"
+-------     implemented: true
+--------    working: "NA"
+-------+    working: true
+-------     file: "server.py"
+-------     stuck_count: 0
+-------     priority: "medium"
+--------    needs_retesting: true
+-------+    needs_retesting: false
+-------     status_history:
+-------       - working: "NA"
+-------         agent: "main"
+-------         comment: "Expense tracking without invoices"
+-------+      - working: true
+-------+        agent: "testing"
+-------+        comment: "✅ Expenses endpoint working correctly. Successfully created expense with Bulgarian description 'Гориво за кола' and amount 80.00"
+------- 
+-------   - task: "Statistics and VAT calculations"
+-------     implemented: true
+--------    working: "NA"
+-------+    working: true
+-------     file: "server.py"
+-------     stuck_count: 0
+-------     priority: "high"
+--------    needs_retesting: true
+-------+    needs_retesting: false
+-------     status_history:
+-------       - working: "NA"
+-------         agent: "main"
+-------         comment: "VAT calculation from fiscal revenue minus invoice VAT credit"
+-------+      - working: true
+-------+        agent: "testing"
+-------+        comment: "✅ Statistics endpoints working perfectly. Summary shows correct VAT calculations: fiscal_vat: 83.33, vat_to_pay: 63.33, profit: 400.0. Chart data endpoint also functional"
+------- 
+-------   - task: "Export Excel/PDF"
+-------     implemented: true
+--------    working: "NA"
+-------+    working: true
+-------     file: "server.py"
+-------     stuck_count: 0
+-------     priority: "medium"
+--------    needs_retesting: true
+-------+    needs_retesting: false
+-------     status_history:
+-------       - working: "NA"
+-------         agent: "main"
+-------         comment: "Export invoices to Excel and PDF formats"
+-------+      - working: true
+-------+        agent: "testing"
+-------+        comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
+------- 
+------- frontend:
+-------   - task: "Login screen with Google OAuth"
+-------@@ -270,13 +291,14 @@ metadata:
+------- 
+------- test_plan:
+-------   current_focus:
+--------    - "Auth endpoints"
+--------    - "Invoice CRUD"
+--------    - "Statistics API"
+--------  stuck_tasks: []
+-------+    - "OCR Invoice Scanning with Gemini API"
+-------+  stuck_tasks:
+-------+    - "OCR Invoice Scanning with Gemini API"
+-------   test_all: false
+--------  test_priority: "high_first"
+-------+  test_priority: "stuck_first"
+------- 
+------- agent_communication:
+-------   - agent: "main"
+--------    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+-------\ No newline at end of file
+-------+    message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+-------+  - agent: "testing"
+-------+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+-------\ No newline at end of file
+--diff --git a/test_result.md b/test_result.md
+--index 38875f4..2238af3 100644
+----- a/test_result.md
+--+++ b/test_result.md
+--@@ -210,6 +210,21 @@ backend:
+--         agent: "testing"
+--         comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
+-- 
+--+  - task: "Advanced Supplier Statistics Endpoints"
+--+    implemented: true
+--+    working: true
+--+    file: "server.py"
+--+    stuck_count: 0
+--+    priority: "high"
+--+    needs_retesting: false
+--+    status_history:
+--+      - working: "NA"
+--+        agent: "main"
+--+        comment: "New advanced supplier statistics endpoints: /api/statistics/suppliers, /api/statistics/supplier/{name}/detailed, /api/statistics/suppliers/compare"
+--+      - working: true
+--+        agent: "testing"
+--+        comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
+--+
+-- frontend:
+--   - task: "Login screen with Google OAuth"
+--     implemented: true
+--@@ -301,4 +316,6 @@ agent_communication:
+--   - agent: "main"
+--     message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+--   - agent: "testing"
+---    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+--\ No newline at end of file
+--+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+--+  - agent: "testing"
+--+    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
+--\ No newline at end of file
 -diff --git a/test_result.md b/test_result.md
--index 38875f4..2238af3 100644
+-index 2238af3..284e7ca 100644
 ---- a/test_result.md
 -+++ b/test_result.md
--@@ -210,6 +210,21 @@ backend:
+-@@ -225,6 +225,18 @@ backend:
 -         agent: "testing"
--         comment: "✅ Both export endpoints working correctly. Excel export returns proper spreadsheet content-type, PDF export returns proper PDF content-type"
+-         comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
 - 
--+  - task: "Advanced Supplier Statistics Endpoints"
+-+  - task: "Item Price Tracking API Endpoints"
 -+    implemented: true
 -+    working: true
 -+    file: "server.py"
@@ -229,56 +270,126 @@ index 823608d..e69de29 100644
 -+    priority: "high"
 -+    needs_retesting: false
 -+    status_history:
--+      - working: "NA"
--+        agent: "main"
--+        comment: "New advanced supplier statistics endpoints: /api/statistics/suppliers, /api/statistics/supplier/{name}/detailed, /api/statistics/suppliers/compare"
 -+      - working: true
 -+        agent: "testing"
--+        comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
+-+        comment: "✅ All item price tracking endpoints working perfectly. Successfully tested: POST /api/invoices with items (creates price history and alerts), GET /api/items/price-alerts (returns price alerts with 17.65% increase for Кафе), GET /api/items/price-alert-settings (threshold 10%, enabled), GET /api/statistics/items (item statistics with top lists), GET /api/items/price-history/кафе (price history with 2 records, avg 9.25 лв), GET /api/statistics/items/кафе/by-supplier (supplier comparison). Price alerts correctly triggered for items exceeding 10% threshold. All Bulgarian text handling working correctly."
 -+
 - frontend:
 -   - task: "Login screen with Google OAuth"
 -     implemented: true
--@@ -301,4 +316,6 @@ agent_communication:
--   - agent: "main"
--     message: "MVP implementation complete for Bulgarian Invoice Management app. Backend has all endpoints including OCR with Gemini, auth, invoices, revenue, expenses, stats, and export. Frontend has beautiful dark theme UI with Bulgarian language. Ready for backend testing."
+-@@ -318,4 +330,6 @@ agent_communication:
 -   - agent: "testing"
---    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+-     message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
+-   - agent: "testing"
+--    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
 -\ No newline at end of file
--+    message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
--+  - agent: "testing"
 -+    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
+-+  - agent: "testing"
+-+    message: "Item Price Tracking API testing completed successfully. All 7 endpoints working perfectly: ✅ POST /api/invoices with items (creates price history and alerts automatically), ✅ GET /api/items/price-alerts (returns price alerts with correct calculations), ✅ GET /api/items/price-alert-settings (threshold management), ✅ GET /api/statistics/items (comprehensive item statistics), ✅ GET /api/items/price-history/{item} (price history tracking), ✅ GET /api/statistics/items/{item}/by-supplier (supplier price comparison). Price alerts correctly triggered for 17.6% coffee price increase. Bulgarian text handling working correctly. All features ready for production."
 -\ No newline at end of file
 diff --git a/test_result.md b/test_result.md
-index 2238af3..284e7ca 100644
+index 14e93cb..b639dcc 100644
 --- a/test_result.md
 +++ b/test_result.md
-@@ -225,6 +225,18 @@ backend:
-         agent: "testing"
-         comment: "✅ All advanced supplier statistics endpoints working perfectly. GET /api/statistics/suppliers returns comprehensive stats with correct structure (executive_summary, totals, top_by_amount, etc.). GET /api/statistics/supplier/{name}/detailed returns detailed supplier info with overview, monthly_trend, anomalies, recent_invoices. GET /api/statistics/suppliers/compare returns comparison data with correct structure. All endpoints handle authentication properly and return expected response formats."
+@@ -333,62 +333,91 @@ agent_communication:
+     message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
+   - agent: "testing"
+     message: "Item Price Tracking API testing completed successfully. All 7 endpoints working perfectly: ✅ POST /api/invoices with items (creates price history and alerts automatically), ✅ GET /api/items/price-alerts (returns price alerts with correct calculations), ✅ GET /api/items/price-alert-settings (threshold management), ✅ GET /api/statistics/items (comprehensive item statistics), ✅ GET /api/items/price-history/{item} (price history tracking), ✅ GET /api/statistics/items/{item}/by-supplier (supplier price comparison). Price alerts correctly triggered for 17.6% coffee price increase. Bulgarian text handling working correctly. All features ready for production."
++  - agent: "testing"
++    message: "AI Item Normalization feature testing completed successfully. All 6 new endpoints working perfectly: ✅ GET /api/items/groups (returns item groups with proper structure), ✅ POST /api/items/groups (creates manual groups with duplicate validation), ✅ PUT /api/items/groups/{id} (updates group variants and categories), ✅ POST /api/items/normalize-single (AI normalization with 99% confidence using Gemini), ✅ POST /api/items/normalize (bulk AI normalization processed 4 items), ✅ GET /api/statistics/items?grouped=true (grouped statistics showing merged similar items). Gemini AI integration working excellently for Bulgarian item normalization. All features ready for production use."
+   - task: "AI Item Normalization - Get groups"
+     implemented: true
+-    working: "NA"
++    working: true
+     file: "backend/server.py"
+     stuck_count: 0
+     priority: "high"
+-    needs_retesting: true
++    needs_retesting: false
+     status_history:
+       - working: "NA"
+         agent: "main"
+         comment: "GET /api/items/groups - returns all item groups for company"
++      - working: true
++        agent: "testing"
++        comment: "✅ GET /api/items/groups working perfectly. Returns proper response structure with groups array and total count. Successfully retrieved 2 existing groups with variants."
  
-+  - task: "Item Price Tracking API Endpoints"
+   - task: "AI Item Normalization - Create group"
+     implemented: true
+-    working: "NA"
++    working: true
+     file: "backend/server.py"
+     stuck_count: 0
+     priority: "high"
+-    needs_retesting: true
++    needs_retesting: false
+     status_history:
+       - working: "NA"
+         agent: "main"
+         comment: "POST /api/items/groups - creates manual item group"
++      - working: true
++        agent: "testing"
++        comment: "✅ POST /api/items/groups working correctly. Properly handles duplicate group creation (409 status) and validates existing groups. Manual group creation functionality confirmed."
++
++  - task: "AI Item Normalization - Update group"
 +    implemented: true
 +    working: true
-+    file: "server.py"
++    file: "backend/server.py"
 +    stuck_count: 0
 +    priority: "high"
 +    needs_retesting: false
 +    status_history:
 +      - working: true
 +        agent: "testing"
-+        comment: "✅ All item price tracking endpoints working perfectly. Successfully tested: POST /api/invoices with items (creates price history and alerts), GET /api/items/price-alerts (returns price alerts with 17.65% increase for Кафе), GET /api/items/price-alert-settings (threshold 10%, enabled), GET /api/statistics/items (item statistics with top lists), GET /api/items/price-history/кафе (price history with 2 records, avg 9.25 лв), GET /api/statistics/items/кафе/by-supplier (supplier comparison). Price alerts correctly triggered for items exceeding 10% threshold. All Bulgarian text handling working correctly."
-+
- frontend:
-   - task: "Login screen with Google OAuth"
++        comment: "✅ PUT /api/items/groups/{group_id} working perfectly. Successfully updated group variants and category. Returns updated group data with proper structure."
+ 
+   - task: "AI Item Normalization - Normalize all"
      implemented: true
-@@ -318,4 +330,6 @@ agent_communication:
-   - agent: "testing"
-     message: "Backend testing completed. 7/8 major features working perfectly: ✅ Auth, ✅ Invoice CRUD, ✅ Daily Revenue, ✅ Expenses, ✅ Statistics, ✅ Export. ❌ OCR endpoint has Emergent LLM library API issue - UserMessage doesn't accept 'image_contents' parameter. This needs websearch to find correct API usage."
-   - agent: "testing"
--    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
-\ No newline at end of file
-+    message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
-+  - agent: "testing"
-+    message: "Item Price Tracking API testing completed successfully. All 7 endpoints working perfectly: ✅ POST /api/invoices with items (creates price history and alerts automatically), ✅ GET /api/items/price-alerts (returns price alerts with correct calculations), ✅ GET /api/items/price-alert-settings (threshold management), ✅ GET /api/statistics/items (comprehensive item statistics), ✅ GET /api/items/price-history/{item} (price history tracking), ✅ GET /api/statistics/items/{item}/by-supplier (supplier price comparison). Price alerts correctly triggered for 17.6% coffee price increase. Bulgarian text handling working correctly. All features ready for production."
-\ No newline at end of file
+-    working: "NA"
++    working: true
+     file: "backend/server.py"
+     stuck_count: 0
+     priority: "high"
+-    needs_retesting: true
++    needs_retesting: false
+     status_history:
+       - working: "NA"
+         agent: "main"
+         comment: "POST /api/items/normalize - runs AI normalization on all items"
++      - working: true
++        agent: "testing"
++        comment: "✅ POST /api/items/normalize working excellently. Successfully processed 4 items, created 0 new groups, updated 2 existing groups. AI normalization with Gemini integration functioning properly."
+ 
+   - task: "AI Item Normalization - Normalize single"
+     implemented: true
+-    working: "NA"
++    working: true
+     file: "backend/server.py"
+     stuck_count: 0
+     priority: "high"
+-    needs_retesting: true
++    needs_retesting: false
+     status_history:
+       - working: "NA"
+         agent: "main"
+         comment: "POST /api/items/normalize-single - normalizes single item"
++      - working: true
++        agent: "testing"
++        comment: "✅ POST /api/items/normalize-single working perfectly. Successfully normalized 'Олио Първа Преса 1л' to canonical name 'Олио' with 99% confidence. AI integration with Gemini working correctly."
+ 
+   - task: "Statistics Items - Grouped view"
+     implemented: true
+-    working: "NA"
++    working: true
+     file: "backend/server.py"
+     stuck_count: 0
+     priority: "high"
+-    needs_retesting: true
++    needs_retesting: false
+     status_history:
+       - working: "NA"
+         agent: "main"
+         comment: "GET /api/statistics/items?grouped=true - returns grouped item statistics"
++      - working: true
++        agent: "testing"
++        comment: "✅ GET /api/statistics/items?grouped=true working excellently. Returns proper grouped statistics with totals (8.0 items, 42.6 лв value), top items by value showing variants count, and correct grouped mode flag. Merging similar items functionality confirmed."
