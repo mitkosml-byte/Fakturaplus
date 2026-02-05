@@ -646,12 +646,12 @@ export const translations: Translations = {
     en: 'Backup & Restore',
   },
   'backup.infoTitle': {
-    bg: 'Google Drive Backup',
-    en: 'Google Drive Backup',
+    bg: 'Локален Backup',
+    en: 'Local Backup',
   },
   'backup.infoDescription': {
-    bg: 'Създайте backup на вашите данни и го запазете в Google Drive или друго облачно хранилище.',
-    en: 'Create a backup of your data and save it to Google Drive or other cloud storage.',
+    bg: 'Създайте backup на вашите данни и го запазете локално на устройството или сървъра.',
+    en: 'Create a backup of your data and save it locally on your device or server.',
   },
   'backup.status': {
     bg: 'Статус на backup',
