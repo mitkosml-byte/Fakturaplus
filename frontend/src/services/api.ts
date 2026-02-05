@@ -99,7 +99,7 @@ class ApiService {
   // Invitations
   async createInvitation(data: { email?: string; phone?: string; role: string }): Promise<{
     message: string;
-    invitation: { id: string; code: string; expires_at: string; company_name: string };
+    invitation: { id: string; code: string; invite_token: string; role: string; expires_at: string; company_name: string };
   }> {
     return this.fetch('/invitations', {
       method: 'POST',
@@ -120,6 +120,28 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ code }),
     });
+  }
+  
+  async acceptInvitationByToken(token: string): Promise<{ message: string; company: Company }> {
+    return this.fetch('/invitations/accept-by-token', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  }
+  
+  async verifyInvitationToken(token: string): Promise<{
+    valid: boolean;
+    company_name: string;
+    role: string;
+    role_name_bg: string;
+    role_name_en: string;
+    expires_at: string;
+  }> {
+    return this.fetch(`/invitations/verify/${token}`);
+  }
+  
+  async getAvailableRoles(): Promise<{ roles: Role[] }> {
+    return this.fetch('/roles');
   }
   
   async leaveCompany(): Promise<{ message: string }> {
