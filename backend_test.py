@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Backend API Testing Script for Bulgarian Invoice Management App
-Tests invitation endpoints and authentication flow
+Tests backup functionality and authentication flow
 """
 
 import asyncio
