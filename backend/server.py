@@ -739,15 +739,15 @@ async def create_invitation(invitation_data: InvitationCreate, current_user: Use
         pending = await db.invitations.find_one({
             "company_id": current_user.company_id,
             "$or": query_conditions,
-        "status": "pending"
-    })
-    if pending:
-        raise HTTPException(status_code=400, detail="Вече има активна покана за този контакт")
+            "status": "pending"
+        })
+        if pending:
+            raise HTTPException(status_code=400, detail="Вече има активна покана за този контакт")
     
     invitation = Invitation(
         company_id=current_user.company_id,
         invited_by=current_user.user_id,
-        email=invitation_data.email,
+        email=invitation_data.email.lower() if invitation_data.email else None,
         phone=invitation_data.phone,
         role=invitation_data.role
     )
@@ -758,11 +758,14 @@ async def create_invitation(invitation_data: InvitationCreate, current_user: Use
     company = await db.companies.find_one({"id": current_user.company_id}, {"name": 1})
     company_name = company.get("name", "Unknown") if company else "Unknown"
     
+    # Връщаме и token за генериране на линк
     return {
         "message": "Поканата е създадена",
         "invitation": {
             "id": invitation.id,
             "code": invitation.code,
+            "invite_token": invitation.invite_token,
+            "role": invitation.role,
             "expires_at": invitation.expires_at.isoformat(),
             "company_name": company_name
         }
