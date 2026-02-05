@@ -1,28 +1,13 @@
-import React, { useEffect } from 'react';
-import { Tabs, useRouter } from 'expo-router';
+import React from 'react';
+import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, View, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../../src/i18n';
-import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
-  const { isAuthenticated, isLoading } = useAuth();
-  const router = useRouter();
-
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.replace('/');
-    }
-  }, [isLoading, isAuthenticated]);
-
-  // Don't render tabs if not authenticated
-  if (!isAuthenticated && !isLoading) {
-    return null;
-  }
 
   return (
     <Tabs
