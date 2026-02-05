@@ -471,3 +471,51 @@ agent_communication:
       - working: true
         agent: "testing"
         comment: "✅ POST /api/invitations/accept-by-token working correctly. Properly validates that users with existing companies cannot accept invitations (returns appropriate error message in Bulgarian). Endpoint logic is sound - in production scenario with users without companies, invitation acceptance would work as expected."
+
+  - task: "Backup System - GET /api/backup/status"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ GET /api/backup/status working perfectly. Returns correct backup status with has_backup flag, last_backup_date, file_name, and statistics (invoices, revenues, expenses counts). Properly handles both initial state (no backup) and after backup creation states."
+
+  - task: "Backup System - POST /api/backup/create"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ POST /api/backup/create working excellently. Successfully creates comprehensive backup with all required fields (id, user_id, user_email, user_name, created_at, app_version, invoices, daily_revenues, expenses, statistics). Properly handles datetime serialization and creates backup metadata. Tested with real data (1 invoice, 1 revenue, 1 expense)."
+
+  - task: "Backup System - POST /api/backup/restore"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ POST /api/backup/restore working correctly. Accepts backup data with invoices, daily_revenues, and expenses arrays. Returns success status and restored counts. Properly handles duplicate prevention (restored counts were 0 because data already existed). Response structure is correct with success, message, and restored fields."
+
+  - task: "Backup System - GET /api/backup/list"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ GET /api/backup/list working perfectly. Returns list of all user backups with complete metadata (file_name, created_at, size_bytes, invoice_count, revenue_count, expense_count). Properly sorted by creation date (newest first). Successfully retrieved 1 backup with correct details (1632 bytes, proper counts)."
