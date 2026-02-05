@@ -99,11 +99,12 @@ export default function StatsScreen() {
   }, []);
   
   // Item statistics functions
-  const loadItemStats = useCallback(async () => {
+  const loadItemStats = useCallback(async (useGrouped?: boolean) => {
     setLoadingItems(true);
     try {
+      const shouldGroup = useGrouped !== undefined ? useGrouped : groupedView;
       const [statsData, alertsData] = await Promise.all([
-        api.getItemStatistics(),
+        api.getItemStatistics({ grouped: shouldGroup }),
         api.getPriceAlerts()
       ]);
       setItemStats(statsData);
@@ -114,7 +115,32 @@ export default function StatsScreen() {
     } finally {
       setLoadingItems(false);
     }
-  }, []);
+  }, [groupedView]);
+  
+  // AI Нормализация на артикули
+  const handleNormalizeItems = async () => {
+    setNormalizing(true);
+    try {
+      const result = await api.normalizeAllItems();
+      Alert.alert(
+        t('stats.normalizeSuccess'),
+        `${result.processed} ${t('stats.totalItems').toLowerCase()}\n${result.new_groups} ${t('stats.newGroups')}\n${result.updated_groups} ${t('stats.updatedGroups')}`,
+        [{ text: 'OK', onPress: () => loadItemStats(true) }]
+      );
+      setGroupedView(true);
+    } catch (error: any) {
+      Alert.alert('Грешка', error.message || 'Неуспешна нормализация');
+    } finally {
+      setNormalizing(false);
+    }
+  };
+  
+  // Toggle grouped view
+  const toggleGroupedView = () => {
+    const newValue = !groupedView;
+    setGroupedView(newValue);
+    loadItemStats(newValue);
+  };
   
   const loadItemDetail = useCallback(async (itemName: string) => {
     setLoadingItemDetail(true);
