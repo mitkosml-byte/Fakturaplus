@@ -1,6 +1,4 @@
 {
   "CFBundleDisplayName": "Faktura+",
-  "CFBundleName": "Faktura+",
-  "NSCameraUsageDescription": "Scan invoices using your camera for automatic data extraction",
-  "NSPhotoLibraryUsageDescription": "Select invoice photos from your gallery to import"
+  "CFBundleName": "Faktura+"
 }
