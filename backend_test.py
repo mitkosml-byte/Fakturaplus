@@ -340,47 +340,310 @@ class BackendTester:
             print(f"❌ Accept invitation error: {str(e)}")
             return False
 
-    async def test_accept_invitation_success_scenario(self, invite_token):
-        """Test successful invitation acceptance by creating a user without company"""
-        print(f"\n🎯 Testing successful invitation acceptance scenario")
+    async def test_backup_status(self):
+        """Test GET /api/backup/status endpoint"""
+        print("\n📊 Testing GET /api/backup/status")
         
-        # Create a second invitation for this test
         try:
             headers = await self.get_auth_headers()
-            invitation_data = {
-                "role": "manager",
-                "email": "success_test@example.com"
+            response = await self.client.get(
+                f"{BACKEND_URL}/backup/status",
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ GET /api/backup/status successful")
+                print(f"   Has Backup: {data.get('has_backup')}")
+                print(f"   Last Backup Date: {data.get('last_backup_date')}")
+                
+                if data.get('has_backup'):
+                    print(f"   File Name: {data.get('file_name')}")
+                    stats = data.get('statistics', {})
+                    print(f"   Statistics:")
+                    print(f"     - Invoices: {stats.get('invoices', 0)}")
+                    print(f"     - Revenues: {stats.get('revenues', 0)}")
+                    print(f"     - Expenses: {stats.get('expenses', 0)}")
+                
+                # Validate response structure
+                required_fields = ["has_backup", "last_backup_date"]
+                missing_fields = [field for field in required_fields if field not in data]
+                
+                if missing_fields:
+                    print(f"❌ Missing required fields in response: {missing_fields}")
+                    return False
+                
+                return True
+            else:
+                print(f"❌ GET /api/backup/status failed: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ GET /api/backup/status error: {str(e)}")
+            return False
+
+    async def test_create_backup(self):
+        """Test POST /api/backup/create endpoint"""
+        print("\n💾 Testing POST /api/backup/create")
+        
+        try:
+            headers = await self.get_auth_headers()
+            
+            # First, let's create some test data to backup
+            await self.create_test_data_for_backup()
+            
+            response = await self.client.post(
+                f"{BACKEND_URL}/backup/create",
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ POST /api/backup/create successful")
+                
+                # Validate backup structure
+                required_fields = ["id", "user_id", "user_email", "user_name", "created_at", 
+                                 "app_version", "invoices", "daily_revenues", "expenses", "statistics"]
+                missing_fields = [field for field in required_fields if field not in data]
+                
+                if missing_fields:
+                    print(f"❌ Missing required fields in backup: {missing_fields}")
+                    return False, None
+                
+                # Validate statistics
+                stats = data.get("statistics", {})
+                print(f"   Backup Statistics:")
+                print(f"     - Invoice Count: {stats.get('invoice_count', 0)}")
+                print(f"     - Revenue Count: {stats.get('revenue_count', 0)}")
+                print(f"     - Expense Count: {stats.get('expense_count', 0)}")
+                
+                # Validate data arrays
+                invoices = data.get("invoices", [])
+                revenues = data.get("daily_revenues", [])
+                expenses = data.get("expenses", [])
+                
+                print(f"   Actual Data Counts:")
+                print(f"     - Invoices: {len(invoices)}")
+                print(f"     - Daily Revenues: {len(revenues)}")
+                print(f"     - Expenses: {len(expenses)}")
+                
+                # Store backup data for restore test
+                return True, data
+                
+            else:
+                print(f"❌ POST /api/backup/create failed: {response.status_code} - {response.text}")
+                return False, None
+                
+        except Exception as e:
+            print(f"❌ POST /api/backup/create error: {str(e)}")
+            return False, None
+
+    async def create_test_data_for_backup(self):
+        """Create some test data to include in backup"""
+        print("   Creating test data for backup...")
+        
+        try:
+            headers = await self.get_auth_headers()
+            
+            # Create test invoice
+            invoice_data = {
+                "supplier": "Тест Доставчик ЕООД",
+                "invoice_number": f"TEST-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                "amount_without_vat": 100.0,
+                "vat_amount": 20.0,
+                "total_amount": 120.0,
+                "date": "2024-01-15",
+                "notes": "Тестова фактура за backup"
             }
             
             response = await self.client.post(
-                f"{BACKEND_URL}/invitations",
+                f"{BACKEND_URL}/invoices",
                 headers=headers,
-                json=invitation_data
+                json=invoice_data
             )
             
-            if response.status_code != 200:
-                print(f"❌ Failed to create test invitation: {response.status_code}")
-                return False
+            if response.status_code == 200:
+                print("     ✅ Test invoice created")
+            else:
+                print(f"     ⚠️  Failed to create test invoice: {response.status_code}")
+            
+            # Create test daily revenue
+            revenue_data = {
+                "date": "2024-01-15",
+                "fiscal_revenue": 500.0,
+                "pocket_money": 50.0
+            }
+            
+            response = await self.client.post(
+                f"{BACKEND_URL}/daily-revenue",
+                headers=headers,
+                json=revenue_data
+            )
+            
+            if response.status_code == 200:
+                print("     ✅ Test daily revenue created")
+            else:
+                print(f"     ⚠️  Failed to create test revenue: {response.status_code}")
+            
+            # Create test expense
+            expense_data = {
+                "description": "Тестов разход за backup",
+                "amount": 75.0,
+                "date": "2024-01-15"
+            }
+            
+            response = await self.client.post(
+                f"{BACKEND_URL}/expenses",
+                headers=headers,
+                json=expense_data
+            )
+            
+            if response.status_code == 200:
+                print("     ✅ Test expense created")
+            else:
+                print(f"     ⚠️  Failed to create test expense: {response.status_code}")
                 
-            data = response.json()
-            test_token = data.get("invitation", {}).get("invite_token")
-            
-            if not test_token:
-                print(f"❌ No invite token in response")
-                return False
-                
-            print(f"   Created test invitation with token: {test_token}")
-            
-            # Note: In a real scenario, we would need a user without a company
-            # Since the registration automatically creates a company, we'll document this limitation
-            print(f"   ℹ️  Note: Current system automatically assigns company to new users")
-            print(f"   ℹ️  In production, invitation acceptance would work for users without companies")
-            print(f"   ✅ Invitation creation and token verification working correctly")
-            
-            return True
-            
         except Exception as e:
-            print(f"❌ Success scenario test error: {str(e)}")
+            print(f"     ❌ Error creating test data: {str(e)}")
+
+    async def test_restore_backup(self, backup_data):
+        """Test POST /api/backup/restore endpoint"""
+        print("\n🔄 Testing POST /api/backup/restore")
+        
+        if not backup_data:
+            print("❌ No backup data available for restore test")
+            return False
+        
+        try:
+            headers = await self.get_auth_headers()
+            
+            # Prepare restore data (subset of backup)
+            restore_data = {
+                "invoices": backup_data.get("invoices", []),
+                "daily_revenues": backup_data.get("daily_revenues", []),
+                "expenses": backup_data.get("expenses", [])
+            }
+            
+            response = await self.client.post(
+                f"{BACKEND_URL}/backup/restore",
+                headers=headers,
+                json=restore_data
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ POST /api/backup/restore successful")
+                print(f"   Success: {data.get('success')}")
+                print(f"   Message: {data.get('message')}")
+                
+                restored = data.get("restored", {})
+                print(f"   Restored Counts:")
+                print(f"     - Invoices: {restored.get('invoices', 0)}")
+                print(f"     - Revenues: {restored.get('revenues', 0)}")
+                print(f"     - Expenses: {restored.get('expenses', 0)}")
+                
+                # Validate response structure
+                required_fields = ["success", "message", "restored"]
+                missing_fields = [field for field in required_fields if field not in data]
+                
+                if missing_fields:
+                    print(f"❌ Missing required fields in response: {missing_fields}")
+                    return False
+                
+                if not data.get("success"):
+                    print(f"❌ Restore operation reported failure")
+                    return False
+                
+                return True
+                
+            else:
+                print(f"❌ POST /api/backup/restore failed: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ POST /api/backup/restore error: {str(e)}")
+            return False
+
+    async def test_list_backups(self):
+        """Test GET /api/backup/list endpoint"""
+        print("\n📋 Testing GET /api/backup/list")
+        
+        try:
+            headers = await self.get_auth_headers()
+            response = await self.client.get(
+                f"{BACKEND_URL}/backup/list",
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                backups = data.get("backups", [])
+                
+                print(f"✅ GET /api/backup/list successful")
+                print(f"   Found {len(backups)} backups")
+                
+                for i, backup in enumerate(backups[:3]):  # Show first 3
+                    print(f"   Backup {i+1}:")
+                    print(f"     - File Name: {backup.get('file_name')}")
+                    print(f"     - Created At: {backup.get('created_at')}")
+                    print(f"     - Size: {backup.get('size_bytes', 0)} bytes")
+                    print(f"     - Invoice Count: {backup.get('invoice_count', 0)}")
+                    print(f"     - Revenue Count: {backup.get('revenue_count', 0)}")
+                    print(f"     - Expense Count: {backup.get('expense_count', 0)}")
+                
+                # Validate response structure
+                if "backups" not in data:
+                    print(f"❌ Missing 'backups' field in response")
+                    return False
+                
+                return True
+                
+            else:
+                print(f"❌ GET /api/backup/list failed: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ GET /api/backup/list error: {str(e)}")
+            return False
+
+    async def test_backup_status_after_create(self):
+        """Test backup status after creating a backup"""
+        print("\n📊 Testing GET /api/backup/status after backup creation")
+        
+        try:
+            headers = await self.get_auth_headers()
+            response = await self.client.get(
+                f"{BACKEND_URL}/backup/status",
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ GET /api/backup/status after creation successful")
+                
+                if data.get('has_backup'):
+                    print(f"   ✅ Backup status correctly shows has_backup: true")
+                    print(f"   Last Backup Date: {data.get('last_backup_date')}")
+                    print(f"   File Name: {data.get('file_name')}")
+                    
+                    stats = data.get('statistics', {})
+                    if stats:
+                        print(f"   Statistics updated:")
+                        print(f"     - Invoices: {stats.get('invoices', 0)}")
+                        print(f"     - Revenues: {stats.get('revenues', 0)}")
+                        print(f"     - Expenses: {stats.get('expenses', 0)}")
+                    
+                    return True
+                else:
+                    print(f"❌ Backup status should show has_backup: true after creation")
+                    return False
+                    
+            else:
+                print(f"❌ GET /api/backup/status failed: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ GET /api/backup/status error: {str(e)}")
             return False
 
     async def run_all_tests(self):
