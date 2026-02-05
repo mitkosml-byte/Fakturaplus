@@ -458,7 +458,9 @@ export default function UsersManagementScreen() {
                               [
                                 { text: language === 'bg' ? 'Отказ' : 'Cancel', style: 'cancel' },
                                 { text: getRoleName('manager'), onPress: () => handleChangeRole(user.user_id, 'manager') },
+                                { text: getRoleName('accountant'), onPress: () => handleChangeRole(user.user_id, 'accountant') },
                                 { text: getRoleName('staff'), onPress: () => handleChangeRole(user.user_id, 'staff') },
+                                { text: getRoleName('viewer'), onPress: () => handleChangeRole(user.user_id, 'viewer') },
                               ]
                             );
                           }}
