@@ -53,28 +53,6 @@ export default function ProfileScreen() {
     setRefreshing(false);
   }, [refreshUser, loadCompany]);
 
-  const handleLogout = async () => {
-    Alert.alert(
-      t('profile.logout'),
-      t('profile.logoutConfirm'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('profile.logout'),
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            // Use dismissAll to clear navigation stack, then go to login
-            while (router.canGoBack()) {
-              router.back();
-            }
-            router.replace('/index');
-          },
-        },
-      ]
-    );
-  };
-
   const handleLanguageChange = async (newLang: Language) => {
     await setLanguage(newLang);
     setShowLanguageModal(false);
