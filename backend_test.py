@@ -415,6 +415,9 @@ class BackendTester:
             
             # 7. Test POST /api/invitations/accept-by-token
             results["accept_invitation"] = await self.test_accept_invitation_by_token(invite_token)
+            
+            # 8. Test successful invitation acceptance scenario
+            results["accept_invitation_success"] = await self.test_accept_invitation_success_scenario(invite_token)
         else:
             results["verify_token"] = False
             results["verify_invalid_token"] = False
