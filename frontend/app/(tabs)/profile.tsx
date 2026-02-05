@@ -24,6 +24,7 @@ export default function ProfileScreen() {
   const { t } = useTranslation();
   const { language, setLanguage } = useLanguageStore();
   const { user, refreshUser } = useAuth();
+  const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
