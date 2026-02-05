@@ -120,6 +120,46 @@ class UserLogin(BaseModel):
     email: str
     password: str
 
+# ===================== STANDARD ROLES =====================
+# Стандартни роли с описания
+STANDARD_ROLES = {
+    "owner": {
+        "name_bg": "Титуляр",
+        "name_en": "Owner",
+        "description_bg": "Пълен достъп и управление на фирмата",
+        "description_en": "Full access and company management",
+        "permissions": ["all"]
+    },
+    "manager": {
+        "name_bg": "Мениджър",
+        "name_en": "Manager",
+        "description_bg": "Управление на фактури и потребители",
+        "description_en": "Invoice and user management",
+        "permissions": ["invoices", "revenues", "expenses", "statistics", "users"]
+    },
+    "accountant": {
+        "name_bg": "Счетоводител",
+        "name_en": "Accountant",
+        "description_bg": "Достъп до финансова информация и статистики",
+        "description_en": "Access to financial data and statistics",
+        "permissions": ["invoices", "revenues", "expenses", "statistics", "export"]
+    },
+    "staff": {
+        "name_bg": "Служител",
+        "name_en": "Staff",
+        "description_bg": "Добавяне на фактури и приходи",
+        "description_en": "Add invoices and revenues",
+        "permissions": ["invoices.create", "revenues.create", "expenses.create"]
+    },
+    "viewer": {
+        "name_bg": "Само преглед",
+        "name_en": "Viewer",
+        "description_bg": "Само преглед на данни, без редактиране",
+        "description_en": "View-only access, no editing",
+        "permissions": ["invoices.view", "statistics.view"]
+    }
+}
+
 # Invitation model for user invitations
 class Invitation(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -129,14 +169,15 @@ class Invitation(BaseModel):
     phone: Optional[str] = None
     role: str = "staff"  # Роля за поканения
     code: str = Field(default_factory=lambda: uuid.uuid4().hex[:8].upper())  # 8-символен код
+    invite_token: str = Field(default_factory=lambda: uuid.uuid4().hex)  # Уникален токен за линк
     status: str = "pending"  # "pending", "accepted", "cancelled", "expired"
-    expires_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(days=7))
+    expires_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(hours=48))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class InvitationCreate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
-    role: str = "staff"
+    role: str = "staff"  # owner не може да се кани
 
 class Invoice(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
