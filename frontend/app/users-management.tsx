@@ -13,17 +13,24 @@ import {
   RefreshControl,
   Share,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { api } from '@/src/services/api';
-import { User, Invitation } from '@/src/types';
+import { User, Invitation, Role } from '@/src/types';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import * as Clipboard from 'expo-clipboard';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
+
+// Базов URL за покани (ще се използва за deep linking)
+const getInviteBaseUrl = () => {
+  // За production използвайте реалния домейн
+  return 'https://invoice-app.example.com/invite';
+};
 
 export default function UsersManagementScreen() {
   const { t } = useTranslation();
@@ -34,18 +41,21 @@ export default function UsersManagementScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
   
   // Invitation modal
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [invitePhone, setInvitePhone] = useState('');
-  const [inviteRole, setInviteRole] = useState<'manager' | 'staff'>('staff');
+  const [inviteRole, setInviteRole] = useState<string>('staff');
   const [inviting, setInviting] = useState(false);
   
-  // Invitation code modal
-  const [showCodeModal, setShowCodeModal] = useState(false);
-  const [invitationCode, setInvitationCode] = useState('');
-  const [companyName, setCompanyName] = useState('');
+  // Share modal (след създаване на покана)
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [createdInvitation, setCreatedInvitation] = useState<{
+    code: string;
+    invite_token: string;
+    company_name: string;
+    role: string;
+  } | null>(null);
 
   const loadData = useCallback(async () => {
     try {
