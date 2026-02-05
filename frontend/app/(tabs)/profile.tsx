@@ -24,8 +24,7 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 export default function ProfileScreen() {
   const { t } = useTranslation();
   const { language, setLanguage } = useLanguageStore();
-  const { user, logout, refreshUser } = useAuth();
-  const router = useRouter();
+  const { user, refreshUser } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
