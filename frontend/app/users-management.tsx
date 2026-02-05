@@ -521,7 +521,7 @@ export default function UsersManagementScreen() {
             <View style={{ height: 40 }} />
           </ScrollView>
 
-          {/* Invite Modal */}
+          {/* Invite Modal - избор на роля */}
           <Modal visible={showInviteModal} animationType="slide" transparent>
             <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -534,61 +534,76 @@ export default function UsersManagementScreen() {
                   </TouchableOpacity>
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>
-                    {language === 'bg' ? 'Имейл' : 'Email'}
-                  </Text>
-                  <TextInput
-                    style={styles.input}
-                    value={inviteEmail}
-                    onChangeText={setInviteEmail}
-                    placeholder="user@example.com"
-                    placeholderTextColor="#64748B"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                  />
-                </View>
-
-                <Text style={styles.orText}>
-                  {language === 'bg' ? '— или —' : '— or —'}
+                <Text style={styles.modalSubtitle}>
+                  {language === 'bg' 
+                    ? 'Изберете роля за новия потребител:'
+                    : 'Select a role for the new user:'}
                 </Text>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>
-                    {language === 'bg' ? 'Телефон' : 'Phone'}
-                  </Text>
-                  <TextInput
-                    style={styles.input}
-                    value={invitePhone}
-                    onChangeText={setInvitePhone}
-                    placeholder="+359 888 123456"
-                    placeholderTextColor="#64748B"
-                    keyboardType="phone-pad"
-                  />
-                </View>
+                <View style={styles.rolesGrid}>
+                  {/* Manager */}
+                  <TouchableOpacity
+                    style={[styles.roleCard, inviteRole === 'manager' && styles.roleCardActive]}
+                    onPress={() => setInviteRole('manager')}
+                  >
+                    <View style={[styles.roleIconContainer, { backgroundColor: '#3B82F620' }]}>
+                      <Ionicons name="briefcase" size={24} color="#3B82F6" />
+                    </View>
+                    <Text style={styles.roleCardTitle}>{getRoleName('manager')}</Text>
+                    <Text style={styles.roleCardDesc}>
+                      {language === 'bg' 
+                        ? 'Управление на фактури и потребители'
+                        : 'Manage invoices and users'}
+                    </Text>
+                  </TouchableOpacity>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>
-                    {language === 'bg' ? 'Роля' : 'Role'}
-                  </Text>
-                  <View style={styles.roleSelector}>
-                    <TouchableOpacity
-                      style={[styles.roleOption, inviteRole === 'staff' && styles.roleOptionActive]}
-                      onPress={() => setInviteRole('staff')}
-                    >
-                      <Text style={[styles.roleOptionText, inviteRole === 'staff' && styles.roleOptionTextActive]}>
-                        {getRoleName('staff')}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.roleOption, inviteRole === 'manager' && styles.roleOptionActive]}
-                      onPress={() => setInviteRole('manager')}
-                    >
-                      <Text style={[styles.roleOptionText, inviteRole === 'manager' && styles.roleOptionTextActive]}>
-                        {getRoleName('manager')}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                  {/* Accountant */}
+                  <TouchableOpacity
+                    style={[styles.roleCard, inviteRole === 'accountant' && styles.roleCardActive]}
+                    onPress={() => setInviteRole('accountant')}
+                  >
+                    <View style={[styles.roleIconContainer, { backgroundColor: '#10B98120' }]}>
+                      <Ionicons name="calculator" size={24} color="#10B981" />
+                    </View>
+                    <Text style={styles.roleCardTitle}>{getRoleName('accountant')}</Text>
+                    <Text style={styles.roleCardDesc}>
+                      {language === 'bg' 
+                        ? 'Достъп до финанси и статистики'
+                        : 'Access to finances and stats'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Staff */}
+                  <TouchableOpacity
+                    style={[styles.roleCard, inviteRole === 'staff' && styles.roleCardActive]}
+                    onPress={() => setInviteRole('staff')}
+                  >
+                    <View style={[styles.roleIconContainer, { backgroundColor: '#64748B20' }]}>
+                      <Ionicons name="person" size={24} color="#64748B" />
+                    </View>
+                    <Text style={styles.roleCardTitle}>{getRoleName('staff')}</Text>
+                    <Text style={styles.roleCardDesc}>
+                      {language === 'bg' 
+                        ? 'Добавяне на фактури и приходи'
+                        : 'Add invoices and revenues'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Viewer */}
+                  <TouchableOpacity
+                    style={[styles.roleCard, inviteRole === 'viewer' && styles.roleCardActive]}
+                    onPress={() => setInviteRole('viewer')}
+                  >
+                    <View style={[styles.roleIconContainer, { backgroundColor: '#94A3B820' }]}>
+                      <Ionicons name="eye" size={24} color="#94A3B8" />
+                    </View>
+                    <Text style={styles.roleCardTitle}>{getRoleName('viewer')}</Text>
+                    <Text style={styles.roleCardDesc}>
+                      {language === 'bg' 
+                        ? 'Само преглед на данни'
+                        : 'View-only access'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
 
                 <TouchableOpacity
@@ -600,9 +615,9 @@ export default function UsersManagementScreen() {
                     <ActivityIndicator color="white" />
                   ) : (
                     <>
-                      <Ionicons name="send" size={20} color="white" />
+                      <Ionicons name="link" size={20} color="white" />
                       <Text style={styles.inviteButtonText}>
-                        {language === 'bg' ? 'Създай покана' : 'Create Invitation'}
+                        {language === 'bg' ? 'Генерирай линк за покана' : 'Generate Invite Link'}
                       </Text>
                     </>
                   )}
@@ -611,42 +626,83 @@ export default function UsersManagementScreen() {
             </View>
           </Modal>
 
-          {/* Invitation Code Modal */}
-          <Modal visible={showCodeModal} animationType="fade" transparent>
+          {/* Share Modal - споделяне чрез различни канали */}
+          <Modal visible={showShareModal} animationType="fade" transparent>
             <View style={styles.modalOverlay}>
-              <View style={styles.codeModalContent}>
+              <View style={styles.shareModalContent}>
                 <Ionicons name="checkmark-circle" size={64} color="#10B981" />
                 <Text style={styles.codeModalTitle}>
                   {language === 'bg' ? 'Поканата е създадена!' : 'Invitation Created!'}
                 </Text>
                 <Text style={styles.codeModalSubtitle}>
                   {language === 'bg' 
-                    ? 'Споделете кода с поканения потребител:'
-                    : 'Share this code with the invited user:'}
+                    ? `Роля: ${getRoleName(createdInvitation?.role || 'staff')}`
+                    : `Role: ${getRoleName(createdInvitation?.role || 'staff')}`}
                 </Text>
                 
+                {/* Код за бързо споделяне */}
                 <View style={styles.codeBox}>
-                  <Text style={styles.codeText}>{invitationCode}</Text>
+                  <Text style={styles.codeText}>{createdInvitation?.code}</Text>
                 </View>
 
-                <View style={styles.codeActions}>
-                  <TouchableOpacity style={styles.codeActionButton} onPress={handleCopyCode}>
-                    <Ionicons name="copy" size={20} color="#8B5CF6" />
-                    <Text style={styles.codeActionText}>
-                      {language === 'bg' ? 'Копирай' : 'Copy'}
+                <Text style={styles.shareTitle}>
+                  {language === 'bg' ? 'Сподели чрез:' : 'Share via:'}
+                </Text>
+
+                {/* Бутони за споделяне */}
+                <View style={styles.shareButtonsGrid}>
+                  <TouchableOpacity style={styles.shareButton} onPress={handleShareViber}>
+                    <View style={[styles.shareIconBg, { backgroundColor: '#7360F220' }]}>
+                      <Ionicons name="chatbubble" size={24} color="#7360F2" />
+                    </View>
+                    <Text style={styles.shareButtonText}>Viber</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.shareButton} onPress={handleShareWhatsApp}>
+                    <View style={[styles.shareIconBg, { backgroundColor: '#25D36620' }]}>
+                      <Ionicons name="logo-whatsapp" size={24} color="#25D366" />
+                    </View>
+                    <Text style={styles.shareButtonText}>WhatsApp</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.shareButton} onPress={handleShareSMS}>
+                    <View style={[styles.shareIconBg, { backgroundColor: '#3B82F620' }]}>
+                      <Ionicons name="chatbox" size={24} color="#3B82F6" />
+                    </View>
+                    <Text style={styles.shareButtonText}>SMS</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.shareButton} onPress={handleShareEmail}>
+                    <View style={[styles.shareIconBg, { backgroundColor: '#EF444420' }]}>
+                      <Ionicons name="mail" size={24} color="#EF4444" />
+                    </View>
+                    <Text style={styles.shareButtonText}>Email</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Допълнителни действия */}
+                <View style={styles.additionalActions}>
+                  <TouchableOpacity style={styles.secondaryActionButton} onPress={handleCopyLink}>
+                    <Ionicons name="copy" size={18} color="#8B5CF6" />
+                    <Text style={styles.secondaryActionText}>
+                      {language === 'bg' ? 'Копирай линк' : 'Copy link'}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.codeActionButton} onPress={handleShareCode}>
-                    <Ionicons name="share-social" size={20} color="#8B5CF6" />
-                    <Text style={styles.codeActionText}>
-                      {language === 'bg' ? 'Сподели' : 'Share'}
+
+                  <TouchableOpacity style={styles.secondaryActionButton} onPress={handleShareGeneric}>
+                    <Ionicons name="share-social" size={18} color="#8B5CF6" />
+                    <Text style={styles.secondaryActionText}>
+                      {language === 'bg' ? 'Други' : 'More'}
                     </Text>
                   </TouchableOpacity>
                 </View>
 
                 <TouchableOpacity
                   style={styles.closeCodeButton}
-                  onPress={() => setShowCodeModal(false)}
+                  onPress={() => {
+                    setShowShareModal(false);
+                    setCreatedInvitation(null);
+                  }}
                 >
                   <Text style={styles.closeCodeButtonText}>
                     {language === 'bg' ? 'Готово' : 'Done'}
