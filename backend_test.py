@@ -686,23 +686,23 @@ async def main():
     async with BackendTester() as tester:
         results = await tester.run_all_tests()
         
-        print("\n" + "=" * 60)
-        print("📊 TEST RESULTS SUMMARY")
-        print("=" * 60)
+        print("\n" + "=" * 70)
+        print("📊 BACKUP API TEST RESULTS SUMMARY")
+        print("=" * 70)
         
         passed = 0
         total = len(results)
         
         for test_name, success in results.items():
             status = "✅ PASS" if success else "❌ FAIL"
-            print(f"{test_name:25} {status}")
+            print(f"{test_name:30} {status}")
             if success:
                 passed += 1
         
         print(f"\nOverall: {passed}/{total} tests passed")
         
         if passed == total:
-            print("🎉 All invitation API tests passed!")
+            print("🎉 All backup API tests passed!")
         else:
             print("⚠️  Some tests failed - check logs above")
         
