@@ -38,7 +38,8 @@ class ApiService {
     const response = await fetch(`${API_URL}/api${endpoint}`, {
       ...options,
       headers,
-      credentials: 'include',
+      // Don't include credentials for localhost development (CORS issue)
+      // Bearer token is used for authentication instead of cookies
     });
 
     if (!response.ok) {
