@@ -3182,22 +3182,28 @@ async def get_item_statistics(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     top_n: int = 10,
+    grouped: bool = False,  # Нов параметър за групиран изглед
     current_user: User = Depends(get_current_user)
 ):
-    """Връща статистика за артикули - топ N по брой и стойност"""
+    """Връща статистика за артикули - топ N по брой и стойност.
+    Ако grouped=True, използва AI нормализирани групи.
+    """
     from collections import defaultdict
     
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
+    empty_response = {
+        "totals": {"total_items": 0, "total_value": 0, "unique_items": 0, "groups_count": 0},
+        "top_by_quantity": [],
+        "top_by_value": [],
+        "top_by_frequency": [],
+        "price_trends": [],
+        "grouped": grouped
+    }
+    
     if not company_id:
-        return {
-            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0},
-            "top_by_quantity": [],
-            "top_by_value": [],
-            "top_by_frequency": [],
-            "price_trends": []
-        }
+        return empty_response
     
     # Build date query
     query = {"company_id": company_id}
@@ -3212,27 +3218,44 @@ async def get_item_statistics(
     history = await db.item_price_history.find(query, {"_id": 0}).to_list(10000)
     
     if not history:
-        return {
-            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0},
-            "top_by_quantity": [],
-            "top_by_value": [],
-            "top_by_frequency": [],
-            "price_trends": []
-        }
+        return empty_response
     
-    # Aggregate by item
+    # Get item groups if grouped mode is requested
+    item_to_canonical = {}
+    if grouped:
+        groups = await db.item_groups.find(
+            {"company_id": company_id},
+            {"_id": 0}
+        ).to_list(1000)
+        
+        # Build mapping from variants to canonical names
+        for group in groups:
+            canonical = group["canonical_name"]
+            item_to_canonical[canonical.lower()] = canonical
+            for variant in group.get("variants", []):
+                item_to_canonical[variant.lower()] = canonical
+    
+    # Aggregate by item (or by canonical name if grouped)
     item_stats = defaultdict(lambda: {
         "quantity": 0,
         "total_value": 0,
         "frequency": 0,
         "prices": [],
-        "suppliers": set()
+        "suppliers": set(),
+        "variants": set()  # За групиран режим - съхраняваме оригиналните имена
     })
     
     for record in history:
-        name = record["item_name"]
+        original_name = record["item_name"]
         price = record["unit_price"]
         qty = record["quantity"]
+        
+        # Определяме името за групиране
+        if grouped and original_name.lower() in item_to_canonical:
+            name = item_to_canonical[original_name.lower()]
+            item_stats[name]["variants"].add(original_name)
+        else:
+            name = original_name
         
         item_stats[name]["quantity"] += qty
         item_stats[name]["total_value"] += price * qty
@@ -3261,7 +3284,7 @@ async def get_item_statistics(
         else:
             trend = 0
         
-        items_list.append({
+        item_data = {
             "item_name": name,
             "quantity": round(stats["quantity"], 2),
             "total_value": round(stats["total_value"], 2),
@@ -3272,7 +3295,14 @@ async def get_item_statistics(
             "price_variance": round(price_variance, 1),
             "trend_percent": round(trend, 1),
             "supplier_count": len(stats["suppliers"])
-        })
+        }
+        
+        # Добавяме варианти ако сме в групиран режим
+        if grouped and stats["variants"]:
+            item_data["variants"] = list(stats["variants"])
+            item_data["variant_count"] = len(stats["variants"])
+        
+        items_list.append(item_data)
     
     # Sort by different criteria
     top_by_quantity = sorted(items_list, key=lambda x: x["quantity"], reverse=True)[:top_n]
@@ -3290,16 +3320,21 @@ async def get_item_statistics(
     total_quantity = sum(i["quantity"] for i in items_list)
     total_value = sum(i["total_value"] for i in items_list)
     
+    # Count groups if in grouped mode
+    groups_count = len(item_to_canonical) // 2 if grouped else 0  # Approximate unique groups
+    
     return {
         "totals": {
             "total_items": round(total_quantity, 2),
             "total_value": round(total_value, 2),
-            "unique_items": len(items_list)
+            "unique_items": len(items_list),
+            "groups_count": groups_count
         },
         "top_by_quantity": top_by_quantity,
         "top_by_value": top_by_value,
         "top_by_frequency": top_by_frequency,
-        "price_trends": price_trends
+        "price_trends": price_trends,
+        "grouped": grouped
     }
 
 @api_router.get("/statistics/items/{item_name}/by-supplier")
