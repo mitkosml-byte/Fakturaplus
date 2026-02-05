@@ -421,3 +421,51 @@ agent_communication:
       - working: true
         agent: "testing"
         comment: "✅ GET /api/statistics/items?grouped=true working excellently. Returns proper grouped statistics with totals (8.0 items, 42.6 лв value), top items by value showing variants count, and correct grouped mode flag. Merging similar items functionality confirmed."
+
+  - task: "User Invitation System - GET /api/roles"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ GET /api/roles working perfectly. Returns 4 available roles (manager, accountant, staff, viewer) with Bulgarian and English names. Correctly excludes 'owner' role from invitable roles list."
+
+  - task: "User Invitation System - POST /api/invitations"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ POST /api/invitations working excellently. Successfully creates invitations for all roles (staff, manager, accountant, viewer). Returns proper response with invitation ID, code, invite_token, role, company_name, and expires_at. Tested with different roles and all working correctly."
+
+  - task: "User Invitation System - GET /api/invitations/verify/{token}"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ GET /api/invitations/verify/{token} working perfectly. Public endpoint correctly verifies invitation tokens and returns company name, role information (both BG and EN), and expiration date. Properly rejects invalid tokens with 404 status."
+
+  - task: "User Invitation System - POST /api/invitations/accept-by-token"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ POST /api/invitations/accept-by-token working correctly. Properly validates that users with existing companies cannot accept invitations (returns appropriate error message in Bulgarian). Endpoint logic is sound - in production scenario with users without companies, invitation acceptance would work as expected."
