@@ -131,8 +131,8 @@ export default function ProfileScreen() {
         <View style={styles.menuSection}>
           <Text style={styles.menuSectionTitle}>{t('profile.settings')}</Text>
 
-          {/* Users Management - Only for Owner */}
-          {user?.role === 'owner' && (
+          {/* Users Management - Only for Owner and Manager */}
+          {(user?.role === 'owner' || user?.role === 'manager') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/users-management')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
                 <Ionicons name="people" size={20} color="#EC4899" />
