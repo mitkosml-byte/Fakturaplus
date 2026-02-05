@@ -333,3 +333,62 @@ agent_communication:
     message: "Advanced supplier statistics endpoints testing completed successfully. All 3 new endpoints working perfectly: ✅ GET /api/statistics/suppliers (comprehensive supplier stats with executive summary, totals, rankings), ✅ GET /api/statistics/supplier/{name}/detailed (detailed supplier analysis with trends and anomalies), ✅ GET /api/statistics/suppliers/compare (multi-supplier comparison). Response structures match expected formats. Authentication working correctly. Ready for production use."
   - agent: "testing"
     message: "Item Price Tracking API testing completed successfully. All 7 endpoints working perfectly: ✅ POST /api/invoices with items (creates price history and alerts automatically), ✅ GET /api/items/price-alerts (returns price alerts with correct calculations), ✅ GET /api/items/price-alert-settings (threshold management), ✅ GET /api/statistics/items (comprehensive item statistics), ✅ GET /api/items/price-history/{item} (price history tracking), ✅ GET /api/statistics/items/{item}/by-supplier (supplier price comparison). Price alerts correctly triggered for 17.6% coffee price increase. Bulgarian text handling working correctly. All features ready for production."
+  - task: "AI Item Normalization - Get groups"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "GET /api/items/groups - returns all item groups for company"
+
+  - task: "AI Item Normalization - Create group"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "POST /api/items/groups - creates manual item group"
+
+  - task: "AI Item Normalization - Normalize all"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "POST /api/items/normalize - runs AI normalization on all items"
+
+  - task: "AI Item Normalization - Normalize single"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "POST /api/items/normalize-single - normalizes single item"
+
+  - task: "Statistics Items - Grouped view"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "GET /api/statistics/items?grouped=true - returns grouped item statistics"
