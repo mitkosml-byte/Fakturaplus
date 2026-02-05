@@ -718,8 +718,8 @@ export const translations: Translations = {
     en: 'Statistics',
   },
   'backup.saveFile': {
-    bg: 'Запазете файла в Google Drive или друго място за съхранение.',
-    en: 'Save the file to Google Drive or other storage.',
+    bg: 'Запазете файла на устройството или изберете папка за съхранение.',
+    en: 'Save the file to your device or select a storage folder.',
   },
   'backup.sharingNotAvailable': {
     bg: 'Файлът е създаден, но споделянето не е достъпно на това устройство.',
