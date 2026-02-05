@@ -698,12 +698,12 @@ export const translations: Translations = {
     en: 'Press "Create Backup" to export your data',
   },
   'backup.step2': {
-    bg: 'Изберете "Запази в Google Drive" от менюто за споделяне',
-    en: 'Select "Save to Google Drive" from the sharing menu',
+    bg: 'Изберете къде да запазите файла от менюто за споделяне',
+    en: 'Select where to save the file from the sharing menu',
   },
   'backup.step3': {
-    bg: 'За възстановяване - изберете файла от Google Drive',
-    en: 'To restore - select the file from Google Drive',
+    bg: 'За възстановяване - изберете backup файла от устройството',
+    en: 'To restore - select the backup file from your device',
   },
   'backup.successTitle': {
     bg: 'Успех!',
