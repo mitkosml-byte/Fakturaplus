@@ -335,60 +335,87 @@ agent_communication:
     message: "Item Price Tracking API testing completed successfully. All 7 endpoints working perfectly: ✅ POST /api/invoices with items (creates price history and alerts automatically), ✅ GET /api/items/price-alerts (returns price alerts with correct calculations), ✅ GET /api/items/price-alert-settings (threshold management), ✅ GET /api/statistics/items (comprehensive item statistics), ✅ GET /api/items/price-history/{item} (price history tracking), ✅ GET /api/statistics/items/{item}/by-supplier (supplier price comparison). Price alerts correctly triggered for 17.6% coffee price increase. Bulgarian text handling working correctly. All features ready for production."
   - task: "AI Item Normalization - Get groups"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "GET /api/items/groups - returns all item groups for company"
+      - working: true
+        agent: "testing"
+        comment: "✅ GET /api/items/groups working perfectly. Returns proper response structure with groups array and total count. Successfully retrieved 2 existing groups with variants."
 
   - task: "AI Item Normalization - Create group"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "POST /api/items/groups - creates manual item group"
+      - working: true
+        agent: "testing"
+        comment: "✅ POST /api/items/groups working correctly. Properly handles duplicate group creation (409 status) and validates existing groups. Manual group creation functionality confirmed."
 
-  - task: "AI Item Normalization - Normalize all"
+  - task: "AI Item Normalization - Update group"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PUT /api/items/groups/{group_id} working perfectly. Successfully updated group variants and category. Returns updated group data with proper structure."
+
+  - task: "AI Item Normalization - Normalize all"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "POST /api/items/normalize - runs AI normalization on all items"
+      - working: true
+        agent: "testing"
+        comment: "✅ POST /api/items/normalize working excellently. Successfully processed 4 items, created 0 new groups, updated 2 existing groups. AI normalization with Gemini integration functioning properly."
 
   - task: "AI Item Normalization - Normalize single"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "POST /api/items/normalize-single - normalizes single item"
+      - working: true
+        agent: "testing"
+        comment: "✅ POST /api/items/normalize-single working perfectly. Successfully normalized 'Олио Първа Преса 1л' to canonical name 'Олио' with 99% confidence. AI integration with Gemini working correctly."
 
   - task: "Statistics Items - Grouped view"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "GET /api/statistics/items?grouped=true - returns grouped item statistics"
+      - working: true
+        agent: "testing"
+        comment: "✅ GET /api/statistics/items?grouped=true working excellently. Returns proper grouped statistics with totals (8.0 items, 42.6 лв value), top items by value showing variants count, and correct grouped mode flag. Merging similar items functionality confirmed."
