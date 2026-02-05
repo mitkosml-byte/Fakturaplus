@@ -1623,6 +1623,12 @@ async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(ge
                     invoice_date=invoice_date
                 )
                 await db.item_price_history.insert_one(price_history.dict())
+                
+                # AI нормализация на артикула (асинхронно, без да забавя фактурата)
+                try:
+                    await normalize_and_save_item(item.name, company_id)
+                except Exception as norm_error:
+                    logger.warning(f"Item normalization failed for '{item.name}': {norm_error}")
     
     invoice_obj = Invoice(
         user_id=current_user.user_id,
