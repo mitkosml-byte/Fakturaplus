@@ -1115,6 +1115,48 @@ export default function StatsScreen() {
                       </View>
                     )}
 
+                    {/* AI Grouping Controls */}
+                    <View style={styles.groupingControlsCard}>
+                      <View style={styles.groupingHeader}>
+                        <View style={styles.groupingTitleRow}>
+                          <Ionicons name="sparkles" size={20} color="#8B5CF6" />
+                          <Text style={styles.groupingTitle}>{t('stats.itemGroups')}</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[styles.normalizeButton, normalizing && styles.normalizeButtonDisabled]}
+                          onPress={handleNormalizeItems}
+                          disabled={normalizing}
+                        >
+                          {normalizing ? (
+                            <ActivityIndicator size="small" color="white" />
+                          ) : (
+                            <>
+                              <Ionicons name="flash" size={16} color="white" />
+                              <Text style={styles.normalizeButtonText}>{t('stats.normalizeItems')}</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                      
+                      <View style={styles.groupingToggleRow}>
+                        <Text style={styles.groupingToggleLabel}>
+                          {groupedView ? t('stats.groupedView') : t('stats.detailedView')}
+                        </Text>
+                        <Switch
+                          value={groupedView}
+                          onValueChange={toggleGroupedView}
+                          trackColor={{ false: '#3E3E5E', true: '#8B5CF6' }}
+                          thumbColor={groupedView ? '#fff' : '#94A3B8'}
+                        />
+                      </View>
+                      
+                      {groupedView && itemStats?.grouped && (
+                        <Text style={styles.groupingHint}>
+                          {t('stats.mergedStats')}: {t('stats.similarItems')} {t('common.merged').toLowerCase()}
+                        </Text>
+                      )}
+                    </View>
+
                     {/* Ranking Type Selector */}
                     <View style={styles.rankingSelector}>
                       <TouchableOpacity
