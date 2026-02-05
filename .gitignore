@@ -73,10 +73,6 @@ agenthub/agents/youtube/db
 # Mobile development
 android-sdk/
 
-# Sensitive files
+# Sensitive files (NOT .env - needed for deployment)
 *token.json*
 *credentials.json*
--e 
-# Environment files
-*.env
-*.env.*
