@@ -1,0 +1,6 @@
+{
+  "CFBundleDisplayName": "Faktura+",
+  "CFBundleName": "Faktura+",
+  "NSCameraUsageDescription": "Сканирайте фактури с камерата за автоматично извличане на данни",
+  "NSPhotoLibraryUsageDescription": "Изберете снимки на фактури от галерията за импортиране"
+}
