@@ -685,39 +685,60 @@ async def remove_user_from_company(user_id: str, current_user: User = Depends(ge
     
     return {"message": "Потребителят е премахнат от фирмата"}
 
+# ===================== ROLES ENDPOINT =====================
+
+@api_router.get("/roles")
+async def get_available_roles(current_user: User = Depends(get_current_user)):
+    """Връща списък с достъпните роли"""
+    # Изключваме owner от списъка за покани
+    roles = []
+    for role_key, role_data in STANDARD_ROLES.items():
+        if role_key != "owner":  # Owner не може да се кани
+            roles.append({
+                "id": role_key,
+                "name_bg": role_data["name_bg"],
+                "name_en": role_data["name_en"],
+                "description_bg": role_data["description_bg"],
+                "description_en": role_data["description_en"]
+            })
+    return {"roles": roles}
+
 # ===================== INVITATION ENDPOINTS =====================
 
 @api_router.post("/invitations")
 async def create_invitation(invitation_data: InvitationCreate, current_user: User = Depends(get_current_user)):
-    """Създава покана за нов потребител (само Owner)"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да изпраща покани")
+    """Създава покана за нов потребител (само Owner/Manager)"""
+    if current_user.role not in ["owner", "manager"]:
+        raise HTTPException(status_code=403, detail="Нямате права да изпращате покани")
     
     if not current_user.company_id:
         raise HTTPException(status_code=400, detail="Нямате фирма")
     
-    if not invitation_data.email and not invitation_data.phone:
-        raise HTTPException(status_code=400, detail="Въведете имейл или телефон")
-    
-    if invitation_data.role not in ["manager", "staff"]:
-        raise HTTPException(status_code=400, detail="Невалидна роля за покана")
+    # Валидация на ролята - всички роли освен owner
+    valid_invite_roles = [r for r in STANDARD_ROLES.keys() if r != "owner"]
+    if invitation_data.role not in valid_invite_roles:
+        raise HTTPException(status_code=400, detail=f"Невалидна роля. Изберете една от: {', '.join(valid_invite_roles)}")
     
     # Check if user with this email already exists in the company
     if invitation_data.email:
         existing_user = await db.users.find_one({
-            "email": invitation_data.email,
+            "email": invitation_data.email.lower(),
             "company_id": current_user.company_id
         })
         if existing_user:
             raise HTTPException(status_code=400, detail="Потребител с този имейл вече е член на фирмата")
     
-    # Check for pending invitation
-    pending = await db.invitations.find_one({
-        "company_id": current_user.company_id,
-        "$or": [
-            {"email": invitation_data.email} if invitation_data.email else {"email": None},
-            {"phone": invitation_data.phone} if invitation_data.phone else {"phone": None}
-        ],
+    # Check for pending invitation with same email or phone
+    query_conditions = []
+    if invitation_data.email:
+        query_conditions.append({"email": invitation_data.email.lower()})
+    if invitation_data.phone:
+        query_conditions.append({"phone": invitation_data.phone})
+    
+    if query_conditions:
+        pending = await db.invitations.find_one({
+            "company_id": current_user.company_id,
+            "$or": query_conditions,
         "status": "pending"
     })
     if pending:
