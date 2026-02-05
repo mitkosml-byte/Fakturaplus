@@ -2763,6 +2763,236 @@ async def get_backup_status(current_user: User = Depends(get_current_user)):
         "last_backup_date": None
     }
 
+# ===================== ITEM GROUPS (AI Нормализация) =====================
+
+@api_router.get("/items/groups")
+async def get_item_groups(
+    current_user: User = Depends(get_current_user)
+):
+    """Връща всички групи артикули за фирмата"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        return {"groups": [], "total": 0}
+    
+    groups = await db.item_groups.find(
+        {"company_id": company_id},
+        {"_id": 0}
+    ).sort("canonical_name", 1).to_list(1000)
+    
+    return {
+        "groups": groups,
+        "total": len(groups)
+    }
+
+
+@api_router.post("/items/groups")
+async def create_item_group(
+    group_data: ItemGroupCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Създава ръчно нова група артикули"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате асоциирана фирма")
+    
+    # Проверка за дублиране
+    existing = await db.item_groups.find_one({
+        "company_id": company_id,
+        "canonical_name": {"$regex": f"^{group_data.canonical_name}$", "$options": "i"}
+    })
+    
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Група с име '{group_data.canonical_name}' вече съществува")
+    
+    new_group = ItemGroup(
+        company_id=company_id,
+        canonical_name=group_data.canonical_name,
+        variants=group_data.variants,
+        category=group_data.category,
+        auto_generated=False
+    )
+    
+    await db.item_groups.insert_one(new_group.dict())
+    return new_group
+
+
+@api_router.put("/items/groups/{group_id}")
+async def update_item_group(
+    group_id: str,
+    group_update: ItemGroupUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Актуализира група артикули"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате асоциирана фирма")
+    
+    existing = await db.item_groups.find_one({
+        "id": group_id,
+        "company_id": company_id
+    })
+    
+    if not existing:
+        raise HTTPException(status_code=404, detail="Групата не е намерена")
+    
+    update_data = {k: v for k, v in group_update.dict().items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    
+    await db.item_groups.update_one(
+        {"id": group_id},
+        {"$set": update_data}
+    )
+    
+    updated = await db.item_groups.find_one({"id": group_id}, {"_id": 0})
+    return updated
+
+
+@api_router.delete("/items/groups/{group_id}")
+async def delete_item_group(
+    group_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Изтрива група артикули"""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате асоциирана фирма")
+    
+    result = await db.item_groups.delete_one({
+        "id": group_id,
+        "company_id": company_id
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Групата не е намерена")
+    
+    return {"success": True, "message": "Групата е изтрита"}
+
+
+@api_router.post("/items/normalize")
+async def normalize_all_items(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Стартира AI нормализация на всички артикули.
+    Създава/актуализира групи за всички уникални артикули.
+    """
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате асоциирана фирма")
+    
+    # Вземаме всички уникални артикули от price_history
+    unique_items = await db.item_price_history.distinct(
+        "item_name",
+        {"company_id": company_id}
+    )
+    
+    if not unique_items:
+        return {
+            "success": True,
+            "message": "Няма артикули за нормализиране",
+            "processed": 0,
+            "new_groups": 0,
+            "updated_groups": 0
+        }
+    
+    # Вземаме съществуващите групи за контекст
+    existing_groups = await db.item_groups.find(
+        {"company_id": company_id},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    new_groups = 0
+    updated_groups = 0
+    processed = 0
+    
+    for item_name in unique_items:
+        try:
+            result = await normalize_item_name_ai(item_name, company_id, existing_groups)
+            
+            if result.is_new_group:
+                # Създаваме нова група
+                new_group = ItemGroup(
+                    company_id=company_id,
+                    canonical_name=result.canonical_name,
+                    variants=[item_name],
+                    category=result.category,
+                    auto_generated=True
+                )
+                await db.item_groups.insert_one(new_group.dict())
+                existing_groups.append(new_group.dict())  # Добавяме за следващите итерации
+                new_groups += 1
+            else:
+                # Добавяме към съществуваща група
+                existing = await db.item_groups.find_one({
+                    "company_id": company_id,
+                    "canonical_name": result.canonical_name
+                })
+                
+                if existing:
+                    variants = existing.get("variants", [])
+                    if item_name not in variants and item_name.lower() not in [v.lower() for v in variants]:
+                        await db.item_groups.update_one(
+                            {"_id": existing["_id"]},
+                            {
+                                "$push": {"variants": item_name},
+                                "$set": {"updated_at": datetime.now(timezone.utc)}
+                            }
+                        )
+                        updated_groups += 1
+            
+            processed += 1
+            
+        except Exception as e:
+            logger.error(f"Error normalizing item '{item_name}': {e}")
+            continue
+    
+    return {
+        "success": True,
+        "message": f"Нормализирани {processed} артикула",
+        "processed": processed,
+        "new_groups": new_groups,
+        "updated_groups": updated_groups
+    }
+
+
+@api_router.post("/items/normalize-single")
+async def normalize_single_item(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """Нормализира единичен артикул и връща резултата"""
+    body = await request.json()
+    item_name = body.get("item_name", "")
+    
+    if not item_name:
+        raise HTTPException(status_code=400, detail="Липсва име на артикул")
+    
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате асоциирана фирма")
+    
+    result = await normalize_item_name_ai(item_name, company_id)
+    
+    return {
+        "original_name": result.original_name,
+        "canonical_name": result.canonical_name,
+        "category": result.category,
+        "confidence": result.confidence,
+        "is_new_group": result.is_new_group
+    }
+
 # ===================== ITEM PRICE TRACKING =====================
 
 @api_router.get("/items/price-alerts")
