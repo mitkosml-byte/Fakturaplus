@@ -422,6 +422,7 @@ class BackendTester:
             results["verify_token"] = False
             results["verify_invalid_token"] = False
             results["accept_invitation"] = False
+            results["accept_invitation_success"] = False
             print("⚠️  Skipping token verification tests - no token available")
         
         return results
