@@ -1,6 +1,15 @@
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation } from '../types';
+import { Platform } from 'react-native';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+// For web development, use relative URL; for mobile use the full URL
+const getApiUrl = () => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return ''; // Use relative URL for localhost web development
+  }
+  return process.env.EXPO_PUBLIC_BACKEND_URL || '';
+};
+
+const API_URL = getApiUrl();
 
 class ApiService {
   private token: string | null = null;
