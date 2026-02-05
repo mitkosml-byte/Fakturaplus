@@ -693,12 +693,12 @@ export default function StatsScreen() {
                     <View style={styles.statItem}>
                       <Ionicons name="receipt" size={20} color="#8B5CF6" />
                       <Text style={styles.statLabel}>{t('stats.invoiceCount')}</Text>
-                      <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
+                      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>{summary?.invoice_count || 0}</Text>
                     </View>
                     <View style={styles.statItem}>
                       <Ionicons name="cash" size={20} color="#10B981" />
                       <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0} €</Text>
+                      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>{summary?.total_fiscal_revenue.toFixed(0) || 0} €</Text>
                     </View>
                   </View>
 
