@@ -1,11 +1,18 @@
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation } from '../types';
 import { Platform } from 'react-native';
 
-// For web development, use relative URL; for mobile use the full URL
+// For web development on localhost, use backend port; for production use the full URL
 const getApiUrl = () => {
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    return ''; // Use relative URL for localhost web development
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    // Local development - use backend directly
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:8001';
+    }
+    // Preview/production - use same origin (proxy handles routing)
+    return window.location.origin;
   }
+  // Mobile app - use environment variable
   return process.env.EXPO_PUBLIC_BACKEND_URL || '';
 };
 
