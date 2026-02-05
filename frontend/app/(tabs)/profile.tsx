@@ -63,8 +63,16 @@ export default function ProfileScreen() {
           text: t('profile.logout'),
           style: 'destructive',
           onPress: async () => {
-            await logout();
-            router.replace('/');
+            try {
+              await logout();
+              // Small delay to ensure state is updated before navigation
+              setTimeout(() => {
+                router.replace('/');
+              }, 100);
+            } catch (error) {
+              console.error('Logout error:', error);
+              router.replace('/');
+            }
           },
         },
       ]
