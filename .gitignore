@@ -76,3 +76,7 @@ android-sdk/
 # Sensitive files
 *token.json*
 *credentials.json*
+-e 
+# Environment files
+*.env
+*.env.*
