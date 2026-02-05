@@ -58,6 +58,8 @@ export default function StatsScreen() {
   const [itemPriceHistory, setItemPriceHistory] = useState<any>(null);
   const [itemBySupplier, setItemBySupplier] = useState<any>(null);
   const [loadingItemDetail, setLoadingItemDetail] = useState(false);
+  const [groupedView, setGroupedView] = useState(false);  // AI групиран изглед
+  const [normalizing, setNormalizing] = useState(false);  // Индикатор за AI нормализация
 
   const loadData = useCallback(async () => {
     try {
