@@ -261,11 +261,7 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-            {/* Logout Button */}
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Ionicons name="log-out" size={20} color="#EF4444" />
-              <Text style={styles.logoutText}>{t('profile.logout')}</Text>
-            </TouchableOpacity>
+            {/* Logout Button - Removed */}
 
             <View style={{ height: 40 }} />
           </ScrollView>
