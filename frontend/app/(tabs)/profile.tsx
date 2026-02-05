@@ -53,7 +53,7 @@ export default function ProfileScreen() {
     setRefreshing(false);
   }, [refreshUser, loadCompany]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     Alert.alert(
       t('profile.logout'),
       t('profile.logoutConfirm'),
@@ -63,14 +63,12 @@ export default function ProfileScreen() {
           text: t('profile.logout'),
           style: 'destructive',
           onPress: async () => {
-            try {
-              await logout();
-            } catch (error) {
-              console.error('Logout error:', error);
-            } finally {
-              // Navigate after logout completes
-              router.replace('/');
+            await logout();
+            // Use dismissAll to clear navigation stack, then go to login
+            while (router.canGoBack()) {
+              router.back();
             }
+            router.replace('/index');
           },
         },
       ]
