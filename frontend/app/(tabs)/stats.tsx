@@ -1618,6 +1618,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
+    minHeight: 85,
   },
   statLabel: {
     fontSize: 11,
@@ -1626,10 +1627,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   statValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 'bold',
     color: 'white',
     marginTop: 4,
+    textAlign: 'center',
+    flexShrink: 1,
   },
   tabSelector: {
     flexDirection: 'row',
