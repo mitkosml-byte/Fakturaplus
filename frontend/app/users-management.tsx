@@ -59,12 +59,14 @@ export default function UsersManagementScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const [usersData, invitationsData] = await Promise.all([
+      const [usersData, invitationsData, rolesData] = await Promise.all([
         api.getCompanyUsers(),
         api.getInvitations(),
+        api.getAvailableRoles(),
       ]);
       setUsers(usersData);
       setInvitations(invitationsData);
+      setAvailableRoles(rolesData.roles);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -82,29 +84,43 @@ export default function UsersManagementScreen() {
     setRefreshing(false);
   }, [loadData]);
 
-  const handleInvite = async () => {
-    if (!inviteEmail && !invitePhone) {
-      Alert.alert(
-        language === 'bg' ? 'Грешка' : 'Error',
-        language === 'bg' ? 'Въведете имейл или телефон' : 'Enter email or phone'
-      );
-      return;
-    }
+  // Генериране на линк за покана
+  const getInviteLink = (token: string) => {
+    return `${getInviteBaseUrl()}/${token}`;
+  };
 
+  // Генериране на съобщение за покана
+  const getInviteMessage = (companyName: string, token: string, code: string) => {
+    const link = getInviteLink(token);
+    const roleName = getRoleName(createdInvitation?.role || 'staff');
+    
+    if (language === 'bg') {
+      return `Поканени сте да се присъедините към "${companyName}" като ${roleName}!\n\n` +
+        `Линк за присъединяване:\n${link}\n\n` +
+        `Или въведете код: ${code}\n\n` +
+        `Валидност: 48 часа`;
+    }
+    return `You're invited to join "${companyName}" as ${roleName}!\n\n` +
+      `Join link:\n${link}\n\n` +
+      `Or enter code: ${code}\n\n` +
+      `Valid for: 48 hours`;
+  };
+
+  const handleInvite = async () => {
     setInviting(true);
     try {
       const result = await api.createInvitation({
-        email: inviteEmail || undefined,
-        phone: invitePhone || undefined,
         role: inviteRole,
       });
       
-      setInvitationCode(result.invitation.code);
-      setCompanyName(result.invitation.company_name);
+      setCreatedInvitation({
+        code: result.invitation.code,
+        invite_token: result.invitation.invite_token,
+        company_name: result.invitation.company_name,
+        role: result.invitation.role,
+      });
       setShowInviteModal(false);
-      setShowCodeModal(true);
-      setInviteEmail('');
-      setInvitePhone('');
+      setShowShareModal(true);
       
       await loadData();
     } catch (error: any) {
@@ -117,24 +133,131 @@ export default function UsersManagementScreen() {
     }
   };
 
-  const handleCopyCode = async () => {
-    await Clipboard.setStringAsync(invitationCode);
-    Alert.alert(
-      language === 'bg' ? 'Копирано!' : 'Copied!',
-      language === 'bg' ? 'Кодът е копиран в клипборда' : 'Code copied to clipboard'
+  // Споделяне чрез системния Share API
+  const handleShareGeneric = async () => {
+    if (!createdInvitation) return;
+    
+    const message = getInviteMessage(
+      createdInvitation.company_name,
+      createdInvitation.invite_token,
+      createdInvitation.code
     );
-  };
-
-  const handleShareCode = async () => {
-    const message = language === 'bg'
-      ? `Поканен сте да се присъедините към ${companyName}!\n\nКод за достъп: ${invitationCode}\n\nОтворете приложението Invoice Manager и въведете кода в Профил → Присъединяване.`
-      : `You are invited to join ${companyName}!\n\nAccess code: ${invitationCode}\n\nOpen Invoice Manager app and enter the code in Profile → Join Company.`;
     
     try {
       await Share.share({ message });
     } catch (error) {
       console.error('Error sharing:', error);
     }
+  };
+
+  // Споделяне чрез Viber
+  const handleShareViber = async () => {
+    if (!createdInvitation) return;
+    
+    const message = getInviteMessage(
+      createdInvitation.company_name,
+      createdInvitation.invite_token,
+      createdInvitation.code
+    );
+    
+    const viberUrl = `viber://forward?text=${encodeURIComponent(message)}`;
+    
+    try {
+      const canOpen = await Linking.canOpenURL(viberUrl);
+      if (canOpen) {
+        await Linking.openURL(viberUrl);
+      } else {
+        Alert.alert(
+          language === 'bg' ? 'Viber не е инсталиран' : 'Viber not installed',
+          language === 'bg' ? 'Моля инсталирайте Viber или използвайте друг начин за споделяне.' : 'Please install Viber or use another sharing method.'
+        );
+      }
+    } catch (error) {
+      console.error('Error opening Viber:', error);
+    }
+  };
+
+  // Споделяне чрез WhatsApp
+  const handleShareWhatsApp = async () => {
+    if (!createdInvitation) return;
+    
+    const message = getInviteMessage(
+      createdInvitation.company_name,
+      createdInvitation.invite_token,
+      createdInvitation.code
+    );
+    
+    const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
+    
+    try {
+      const canOpen = await Linking.canOpenURL(whatsappUrl);
+      if (canOpen) {
+        await Linking.openURL(whatsappUrl);
+      } else {
+        Alert.alert(
+          language === 'bg' ? 'WhatsApp не е инсталиран' : 'WhatsApp not installed',
+          language === 'bg' ? 'Моля инсталирайте WhatsApp или използвайте друг начин за споделяне.' : 'Please install WhatsApp or use another sharing method.'
+        );
+      }
+    } catch (error) {
+      console.error('Error opening WhatsApp:', error);
+    }
+  };
+
+  // Споделяне чрез SMS
+  const handleShareSMS = async () => {
+    if (!createdInvitation) return;
+    
+    const message = getInviteMessage(
+      createdInvitation.company_name,
+      createdInvitation.invite_token,
+      createdInvitation.code
+    );
+    
+    const smsUrl = Platform.OS === 'ios' 
+      ? `sms:&body=${encodeURIComponent(message)}`
+      : `sms:?body=${encodeURIComponent(message)}`;
+    
+    try {
+      await Linking.openURL(smsUrl);
+    } catch (error) {
+      console.error('Error opening SMS:', error);
+    }
+  };
+
+  // Споделяне чрез Email
+  const handleShareEmail = async () => {
+    if (!createdInvitation) return;
+    
+    const subject = language === 'bg' 
+      ? `Покана за присъединяване към ${createdInvitation.company_name}`
+      : `Invitation to join ${createdInvitation.company_name}`;
+    
+    const body = getInviteMessage(
+      createdInvitation.company_name,
+      createdInvitation.invite_token,
+      createdInvitation.code
+    );
+    
+    const emailUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    
+    try {
+      await Linking.openURL(emailUrl);
+    } catch (error) {
+      console.error('Error opening email:', error);
+    }
+  };
+
+  // Копиране на линка
+  const handleCopyLink = async () => {
+    if (!createdInvitation) return;
+    
+    const link = getInviteLink(createdInvitation.invite_token);
+    await Clipboard.setStringAsync(link);
+    Alert.alert(
+      language === 'bg' ? 'Копирано!' : 'Copied!',
+      language === 'bg' ? 'Линкът е копиран в клипборда' : 'Link copied to clipboard'
+    );
   };
 
   const handleCancelInvitation = async (invitationId: string) => {
