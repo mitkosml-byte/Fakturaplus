@@ -206,6 +206,37 @@ class PriceAlert(BaseModel):
     status: str = "unread"  # unread, read, dismissed
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+# ===================== ITEM GROUPS (AI Нормализация) =====================
+
+class ItemGroup(BaseModel):
+    """Група от сходни артикули с каноничено име"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    canonical_name: str  # Нормализирано име (напр. "Олио")
+    variants: List[str] = []  # Вариации (напр. ["Олио Първа Преса", "Олио Екстра"])
+    category: Optional[str] = None  # Категория (напр. "Хранителни стоки")
+    auto_generated: bool = True  # Дали е генерирана от AI
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ItemGroupCreate(BaseModel):
+    canonical_name: str
+    variants: List[str] = []
+    category: Optional[str] = None
+
+class ItemGroupUpdate(BaseModel):
+    canonical_name: Optional[str] = None
+    variants: Optional[List[str]] = None
+    category: Optional[str] = None
+
+class NormalizationResult(BaseModel):
+    """Резултат от AI нормализация"""
+    original_name: str
+    canonical_name: str
+    category: Optional[str] = None
+    confidence: float = 1.0
+    is_new_group: bool = False
+
 class InvoiceCreate(BaseModel):
     supplier: str
     invoice_number: str
