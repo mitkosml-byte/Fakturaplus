@@ -39,6 +39,51 @@ export default function Index() {
     }
   }, [isLoading, isAuthenticated]);
 
+  // Handle deep links for mobile OAuth callback
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      // Handle initial URL (app opened via deep link)
+      const handleInitialUrl = async () => {
+        const initialUrl = await Linking.getInitialURL();
+        console.log('Initial URL:', initialUrl);
+        if (initialUrl) {
+          handleDeepLink(initialUrl);
+        }
+      };
+      
+      handleInitialUrl();
+      
+      // Listen for incoming deep links while app is open
+      const subscription = Linking.addEventListener('url', (event) => {
+        console.log('Deep link received:', event.url);
+        handleDeepLink(event.url);
+      });
+      
+      return () => {
+        subscription.remove();
+      };
+    }
+  }, []);
+
+  // Handle deep link URL and extract session_id
+  const handleDeepLink = (url: string) => {
+    console.log('Processing deep link:', url);
+    let sessionId = null;
+    
+    if (url.includes('#session_id=')) {
+      sessionId = url.split('#session_id=')[1]?.split('&')[0];
+    } else if (url.includes('?session_id=')) {
+      sessionId = url.split('?session_id=')[1]?.split('&')[0];
+    } else if (url.includes('session_id=')) {
+      sessionId = url.split('session_id=')[1]?.split('&')[0]?.split('#')[0];
+    }
+    
+    if (sessionId) {
+      console.log('Session ID from deep link:', sessionId);
+      handleSessionId(sessionId);
+    }
+  };
+
   useEffect(() => {
     // Check for session_id in URL (web)
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
