@@ -65,28 +65,75 @@ export default function Index() {
   };
 
   const handleGoogleLogin = async () => {
-    const redirectUrl = Platform.OS === 'web'
-      ? (typeof window !== 'undefined' ? window.location.origin + '/' : '/')
-      : Linking.createURL('/');
-    
-    const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-    
-    if (Platform.OS === 'web') {
-      window.location.href = authUrl;
-    } else {
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
-      if (result.type === 'success' && result.url) {
-        const url = result.url;
-        let sessionId = null;
-        if (url.includes('#session_id=')) {
-          sessionId = url.split('#session_id=')[1]?.split('&')[0];
-        } else if (url.includes('?session_id=')) {
-          sessionId = url.split('?session_id=')[1]?.split('&')[0];
-        }
-        if (sessionId) {
-          await handleSessionId(sessionId);
+    try {
+      setIsProcessing(true);
+      
+      // For mobile, we need to use the app scheme for deep linking
+      const redirectUrl = Platform.OS === 'web'
+        ? (typeof window !== 'undefined' ? window.location.origin + '/' : '/')
+        : Linking.createURL('/');
+      
+      console.log('OAuth redirect URL:', redirectUrl);
+      
+      const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+      
+      if (Platform.OS === 'web') {
+        window.location.href = authUrl;
+      } else {
+        // Use mayInitWithUrl for better performance on Android
+        await WebBrowser.warmUpAsync();
+        
+        const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl, {
+          showInRecents: true,
+          preferEphemeralSession: false,
+        });
+        
+        console.log('Auth result:', JSON.stringify(result));
+        
+        await WebBrowser.coolDownAsync();
+        
+        if (result.type === 'success' && result.url) {
+          const url = result.url;
+          console.log('Result URL:', url);
+          
+          let sessionId = null;
+          
+          // Try different URL formats for session_id extraction
+          if (url.includes('#session_id=')) {
+            sessionId = url.split('#session_id=')[1]?.split('&')[0];
+          } else if (url.includes('?session_id=')) {
+            sessionId = url.split('?session_id=')[1]?.split('&')[0];
+          } else if (url.includes('session_id=')) {
+            sessionId = url.split('session_id=')[1]?.split('&')[0]?.split('#')[0];
+          }
+          
+          console.log('Extracted session_id:', sessionId);
+          
+          if (sessionId) {
+            await handleSessionId(sessionId);
+          } else {
+            console.error('No session_id found in URL');
+            Alert.alert(
+              language === 'bg' ? 'Грешка' : 'Error',
+              language === 'bg' ? 'Неуспешно извличане на сесията. Моля опитайте отново.' : 'Failed to extract session. Please try again.'
+            );
+            setIsProcessing(false);
+          }
+        } else if (result.type === 'cancel' || result.type === 'dismiss') {
+          console.log('Auth was cancelled or dismissed');
+          setIsProcessing(false);
+        } else {
+          console.log('Auth result type:', result.type);
+          setIsProcessing(false);
         }
       }
+    } catch (error) {
+      console.error('Google login error:', error);
+      Alert.alert(
+        language === 'bg' ? 'Грешка' : 'Error',
+        language === 'bg' ? 'Грешка при вход с Google. Моля опитайте отново.' : 'Google login error. Please try again.'
+      );
+      setIsProcessing(false);
     }
   };
 
