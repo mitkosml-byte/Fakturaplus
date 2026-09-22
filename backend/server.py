@@ -4067,10 +4067,24 @@ async def health():
 # Include the router
 app.include_router(api_router)
 
+_cors_origins_env = os.environ.get("CORS_ORIGINS", "")
+if _cors_origins_env:
+    _cors_origins = [origin.strip() for origin in _cors_origins_env.split(",") if origin.strip()]
+else:
+    # Credentialed requests (cookies) can't use a wildcard origin per the CORS
+    # spec - browsers silently reject the response. List explicit origins here,
+    # or set CORS_ORIGINS (comma-separated) to override without a code change.
+    _cors_origins = [
+        "https://fakturaplus-frontend.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:8081",
+        "http://localhost:19006",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
