@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Response, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Response, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -15,7 +15,11 @@ import base64
 import httpx
 import io
 import re
+import json
+import difflib
 from passlib.context import CryptContext
+from anthropic import AsyncAnthropic
+import anthropic as anthropic_sdk
 
 # Rate limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -39,13 +43,13 @@ mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'test_database')]
 
-# Emergent LLM Key
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-
-# AI features (OCR scanning, AI item merge, AI ROI insights) depend on the
-# emergentintegrations package and EMERGENT_LLM_KEY, which are specific to the
-# Emergent hosting platform and unavailable outside it. Disabled for now.
-AI_FEATURES_ENABLED = False
+# AI features (OCR scanning, AI item merge, AI ROI insights) run on the
+# Anthropic API directly. Disabled automatically when no key is configured
+# (e.g. a fresh deploy before the Render env var is set), so the rest of the
+# app keeps working without them.
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+AI_FEATURES_ENABLED = bool(ANTHROPIC_API_KEY)
+anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if AI_FEATURES_ENABLED else None
 
 # Create the main app
 app = FastAPI(
@@ -343,13 +347,22 @@ class NotificationSettingsUpdate(BaseModel):
     periodic_enabled: Optional[bool] = None
     periodic_dates: Optional[List[int]] = None
 
+class OCRItemResult(BaseModel):
+    name: str
+    quantity: float = 1
+    unit: str = "бр."
+    unit_price: float
+    total_price: float
+
 class OCRResult(BaseModel):
     supplier: str
+    supplier_eik: Optional[str] = None  # ЕИК на доставчика, ако е видим на фактурата
     invoice_number: str
     amount_without_vat: float
     vat_amount: float
     total_amount: float
     invoice_date: Optional[str] = None  # Дата на издаване от фактурата
+    items: List[OCRItemResult] = []  # Разпознати продукти от таблицата с артикули
     corrections: Optional[List[str]] = None  # Списък с направени корекции
     confidence: Optional[float] = None  # Увереност в резултата (0-1)
 
@@ -1072,22 +1085,25 @@ class DataCorrectionResult(BaseModel):
     corrections_made: List[str] = []
     confidence: float = 1.0
 
+def _compare_key(value: str) -> str:
+    """Uppercases and strips everything but letters/digits, so two names
+    that only differ by punctuation, spacing or letter case compare equal
+    (e.g. 'Иванов О.О.Д.', 'ИВАНОВ-ООД' and 'иванов оод' all normalize to
+    the same key)."""
+    return re.sub(r'[^\w]', '', value.upper())
+
+def _similarity(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
 async def normalize_supplier_name(supplier: str, company_id: Optional[str] = None) -> tuple[str, bool]:
-    """Нормализира име на доставчик и го съпоставя с известни доставчици"""
+    """Нормализира име на доставчик/контрагент и го съпоставя с вече познати
+    доставчици на фирмата, независимо от препинателни знаци, интервали и
+    регистър на буквите (главни/малки)."""
     if not supplier:
         return supplier, False
-    
-    # Почистване на основни проблеми
+
     supplier = supplier.strip()
-    
-    # Премахване на типични OCR грешки
-    ocr_fixes = {
-        '0': 'О',  # Нула -> О (за български текст)
-        '1': 'І',  # Единица -> И (в някои контексти)
-        '|': 'І',
-        '!': 'І',
-    }
-    
+
     # Нормализиране на правните форми
     legal_forms = [
         (r'\bЕООД\b', 'ЕООД'),
@@ -1099,38 +1115,45 @@ async def normalize_supplier_name(supplier: str, company_id: Optional[str] = Non
         (r'\bКД\b', 'КД'),
         (r'\bКДА\b', 'КДА'),
     ]
-    
+
     normalized = supplier.upper()
     for pattern, replacement in legal_forms:
         normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
-    
+
+    supplier_key = _compare_key(normalized)
+
     # Ако има company_id, търсим съществуващ подобен доставчик
-    if company_id:
+    if company_id and supplier_key:
         existing_suppliers = await db.invoices.distinct("supplier", {"company_id": company_id})
-        
-        # Fuzzy matching - търсим най-близкото съвпадение
+
         best_match = None
-        best_score = 0
-        
+        best_score = 0.0
+
         for existing in existing_suppliers:
-            # Проста метрика за сходство
-            existing_norm = existing.upper().replace(' ', '').replace('.', '')
-            supplier_norm = normalized.replace(' ', '').replace('.', '')
-            
-            # Проверка за частично съвпадение
-            if existing_norm in supplier_norm or supplier_norm in existing_norm:
-                score = len(min(existing_norm, supplier_norm, key=len)) / len(max(existing_norm, supplier_norm, key=len))
-                if score > best_score and score > 0.7:
-                    best_score = score
-                    best_match = existing
-            
-            # Точно съвпадение с игнориране на интервали и точки
-            if existing_norm == supplier_norm:
+            existing_key = _compare_key(existing)
+            if not existing_key:
+                continue
+
+            # Точно съвпадение с игнориране на пунктуация/регистър
+            if existing_key == supplier_key:
                 return existing, True
-        
-        if best_match and best_score > 0.8:
+
+            # По-кратко име, съдържащо се изцяло в по-дългото (напр. "ИВАНОВ"
+            # в "ИВАНОВ ЕООД"), почти винаги е същият контрагент, изписан
+            # с/без правната форма.
+            if existing_key in supplier_key or supplier_key in existing_key:
+                containment = len(min(existing_key, supplier_key, key=len)) / len(max(existing_key, supplier_key, key=len))
+            else:
+                containment = 0.0
+
+            score = max(containment, _similarity(existing_key, supplier_key))
+            if score > best_score:
+                best_score = score
+                best_match = existing
+
+        if best_match and best_score >= 0.82:
             return best_match, True
-    
+
     # Форматиране - първа буква главна
     words = normalized.split()
     formatted_words = []
@@ -1139,8 +1162,57 @@ async def normalize_supplier_name(supplier: str, company_id: Optional[str] = Non
             formatted_words.append(word)
         else:
             formatted_words.append(word.capitalize())
-    
+
     return ' '.join(formatted_words), False
+
+async def normalize_item_name(item_name: str, company_id: Optional[str] = None) -> tuple[str, bool]:
+    """Нормализира име на продукт/артикул и го обединява с вече записан
+    артикул на фирмата (като суровина), независимо от препинателни знаци,
+    интервали и регистър на буквите - автоматичният, безплатен вариант на
+    /items/ai-merge, приложен веднага при запис, вместо да се чака
+    периодичното AI сравнение."""
+    if not item_name:
+        return item_name, False
+
+    cleaned = re.sub(r'\s+', ' ', item_name.strip().lower())
+    if not company_id or not cleaned:
+        return cleaned, False
+
+    compare_key = _compare_key(cleaned)
+    if not compare_key:
+        return cleaned, False
+
+    # 1. Прилагаме вече запазено AI групиране (/items/ai-merge), ако има.
+    mapping = await db.item_merge_mappings.find_one(
+        {"company_id": company_id, "variants": cleaned},
+        {"_id": 0, "canonical_name": 1}
+    )
+    if mapping:
+        return mapping["canonical_name"], True
+
+    # 2. Иначе - fuzzy съпоставяне с вече записани артикули на фирмата, за
+    # да се слеят очевидни варианти (правопис, регистър, пунктуация) веднага,
+    # без да се чака периодичния AI анализ.
+    existing_names = await db.item_price_history.distinct("item_name", {"company_id": company_id})
+
+    best_match = None
+    best_score = 0.0
+    for existing in existing_names:
+        existing_key = _compare_key(existing)
+        if not existing_key:
+            continue
+        if existing_key == compare_key:
+            return existing, existing != cleaned
+
+        score = _similarity(existing_key, compare_key)
+        if score > best_score:
+            best_score = score
+            best_match = existing
+
+    if best_match and best_score >= 0.88:
+        return best_match, True
+
+    return cleaned, False
 
 def fix_ocr_number_errors(value: str) -> str:
     """Поправя типични OCR грешки в числа"""
@@ -1338,7 +1410,32 @@ async def correct_ocr_data(
             corrected["vat_amount"] = round(amount_without_vat * 0.20, 2)
             corrected["total_amount"] = round(amount_without_vat * 1.20, 2)
             corrections.append(f"ДДС добавено (20%): {corrected['vat_amount']}")
-    
+
+    # 6. Корекция на редовете с продукти - нормализиране на имена (за да се
+    # обединят със същия артикул, записан преди по друг начин) и на числата.
+    raw_items = data.get("items")
+    if isinstance(raw_items, list) and raw_items:
+        corrected_items = []
+        item_corrections = 0
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict) or not raw_item.get("name"):
+                continue
+            item = dict(raw_item)
+            original_name = str(item["name"]).strip()
+            normalized_name, was_matched = await normalize_item_name(original_name, company_id)
+            if normalized_name != original_name:
+                item_corrections += 1
+            item["name"] = normalized_name
+            item["quantity"] = parse_amount(item.get("quantity", 1)) or 1
+            item["unit_price"] = parse_amount(item.get("unit_price", 0))
+            item["total_price"] = parse_amount(item.get("total_price")) or round(item["quantity"] * item["unit_price"], 2)
+            if not item.get("unit"):
+                item["unit"] = "бр."
+            corrected_items.append(item)
+        corrected["items"] = corrected_items
+        if item_corrections:
+            corrections.append(f"Продукти нормализирани/обединени: {item_corrections}")
+
     # Изчисляване на confidence
     confidence = 1.0 - (len(corrections) * 0.05)  # Намаляме увереността с всяка корекция
     confidence = max(0.5, confidence)  # Минимум 50%
@@ -1352,6 +1449,43 @@ async def correct_ocr_data(
 
 # ===================== OCR ENDPOINT =====================
 
+class ClaudeInvoiceItem(BaseModel):
+    name: str = Field(description="Точното име на продукта/артикула, както е изписано на реда в таблицата")
+    quantity: float = Field(description="Количество")
+    unit: str = Field(description="Мерна единица: бр., кг, л, м, опаковка и т.н.")
+    unit_price: float = Field(description="Единична цена без ДДС")
+    total_price: float = Field(description="Обща цена за реда без ДДС")
+
+class ClaudeInvoiceExtraction(BaseModel):
+    supplier: str = Field(description="Пълното име на доставчика (издателя), НЕ на получателя/купувача")
+    supplier_eik: Optional[str] = Field(default=None, description="ЕИК/Булстат на доставчика, ако е видим на фактурата")
+    invoice_number: str = Field(description="Номер на фактурата")
+    invoice_date: Optional[str] = Field(default=None, description="Дата на издаване, формат YYYY-MM-DD")
+    amount_without_vat: float = Field(description="Данъчна основа / обща сума без ДДС")
+    vat_amount: float = Field(description="ДДС (обикновено 20%)")
+    total_amount: float = Field(description="Обща сума за плащане с ДДС")
+    items: List[ClaudeInvoiceItem] = Field(default_factory=list, description="Всички редове от таблицата с артикули/продукти/услуги на фактурата")
+
+OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за автоматично разпознаване на данни от български фактури.
+
+ЗАДАЧА: Прегледай ЦЯЛОТО изображение внимателно - всеки сегмент от снимката: заглавна част, таблицата с продукти/услуги, обобщението със сумите, бележки, печати и подписи. Не пропускай части от фактурата само защото не са в центъра на кадъра.
+
+РАЗГРАНИЧАВАНЕ НА ДОСТАВЧИК ОТ ПОЛУЧАТЕЛ (изключително важно):
+Всяка фактура има ДВЕ фирми - ИЗДАТЕЛ (доставчик/продавач) и ПОЛУЧАТЕЛ (купувач). В полето "supplier" трябва да върнеш ИМЕННО ИЗДАТЕЛЯ - фирмата, която ПРОДАВА и ИЗДАВА фактурата. Обикновено тя е:
+- показана в горната част/логото/заглавката на документа, или до печат
+- до текст като "Доставчик", "Продавач", "Издател", "ИЗПЪЛНИТЕЛ"
+НИКОГА не връщай фирмата до "Получател", "Купувач", "ВЪЗЛОЖИТЕЛ" - това е клиентът, комуто е издадена фактурата. Ако разположението е нестандартно, разчитай на контекст и логика (логото/печатът обикновено е на доставчика), а не само на буквално най-близкия текст.
+
+ЗА ПРОДУКТИТЕ/АРТИКУЛИТЕ:
+Извлечи ВСЕКИ ред от таблицата с артикули - име на продукта, количество, мерна единица, единична цена и обща цена на реда. Не пропускай редове, дори ако таблицата е дълга, частично замъглена или пресечена в кадъра - извлечи всичко, което успееш да разчетеш логично, включително чрез съпоставка със съседни редове и типичния формат на таблицата. Не измисляй артикули, които не съществуват на фактурата.
+
+ОБЩИ ПРАВИЛА:
+- Всички суми в полетата на артикулите и amount_without_vat са БЕЗ ДДС.
+- ДДС в България обикновено е 20%.
+- Датата винаги във формат YYYY-MM-DD.
+- Ако дадена стойност наистина не може да се прочете - остави я празна ("" за текст, 0 за число, null за дата), но НЕ измисляй данни, които не се виждат на изображението.
+- Разпознавай възможно най-много от вариациите в изписването (главни/малки букви, съкращения на правни форми, различно разположение на текста)."""
+
 @api_router.post("/ocr/scan", response_model=OCRResult)
 async def scan_invoice(image_base64: str = None, request: Request = None, current_user: User = Depends(get_current_user)):
     if not AI_FEATURES_ENABLED:
@@ -1359,78 +1493,81 @@ async def scan_invoice(image_base64: str = None, request: Request = None, curren
 
     body = await request.json()
     image_data = body.get("image_base64", "")
-    
+
     if not image_data:
         raise HTTPException(status_code=400, detail="Липсва изображение")
-    
-    # Remove data URL prefix if present
-    if "," in image_data:
+
+    # Извличане на media type от data URL префикса (ако има), преди да го махнем
+    media_type = "image/jpeg"
+    if image_data.startswith("data:") and "," in image_data:
+        header, image_data = image_data.split(",", 1)
+        header_match = re.match(r"data:([^;]+);base64", header)
+        if header_match:
+            media_type = header_match.group(1)
+    elif "," in image_data:
         image_data = image_data.split(",")[1]
-    
+
     # Get company_id for supplier matching
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
-    
+
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-        
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"ocr_{uuid.uuid4().hex[:8]}",
-            system_message="""Ти си OCR асистент за извличане на данни от фактури на български език.
-            Анализирай изображението и извлечи следните данни:
-            - Доставчик (име на фирмата)
-            - Номер на фактура
-            - Дата на издаване на фактурата (във формат YYYY-MM-DD)
-            - Сума без ДДС
-            - ДДС (обикновено 20%)
-            - Обща сума
-            
-            Отговори САМО в JSON формат:
-            {"supplier": "...", "invoice_number": "...", "invoice_date": "YYYY-MM-DD", "amount_without_vat": 0.00, "vat_amount": 0.00, "total_amount": 0.00}
-            
-            Ако не можеш да прочетеш някоя стойност, използвай празен низ за текст или 0 за числа.
-            За датата: ако не може да се прочете, върни null."""
-        ).with_model("gemini", "gemini-2.5-flash")
-        
-        image_content = ImageContent(image_base64=image_data)
-        
-        user_message = UserMessage(
-            text="Извлечи данните от тази фактура. Отговори само с JSON.",
-            file_contents=[image_content]
+        response = await anthropic_client.messages.parse(
+            model="claude-opus-5",
+            max_tokens=8000,
+            system=OCR_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": media_type, "data": image_data}
+                    },
+                    {
+                        "type": "text",
+                        "text": "Извлечи всички данни от тази фактура: доставчика (не получателя!), ЕИК ако е видим, номер, дата, суми и ВСИЧКИ редове от таблицата с артикули."
+                    }
+                ]
+            }],
+            output_format=ClaudeInvoiceExtraction,
         )
-        
-        response = await chat.send_message(user_message)
-        
-        # Parse JSON from response
-        import json
-        
-        # Find JSON in response
-        json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
-        if json_match:
-            raw_result = json.loads(json_match.group())
-            
-            # Apply AI correction module
-            correction_result = await correct_ocr_data(raw_result, company_id)
-            corrected = correction_result.corrected
-            
-            # Log corrections for debugging
-            if correction_result.corrections_made:
-                logger.info(f"OCR Corrections: {correction_result.corrections_made}")
-            
-            return OCRResult(
-                supplier=corrected.get("supplier", ""),
-                invoice_number=corrected.get("invoice_number", ""),
-                amount_without_vat=float(corrected.get("amount_without_vat", 0)),
-                vat_amount=float(corrected.get("vat_amount", 0)),
-                total_amount=float(corrected.get("total_amount", 0)),
-                invoice_date=corrected.get("invoice_date"),
-                corrections=correction_result.corrections_made,
-                confidence=correction_result.confidence
-            )
-        else:
+
+        extracted = response.parsed_output
+        if extracted is None:
             raise HTTPException(status_code=500, detail="Не можах да разпозная фактурата")
-            
+
+        raw_result = extracted.model_dump()
+
+        # Apply AI correction module (доставчик/продукти нормализиране и сливане)
+        correction_result = await correct_ocr_data(raw_result, company_id)
+        corrected = correction_result.corrected
+
+        if correction_result.corrections_made:
+            logger.info(f"OCR Corrections: {correction_result.corrections_made}")
+
+        return OCRResult(
+            supplier=corrected.get("supplier", ""),
+            supplier_eik=corrected.get("supplier_eik"),
+            invoice_number=corrected.get("invoice_number", ""),
+            amount_without_vat=float(corrected.get("amount_without_vat", 0)),
+            vat_amount=float(corrected.get("vat_amount", 0)),
+            total_amount=float(corrected.get("total_amount", 0)),
+            invoice_date=corrected.get("invoice_date"),
+            items=[OCRItemResult(**item) for item in corrected.get("items", [])],
+            corrections=correction_result.corrections_made,
+            confidence=correction_result.confidence
+        )
+
+    except HTTPException:
+        raise
+    except anthropic_sdk.AuthenticationError:
+        logger.error("OCR Error: invalid or missing Anthropic API key")
+        raise HTTPException(status_code=503, detail="AI разпознаването не е конфигурирано правилно на сървъра. Моля, въведете данните ръчно.")
+    except anthropic_sdk.RateLimitError:
+        raise HTTPException(status_code=503, detail="AI услугата за разпознаване е временно претоварена. Моля, опитайте отново след малко.")
+    except anthropic_sdk.APIStatusError as e:
+        logger.error(f"OCR Error (API status): {e}")
+        raise HTTPException(status_code=502, detail="Грешка при връзка с AI услугата за разпознаване.")
     except Exception as e:
         logger.error(f"OCR Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Грешка при сканиране: {str(e)}")
@@ -1438,11 +1575,17 @@ async def scan_invoice(image_base64: str = None, request: Request = None, curren
 # ===================== INVOICE ENDPOINTS =====================
 
 @api_router.post("/invoices", response_model=Invoice)
-async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(get_current_user)):
+async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
     # Get user's company_id
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
-    
+
+    # Merge with an already-known counterparty regardless of punctuation or
+    # letter case, so this also applies to manually-typed/edited invoices,
+    # not just ones that came straight out of OCR.
+    normalized_supplier, _ = await normalize_supplier_name(invoice.supplier, company_id)
+    invoice.supplier = normalized_supplier
+
     # Check for duplicate invoice
     if company_id:
         # If user has a company, check across all company users
@@ -1483,7 +1626,8 @@ async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(ge
     # Process items and convert to dict format
     items_list = None
     price_alerts = []
-    
+    item_normalized_names = {}  # item_dict["id"] -> normalized_name, reused below when backfilling invoice_id
+
     if invoice.items:
         items_list = []
         for item in invoice.items:
@@ -1494,14 +1638,15 @@ async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(ge
             # Calculate VAT if not provided (20%)
             if item_dict.get("vat_amount") is None:
                 item_dict["vat_amount"] = item_dict["total_price"] * 0.2
-            
+
             item_dict["id"] = str(uuid.uuid4())
             items_list.append(item_dict)
-            
+
             # Check price changes and create alerts if company exists
             if company_id:
-                normalized_name = item.name.strip().lower()
-                
+                normalized_name, _ = await normalize_item_name(item.name, company_id)
+                item_normalized_names[item_dict["id"]] = normalized_name
+
                 # Find last price for this item from same supplier
                 last_price_record = await db.item_price_history.find_one(
                     {
@@ -1567,8 +1712,8 @@ async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(ge
     
     # Update price history and alerts with invoice_id
     if company_id and invoice.items:
-        for item in invoice.items:
-            normalized_name = item.name.strip().lower()
+        for item_dict in items_list:
+            normalized_name = item_normalized_names.get(item_dict["id"], item_dict["name"].strip().lower())
             await db.item_price_history.update_many(
                 {
                     "company_id": company_id,
@@ -1583,7 +1728,11 @@ async def create_invoice(invoice: InvoiceCreate, current_user: User = Depends(ge
         for alert in price_alerts:
             alert.invoice_id = invoice_obj.id
             await db.price_alerts.insert_one(alert.dict())
-    
+
+        # Keep raw-material grouping fresh automatically, without the user
+        # having to trigger it - throttled inside the task itself.
+        background_tasks.add_task(maybe_schedule_ai_item_merge, company_id)
+
     return invoice_obj
 
 @api_router.get("/invoices", response_model=List[Invoice])
@@ -1993,14 +2142,7 @@ async def generate_roi_insights(
     try:
         if not AI_FEATURES_ENABLED:
             raise RuntimeError("AI features disabled")
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
 
-        llm = LlmChat(
-            api_key=os.getenv("EMERGENT_LLM_KEY"),
-            session_id=f"roi_{uuid.uuid4().hex[:8]}",
-            system_message="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български."
-        ).with_model("gemini", "gemini-2.5-flash")
-        
         prompt = f"""Анализирай тези финансови показатели за малък бизнес:
 - Лична инвестиция на собственика: {total_personal:.2f} лв
 - Общ оборот: {total_revenue:.2f} лв
@@ -2010,9 +2152,14 @@ async def generate_roi_insights(
 Дай ЕДНА кратка препоръка (до 15 думи) какво може да направи собственикът за подобрение.
 Отговори директно с препоръката, без въвеждащ текст."""
 
-        response = await llm.send_message(UserMessage(text=prompt))
-        ai_recommendation = response.strip() if isinstance(response, str) else str(response)
-        
+        response = await anthropic_client.messages.create(
+            model="claude-opus-5",
+            max_tokens=200,
+            system="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български.",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        ai_recommendation = next((b.text for b in response.content if b.type == "text"), "").strip()
+
         if ai_recommendation and len(ai_recommendation) < 200:
             insights.append(f"💡 AI препоръка: {ai_recommendation}")
     except Exception as e:
@@ -3407,109 +3554,133 @@ async def get_item_by_supplier(
 
 # ===================== AI ITEM MERGING =====================
 
-@api_router.post("/items/ai-merge")
-async def ai_merge_similar_items(
-    current_user: User = Depends(get_current_user)
-):
+class ItemMergeGroup(BaseModel):
+    canonical_name: str = Field(description="Каноничното (най-ясно четимото) име на продукта/суровината")
+    variants: List[str] = Field(description="Всички изписвания от списъка, които обозначават същия продукт")
+
+class ItemMergeResult(BaseModel):
+    groups: List[ItemMergeGroup] = Field(default_factory=list, description="Групи от сходни продукти; празен списък, ако няма такива")
+
+async def run_ai_item_merge(company_id: str) -> dict:
     """
-    AI модул за автоматично сливане на сходни продукти.
-    Използва Gemini за идентифициране на еднакви продукти с различни имена.
+    AI модул за автоматично сливане на сходни продукти (като суровина),
+    отвъд простото fuzzy съпоставяне при запис - разпознава и варианти,
+    които разчитат на контекст/смисъл (съкращения, синоними, правописни
+    грешки), не само на близост в изписването. Извиква се както директно
+    от /items/ai-merge, така и автоматично на заден план след запис на
+    фактура (виж maybe_schedule_ai_item_merge).
     """
     if not AI_FEATURES_ENABLED:
         return {"merged_groups": [], "total_merged": 0, "message": "AI функцията временно не е налична"}
 
-    from collections import defaultdict
-
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {"merged_groups": [], "total_merged": 0}
-    
     # Get all unique item names
     history = await db.item_price_history.find(
         {"company_id": company_id},
         {"_id": 0, "item_name": 1}
     ).to_list(10000)
-    
+
     unique_items = list(set(h["item_name"] for h in history))
-    
+
     if len(unique_items) < 2:
         return {"merged_groups": [], "total_merged": 0, "message": "Недостатъчно артикули за анализ"}
-    
-    # Use AI to find similar items
+
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        
-        items_text = "\n".join(unique_items[:100])  # Limit to 100 items
-        
-        prompt = f"""Анализирай следния списък с имена на продукти и групирай сходните продукти.
-Търси продукти, които са едни и същи, но са записани по различен начин (различен регистър, съкращения, правописни грешки, варианти на името).
+        items_text = "\n".join(unique_items[:200])
+
+        prompt = f"""Анализирай следния списък с имена на продукти/суровини и групирай сходните продукти.
+Търси продукти, които са едни и същи, но са записани по различен начин: различен регистър на буквите, пунктуация, съкращения, правописни грешки, синоними, различен словоред или разфасовка на един и същ артикул.
 
 Списък с продукти:
 {items_text}
 
-Върни САМО JSON масив с групите, без допълнителен текст. Формат:
-[
-  {{"canonical_name": "Олио слънчогледово", "variants": ["Олио Първа Преса", "олио слънчогледово", "ОЛИО", "Олио Екстра"]}},
-  {{"canonical_name": "Захар кристална", "variants": ["Захар", "захар кристална", "ЗАХАР БГ"]}}
-]
+Не групирай продукти, които са наистина различни (например "Олио" и "Оцет" са РАЗЛИЧНИ продукти).
+Групирай САМО ако очевидно става дума за същия продукт/суровина с различно изписване.
+Върни само групи с 2 или повече варианта - пропусни продукти без дубликат."""
 
-Ако няма сходни продукти, върни празен масив: []
-Не групирай продукти, които са наистина различни (например "Олио" и "Оцет" са РАЗЛИЧНИ).
-Групирай САМО ако са очевидно същият продукт с различно изписване."""
+        response = await anthropic_client.messages.parse(
+            model="claude-opus-5",
+            max_tokens=8000,
+            system="Ти си експертен асистент за анализ и групиране на продукти/суровини за малък бизнес в България.",
+            messages=[{"role": "user", "content": prompt}],
+            output_format=ItemMergeResult,
+        )
 
-        llm = LlmChat(
-            api_key=os.getenv("EMERGENT_LLM_KEY"),
-            session_id=f"merge_{uuid.uuid4().hex[:8]}",
-            system_message="Ти си асистент за анализ на продукти. Отговаряй само с валиден JSON."
-        ).with_model("gemini", "gemini-2.5-flash")
-        
-        user_message = UserMessage(text=prompt)
-        response = await llm.send_message(user_message)
-        response_text = response.strip() if isinstance(response, str) else str(response)
-        
-        # Extract JSON from response
-        import re
-        json_match = re.search(r'\[[\s\S]*\]', response_text)
-        if json_match:
-            merged_groups = json.loads(json_match.group())
-        else:
-            merged_groups = []
-        
+        parsed = response.parsed_output
+        groups = parsed.groups if parsed else []
+        merged_groups = [g.model_dump() for g in groups if g.canonical_name and g.variants]
+
         # Save merge mappings to database
-        if merged_groups:
-            for group in merged_groups:
-                canonical = group.get("canonical_name", "")
-                variants = group.get("variants", [])
-                
-                if canonical and variants:
-                    # Create or update merge mapping
-                    await db.item_merge_mappings.update_one(
-                        {"company_id": company_id, "canonical_name": canonical.lower()},
-                        {
-                            "$set": {
-                                "canonical_name": canonical.lower(),
-                                "display_name": canonical,
-                                "variants": [v.lower() for v in variants],
-                                "company_id": company_id,
-                                "updated_at": datetime.now(timezone.utc)
-                            }
-                        },
-                        upsert=True
-                    )
-        
-        total_merged = sum(len(g.get("variants", [])) for g in merged_groups)
-        
+        for group in merged_groups:
+            canonical = group["canonical_name"]
+            variants = group["variants"]
+            variant_keys = sorted({v.lower() for v in variants} | {canonical.lower()})
+
+            await db.item_merge_mappings.update_one(
+                {"company_id": company_id, "canonical_name": canonical.lower()},
+                {
+                    "$set": {
+                        "canonical_name": canonical.lower(),
+                        "display_name": canonical,
+                        "variants": variant_keys,
+                        "company_id": company_id,
+                        "updated_at": datetime.now(timezone.utc)
+                    }
+                },
+                upsert=True
+            )
+
+        total_merged = sum(len(g["variants"]) for g in merged_groups)
+
         return {
             "merged_groups": merged_groups,
             "total_merged": total_merged,
             "message": f"Намерени {len(merged_groups)} групи сходни продукти"
         }
-        
+
     except Exception as e:
         logger.error(f"AI merge error: {str(e)}")
         return {"merged_groups": [], "total_merged": 0, "error": str(e)}
+
+# Ready-run-immediately gate for the background auto-merge: at most once
+# per company per cooldown window, so an active user saving many invoices
+# in a row doesn't trigger a paid AI call on every single one.
+AI_ITEM_MERGE_COOLDOWN = timedelta(hours=6)
+
+async def maybe_schedule_ai_item_merge(company_id: Optional[str]):
+    """Fire-and-forget background task: runs the AI item merge for a company
+    if it hasn't run recently, so raw-material grouping stays up to date
+    automatically as invoices come in, without the user having to ask for it."""
+    if not company_id or not AI_FEATURES_ENABLED:
+        return
+    try:
+        run_doc = await db.item_merge_runs.find_one({"company_id": company_id}, {"_id": 0, "last_run_at": 1})
+        now = datetime.now(timezone.utc)
+        if run_doc and run_doc.get("last_run_at"):
+            last_run_at = run_doc["last_run_at"]
+            if last_run_at.tzinfo is None:
+                last_run_at = last_run_at.replace(tzinfo=timezone.utc)
+            if now - last_run_at < AI_ITEM_MERGE_COOLDOWN:
+                return
+        await db.item_merge_runs.update_one(
+            {"company_id": company_id},
+            {"$set": {"company_id": company_id, "last_run_at": now}},
+            upsert=True
+        )
+        await run_ai_item_merge(company_id)
+    except Exception as e:
+        logger.error(f"Background AI item merge error: {str(e)}")
+
+@api_router.post("/items/ai-merge")
+async def ai_merge_similar_items(
+    current_user: User = Depends(get_current_user)
+):
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    if not company_id:
+        return {"merged_groups": [], "total_merged": 0}
+
+    return await run_ai_item_merge(company_id)
 
 @api_router.get("/items/merge-mappings")
 async def get_merge_mappings(current_user: User = Depends(get_current_user)):

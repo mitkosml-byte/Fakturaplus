@@ -50,6 +50,7 @@ export interface Invoice {
   date: string;
   image_base64?: string;
   notes?: string;
+  items?: InvoiceItemCreate[];
   created_at: string;
 }
 
@@ -71,13 +72,23 @@ export interface NonInvoiceExpense {
   created_at: string;
 }
 
+export interface OCRItemResult {
+  name: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  total_price: number;
+}
+
 export interface OCRResult {
   supplier: string;
+  supplier_eik?: string;  // ЕИК на доставчика, ако е разпознат
   invoice_number: string;
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;
   invoice_date?: string;  // Дата на издаване от фактурата
+  items?: OCRItemResult[];  // Разпознати продукти от таблицата с артикули
   corrections?: string[];  // AI корекции
   confidence?: number;  // Увереност в резултата
 }

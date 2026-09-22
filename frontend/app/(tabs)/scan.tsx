@@ -20,12 +20,21 @@ import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { api } from '../../src/services/api';
-import { OCRResult } from '../../src/types';
+import { OCRResult, InvoiceItemCreate } from '../../src/types';
 import { format, parse } from 'date-fns';
 import { bg, enUS } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
+
+interface EditableItem {
+  name: string;
+  quantity: string;
+  unit: string;
+  unit_price: string;
+}
+
+const emptyItem = (): EditableItem => ({ name: '', quantity: '1', unit: 'бр.', unit_price: '' });
 
 export default function ScanScreen() {
   const { t } = useTranslation();
@@ -52,6 +61,7 @@ export default function ScanScreen() {
   const [notes, setNotes] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date());
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
+  const [items, setItems] = useState<EditableItem[]>([]);
 
   // Tap to focus - triggers refocus
   const handleTapToFocus = useCallback(() => {
@@ -110,6 +120,16 @@ export default function ScanScreen() {
       if (result.confidence) {
         setOcrConfidence(result.confidence);
       }
+
+      // Pre-fill the recognized line items - reviewable/editable before saving
+      if (result.items && result.items.length > 0) {
+        setItems(result.items.map(item => ({
+          name: item.name,
+          quantity: String(item.quantity),
+          unit: item.unit || 'бр.',
+          unit_price: String(item.unit_price),
+        })));
+      }
       
       // Set invoice date from OCR if available
       if (result.invoice_date) {
@@ -135,6 +155,15 @@ export default function ScanScreen() {
       return;
     }
 
+    const itemsPayload: InvoiceItemCreate[] = items
+      .filter(item => item.name.trim() && item.unit_price)
+      .map(item => ({
+        name: item.name.trim(),
+        quantity: parseFloat(item.quantity) || 1,
+        unit: item.unit.trim() || 'бр.',
+        unit_price: parseFloat(item.unit_price) || 0,
+      }));
+
     setIsSaving(true);
     try {
       await api.createInvoice({
@@ -146,6 +175,7 @@ export default function ScanScreen() {
         date: invoiceDate.toISOString(),
         image_base64: capturedImage || undefined,
         notes: notes || undefined,
+        items: itemsPayload.length > 0 ? itemsPayload : undefined,
       });
       Alert.alert(t('common.success'), t('msg.invoiceSaved'));
       resetForm();
@@ -154,6 +184,18 @@ export default function ScanScreen() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const updateItem = (index: number, patch: Partial<EditableItem>) => {
+    setItems(prev => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  };
+
+  const removeItem = (index: number) => {
+    setItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const addItem = () => {
+    setItems(prev => [...prev, emptyItem()]);
   };
 
   const resetForm = () => {
@@ -165,6 +207,7 @@ export default function ScanScreen() {
     setVatAmount('');
     setTotalAmount('');
     setNotes('');
+    setItems([]);
     setInvoiceDate(new Date());
   };
 
@@ -377,6 +420,69 @@ export default function ScanScreen() {
                       placeholder="0.00"
                       placeholderTextColor="#64748B"
                     />
+                  </View>
+
+                  {/* Line items - pre-filled from OCR, editable */}
+                  <View style={styles.itemsSection}>
+                    <View style={styles.itemsSectionHeader}>
+                      <Text style={styles.inputLabel}>
+                        {language === 'bg' ? 'Продукти/артикули' : 'Products/items'}
+                      </Text>
+                      <TouchableOpacity style={styles.addItemButton} onPress={addItem}>
+                        <Ionicons name="add" size={18} color="#8B5CF6" />
+                        <Text style={styles.addItemButtonText}>
+                          {language === 'bg' ? 'Добави' : 'Add'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {items.length === 0 ? (
+                      <Text style={styles.itemsEmptyHint}>
+                        {language === 'bg'
+                          ? 'Няма разпознати продукти. Добавете ги ръчно при нужда.'
+                          : 'No products recognized. Add them manually if needed.'}
+                      </Text>
+                    ) : (
+                      items.map((item, index) => (
+                        <View key={index} style={styles.itemRow}>
+                          <TextInput
+                            style={[styles.input, styles.itemNameInput]}
+                            value={item.name}
+                            onChangeText={(v) => updateItem(index, { name: v })}
+                            placeholder={language === 'bg' ? 'Име на продукта' : 'Product name'}
+                            placeholderTextColor="#64748B"
+                          />
+                          <View style={styles.itemRowFields}>
+                            <TextInput
+                              style={[styles.input, styles.itemSmallInput]}
+                              value={item.quantity}
+                              onChangeText={(v) => updateItem(index, { quantity: v })}
+                              keyboardType="decimal-pad"
+                              placeholder={language === 'bg' ? 'Бр.' : 'Qty'}
+                              placeholderTextColor="#64748B"
+                            />
+                            <TextInput
+                              style={[styles.input, styles.itemSmallInput]}
+                              value={item.unit}
+                              onChangeText={(v) => updateItem(index, { unit: v })}
+                              placeholder={language === 'bg' ? 'Мярка' : 'Unit'}
+                              placeholderTextColor="#64748B"
+                            />
+                            <TextInput
+                              style={[styles.input, styles.itemSmallInput]}
+                              value={item.unit_price}
+                              onChangeText={(v) => updateItem(index, { unit_price: v })}
+                              keyboardType="decimal-pad"
+                              placeholder={language === 'bg' ? 'Цена' : 'Price'}
+                              placeholderTextColor="#64748B"
+                            />
+                            <TouchableOpacity style={styles.removeItemButton} onPress={() => removeItem(index)}>
+                              <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ))
+                    )}
                   </View>
 
                   <View style={styles.inputGroup}>
@@ -725,5 +831,57 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flex: 1,
     lineHeight: 18,
+  },
+  itemsSection: {
+    marginBottom: 16,
+  },
+  itemsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  addItemButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+  },
+  addItemButtonText: {
+    color: '#8B5CF6',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  itemsEmptyHint: {
+    color: '#64748B',
+    fontSize: 13,
+    marginTop: 8,
+  },
+  itemRow: {
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  itemNameInput: {
+    marginBottom: 8,
+  },
+  itemRowFields: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  itemSmallInput: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    fontSize: 14,
+  },
+  removeItemButton: {
+    padding: 8,
   },
 });
