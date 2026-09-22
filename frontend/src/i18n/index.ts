@@ -552,20 +552,12 @@ export const translations: Translations = {
     en: 'Company data is shared between all users in a company. Duplicate invoices are checked company-wide.',
   },
   'company.joinExisting': {
-    bg: 'Присъединяване към съществуваща фирма',
-    en: 'Join existing company',
+    bg: 'Присъединяване по покана',
+    en: 'Join by invitation',
   },
   'company.joinHint': {
-    bg: 'Въведете ЕИК на фирмата, към която искате да се присъедините',
-    en: 'Enter the EIK of the company you want to join',
-  },
-  'company.enterEik': {
-    bg: 'Въведете ЕИК',
-    en: 'Enter EIK',
-  },
-  'company.join': {
-    bg: 'Присъедини се',
-    en: 'Join',
+    bg: 'Имате код за покана от вашия работодател? Въведете го тук.',
+    en: 'Have an invitation code from your employer? Enter it here.',
   },
   'company.editCompany': {
     bg: 'Редактиране на фирма',

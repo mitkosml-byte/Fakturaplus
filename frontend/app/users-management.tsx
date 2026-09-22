@@ -117,8 +117,8 @@ export default function UsersManagementScreen() {
 
   const handleShareCode = async () => {
     const message = language === 'bg'
-      ? `Поканен сте да се присъедините към ${companyName}!\n\nКод за достъп: ${invitationCode}\n\nОтворете приложението Invoice Manager и въведете кода в Профил → Присъединяване.`
-      : `You are invited to join ${companyName}!\n\nAccess code: ${invitationCode}\n\nOpen Invoice Manager app and enter the code in Profile → Join Company.`;
+      ? `Поканен сте да се присъедините към ${companyName}!\n\nКод за достъп: ${invitationCode}\n\nОтворете приложението Фактура+ и въведете кода в Профил → Фирма → Присъединяване по покана.`
+      : `You are invited to join ${companyName}!\n\nAccess code: ${invitationCode}\n\nOpen the Fakturaplus app and enter the code in Profile → Company → Join by Invitation.`;
     
     try {
       await Share.share({ message });

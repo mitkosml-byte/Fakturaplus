@@ -271,12 +271,6 @@ class ApiService {
     });
   }
 
-  async joinCompanyByEik(eik: string): Promise<{ message: string; company: Company }> {
-    return this.fetch(`/company/join/${eik}`, {
-      method: 'POST',
-    });
-  }
-
   // Backup
   async createBackup(): Promise<any> {
     return this.fetch('/backup/create', {

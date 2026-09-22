@@ -357,6 +357,26 @@ class SessionDataResponse(BaseModel):
 
 # ===================== AUTH HELPERS =====================
 
+VALID_ROLES = {"owner", "manager", "staff"}
+
+async def repair_invalid_role(user_doc: dict) -> dict:
+    """Поправя легаси/невалидни стойности на role (напр. от стари версии на схемата).
+
+    Ако фирмата на потребителя няма нито един owner, той/тя става owner
+    (най-вероятно е основателят на фирмата и просто данните му са останали
+    с остаряла стойност). В противен случай, за да не ескалираме права без
+    основание, се връща към най-ниската роля - staff.
+    """
+    company_id = user_doc.get("company_id")
+    fixed_role = "staff"
+    if company_id:
+        has_owner = await db.users.count_documents({"company_id": company_id, "role": "owner"})
+        if not has_owner:
+            fixed_role = "owner"
+    await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": {"role": fixed_role}})
+    user_doc["role"] = fixed_role
+    return user_doc
+
 def sanitize_user(user_doc: dict) -> dict:
     """Премахва password_hash от документа на потребителя и добавя has_password флаг."""
     user_doc = dict(user_doc)
@@ -394,6 +414,8 @@ async def get_current_user(request: Request) -> User:
     user_doc = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user_doc:
         raise HTTPException(status_code=401, detail="Потребителят не е намерен")
+    if user_doc.get("role") not in VALID_ROLES:
+        user_doc = await repair_invalid_role(user_doc)
     user_doc = sanitize_user(user_doc)
 
     return User(**user_doc)
@@ -819,39 +841,44 @@ async def cancel_invitation(invitation_id: str, current_user: User = Depends(get
     return {"message": "Поканата е отменена"}
 
 @api_router.post("/invitations/accept")
+@limiter.limit("10/minute")
 async def accept_invitation(request: Request, current_user: User = Depends(get_current_user)):
     """Приема покана по код"""
     body = await request.json()
     code = body.get("code", "").upper().strip()
-    
+
     if not code:
         raise HTTPException(status_code=400, detail="Въведете код на поканата")
-    
+
     # Find valid invitation
     invitation = await db.invitations.find_one({
         "code": code,
         "status": "pending"
     })
-    
+
     if not invitation:
         raise HTTPException(status_code=404, detail="Невалиден или изтекъл код")
-    
+
     # Check expiry
     expires_at = invitation["expires_at"]
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
-    
+
     if expires_at < datetime.now(timezone.utc):
         await db.invitations.update_one(
             {"id": invitation["id"]},
             {"$set": {"status": "expired"}}
         )
         raise HTTPException(status_code=400, detail="Поканата е изтекла")
-    
+
+    # If the invitation was issued to a specific email, only that account may accept it
+    if invitation.get("email") and invitation["email"].lower() != current_user.email.lower():
+        raise HTTPException(status_code=403, detail="Тази покана е издадена за друг имейл адрес")
+
     # Check if user already has a company
     if current_user.company_id:
         raise HTTPException(status_code=400, detail="Вече сте член на фирма. Първо напуснете текущата фирма.")
-    
+
     # Accept invitation - link user to company
     await db.users.update_one(
         {"user_id": current_user.user_id},
@@ -1016,21 +1043,6 @@ async def update_company(company_update: CompanyUpdate, current_user: User = Dep
     
     updated_company = await db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
     return Company(**updated_company)
-
-@api_router.post("/company/join/{eik}")
-async def join_company_by_eik(eik: str, current_user: User = Depends(get_current_user)):
-    """Присъединява потребител към съществуваща фирма по ЕИК"""
-    company = await db.companies.find_one({"eik": eik}, {"_id": 0})
-    
-    if not company:
-        raise HTTPException(status_code=404, detail=f"Фирма с ЕИК {eik} не е намерена")
-    
-    await db.users.update_one(
-        {"user_id": current_user.user_id},
-        {"$set": {"company_id": company["id"]}}
-    )
-    
-    return {"message": f"Успешно се присъединихте към {company['name']}", "company": Company(**company)}
 
 @api_router.get("/company/users")
 async def get_company_users(current_user: User = Depends(get_current_user)):

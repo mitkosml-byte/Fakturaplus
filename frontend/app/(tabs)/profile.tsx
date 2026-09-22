@@ -164,15 +164,19 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Company Settings - Only for Owner */}
-          {hasPermission('manage_company') && (
+          {/* Company Settings - Owner, or anyone without a company yet (create/join) */}
+          {(hasPermission('manage_company') || !company) && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/company-settings')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
                 <Ionicons name="business" size={20} color="#3B82F6" />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.company')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.companyData')}</Text>
+                <Text style={styles.menuSubtitle}>
+                  {company
+                    ? t('profile.companyData')
+                    : (language === 'bg' ? 'Създайте фирма или се присъединете по покана' : 'Create a company or join by invitation')}
+                </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#64748B" />
             </TouchableOpacity>

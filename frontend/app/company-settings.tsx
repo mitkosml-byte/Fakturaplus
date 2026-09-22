@@ -40,10 +40,6 @@ export default function CompanySettingsScreen() {
   const [email, setEmail] = useState('');
   const [bankName, setBankName] = useState('');
   const [bankIban, setBankIban] = useState('');
-  
-  // Join existing company
-  const [joinEik, setJoinEik] = useState('');
-  const [showJoinSection, setShowJoinSection] = useState(false);
 
   const loadCompany = useCallback(async () => {
     try {
@@ -111,36 +107,6 @@ export default function CompanySettingsScreen() {
     }
   };
 
-  const handleJoinCompany = async () => {
-    if (!joinEik.trim()) {
-      Alert.alert(t('common.error'), t('company.enterEikError'));
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const result = await api.joinCompanyByEik(joinEik.trim());
-      Alert.alert(t('common.success'), result.message);
-      setCompany(result.company);
-      setName(result.company.name || '');
-      setEik(result.company.eik || '');
-      setVatNumber(result.company.vat_number || '');
-      setMol(result.company.mol || '');
-      setAddress(result.company.address || '');
-      setCity(result.company.city || '');
-      setPhone(result.company.phone || '');
-      setEmail(result.company.email || '');
-      setBankName(result.company.bank_name || '');
-      setBankIban(result.company.bank_iban || '');
-      setShowJoinSection(false);
-      setJoinEik('');
-    } catch (error: any) {
-      Alert.alert(t('common.error'), error.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   if (loading) {
     return (
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -190,54 +156,23 @@ export default function CompanySettingsScreen() {
                 </Text>
               </View>
 
-              {/* Join Existing Company Section */}
+              {/* Join Existing Company via Invitation */}
               {!company && (
-                <View style={styles.joinSection}>
-                  <TouchableOpacity
-                    style={styles.joinToggle}
-                    onPress={() => setShowJoinSection(!showJoinSection)}
-                  >
+                <TouchableOpacity
+                  style={styles.joinSection}
+                  onPress={() => router.push('/join-company')}
+                >
+                  <View style={styles.joinToggle}>
                     <Ionicons name="people" size={20} color="#8B5CF6" />
                     <Text style={styles.joinToggleText}>
                       {t('company.joinExisting')}
                     </Text>
-                    <Ionicons 
-                      name={showJoinSection ? "chevron-up" : "chevron-down"} 
-                      size={20} 
-                      color="#64748B" 
-                    />
-                  </TouchableOpacity>
-                  
-                  {showJoinSection && (
-                    <View style={styles.joinForm}>
-                      <Text style={styles.joinHint}>
-                        {t('company.joinHint')}
-                      </Text>
-                      <TextInput
-                        style={styles.input}
-                        value={joinEik}
-                        onChangeText={setJoinEik}
-                        placeholder={t('company.enterEik')}
-                        placeholderTextColor="#64748B"
-                        keyboardType="number-pad"
-                      />
-                      <TouchableOpacity
-                        style={[styles.joinButton, saving && styles.buttonDisabled]}
-                        onPress={handleJoinCompany}
-                        disabled={saving}
-                      >
-                        {saving ? (
-                          <ActivityIndicator color="white" />
-                        ) : (
-                          <>
-                            <Ionicons name="log-in" size={20} color="white" />
-                            <Text style={styles.joinButtonText}>{t('company.join')}</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
+                    <Ionicons name="chevron-forward" size={20} color="#64748B" />
+                  </View>
+                  <Text style={styles.joinHint}>
+                    {t('company.joinHint')}
+                  </Text>
+                </TouchableOpacity>
               )}
 
               {/* Company Form */}
@@ -456,12 +391,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E293B',
     borderRadius: 16,
     marginBottom: 20,
-    overflow: 'hidden',
+    padding: 16,
   },
   joinToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
     gap: 12,
   },
   joinToggleText: {
@@ -470,32 +404,10 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '500',
   },
-  joinForm: {
-    padding: 16,
-    paddingTop: 0,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
   joinHint: {
     fontSize: 13,
     color: '#94A3B8',
-    marginBottom: 12,
-    marginTop: 12,
-  },
-  joinButton: {
-    flexDirection: 'row',
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 12,
-  },
-  joinButtonText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: '600',
+    marginTop: 8,
   },
   formContainer: {
     backgroundColor: '#1E293B',
