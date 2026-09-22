@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -10,15 +10,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
-  Pressable,
   ImageBackground,
-  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Alert } from '../../src/utils/alert';
 import * as ImagePicker from 'expo-image-picker';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { api } from '../../src/services/api';
 import { OCRResult, InvoiceItemCreate } from '../../src/types';
@@ -42,16 +39,12 @@ export default function ScanScreen() {
   const { language } = useLanguageStore();
   const dateLocale = language === 'bg' ? bg : enUS;
   
-  const [permission, requestPermission] = useCameraPermissions();
-  const [showCamera, setShowCamera] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
   const [ocrCorrections, setOcrCorrections] = useState<string[]>([]);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
-  const [focusKey, setFocusKey] = useState(0);
-  const cameraRef = useRef<any>(null);
 
   // Form fields (editable after OCR)
   const [supplier, setSupplier] = useState('');
@@ -64,27 +57,27 @@ export default function ScanScreen() {
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [items, setItems] = useState<EditableItem[]>([]);
 
-  // Tap to focus - triggers refocus
-  const handleTapToFocus = useCallback(() => {
-    setFocusKey(prev => prev + 1);
-  }, []);
-
+  // Delegates to the phone's own camera app (via the OS camera picker)
+  // instead of a custom in-page live preview. The in-page camera had no
+  // reliable autofocus on web (browsers don't expose manual focus control
+  // to sites), so photos often came out blurry regardless of screen size
+  // or phone quality - the native camera app has full autofocus/HDR and
+  // uses the phone's actual camera capabilities.
   const handleTakePhoto = async () => {
-    if (cameraRef.current) {
-      try {
-        // Use higher quality for better OCR results
-        const photo = await cameraRef.current.takePictureAsync({ 
-          base64: true, 
-          quality: 0.9,
-          skipProcessing: false,
-        });
-        setCapturedImage(`data:image/jpeg;base64,${photo.base64}`);
-        setShowCamera(false);
-        await processImage(photo.base64);
-      } catch (error) {
-        console.error('Error taking photo:', error);
-        Alert.alert(t('common.error'), language === 'bg' ? 'Не можах да заснема снимка' : 'Could not take photo');
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        base64: true,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets[0].base64) {
+        setCapturedImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+        await processImage(result.assets[0].base64);
       }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      Alert.alert(t('common.error'), language === 'bg' ? 'Не можах да заснема снимка' : 'Could not take photo');
     }
   };
 
@@ -92,7 +85,7 @@ export default function ScanScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       base64: true,
-      quality: 0.7,
+      quality: 1,
     });
 
     if (!result.canceled && result.assets[0].base64) {
@@ -212,59 +205,6 @@ export default function ScanScreen() {
     setInvoiceDate(new Date());
   };
 
-  const openCamera = async () => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        Alert.alert(t('common.error'), language === 'bg' ? 'Нужен е достъп до камерата' : 'Camera access required');
-        return;
-      }
-    }
-    setShowCamera(true);
-  };
-
-  if (showCamera) {
-    // Rendered in a Modal rather than inline: this screen is still mounted
-    // inside the tab navigator, whose bottom tab bar is a persistent
-    // sibling drawn on top of whatever the active tab returns - a plain
-    // full-screen View here gets its bottom edge (including the capture
-    // button) clipped behind that bar. A Modal portals above the whole
-    // navigator, tab bar included.
-    return (
-      <Modal visible={showCamera} animationType="none" onRequestClose={() => setShowCamera(false)}>
-        <View style={styles.cameraContainer}>
-          <CameraView
-            key={focusKey}
-            style={styles.camera}
-            ref={cameraRef}
-            facing="back"
-            autofocus="on"
-            mode="picture"
-          >
-            <Pressable style={styles.cameraOverlayPressable} onPress={handleTapToFocus}>
-              <SafeAreaView style={styles.cameraOverlay}>
-                <TouchableOpacity style={styles.closeButton} onPress={() => setShowCamera(false)}>
-                  <Ionicons name="close" size={32} color="white" />
-                </TouchableOpacity>
-                <View style={styles.cameraFrame}>
-                  <View style={[styles.corner, styles.topLeft]} />
-                  <View style={[styles.corner, styles.topRight]} />
-                  <View style={[styles.corner, styles.bottomLeft]} />
-                  <View style={[styles.corner, styles.bottomRight]} />
-                </View>
-                <Text style={styles.cameraHint}>{t('scan.tapToFocus')}</Text>
-                <Text style={styles.cameraHint2}>{t('scan.positionInvoice')}</Text>
-                <TouchableOpacity style={styles.captureButton} onPress={handleTakePhoto}>
-                  <Ionicons name="camera" size={36} color="white" />
-                </TouchableOpacity>
-              </SafeAreaView>
-            </Pressable>
-          </CameraView>
-        </View>
-      </Modal>
-    );
-  }
-
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
@@ -281,7 +221,7 @@ export default function ScanScreen() {
 
               {!capturedImage ? (
                 <View style={styles.scanOptions}>
-              <TouchableOpacity style={styles.scanButton} onPress={openCamera}>
+              <TouchableOpacity style={styles.scanButton} onPress={handleTakePhoto}>
                 <View style={styles.scanIconContainer}>
                   <Ionicons name="camera" size={48} color="#8B5CF6" />
                 </View>
@@ -596,92 +536,6 @@ const styles = StyleSheet.create({
   scanButtonHint: {
     fontSize: 12,
     color: '#64748B',
-  },
-  cameraContainer: {
-    flex: 1,
-  },
-  camera: {
-    flex: 1,
-  },
-  cameraOverlayPressable: {
-    flex: 1,
-  },
-  cameraOverlay: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    justifyContent: 'space-between',
-    padding: 20,
-  },
-  closeButton: {
-    alignSelf: 'flex-end',
-    padding: 8,
-  },
-  cameraFrame: {
-    width: '90%',
-    aspectRatio: 0.7,
-    alignSelf: 'center',
-    position: 'relative',
-  },
-  corner: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderColor: '#8B5CF6',
-    borderRadius: 4,
-  },
-  topLeft: {
-    top: 0,
-    left: 0,
-    borderTopWidth: 4,
-    borderLeftWidth: 4,
-  },
-  topRight: {
-    top: 0,
-    right: 0,
-    borderTopWidth: 4,
-    borderRightWidth: 4,
-  },
-  bottomLeft: {
-    bottom: 0,
-    left: 0,
-    borderBottomWidth: 4,
-    borderLeftWidth: 4,
-  },
-  bottomRight: {
-    bottom: 0,
-    right: 0,
-    borderBottomWidth: 4,
-    borderRightWidth: 4,
-  },
-  cameraHint: {
-    color: 'white',
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
-  },
-  cameraHint2: {
-    color: '#94A3B8',
-    textAlign: 'center',
-    fontSize: 14,
-    marginBottom: 20,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
-  },
-  captureButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#8B5CF6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    alignSelf: 'center',
-    borderWidth: 4,
-    borderColor: 'rgba(255,255,255,0.3)',
   },
   resultContainer: {
     flex: 1,
