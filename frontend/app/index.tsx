@@ -6,17 +6,14 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
-import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLanguageStore, useTranslation } from '../src/i18n';
 import { api } from '../src/services/api';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function Index() {
-  const { isLoading, isAuthenticated, login, setUser } = useAuth();
+  const { isLoading, isAuthenticated, setUser } = useAuth();
   const router = useRouter();
   const [isProcessing, setIsProcessing] = useState(false);
   const { language, setLanguage, loadLanguage } = useLanguageStore();
@@ -38,91 +35,6 @@ export default function Index() {
       router.replace('/(tabs)');
     }
   }, [isLoading, isAuthenticated]);
-
-  useEffect(() => {
-    // Check for session_id in URL (web)
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const hash = window.location.hash;
-      if (hash.includes('session_id=')) {
-        const sessionId = hash.split('session_id=')[1]?.split('&')[0];
-        if (sessionId) {
-          handleSessionId(sessionId);
-          window.location.hash = '';
-        }
-      }
-    }
-  }, []);
-
-  const handleSessionId = async (sessionId: string) => {
-    try {
-      setIsProcessing(true);
-      await login(sessionId);
-      router.replace('/(tabs)');
-    } catch (error) {
-      console.error('Login error:', error);
-      setIsProcessing(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    try {
-      // For Expo Go, use exp:// scheme; for standalone app use custom scheme
-      const redirectUrl = Platform.OS === 'web'
-        ? (typeof window !== 'undefined' ? window.location.origin + '/' : '/')
-        : Linking.createURL('/');
-      
-      console.log('Google login redirect URL:', redirectUrl);
-      
-      const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-      
-      if (Platform.OS === 'web') {
-        window.location.href = authUrl;
-      } else {
-        setIsProcessing(true);
-        const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
-        console.log('WebBrowser result:', result);
-        
-        if (result.type === 'success' && result.url) {
-          const url = result.url;
-          console.log('Received URL:', url);
-          
-          let sessionId = null;
-          // Try different URL formats
-          if (url.includes('#session_id=')) {
-            sessionId = url.split('#session_id=')[1]?.split('&')[0];
-          } else if (url.includes('?session_id=')) {
-            sessionId = url.split('?session_id=')[1]?.split('&')[0];
-          } else if (url.includes('session_id=')) {
-            sessionId = url.split('session_id=')[1]?.split('&')[0];
-          }
-          
-          console.log('Extracted sessionId:', sessionId);
-          
-          if (sessionId) {
-            await handleSessionId(sessionId);
-          } else {
-            setIsProcessing(false);
-            Alert.alert(
-              language === 'bg' ? 'Грешка' : 'Error',
-              language === 'bg' ? 'Не беше получен session ID' : 'No session ID received'
-            );
-          }
-        } else if (result.type === 'cancel') {
-          console.log('User cancelled');
-          setIsProcessing(false);
-        } else {
-          setIsProcessing(false);
-        }
-      }
-    } catch (error) {
-      console.error('Google login error:', error);
-      setIsProcessing(false);
-      Alert.alert(
-        language === 'bg' ? 'Грешка' : 'Error',
-        language === 'bg' ? 'Грешка при вход с Google' : 'Google login failed'
-      );
-    }
-  };
 
   const handleEmailAuth = async () => {
     if (!email.trim()) {
@@ -281,17 +193,6 @@ export default function Index() {
                   </Text>
                 </TouchableOpacity>
               </View>
-
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>{language === 'bg' ? 'или' : 'or'}</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin}>
-                <Ionicons name="logo-google" size={24} color="white" />
-                <Text style={styles.googleButtonText}>{t('login.google')}</Text>
-              </TouchableOpacity>
 
               {/* Legal Links */}
               <View style={styles.legalLinks}>
@@ -462,23 +363,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    maxWidth: 300,
-    marginVertical: 16,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#334155',
-  },
-  dividerText: {
-    color: '#64748B',
-    paddingHorizontal: 16,
-    fontSize: 14,
-  },
   featuresContainer: {
     width: '100%',
     maxWidth: 300,
@@ -501,25 +385,6 @@ const styles = StyleSheet.create({
   featureText: {
     fontSize: 16,
     color: '#E2E8F0',
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#334155',
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    width: '100%',
-    maxWidth: 300,
-    borderWidth: 1,
-    borderColor: '#475569',
-  },
-  googleButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 12,
   },
   legalLinks: {
     flexDirection: 'row',

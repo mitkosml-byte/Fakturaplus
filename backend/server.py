@@ -42,6 +42,11 @@ db = client[os.environ.get('DB_NAME', 'test_database')]
 # Emergent LLM Key
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
+# AI features (OCR scanning, AI item merge, AI ROI insights) depend on the
+# emergentintegrations package and EMERGENT_LLM_KEY, which are specific to the
+# Emergent hosting platform and unavailable outside it. Disabled for now.
+AI_FEATURES_ENABLED = False
+
 # Create the main app
 app = FastAPI(
     title="Invoice Manager API",
@@ -1349,6 +1354,9 @@ async def correct_ocr_data(
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
 async def scan_invoice(image_base64: str = None, request: Request = None, current_user: User = Depends(get_current_user)):
+    if not AI_FEATURES_ENABLED:
+        raise HTTPException(status_code=503, detail="AI разпознаването временно не е налично. Моля, въведете данните ръчно.")
+
     body = await request.json()
     image_data = body.get("image_base64", "")
     
@@ -1983,8 +1991,10 @@ async def generate_roi_insights(
     
     # Try to get AI enhanced insights
     try:
+        if not AI_FEATURES_ENABLED:
+            raise RuntimeError("AI features disabled")
         from emergentintegrations.llm.chat import LlmChat, UserMessage
-        
+
         llm = LlmChat(
             api_key=os.getenv("EMERGENT_LLM_KEY"),
             session_id=f"roi_{uuid.uuid4().hex[:8]}",
@@ -3405,8 +3415,11 @@ async def ai_merge_similar_items(
     AI модул за автоматично сливане на сходни продукти.
     Използва Gemini за идентифициране на еднакви продукти с различни имена.
     """
+    if not AI_FEATURES_ENABLED:
+        return {"merged_groups": [], "total_merged": 0, "message": "AI функцията временно не е налична"}
+
     from collections import defaultdict
-    
+
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
