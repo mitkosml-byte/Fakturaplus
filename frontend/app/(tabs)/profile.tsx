@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Alert } from '../../src/utils/alert';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation, useLanguageStore, Language } from '../../src/i18n';
 import { api } from '../../src/services/api';
 import { Company } from '../../src/types';
@@ -39,9 +39,14 @@ export default function ProfileScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    loadCompany();
-  }, [loadCompany]);
+  // Tab screens stay mounted, so returning from company-settings after an
+  // edit doesn't remount this screen - only re-fetching on focus picks up
+  // the change without needing a manual pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      loadCompany();
+    }, [loadCompany])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

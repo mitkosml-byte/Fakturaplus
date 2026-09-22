@@ -16,6 +16,12 @@ import { OfflineBanner } from '../src/components/OfflineBanner';
 // (tabs)/index.tsx for the root path - replace("/") used to silently
 // resolve back to whichever of the two the router already considered
 // "current" instead of actually leaving the tabs group.
+//
+// Only "login" is a public screen. Every other top-level route (e.g.
+// company-settings, users-management, budget) is pushed on top of the
+// tabs stack and still requires auth, so redirecting whenever the user
+// isn't literally inside "(tabs)" would bounce them back out of those
+// screens the instant they navigate to one.
 function useProtectedRoute() {
   const { isAuthenticated, isLoading } = useAuth();
   const segments = useSegments();
@@ -23,10 +29,10 @@ function useProtectedRoute() {
 
   useEffect(() => {
     if (isLoading) return;
-    const inTabsGroup = segments[0] === '(tabs)';
-    if (isAuthenticated && !inTabsGroup) {
+    const onLoginScreen = segments[0] === 'login';
+    if (isAuthenticated && onLoginScreen) {
       router.replace('/(tabs)');
-    } else if (!isAuthenticated && inTabsGroup) {
+    } else if (!isAuthenticated && !onLoginScreen) {
       router.replace('/login');
     }
   }, [isAuthenticated, isLoading, segments]);

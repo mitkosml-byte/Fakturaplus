@@ -28,7 +28,8 @@ export default function CompanySettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
-  
+  const [hasOtherUsers, setHasOtherUsers] = useState(false);
+
   // Form fields
   const [name, setName] = useState('');
   const [eik, setEik] = useState('');
@@ -56,6 +57,18 @@ export default function CompanySettingsScreen() {
         setEmail(data.email || '');
         setBankName(data.bank_name || '');
         setBankIban(data.bank_iban || '');
+
+        // The backend only blocks an EIK change once teammates have joined
+        // (it would silently change their company's tax ID too). Mirror
+        // that here instead of locking the field for every existing
+        // company - otherwise a sole owner could never fix the
+        // placeholder EIK the app auto-generates at signup.
+        try {
+          const users = await api.getCompanyUsers();
+          setHasOtherUsers(users.length > 1);
+        } catch (error) {
+          setHasOtherUsers(false);
+        }
       }
     } catch (error) {
       console.error('Error loading company:', error);
@@ -201,9 +214,9 @@ export default function CompanySettingsScreen() {
                     placeholder="123456789"
                     placeholderTextColor="#64748B"
                     keyboardType="number-pad"
-                    editable={!company}
+                    editable={!company || !hasOtherUsers}
                   />
-                  {company && (
+                  {company && hasOtherUsers && (
                     <Text style={styles.inputHint}>{t('company.eikCantChange')}</Text>
                   )}
                 </View>
