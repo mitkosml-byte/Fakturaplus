@@ -5,6 +5,7 @@ export interface User {
   picture?: string;
   role: 'owner' | 'manager' | 'staff';
   company_id?: string;
+  has_password?: boolean;
   created_at: string;
 }
 

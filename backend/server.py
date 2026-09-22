@@ -115,6 +115,7 @@ class User(BaseModel):
     company_id: Optional[str] = None  # Връзка към фирмата
     password_hash: Optional[str] = None  # За email/password auth
     auth_provider: str = "email"  # "google" or "email"
+    has_password: bool = False  # Дали акаунтът има парола (за да предложим "задай парола" на Google потребители)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserSession(BaseModel):
@@ -132,6 +133,10 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+class ChangePassword(BaseModel):
+    current_password: Optional[str] = None  # Не се изисква, ако акаунтът все още няма парола (напр. Google вход)
+    new_password: str
 
 # Invitation model for user invitations
 class Invitation(BaseModel):
@@ -352,6 +357,13 @@ class SessionDataResponse(BaseModel):
 
 # ===================== AUTH HELPERS =====================
 
+def sanitize_user(user_doc: dict) -> dict:
+    """Премахва password_hash от документа на потребителя и добавя has_password флаг."""
+    user_doc = dict(user_doc)
+    user_doc["has_password"] = bool(user_doc.get("password_hash"))
+    user_doc.pop("password_hash", None)
+    return user_doc
+
 async def get_session_token(request: Request) -> Optional[str]:
     # Check cookie first
     session_token = request.cookies.get("session_token")
@@ -382,7 +394,8 @@ async def get_current_user(request: Request) -> User:
     user_doc = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user_doc:
         raise HTTPException(status_code=401, detail="Потребителят не е намерен")
-    
+    user_doc = sanitize_user(user_doc)
+
     return User(**user_doc)
 
 async def get_current_user_optional(request: Request) -> Optional[User]:
@@ -464,7 +477,7 @@ async def create_session(request: Request, response: Response):
     )
     
     user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    return {"user": user_doc, "session_token": session_data.session_token}
+    return {"user": sanitize_user(user_doc), "session_token": session_data.session_token}
 
 @api_router.get("/auth/me")
 async def get_me(current_user: User = Depends(get_current_user)):
@@ -563,8 +576,8 @@ async def register_user(user_data: UserRegister, response: Response):
         path="/"
     )
     
-    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
-    return {"user": user_doc, "session_token": session_token}
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return {"user": sanitize_user(user_doc), "session_token": session_token}
 
 @api_router.post("/auth/login")
 async def login_user(user_data: UserLogin, response: Response):
@@ -604,8 +617,33 @@ async def login_user(user_data: UserLogin, response: Response):
         path="/"
     )
     
-    user_doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
-    return {"user": user_doc, "session_token": session_token}
+    user_doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return {"user": sanitize_user(user_doc), "session_token": session_token}
+
+@api_router.put("/auth/change-password")
+async def change_password(data: ChangePassword, current_user: User = Depends(get_current_user)):
+    """Смяна на парола. Ако акаунтът (напр. Google вход) все още няма парола, я задава за пръв път."""
+    user = await db.users.find_one({"user_id": current_user.user_id})
+    if not user:
+        raise HTTPException(status_code=401, detail="Потребителят не е намерен")
+
+    existing_hash = user.get("password_hash")
+    if existing_hash:
+        if not data.current_password:
+            raise HTTPException(status_code=400, detail="Въведете текущата парола")
+        if not pwd_context.verify(data.current_password, existing_hash):
+            raise HTTPException(status_code=401, detail="Грешна текуща парола")
+
+    is_valid, error_msg = validate_password(data.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+
+    new_hash = pwd_context.hash(data.new_password)
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$set": {"password_hash": new_hash}}
+    )
+    return {"message": "Паролата е сменена успешно"}
 
 @api_router.put("/auth/role/{user_id}")
 async def update_user_role(user_id: str, request: Request, current_user: User = Depends(get_current_user)):

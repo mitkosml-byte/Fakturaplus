@@ -178,6 +178,21 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/account-security')}>
+            <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+              <Ionicons name="lock-closed" size={20} color="#10B981" />
+            </View>
+            <View style={styles.menuContent}>
+              <Text style={styles.menuTitle}>{language === 'bg' ? 'Акаунт и сигурност' : 'Account & Security'}</Text>
+              <Text style={styles.menuSubtitle}>
+                {user?.has_password
+                  ? (language === 'bg' ? 'Смяна на парола' : 'Change password')
+                  : (language === 'bg' ? 'Задайте парола за вход с имейл' : 'Set a password for email login')}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
               <Ionicons name="notifications" size={20} color="#8B5CF6" />
