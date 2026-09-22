@@ -6,13 +6,13 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Alert,
   RefreshControl,
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
 

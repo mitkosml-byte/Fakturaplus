@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   TextInput,
   Modal,
   ImageBackground,
@@ -17,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { User, Invitation } from '../src/types';
 import { useAuth } from '../src/contexts/AuthContext';

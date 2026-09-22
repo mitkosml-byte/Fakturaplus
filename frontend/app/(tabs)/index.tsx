@@ -8,7 +8,6 @@ import {
   RefreshControl,
   TextInput,
   Modal,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ImageBackground,
@@ -17,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
 import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
 import { format, addDays, subDays } from 'date-fns';

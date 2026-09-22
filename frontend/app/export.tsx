@@ -4,13 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { Alert } from '../src/utils/alert';
 import { useTranslation } from '../src/i18n';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';

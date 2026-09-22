@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { 
-  View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Platform, 
-  ImageBackground, Image, TextInput, KeyboardAvoidingView, ScrollView, Alert 
+import {
+  View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Platform,
+  ImageBackground, Image, TextInput, KeyboardAvoidingView, ScrollView
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
+import { Alert } from '../src/utils/alert';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLanguageStore, useTranslation } from '../src/i18n';
 import { api } from '../src/services/api';

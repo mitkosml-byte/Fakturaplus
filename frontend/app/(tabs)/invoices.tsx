@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   TextInput,
   RefreshControl,
-  Alert,
   Modal,
   Linking,
   Platform,
@@ -15,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
 import { Invoice } from '../../src/types';
 import { format } from 'date-fns';
