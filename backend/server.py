@@ -18,8 +18,17 @@ import re
 import json
 import difflib
 from passlib.context import CryptContext
+import certifi
 from anthropic import AsyncAnthropic
 import anthropic as anthropic_sdk
+
+# The anthropic SDK's HTTP client (httpx2) verifies TLS against the
+# operating system's native certificate store by default. That store isn't
+# reliably populated on minimal container hosts (Render's included), which
+# surfaces as a generic httpx2 "Connection error" on every request with no
+# other symptom. Pointing it at certifi's bundled CA file (what every other
+# HTTP client in this app already relies on) sidesteps the OS store entirely.
+os.environ.setdefault('SSL_CERT_FILE', certifi.where())
 
 # Rate limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -1565,11 +1574,14 @@ async def scan_invoice(image_base64: str = None, request: Request = None, curren
         raise HTTPException(status_code=503, detail="AI разпознаването не е конфигурирано правилно на сървъра. Моля, въведете данните ръчно.")
     except anthropic_sdk.RateLimitError:
         raise HTTPException(status_code=503, detail="AI услугата за разпознаване е временно претоварена. Моля, опитайте отново след малко.")
+    except anthropic_sdk.APIConnectionError:
+        logger.exception("OCR Error: could not reach the Anthropic API (network/TLS)")
+        raise HTTPException(status_code=502, detail="Сървърът не успя да се свърже с AI услугата (мрежов проблем). Моля, опитайте отново след малко.")
     except anthropic_sdk.APIStatusError as e:
         logger.error(f"OCR Error (API status): {e}")
         raise HTTPException(status_code=502, detail="Грешка при връзка с AI услугата за разпознаване.")
     except Exception as e:
-        logger.error(f"OCR Error: {str(e)}")
+        logger.exception("OCR Error")
         raise HTTPException(status_code=500, detail=f"Грешка при сканиране: {str(e)}")
 
 # ===================== INVOICE ENDPOINTS =====================
