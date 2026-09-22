@@ -111,6 +111,13 @@ export default function ProfileScreen() {
           >
             <View style={styles.header}>
               <Text style={styles.title}>{t('profile.title')}</Text>
+              <TouchableOpacity
+                style={styles.headerLogoutButton}
+                onPress={handleLogout}
+                accessibilityLabel={t('profile.logout')}
+              >
+                <Ionicons name="log-out-outline" size={22} color="#EF4444" />
+              </TouchableOpacity>
             </View>
 
             {/* Company Banner */}
@@ -381,6 +388,17 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerLogoutButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   title: {
     fontSize: 28,
