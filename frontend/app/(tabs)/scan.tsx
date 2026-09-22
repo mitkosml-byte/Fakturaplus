@@ -12,6 +12,7 @@ import {
   Image,
   Pressable,
   ImageBackground,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -223,36 +224,44 @@ export default function ScanScreen() {
   };
 
   if (showCamera) {
+    // Rendered in a Modal rather than inline: this screen is still mounted
+    // inside the tab navigator, whose bottom tab bar is a persistent
+    // sibling drawn on top of whatever the active tab returns - a plain
+    // full-screen View here gets its bottom edge (including the capture
+    // button) clipped behind that bar. A Modal portals above the whole
+    // navigator, tab bar included.
     return (
-      <View style={styles.cameraContainer}>
-        <CameraView 
-          key={focusKey}
-          style={styles.camera} 
-          ref={cameraRef} 
-          facing="back"
-          autofocus="on"
-          mode="picture"
-        >
-          <Pressable style={styles.cameraOverlayPressable} onPress={handleTapToFocus}>
-            <SafeAreaView style={styles.cameraOverlay}>
-              <TouchableOpacity style={styles.closeButton} onPress={() => setShowCamera(false)}>
-                <Ionicons name="close" size={32} color="white" />
-              </TouchableOpacity>
-              <View style={styles.cameraFrame}>
-                <View style={[styles.corner, styles.topLeft]} />
-                <View style={[styles.corner, styles.topRight]} />
-                <View style={[styles.corner, styles.bottomLeft]} />
-                <View style={[styles.corner, styles.bottomRight]} />
-              </View>
-              <Text style={styles.cameraHint}>{t('scan.tapToFocus')}</Text>
-              <Text style={styles.cameraHint2}>{t('scan.positionInvoice')}</Text>
-              <TouchableOpacity style={styles.captureButton} onPress={handleTakePhoto}>
-                <Ionicons name="camera" size={36} color="white" />
-              </TouchableOpacity>
-            </SafeAreaView>
-          </Pressable>
-        </CameraView>
-      </View>
+      <Modal visible={showCamera} animationType="none" onRequestClose={() => setShowCamera(false)}>
+        <View style={styles.cameraContainer}>
+          <CameraView
+            key={focusKey}
+            style={styles.camera}
+            ref={cameraRef}
+            facing="back"
+            autofocus="on"
+            mode="picture"
+          >
+            <Pressable style={styles.cameraOverlayPressable} onPress={handleTapToFocus}>
+              <SafeAreaView style={styles.cameraOverlay}>
+                <TouchableOpacity style={styles.closeButton} onPress={() => setShowCamera(false)}>
+                  <Ionicons name="close" size={32} color="white" />
+                </TouchableOpacity>
+                <View style={styles.cameraFrame}>
+                  <View style={[styles.corner, styles.topLeft]} />
+                  <View style={[styles.corner, styles.topRight]} />
+                  <View style={[styles.corner, styles.bottomLeft]} />
+                  <View style={[styles.corner, styles.bottomRight]} />
+                </View>
+                <Text style={styles.cameraHint}>{t('scan.tapToFocus')}</Text>
+                <Text style={styles.cameraHint2}>{t('scan.positionInvoice')}</Text>
+                <TouchableOpacity style={styles.captureButton} onPress={handleTakePhoto}>
+                  <Ionicons name="camera" size={36} color="white" />
+                </TouchableOpacity>
+              </SafeAreaView>
+            </Pressable>
+          </CameraView>
+        </View>
+      </Modal>
     );
   }
 
