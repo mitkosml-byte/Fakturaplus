@@ -63,8 +63,9 @@ export default function ProfileScreen() {
           text: t('profile.logout'),
           style: 'destructive',
           onPress: async () => {
+            // The root layout's auth guard redirects to "/" as soon as
+            // isAuthenticated flips false - no manual navigation needed.
             await logout();
-            router.replace('/');
           },
         },
       ]

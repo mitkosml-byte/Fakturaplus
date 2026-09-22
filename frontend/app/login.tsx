@@ -13,7 +13,7 @@ import { api } from '../src/services/api';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
-export default function Index() {
+export default function LoginScreen() {
   const { isLoading, isAuthenticated, setUser } = useAuth();
   const router = useRouter();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -30,12 +30,6 @@ export default function Index() {
   useEffect(() => {
     loadLanguage();
   }, []);
-
-  useEffect(() => {
-    if (!isLoading && isAuthenticated) {
-      router.replace('/(tabs)');
-    }
-  }, [isLoading, isAuthenticated]);
 
   const handleEmailAuth = async () => {
     if (!email.trim()) {
@@ -62,7 +56,8 @@ export default function Index() {
       
       api.setToken(result.session_token);
       setUser(result.user);
-      router.replace('/(tabs)');
+      // The root layout's auth guard navigates to /(tabs) once
+      // isAuthenticated flips true - no manual navigation needed here.
     } catch (error: any) {
       Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
     } finally {
