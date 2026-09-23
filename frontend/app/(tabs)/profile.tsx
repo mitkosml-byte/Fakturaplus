@@ -235,6 +235,20 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Audit Log - Owner only */}
+          {hasPermission('view_audit_log') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/audit-log')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
+                <Ionicons name="list" size={20} color="#6366F1" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('profile.auditLog')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.auditLogDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
+
           {/* Export - Owner and Manager only */}
           {hasPermission('export_data') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/export')}>

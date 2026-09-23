@@ -901,6 +901,74 @@ export const translations: Translations = {
     bg: 'Допълнителна информация',
     en: 'Additional Information',
   },
+  'stats.top3Title': {
+    bg: 'Топ 3',
+    en: 'Top 3',
+  },
+  'stats.topSuppliers': {
+    bg: 'Доставчици',
+    en: 'Suppliers',
+  },
+  'stats.topItems': {
+    bg: 'Артикули',
+    en: 'Items',
+  },
+  'stats.forecastTitle': {
+    bg: 'Прогноза за следващия месец',
+    en: 'Forecast for next month',
+  },
+  'stats.forecastHint': {
+    bg: 'На база последните 6 месеца',
+    en: 'Based on the last 6 months',
+  },
+  'stats.forecastRevenue': {
+    bg: 'Очакван оборот',
+    en: 'Expected revenue',
+  },
+  'stats.forecastExpense': {
+    bg: 'Очакван разход',
+    en: 'Expected expense',
+  },
+  'stats.roiTrendTitle': {
+    bg: 'ROI тренд (последните 6 месеца)',
+    en: 'ROI trend (last 6 months)',
+  },
+  'stats.compare': {
+    bg: 'Сравни',
+    en: 'Compare',
+  },
+  'stats.compareHint': {
+    bg: 'Изберете 2-5 доставчика за сравнение',
+    en: 'Select 2-5 suppliers to compare',
+  },
+  'stats.compareMinRequired': {
+    bg: 'Изберете поне 2 доставчика',
+    en: 'Select at least 2 suppliers',
+  },
+  'stats.compareMaxReached': {
+    bg: 'Може да сравните най-много 5 доставчика',
+    en: 'You can compare at most 5 suppliers',
+  },
+  'stats.compareButtonWithCount': {
+    bg: 'Сравни',
+    en: 'Compare',
+  },
+  'stats.compareTitle': {
+    bg: 'Сравнение на доставчици',
+    en: 'Supplier comparison',
+  },
+  'stats.compareTotalAmount': {
+    bg: 'Обща сума',
+    en: 'Total amount',
+  },
+  'stats.compareInvoiceCount': {
+    bg: 'Брой фактури',
+    en: 'Invoice count',
+  },
+  'stats.compareAvgInvoice': {
+    bg: 'Средна фактура',
+    en: 'Average invoice',
+  },
   'stats.loadingData': {
     bg: 'Зареждане на данни...',
     en: 'Loading data...',
@@ -1554,6 +1622,50 @@ export const translations: Translations = {
   'profile.budgetDesc': {
     bg: 'Управление на месечен бюджет',
     en: 'Manage monthly budget',
+  },
+  'profile.auditLog': {
+    bg: 'Дневник на действията',
+    en: 'Audit log',
+  },
+  'profile.auditLogDesc': {
+    bg: 'Кой какво е добавил, променил или изтрил',
+    en: 'Who added, changed or deleted what',
+  },
+  'auditLog.title': {
+    bg: 'Дневник на действията',
+    en: 'Audit log',
+  },
+  'auditLog.empty': {
+    bg: 'Няма записани действия',
+    en: 'No recorded actions',
+  },
+  'auditLog.filterAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'auditLog.actionCreate': {
+    bg: 'Създадена',
+    en: 'Created',
+  },
+  'auditLog.actionUpdate': {
+    bg: 'Редактирана',
+    en: 'Updated',
+  },
+  'auditLog.actionDelete': {
+    bg: 'Изтрита',
+    en: 'Deleted',
+  },
+  'auditLog.actionExport': {
+    bg: 'Експорт',
+    en: 'Export',
+  },
+  'auditLog.entityInvoice': {
+    bg: 'фактура',
+    en: 'invoice',
+  },
+  'auditLog.entityInvoices': {
+    bg: 'фактури',
+    en: 'invoices',
   },
   'profile.export': {
     bg: 'Експорт',
