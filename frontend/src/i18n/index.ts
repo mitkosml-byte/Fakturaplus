@@ -541,7 +541,43 @@ export const translations: Translations = {
     bg: 'Не можах да изтегля файла',
     en: 'Could not download file',
   },
-  
+  'invoices.periodAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'invoices.periodThisMonth': {
+    bg: 'Този месец',
+    en: 'This month',
+  },
+  'invoices.periodLastMonth': {
+    bg: 'Миналия месец',
+    en: 'Last month',
+  },
+  'invoices.periodLast3Months': {
+    bg: 'Последните 3 месеца',
+    en: 'Last 3 months',
+  },
+  'invoices.periodThisYear': {
+    bg: 'Тази година',
+    en: 'This year',
+  },
+  'invoices.periodCustom': {
+    bg: 'Период',
+    en: 'Custom',
+  },
+  'invoices.periodFrom': {
+    bg: 'От',
+    en: 'From',
+  },
+  'invoices.periodTo': {
+    bg: 'До',
+    en: 'To',
+  },
+  'invoices.monthlyTotal': {
+    bg: 'Общо',
+    en: 'Total',
+  },
+
   // Company Settings
   'company.title': {
     bg: 'Настройки на фирма',

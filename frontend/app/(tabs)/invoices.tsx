@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
+  SectionList,
+  ScrollView,
   TouchableOpacity,
   TextInput,
   RefreshControl,
@@ -15,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
 import { Invoice } from '../../src/types';
@@ -26,6 +28,42 @@ import { useTranslation, useLanguageStore } from '../../src/i18n';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
+type PeriodPreset = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'thisYear' | 'custom';
+
+function getPeriodRange(
+  preset: PeriodPreset,
+  customStart: Date,
+  customEnd: Date
+): { start?: string; end?: string } {
+  const now = new Date();
+  switch (preset) {
+    case 'thisMonth':
+      return {
+        start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+        end: now.toISOString(),
+      };
+    case 'lastMonth':
+      return {
+        start: new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString(),
+        end: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString(),
+      };
+    case 'last3Months':
+      return {
+        start: new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString(),
+        end: now.toISOString(),
+      };
+    case 'thisYear':
+      return {
+        start: new Date(now.getFullYear(), 0, 1).toISOString(),
+        end: now.toISOString(),
+      };
+    case 'custom':
+      return { start: customStart.toISOString(), end: customEnd.toISOString() };
+    default:
+      return {};
+  }
+}
+
 export default function InvoicesScreen() {
   const { t } = useTranslation();
   const { language } = useLanguageStore();
@@ -34,20 +72,36 @@ export default function InvoicesScreen() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
+  const [customStartDate, setCustomStartDate] = useState<Date>(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [customEndDate, setCustomEndDate] = useState<Date>(new Date());
+  const [startPickerVisible, setStartPickerVisible] = useState(false);
+  const [endPickerVisible, setEndPickerVisible] = useState(false);
+
+  const periodOptions: { key: PeriodPreset; label: string }[] = [
+    { key: 'all', label: t('invoices.periodAll') },
+    { key: 'thisMonth', label: t('invoices.periodThisMonth') },
+    { key: 'lastMonth', label: t('invoices.periodLastMonth') },
+    { key: 'last3Months', label: t('invoices.periodLast3Months') },
+    { key: 'thisYear', label: t('invoices.periodThisYear') },
+    { key: 'custom', label: t('invoices.periodCustom') },
+  ];
 
   const loadInvoices = useCallback(async () => {
     try {
-      const data = await api.getInvoices(
-        searchQuery ? { supplier: searchQuery } : undefined
-      );
+      const { start, end } = getPeriodRange(periodPreset, customStartDate, customEndDate);
+      const data = await api.getInvoices({
+        ...(searchQuery ? { supplier: searchQuery } : {}),
+        ...(start ? { start_date: start } : {}),
+        ...(end ? { end_date: end } : {}),
+      });
       setInvoices(data);
     } catch (error) {
       console.error('Error loading invoices:', error);
     }
-  }, [searchQuery]);
+  }, [searchQuery, periodPreset, customStartDate, customEndDate]);
 
   // Tab screens stay mounted, so returning here (e.g. after scanning and
   // saving a new invoice) doesn't remount the screen - only re-fetching on
@@ -150,6 +204,42 @@ export default function InvoicesScreen() {
   const totalAmount = invoices.reduce((sum, inv) => sum + inv.total_amount, 0);
   const totalVat = invoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
 
+  const sections = useMemo(() => {
+    const groups = new Map<string, { title: string; data: Invoice[]; totalAmount: number; totalVat: number }>();
+    for (const inv of invoices) {
+      let key: string;
+      let title: string;
+      try {
+        const d = new Date(inv.date);
+        key = format(d, 'yyyy-MM');
+        title = format(d, 'LLLL yyyy', { locale: dateLocale });
+        title = title.charAt(0).toUpperCase() + title.slice(1);
+      } catch {
+        key = 'unknown';
+        title = inv.date;
+      }
+      if (!groups.has(key)) {
+        groups.set(key, { title, data: [], totalAmount: 0, totalVat: 0 });
+      }
+      const group = groups.get(key)!;
+      group.data.push(inv);
+      group.totalAmount += inv.total_amount;
+      group.totalVat += inv.vat_amount;
+    }
+    return Array.from(groups.entries())
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([key, group]) => ({ key, ...group }));
+  }, [invoices, dateLocale]);
+
+  const renderSectionHeader = ({ section }: { section: { title: string; data: Invoice[]; totalAmount: number } }) => (
+    <View style={styles.monthHeader}>
+      <Text style={styles.monthHeaderTitle}>{section.title}</Text>
+      <Text style={styles.monthHeaderStats}>
+        {section.data.length} · {t('invoices.monthlyTotal')} {section.totalAmount.toFixed(2)} €
+      </Text>
+    </View>
+  );
+
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
@@ -179,6 +269,57 @@ export default function InvoicesScreen() {
             )}
           </View>
 
+          {/* Period filter */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.periodChipsRow}
+            contentContainerStyle={styles.periodChipsContent}
+          >
+            {periodOptions.map((opt) => (
+              <TouchableOpacity
+                key={opt.key}
+                style={[styles.periodChip, periodPreset === opt.key && styles.periodChipActive]}
+                onPress={() => setPeriodPreset(opt.key)}
+              >
+                <Text style={[styles.periodChipText, periodPreset === opt.key && styles.periodChipTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {periodPreset === 'custom' && (
+            <View style={styles.customRangeRow}>
+              <TouchableOpacity style={styles.customRangeButton} onPress={() => setStartPickerVisible(true)}>
+                <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+                <Text style={styles.customRangeButtonText}>
+                  {t('invoices.periodFrom')}: {format(customStartDate, 'd MMM yyyy', { locale: dateLocale })}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.customRangeButton} onPress={() => setEndPickerVisible(true)}>
+                <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+                <Text style={styles.customRangeButtonText}>
+                  {t('invoices.periodTo')}: {format(customEndDate, 'd MMM yyyy', { locale: dateLocale })}
+                </Text>
+              </TouchableOpacity>
+              <DateTimePickerModal
+                isVisible={startPickerVisible}
+                mode="date"
+                date={customStartDate}
+                onConfirm={(d) => { setCustomStartDate(d); setStartPickerVisible(false); }}
+                onCancel={() => setStartPickerVisible(false)}
+              />
+              <DateTimePickerModal
+                isVisible={endPickerVisible}
+                mode="date"
+                date={customEndDate}
+                onConfirm={(d) => { setCustomEndDate(d); setEndPickerVisible(false); }}
+                onCancel={() => setEndPickerVisible(false)}
+              />
+            </View>
+          )}
+
           {/* Summary */}
           <View style={styles.summaryBar}>
             <View style={styles.summaryItem}>
@@ -196,9 +337,11 @@ export default function InvoicesScreen() {
           </View>
 
           {/* List */}
-          <FlatList
-            data={invoices}
+          <SectionList
+            sections={sections}
             renderItem={renderInvoice}
+            renderSectionHeader={renderSectionHeader}
+            stickySectionHeadersEnabled
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
             refreshControl={
@@ -357,6 +500,70 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     color: 'white',
     fontSize: 16,
+  },
+  periodChipsRow: {
+    marginTop: 12,
+  },
+  periodChipsContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  periodChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#1E293B',
+    marginRight: 8,
+  },
+  periodChipActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  periodChipText: {
+    fontSize: 13,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  periodChipTextActive: {
+    color: 'white',
+  },
+  customRangeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginTop: 10,
+  },
+  customRangeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#1E293B',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  customRangeButtonText: {
+    fontSize: 12,
+    color: '#E2E8F0',
+  },
+  monthHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  monthHeaderTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#C4B5FD',
+    textTransform: 'capitalize',
+  },
+  monthHeaderStats: {
+    fontSize: 12,
+    color: '#94A3B8',
   },
   summaryBar: {
     flexDirection: 'row',
