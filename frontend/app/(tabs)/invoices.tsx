@@ -20,6 +20,7 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
 import { Invoice } from '../../src/types';
+import { validateEikFormat } from '../../src/utils/eik';
 import { format } from 'date-fns';
 import { bg, enUS } from 'date-fns/locale';
 import * as FileSystem from 'expo-file-system';
@@ -79,6 +80,14 @@ export default function InvoicesScreen() {
   const [customEndDate, setCustomEndDate] = useState<Date>(new Date());
   const [startPickerVisible, setStartPickerVisible] = useState(false);
   const [endPickerVisible, setEndPickerVisible] = useState(false);
+  const [showOnlyEikIssues, setShowOnlyEikIssues] = useState(false);
+
+  // Reverse-charge suppliers are foreign and don't have a Bulgarian ЕИК,
+  // so they're excluded from this check on purpose.
+  const hasEikIssue = useCallback((inv: Invoice) => {
+    if (inv.vat_treatment === 'reverse_charge') return false;
+    return !validateEikFormat(inv.supplier_eik).valid;
+  }, []);
 
   const periodOptions: { key: PeriodPreset; label: string }[] = [
     { key: 'all', label: t('invoices.periodAll') },
@@ -179,6 +188,13 @@ export default function InvoicesScreen() {
         <Text style={styles.invoiceDate}>{formatDate(item.date)}</Text>
       </View>
 
+      {hasEikIssue(item) && (
+        <View style={styles.eikWarningBadge}>
+          <Ionicons name="alert-circle" size={13} color="#F59E0B" />
+          <Text style={styles.eikWarningBadgeText}>{t('invoices.missingEik')}</Text>
+        </View>
+      )}
+
       <View style={styles.invoiceDetails}>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>{t('invoices.invoiceNo')}:</Text>
@@ -201,12 +217,18 @@ export default function InvoicesScreen() {
     </TouchableOpacity>
   );
 
-  const totalAmount = invoices.reduce((sum, inv) => sum + inv.total_amount, 0);
-  const totalVat = invoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
+  const eikIssueCount = useMemo(() => invoices.filter(hasEikIssue).length, [invoices, hasEikIssue]);
+  const visibleInvoices = useMemo(
+    () => (showOnlyEikIssues ? invoices.filter(hasEikIssue) : invoices),
+    [invoices, showOnlyEikIssues, hasEikIssue]
+  );
+
+  const totalAmount = visibleInvoices.reduce((sum, inv) => sum + inv.total_amount, 0);
+  const totalVat = visibleInvoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
 
   const sections = useMemo(() => {
     const groups = new Map<string, { title: string; data: Invoice[]; totalAmount: number; totalVat: number }>();
-    for (const inv of invoices) {
+    for (const inv of visibleInvoices) {
       let key: string;
       let title: string;
       try {
@@ -229,7 +251,7 @@ export default function InvoicesScreen() {
     return Array.from(groups.entries())
       .sort((a, b) => (a[0] < b[0] ? 1 : -1))
       .map(([key, group]) => ({ key, ...group }));
-  }, [invoices, dateLocale]);
+  }, [visibleInvoices, dateLocale]);
 
   const renderSectionHeader = ({ section }: { section: { title: string; data: Invoice[]; totalAmount: number } }) => (
     <View style={styles.monthHeader}>
@@ -320,11 +342,27 @@ export default function InvoicesScreen() {
             </View>
           )}
 
+          {/* ЕИК issues banner */}
+          {eikIssueCount > 0 && (
+            <TouchableOpacity
+              style={[styles.eikBanner, showOnlyEikIssues && styles.eikBannerActive]}
+              onPress={() => setShowOnlyEikIssues((prev) => !prev)}
+            >
+              <Ionicons name="alert-circle" size={18} color="#F59E0B" />
+              <Text style={styles.eikBannerText}>
+                {eikIssueCount} {eikIssueCount === 1 ? t('invoices.missingEikSingular') : t('invoices.missingEikPlural')}
+              </Text>
+              <Text style={styles.eikBannerAction}>
+                {showOnlyEikIssues ? t('invoices.showAll') : t('invoices.showOnlyThese')}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {/* Summary */}
           <View style={styles.summaryBar}>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('invoices.count')}:</Text>
-              <Text style={styles.summaryValue}>{invoices.length}</Text>
+              <Text style={styles.summaryValue}>{visibleInvoices.length}</Text>
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('stats.vat')}:</Text>
@@ -635,6 +673,49 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  eikWarningBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 10,
+    marginTop: -4,
+  },
+  eikWarningBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#F59E0B',
+  },
+  eikBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  eikBannerActive: {
+    backgroundColor: 'rgba(245, 158, 11, 0.25)',
+  },
+  eikBannerText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#F59E0B',
+    fontWeight: '600',
+  },
+  eikBannerAction: {
+    fontSize: 12,
+    color: '#F59E0B',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   supplierContainer: {
     flexDirection: 'row',

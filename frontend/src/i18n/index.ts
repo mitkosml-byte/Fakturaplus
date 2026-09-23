@@ -665,6 +665,26 @@ export const translations: Translations = {
     bg: 'Общо',
     en: 'Total',
   },
+  'invoices.missingEik': {
+    bg: 'Без ЕИК',
+    en: 'No EIK',
+  },
+  'invoices.missingEikSingular': {
+    bg: 'фактура без валиден ЕИК на доставчика',
+    en: "invoice with no valid supplier EIK",
+  },
+  'invoices.missingEikPlural': {
+    bg: 'фактури без валиден ЕИК на доставчика',
+    en: "invoices with no valid supplier EIK",
+  },
+  'invoices.showAll': {
+    bg: 'Покажи всички',
+    en: 'Show all',
+  },
+  'invoices.showOnlyThese': {
+    bg: 'Покажи само тях',
+    en: 'Show only these',
+  },
 
   // Company Settings
   'company.title': {
