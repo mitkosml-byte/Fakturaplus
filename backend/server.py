@@ -193,6 +193,7 @@ class Invoice(BaseModel):
     vat_amount: float
     total_amount: float
     vat_treatment: Optional[VatTreatment] = None  # ДДС третиране за дневника на покупки
+    protocol_number: Optional[str] = None  # Номер на протокол по чл.117 ЗДДС (само за reverse_charge)
     date: datetime
     image_base64: Optional[str] = None
     notes: Optional[str] = None
@@ -273,6 +274,7 @@ class InvoiceUpdate(BaseModel):
     vat_amount: Optional[float] = None
     total_amount: Optional[float] = None
     vat_treatment: Optional[VatTreatment] = None
+    protocol_number: Optional[str] = None
     date: Optional[str] = None
     notes: Optional[str] = None
 
@@ -1657,6 +1659,23 @@ async def scan_invoice(image_base64: str = None, request: Request = None, curren
         logger.exception("OCR Error")
         raise HTTPException(status_code=500, detail=f"Грешка при сканиране: {str(e)}")
 
+# ===================== PROTOCOL BY чл.117 ЗДДС NUMBERING =====================
+
+async def next_protocol_number(company_id: Optional[str], user_id: str, year: int) -> str:
+    """Atomically issue the next sequential протокол number for a
+    reverse-charge self-billing document (чл.117 ЗДДС), scoped per
+    company (or per user without one) and reset each calendar year -
+    matches how these protocols are numbered in practice."""
+    scope = company_id or f"user:{user_id}"
+    counter_id = f"protocol_{scope}_{year}"
+    result = await db.counters.find_one_and_update(
+        {"_id": counter_id},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=True
+    )
+    return f"{result['seq']}/{year}"
+
 # ===================== INVOICE ENDPOINTS =====================
 
 @api_router.post("/invoices", response_model=Invoice)
@@ -1718,6 +1737,13 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
             invoice_dict["vat_treatment"] = VatTreatment.STANDARD_20
         elif abs(vat_ratio - 0.09) < 0.01:
             invoice_dict["vat_treatment"] = VatTreatment.REDUCED_9
+
+    # Reverse-charge purchases (services from abroad, ВОП...) need a
+    # self-billing протокол по чл.117 ЗДДС, issued within 15 days of the
+    # tax point - assign the next sequential number automatically so
+    # nobody has to track this by hand.
+    if invoice_dict.get("vat_treatment") == VatTreatment.REVERSE_CHARGE:
+        invoice_dict["protocol_number"] = await next_protocol_number(company_id, current_user.user_id, invoice_date.year)
 
     # Process items and convert to dict format
     items_list = None
@@ -1866,6 +1892,24 @@ async def get_invoices(
     invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
     return [Invoice(**inv) for inv in invoices]
 
+@api_router.get("/invoices/protocols/reverse-charge")
+async def get_reverse_charge_protocols(current_user: User = Depends(get_current_user)):
+    """List all reverse-charge purchases (self-billing протокол по чл.117
+    ЗДДС) across the whole company, newest first - lets the owner or
+    accountant see every protocol's number and check none has slipped
+    past its 15-day filing deadline."""
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    query = {"vat_treatment": VatTreatment.REVERSE_CHARGE}
+    if company_id:
+        query["company_id"] = company_id
+    else:
+        query["user_id"] = current_user.user_id
+
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
+    return [Invoice(**inv) for inv in invoices]
+
 @api_router.get("/invoices/{invoice_id}", response_model=Invoice)
 async def get_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
     invoice = await db.invoices.find_one({"id": invoice_id, "user_id": current_user.user_id}, {"_id": 0})
@@ -1878,7 +1922,20 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     update_data = {k: v for k, v in invoice_update.dict().items() if v is not None}
     if "date" in update_data:
         update_data["date"] = datetime.fromisoformat(update_data["date"].replace("Z", "+00:00"))
-    
+
+    existing = await db.invoices.find_one({"id": invoice_id, "user_id": current_user.user_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+
+    # Newly switched to reverse charge and no протокол yet - assign one,
+    # same as on create.
+    if update_data.get("vat_treatment") == VatTreatment.REVERSE_CHARGE and not existing.get("protocol_number"):
+        user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+        protocol_year = update_data.get("date", existing["date"]).year
+        update_data["protocol_number"] = await next_protocol_number(
+            user_doc.get("company_id") if user_doc else None, current_user.user_id, protocol_year
+        )
+
     result = await db.invoices.update_one(
         {"id": invoice_id, "user_id": current_user.user_id},
         {"$set": update_data}

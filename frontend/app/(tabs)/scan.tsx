@@ -195,7 +195,7 @@ export default function ScanScreen() {
 
     setIsSaving(true);
     try {
-      await api.createInvoice({
+      const saved = await api.createInvoice({
         supplier,
         supplier_eik: supplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
@@ -208,7 +208,11 @@ export default function ScanScreen() {
         notes: notes || undefined,
         items: itemsPayload.length > 0 ? itemsPayload : undefined,
       });
-      Alert.alert(t('common.success'), t('msg.invoiceSaved'));
+      if (saved.protocol_number) {
+        Alert.alert(t('common.success'), `${t('msg.invoiceSaved')}\n\n${t('scan.protocolAssigned')} ${saved.protocol_number}`);
+      } else {
+        Alert.alert(t('common.success'), t('msg.invoiceSaved'));
+      }
       resetForm();
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
@@ -453,6 +457,12 @@ export default function ScanScreen() {
                         </TouchableOpacity>
                       ))}
                     </View>
+                    {vatTreatment === 'reverse_charge' && (
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="information-circle" size={16} color="#8B5CF6" />
+                        <Text style={styles.protocolNoteText}>{t('scan.reverseChargeNote')}</Text>
+                      </View>
+                    )}
                   </View>
 
                   {/* Line items - pre-filled from OCR, editable */}
@@ -734,6 +744,21 @@ const styles = StyleSheet.create({
   },
   vatTreatmentChipTextActive: {
     color: 'white',
+  },
+  protocolNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+  },
+  protocolNoteText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#C4B5FD',
+    lineHeight: 18,
   },
   row: {
     flexDirection: 'row',

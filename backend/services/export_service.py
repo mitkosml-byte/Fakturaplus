@@ -1,7 +1,7 @@
 """Export service for generating Excel and PDF reports"""
 import io
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 import json
 
@@ -314,17 +314,21 @@ class ExportService:
 
         purchase_headers = [
             "№", "Дата", "Доставчик", "ЕИК/Булстат", "№ документ", "Вид документ",
+            "№ протокол чл.117", "Краен срок протокол",
             "ДО 20%", "ДДС 20%", "ДО 9%", "ДДС 9%", "ДО нулева ставка",
             "ДО освободени", "ДО извън обхвата", "ДО обратно начисляване",
             "ДДС самоначислен", "Общо с ДДС"
         ]
+        AMOUNT_COL_START = 9  # 1-indexed column where the amount columns begin
         header_row = 4
         for col, header in enumerate(purchase_headers, 1):
             cell = ws.cell(row=header_row, column=col, value=header)
             cell.font = header_font
             cell.fill = header_fill
 
-        totals = [0.0] * (len(purchase_headers) - 6)  # columns 7..16
+        overdue_fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+        today = datetime.now()
+        totals = [0.0] * (len(purchase_headers) - (AMOUNT_COL_START - 1))
         row = header_row
         for idx, inv in enumerate(purchases, 1):
             row = header_row + idx
@@ -348,28 +352,43 @@ class ExportService:
             values[9] = inv.get("total_amount", base + vat)
 
             date_val = inv.get("date")
-            date_str = date_val.strftime("%d.%m.%Y") if isinstance(date_val, datetime) else str(date_val)[:10]
+            is_datetime = isinstance(date_val, datetime)
+            date_str = date_val.strftime("%d.%m.%Y") if is_datetime else str(date_val)[:10]
             doc_type = "Протокол чл.117" if treatment == "reverse_charge" else "Фактура"
+
+            protocol_number = ""
+            deadline_str = ""
+            deadline_overdue = False
+            if treatment == "reverse_charge":
+                protocol_number = inv.get("protocol_number") or ""
+                if is_datetime:
+                    deadline = date_val + timedelta(days=15)
+                    deadline_str = deadline.strftime("%d.%m.%Y")
+                    deadline_overdue = deadline < today
 
             row_values = [
                 idx, date_str, inv.get("supplier", ""), inv.get("supplier_eik") or "",
-                inv.get("invoice_number", ""), doc_type, *values
+                inv.get("invoice_number", ""), doc_type, protocol_number, deadline_str, *values
             ]
             for col, value in enumerate(row_values, 1):
                 cell = ws.cell(row=row, column=col, value=value)
-                if col >= 7:
+                if col >= AMOUNT_COL_START:
                     cell.number_format = money_format
-                    totals[col - 7] += value
+                    totals[col - AMOUNT_COL_START] += value
+                if col == 8 and deadline_overdue:
+                    cell.fill = overdue_fill
+                    cell.font = Font(color="991B1B", bold=True)
 
         total_row = row + 1
         ws.cell(row=total_row, column=6, value="ОБЩО:").font = total_font
         for i, t in enumerate(totals):
-            cell = ws.cell(row=total_row, column=7 + i, value=round(t, 2))
+            cell = ws.cell(row=total_row, column=AMOUNT_COL_START + i, value=round(t, 2))
             cell.font = total_font
             cell.fill = total_fill
             cell.number_format = money_format
 
-        for col, width in zip(range(1, len(purchase_headers) + 1), [5, 12, 26, 14, 14, 14, 11, 10, 11, 10, 13, 12, 12, 14, 13, 13]):
+        col_widths = [5, 12, 26, 14, 14, 14, 16, 16, 11, 10, 11, 10, 13, 12, 12, 14, 13, 13]
+        for col, width in zip(range(1, len(purchase_headers) + 1), col_widths):
             ws.column_dimensions[get_column_letter(col)].width = width
 
         # ===== Дневник на продажбите =====

@@ -249,6 +249,20 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          {/* VAT Protocols (чл.117) - Owner and Manager */}
+          {hasPermission('view_statistics') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/protocols')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+                <Ionicons name="document-text" size={20} color="#8B5CF6" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('profile.protocols')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.protocolsDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
+
           {/* Export - Owner and Manager only */}
           {hasPermission('export_data') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/export')}>

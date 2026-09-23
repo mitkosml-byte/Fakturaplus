@@ -221,6 +221,50 @@ export const translations: Translations = {
     bg: 'ДДС третиране',
     en: 'VAT treatment',
   },
+  'scan.reverseChargeNote': {
+    bg: 'При запис ще се генерира автоматично номер на протокол по чл.117 ЗДДС, който трябва да се издаде до 15 дни от датата на доставката.',
+    en: 'Saving will auto-assign a чл.117 self-billing protocol number, due within 15 days of the supply date.',
+  },
+  'scan.protocolAssigned': {
+    bg: 'Издаден протокол по чл.117 №',
+    en: 'Issued чл.117 protocol №',
+  },
+  'invoices.protocolDeadline': {
+    bg: 'Краен срок за протокола',
+    en: 'Protocol deadline',
+  },
+  'invoices.protocolOverdue': {
+    bg: 'просрочен',
+    en: 'overdue',
+  },
+  'profile.protocols': {
+    bg: 'Протоколи по чл.117',
+    en: 'чл.117 protocols',
+  },
+  'profile.protocolsDesc': {
+    bg: 'Самоначислен ДДС и срокове за подаване',
+    en: 'Self-charged VAT and filing deadlines',
+  },
+  'protocols.title': {
+    bg: 'Протоколи по чл.117',
+    en: 'чл.117 protocols',
+  },
+  'protocols.overdueSingular': {
+    bg: 'протокол е просрочен',
+    en: 'protocol is overdue',
+  },
+  'protocols.overduePlural': {
+    bg: 'протокола са просрочени',
+    en: 'protocols are overdue',
+  },
+  'protocols.empty': {
+    bg: 'Няма протоколи по чл.117',
+    en: 'No чл.117 protocols',
+  },
+  'protocols.emptyHint': {
+    bg: 'Появяват се тук, когато маркирате фактура с ДДС третиране "Обратно начисляване"',
+    en: 'Appear here when you mark an invoice with VAT treatment "Reverse charge"',
+  },
   'vat.standard_20': {
     bg: 'Стандартна 20%',
     en: 'Standard 20%',

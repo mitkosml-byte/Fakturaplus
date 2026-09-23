@@ -57,6 +57,7 @@ export interface Invoice {
   vat_amount: number;
   total_amount: number;
   vat_treatment?: VatTreatment;
+  protocol_number?: string;
   date: string;
   image_base64?: string;
   notes?: string;

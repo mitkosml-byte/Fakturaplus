@@ -158,6 +158,10 @@ class ApiService {
     return this.fetch(`/utils/validate-eik?eik=${encodeURIComponent(eik)}`);
   }
 
+  async getReverseChargeProtocols(): Promise<Invoice[]> {
+    return this.fetch('/invoices/protocols/reverse-charge');
+  }
+
   async deleteInvoice(id: string): Promise<void> {
     await this.fetch(`/invoices/${id}`, { method: 'DELETE' });
   }

@@ -418,6 +418,24 @@ export default function InvoicesScreen() {
                     <Text style={styles.detailSectionValue}>{t(`vat.${selectedInvoice.vat_treatment}`)}</Text>
                   </View>
                 )}
+                {selectedInvoice.vat_treatment === 'reverse_charge' && (() => {
+                  const deadline = new Date(new Date(selectedInvoice.date).getTime() + 15 * 24 * 60 * 60 * 1000);
+                  const overdue = deadline.getTime() < Date.now();
+                  return (
+                    <View style={[styles.protocolBanner, overdue && styles.protocolBannerOverdue]}>
+                      <Ionicons name={overdue ? 'alert-circle' : 'document-text'} size={18} color={overdue ? '#EF4444' : '#8B5CF6'} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.protocolBannerTitle}>
+                          {t('scan.protocolAssigned')} {selectedInvoice.protocol_number || '—'}
+                        </Text>
+                        <Text style={[styles.protocolBannerDeadline, overdue && { color: '#EF4444' }]}>
+                          {t('invoices.protocolDeadline')}: {formatDate(deadline.toISOString())}
+                          {overdue ? ` (${t('invoices.protocolOverdue')})` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })()}
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.invoiceNo')}</Text>
                   <Text style={styles.detailSectionValue}>{selectedInvoice.invoice_number}</Text>
@@ -755,6 +773,28 @@ const styles = StyleSheet.create({
   },
   detailSection: {
     marginBottom: 16,
+  },
+  protocolBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  protocolBannerOverdue: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+  },
+  protocolBannerTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'white',
+  },
+  protocolBannerDeadline: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 2,
   },
   detailSectionLabel: {
     fontSize: 12,
