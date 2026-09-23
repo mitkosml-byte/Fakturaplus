@@ -1,5 +1,6 @@
 """Export service for generating Excel and PDF reports"""
 import io
+import os
 from datetime import datetime
 from typing import List, Optional
 import json
@@ -21,6 +22,19 @@ try:
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
     PDF_AVAILABLE = True
+
+    # The built-in PDF fonts (Helvetica etc.) have no Cyrillic glyphs, so
+    # Bulgarian text would render as boxes - register a bundled font that does.
+    _FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "fonts")
+    PDF_FONT = "Helvetica"
+    PDF_FONT_BOLD = "Helvetica-Bold"
+    try:
+        pdfmetrics.registerFont(TTFont("DejaVuSans", os.path.join(_FONTS_DIR, "DejaVuSans.ttf")))
+        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", os.path.join(_FONTS_DIR, "DejaVuSans-Bold.ttf")))
+        PDF_FONT = "DejaVuSans"
+        PDF_FONT_BOLD = "DejaVuSans-Bold"
+    except Exception:
+        pass  # fall back to Helvetica (Cyrillic text will render as boxes)
 except ImportError:
     PDF_AVAILABLE = False
 
@@ -140,13 +154,15 @@ class ExportService:
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
+            fontName=PDF_FONT_BOLD,
             fontSize=16,
             spaceAfter=10,
             alignment=1  # Center
         )
+        normal_style = ParagraphStyle('CustomNormal', parent=styles['Normal'], fontName=PDF_FONT)
         title = f"Справка за фактури - {company_name}" if company_name else "Справка за фактури"
         elements.append(Paragraph(title, title_style))
-        elements.append(Paragraph(f"Генерирано: {datetime.now().strftime('%d.%m.%Y %H:%M')}", styles['Normal']))
+        elements.append(Paragraph(f"Генерирано: {datetime.now().strftime('%d.%m.%Y %H:%M')}", normal_style))
         elements.append(Spacer(1, 10*mm))
         
         # Table data
@@ -188,15 +204,16 @@ class ExportService:
         # Create table
         table = Table(data, colWidths=[55, 100, 70, 55, 45, 55])
         table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#8B5CF6')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), PDF_FONT_BOLD),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
             ('BACKGROUND', (0, 1), (-1, -2), colors.HexColor('#F8FAFC')),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E2E8F0')),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (0, -1), (-1, -1), PDF_FONT_BOLD),
             ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CBD5E1')),
             ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),
@@ -251,8 +268,107 @@ class ExportService:
         
         ws.column_dimensions['A'].width = 25
         ws.column_dimensions['B'].width = 20
-        
+
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
         return output.getvalue()
+
+    @staticmethod
+    def generate_statistics_pdf(
+        stats: dict,
+        top_suppliers: Optional[List[dict]] = None,
+        top_items: Optional[List[dict]] = None,
+        company_name: str = "",
+        period_label: str = ""
+    ) -> bytes:
+        """Generate a one-page PDF financial report - summary + top suppliers/items"""
+        if not PDF_AVAILABLE:
+            raise ImportError("reportlab is not installed")
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm)
+        elements = []
+        styles = getSampleStyleSheet()
+
+        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontName=PDF_FONT_BOLD, fontSize=16, spaceAfter=6, alignment=1)
+        subtitle_style = ParagraphStyle('CustomSubtitle', parent=styles['Normal'], fontName=PDF_FONT, alignment=1, textColor=colors.HexColor('#64748B'))
+        section_style = ParagraphStyle('SectionTitle', parent=styles['Heading2'], fontName=PDF_FONT_BOLD, fontSize=13, spaceBefore=14, spaceAfter=6)
+
+        title = f"Финансов отчет - {company_name}" if company_name else "Финансов отчет"
+        elements.append(Paragraph(title, title_style))
+        if period_label:
+            elements.append(Paragraph(period_label, subtitle_style))
+        elements.append(Paragraph(f"Генерирано: {datetime.now().strftime('%d.%m.%Y %H:%M')}", subtitle_style))
+        elements.append(Spacer(1, 8*mm))
+
+        elements.append(Paragraph("Обобщение", section_style))
+        summary_rows = [
+            ["Показател", "Стойност"],
+            ["Общо приходи", f"{stats.get('total_income', 0):.2f} €"],
+            ["Общо разходи", f"{stats.get('total_expense', 0):.2f} €"],
+            ["Печалба", f"{stats.get('profit', 0):.2f} €"],
+            ["ДДС за плащане", f"{stats.get('vat_to_pay', 0):.2f} €"],
+            ["Брой фактури", str(stats.get('invoice_count', 0))],
+        ]
+        summary_table = Table(summary_rows, colWidths=[90*mm, 60*mm])
+        summary_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#8B5CF6')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (-1, 0), PDF_FONT_BOLD),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CBD5E1')),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8FAFC')),
+        ]))
+        elements.append(summary_table)
+
+        if top_suppliers:
+            elements.append(Paragraph("Топ доставчици", section_style))
+            rows = [["Доставчик", "Сума", "Фактури"]]
+            for s in top_suppliers[:10]:
+                rows.append([
+                    str(s.get('supplier', ''))[:30],
+                    f"{s.get('total_amount', 0):.2f} €",
+                    str(s.get('invoice_count', 0)),
+                ])
+            supplier_table = Table(rows, colWidths=[90*mm, 40*mm, 25*mm])
+            supplier_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10B981')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('FONTNAME', (0, 0), (-1, 0), PDF_FONT_BOLD),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CBD5E1')),
+                ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8FAFC')),
+            ]))
+            elements.append(supplier_table)
+
+        if top_items:
+            elements.append(Paragraph("Топ артикули", section_style))
+            rows = [["Артикул", "Стойност", "Брой"]]
+            for i in top_items[:10]:
+                rows.append([
+                    str(i.get('item_name', ''))[:30],
+                    f"{i.get('total_value', 0):.2f} €",
+                    str(i.get('frequency', 0)),
+                ])
+            items_table = Table(rows, colWidths=[90*mm, 40*mm, 25*mm])
+            items_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F59E0B')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('FONTNAME', (0, 0), (-1, 0), PDF_FONT_BOLD),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CBD5E1')),
+                ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8FAFC')),
+            ]))
+            elements.append(items_table)
+
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()

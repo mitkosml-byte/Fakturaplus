@@ -1750,6 +1750,16 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         # having to trigger it - throttled inside the task itself.
         background_tasks.add_task(maybe_schedule_ai_item_merge, company_id)
 
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="create",
+        entity_type="invoice",
+        entity_id=invoice_obj.id,
+        company_id=company_id,
+        details={"supplier": invoice_obj.supplier, "invoice_number": invoice_obj.invoice_number, "total_amount": invoice_obj.total_amount}
+    )
+
     return invoice_obj
 
 @api_router.get("/invoices", response_model=List[Invoice])
@@ -1796,15 +1806,40 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
-    
+
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="update",
+        entity_type="invoice",
+        entity_id=invoice_id,
+        company_id=user_doc.get("company_id") if user_doc else None,
+        details={k: v for k, v in update_data.items() if k != "date"}
+    )
+
     return Invoice(**invoice)
 
 @api_router.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
+    invoice = await db.invoices.find_one({"id": invoice_id, "user_id": current_user.user_id}, {"_id": 0})
     result = await db.invoices.delete_one({"id": invoice_id, "user_id": current_user.user_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="delete",
+        entity_type="invoice",
+        entity_id=invoice_id,
+        company_id=user_doc.get("company_id") if user_doc else None,
+        details={"supplier": invoice.get("supplier"), "invoice_number": invoice.get("invoice_number"), "total_amount": invoice.get("total_amount")} if invoice else None
+    )
+
     return {"message": "Фактурата е изтрита"}
 
 # ===================== DAILY REVENUE ENDPOINTS =====================
@@ -2974,6 +3009,55 @@ async def export_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=fakturi.pdf"}
     )
+
+@api_router.get("/export/statistics/pdf")
+async def export_statistics_pdf(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Export a one-page financial report (summary + top suppliers/items) as PDF"""
+    stats = await get_summary(start_date=start_date, end_date=end_date, current_month_only=not (start_date or end_date), current_user=current_user)
+    suppliers_data = await get_supplier_statistics(start_date=start_date, end_date=end_date, current_user=current_user)
+    items_data = await get_item_statistics(start_date=start_date, end_date=end_date, top_n=10, current_user=current_user)
+
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    company_name = ""
+    if company_id:
+        company = await db.companies.find_one({"id": company_id})
+        company_name = company.get("name", "") if company else ""
+
+    period_label = ""
+    if start_date and end_date:
+        period_label = f"Период: {start_date[:10]} - {end_date[:10]}"
+
+    try:
+        pdf_data = ExportService.generate_statistics_pdf(
+            stats=stats,
+            top_suppliers=suppliers_data.get("top_by_amount", []),
+            top_items=items_data.get("top_by_value", []),
+            company_name=company_name,
+            period_label=period_label
+        )
+
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+            action="export",
+            entity_type="statistics",
+            company_id=company_id,
+            details={"format": "pdf"}
+        )
+
+        filename = f"statistics_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        return Response(
+            content=pdf_data,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PDF export not available")
 
 # ===================== BACKUP ENDPOINTS =====================
 
