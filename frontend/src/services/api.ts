@@ -1,4 +1,4 @@
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -591,6 +591,52 @@ class ApiService {
 
   async getROITrend(months: number = 6): Promise<{ trend: any[]; months: number }> {
     return this.fetch(`/roi/trend?months=${months}`);
+  }
+
+  // Payroll / Ведомост за заплати
+  async getEmployees(activeOnly?: boolean): Promise<Employee[]> {
+    const query = activeOnly ? '?active_only=true' : '';
+    return this.fetch(`/employees${query}`);
+  }
+
+  async createEmployee(employee: EmployeeCreate): Promise<Employee> {
+    return this.fetch('/employees', { method: 'POST', body: JSON.stringify(employee) });
+  }
+
+  async updateEmployee(id: string, update: Partial<EmployeeCreate & { active: boolean }>): Promise<Employee> {
+    return this.fetch(`/employees/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteEmployee(id: string): Promise<void> {
+    await this.fetch(`/employees/${id}`, { method: 'DELETE' });
+  }
+
+  async getPayrollRates(): Promise<PayrollRates> {
+    return this.fetch('/payroll/rates');
+  }
+
+  async updatePayrollRates(rates: Partial<PayrollRates>): Promise<PayrollRates> {
+    return this.fetch('/payroll/rates', { method: 'PUT', body: JSON.stringify(rates) });
+  }
+
+  async previewPayroll(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number }): Promise<PayrollBreakdown> {
+    return this.fetch('/payroll/preview', { method: 'POST', body: JSON.stringify(params) });
+  }
+
+  async createPayrollEntry(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number; notes?: string; image_base64?: string }): Promise<PayrollEntry> {
+    return this.fetch('/payroll', { method: 'POST', body: JSON.stringify(params) });
+  }
+
+  async getPayrollEntries(params?: { year?: number; month?: number }): Promise<PayrollEntry[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.year) queryParams.set('year', params.year.toString());
+    if (params?.month) queryParams.set('month', params.month.toString());
+    const query = queryParams.toString();
+    return this.fetch(`/payroll${query ? `?${query}` : ''}`);
+  }
+
+  async deletePayrollEntry(id: string): Promise<void> {
+    await this.fetch(`/payroll/${id}`, { method: 'DELETE' });
   }
 }
 

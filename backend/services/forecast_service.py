@@ -37,6 +37,13 @@ class ForecastService:
             {"_id": 0, "date": 1, "amount": 1}
         ).to_list(10000)
 
+        # Payroll cost (gross + employer contributions + benefits) - usually
+        # the most stable, predictable expense a business has
+        payroll_entries = await self.db.payroll_entries.find(
+            {"company_id": company_id},
+            {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1}
+        ).to_list(10000)
+
         # Aggregate by month
         monthly_totals = defaultdict(float)
 
@@ -51,6 +58,11 @@ class ForecastService:
             if isinstance(date_str, str) and len(date_str) >= 7:
                 month_key = date_str[:7]
                 monthly_totals[month_key] += float(exp.get("amount", 0))
+
+        for p in payroll_entries:
+            month_key = f"{p['period_year']}-{p['period_month']:02d}"
+            if month_key >= six_months_ago_str[:7]:
+                monthly_totals[month_key] += float(p.get("total_employer_cost", 0))
         
         if not monthly_totals:
             return {

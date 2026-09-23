@@ -235,6 +235,20 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Payroll - Owner and Manager */}
+          {hasPermission('manage_budget') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/payroll')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                <Ionicons name="people" size={20} color="#10B981" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('payroll.title')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.payrollDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
+
           {/* Audit Log - Owner only */}
           {hasPermission('view_audit_log') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/audit-log')}>

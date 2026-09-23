@@ -2477,26 +2477,32 @@ async def get_summary(
     if date_query:
         exp_query["date"] = date_query
     expenses = await db.expenses.find(exp_query, {"_id": 0, "amount": 1}).to_list(1000)
-    
+
+    # Get payroll cost (real employer cost: gross + employer contributions +
+    # benefits), for the same period
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    total_payroll_cost = await get_payroll_cost_for_period(company_id, current_user.user_id, start_date, end_date)
+
     # Calculate totals
     total_invoice_amount = sum(inv.get("total_amount", 0) for inv in invoices)
     total_invoice_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
     total_fiscal_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues)
     total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues)
     total_expenses = sum(e.get("amount", 0) for e in expenses)
-    
+
     # ДДС от фискализиран оборот (20% от 120% = 16.67% от тотала)
     fiscal_vat = total_fiscal_revenue * 0.2 / 1.2
-    
+
     # Общ ДДС за плащане = ДДС от продажби - ДДС от покупки (фактури)
     vat_to_pay = fiscal_vat - total_invoice_vat
-    
+
     # Общ приход (фискализиран + джобче)
     total_income = total_fiscal_revenue + total_pocket_money
-    
-    # Общ разход (фактури + разходи без фактури)
-    total_expense = total_invoice_amount + total_expenses
-    
+
+    # Общ разход (фактури + разходи без фактури + разход за персонал)
+    total_expense = total_invoice_amount + total_expenses + total_payroll_cost
+
     return {
         "total_invoice_amount": round(total_invoice_amount, 2),
         "total_invoice_vat": round(total_invoice_vat, 2),
@@ -2505,6 +2511,7 @@ async def get_summary(
         "fiscal_vat": round(fiscal_vat, 2),
         "vat_to_pay": round(vat_to_pay, 2),
         "total_non_invoice_expenses": round(total_expenses, 2),
+        "total_payroll_cost": round(total_payroll_cost, 2),
         "total_income": round(total_income, 2),
         "total_expense": round(total_expense, 2),
         "profit": round(total_income - total_expense, 2),
@@ -4478,6 +4485,315 @@ async def get_revenue_forecast(
         return {"error": "No company"}
     
     return await forecast_service.get_revenue_forecast(company_id, months_ahead)
+
+# ===================== PAYROLL / ВЕДОМОСТ ЗА ЗАПЛАТИ =====================
+
+class PayrollAgreementType(str, Enum):
+    GROSS = "gross"  # договорено е брутното - служителят носи стандартната си част
+    NET = "net"      # договорено е нетното "на ръка" - работодателят поема разликата
+
+class Employee(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    company_id: Optional[str] = None
+    name: str
+    position: Optional[str] = None
+    hire_date: Optional[str] = None
+    base_salary: float  # тълкува се според agreement_type
+    agreement_type: PayrollAgreementType = PayrollAgreementType.GROSS
+    food_vouchers: float = 0  # ваучери за храна, месечно
+    additional_insurance: float = 0  # ДДЗО, месечно
+    active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class EmployeeCreate(BaseModel):
+    name: str
+    position: Optional[str] = None
+    hire_date: Optional[str] = None
+    base_salary: float
+    agreement_type: PayrollAgreementType = PayrollAgreementType.GROSS
+    food_vouchers: float = 0
+    additional_insurance: float = 0
+
+class EmployeeUpdate(BaseModel):
+    name: Optional[str] = None
+    position: Optional[str] = None
+    hire_date: Optional[str] = None
+    base_salary: Optional[float] = None
+    agreement_type: Optional[PayrollAgreementType] = None
+    food_vouchers: Optional[float] = None
+    additional_insurance: Optional[float] = None
+    active: Optional[bool] = None
+
+class PayrollRates(BaseModel):
+    company_id: str
+    employee_rate_percent: float = 13.78  # осигуровки за сметка на осигурения
+    employer_rate_percent: float = 18.92  # осигуровки за сметка на работодателя
+    income_tax_percent: float = 10.0      # данък общ доход (плосък данък)
+    min_insurance_income: float = 550.71  # минимален осигурителен доход (EUR)
+    max_insurance_income: float = 1917.56  # максимален осигурителен доход (EUR)
+
+DEFAULT_PAYROLL_RATES = {
+    "employee_rate_percent": 13.78,
+    "employer_rate_percent": 18.92,
+    "income_tax_percent": 10.0,
+    "min_insurance_income": 550.71,
+    "max_insurance_income": 1917.56,
+}
+
+class PayrollEntryCreate(BaseModel):
+    employee_id: str
+    period_month: int  # 1-12
+    period_year: int
+    gross_amount: Optional[float] = None  # подадено ако agreement_type=gross (или ръчна корекция)
+    net_target: Optional[float] = None    # подадено ако agreement_type=net
+    bonus_amount: float = 0
+    notes: Optional[str] = None
+    image_base64: Optional[str] = None
+
+def calculate_payroll(
+    base_amount: float,
+    agreement_type: str,
+    rates: dict,
+    bonus_amount: float = 0,
+    food_vouchers: float = 0,
+    additional_insurance: float = 0,
+) -> dict:
+    """Изчислява разбивка на трудово възнаграждение.
+
+    Опростен модел: осигуровки върху ограничен (мин/макс) осигурителен доход,
+    данък общ доход върху (бруто - осигуровки на осигурения). Не отчита данъчни
+    облекчения (деца, инвалидност), втори трудов договор или други частни
+    случаи - реалната ведомост на счетоводителя е меродавна, това е работна
+    оценка за статистиката на приложението.
+    """
+    employee_rate = rates["employee_rate_percent"] / 100
+    employer_rate = rates["employer_rate_percent"] / 100
+    tax_rate = rates["income_tax_percent"] / 100
+    min_income = rates["min_insurance_income"]
+    max_income = rates["max_insurance_income"]
+
+    if agreement_type == PayrollAgreementType.NET or agreement_type == "net":
+        # Gross-up: намери брутното, което след удръжки дава точно това нето.
+        net_target = base_amount
+        gross_amount = net_target / ((1 - employee_rate) * (1 - tax_rate))
+    else:
+        gross_amount = base_amount
+
+    gross_amount += bonus_amount
+
+    insurance_base = max(min_income, min(gross_amount, max_income))
+    employee_contributions = insurance_base * employee_rate
+    employer_contributions = insurance_base * employer_rate
+    taxable_base = max(0, gross_amount - employee_contributions)
+    income_tax = taxable_base * tax_rate
+    net_amount = gross_amount - employee_contributions - income_tax
+    total_employer_cost = gross_amount + employer_contributions + food_vouchers + additional_insurance
+
+    return {
+        "gross_amount": round(gross_amount, 2),
+        "insurance_base": round(insurance_base, 2),
+        "employee_contributions": round(employee_contributions, 2),
+        "employer_contributions": round(employer_contributions, 2),
+        "income_tax": round(income_tax, 2),
+        "net_amount": round(net_amount, 2),
+        "food_vouchers": round(food_vouchers, 2),
+        "additional_insurance": round(additional_insurance, 2),
+        "total_employer_cost": round(total_employer_cost, 2),
+    }
+
+async def get_payroll_rates_dict(company_id: Optional[str]) -> dict:
+    if not company_id:
+        return dict(DEFAULT_PAYROLL_RATES)
+    rates = await db.payroll_rates.find_one({"company_id": company_id}, {"_id": 0})
+    if not rates:
+        return dict(DEFAULT_PAYROLL_RATES)
+    return {**DEFAULT_PAYROLL_RATES, **rates}
+
+@api_router.get("/payroll/rates")
+async def get_payroll_rates(current_user: User = Depends(get_current_user)):
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    return await get_payroll_rates_dict(company_id)
+
+@api_router.put("/payroll/rates")
+async def update_payroll_rates(request: Request, current_user: User = Depends(get_current_user)):
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+
+    body = await request.json()
+    update_data = {k: float(v) for k, v in body.items() if k in DEFAULT_PAYROLL_RATES}
+
+    existing = await db.payroll_rates.find_one({"company_id": company_id})
+    if existing:
+        await db.payroll_rates.update_one({"company_id": company_id}, {"$set": update_data})
+    else:
+        rates = PayrollRates(company_id=company_id, **{**DEFAULT_PAYROLL_RATES, **update_data})
+        await db.payroll_rates.insert_one(rates.dict())
+
+    return await get_payroll_rates_dict(company_id)
+
+@api_router.post("/employees", response_model=Employee)
+async def create_employee(employee: EmployeeCreate, current_user: User = Depends(get_current_user)):
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    employee_obj = Employee(user_id=current_user.user_id, company_id=company_id, **employee.dict())
+    await db.employees.insert_one(employee_obj.dict())
+    return employee_obj
+
+@api_router.get("/employees", response_model=List[Employee])
+async def get_employees(active_only: bool = False, current_user: User = Depends(get_current_user)):
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    query = {"company_id": company_id} if company_id else {"user_id": current_user.user_id}
+    if active_only:
+        query["active"] = True
+
+    employees = await db.employees.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    return [Employee(**e) for e in employees]
+
+@api_router.put("/employees/{employee_id}", response_model=Employee)
+async def update_employee(employee_id: str, update: EmployeeUpdate, current_user: User = Depends(get_current_user)):
+    update_data = {k: v for k, v in update.dict().items() if v is not None}
+    result = await db.employees.update_one({"id": employee_id, "user_id": current_user.user_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Служителят не е намерен")
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    return Employee(**employee)
+
+@api_router.delete("/employees/{employee_id}")
+async def delete_employee(employee_id: str, current_user: User = Depends(get_current_user)):
+    result = await db.employees.delete_one({"id": employee_id, "user_id": current_user.user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Служителят не е намерен")
+    return {"message": "Служителят е изтрит"}
+
+@api_router.post("/payroll/preview")
+async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
+    """Изчислява разбивка без да записва - за преглед преди потвърждение."""
+    employee = await db.employees.find_one({"id": entry.employee_id, "user_id": current_user.user_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Служителят не е намерен")
+
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    rates = await get_payroll_rates_dict(company_id)
+
+    base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
+
+    return calculate_payroll(
+        base_amount=base_amount,
+        agreement_type=employee["agreement_type"],
+        rates=rates,
+        bonus_amount=entry.bonus_amount,
+        food_vouchers=employee.get("food_vouchers", 0),
+        additional_insurance=employee.get("additional_insurance", 0),
+    )
+
+@api_router.post("/payroll")
+async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
+    employee = await db.employees.find_one({"id": entry.employee_id, "user_id": current_user.user_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Служителят не е намерен")
+
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    rates = await get_payroll_rates_dict(company_id)
+
+    base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
+
+    breakdown = calculate_payroll(
+        base_amount=base_amount,
+        agreement_type=employee["agreement_type"],
+        rates=rates,
+        bonus_amount=entry.bonus_amount,
+        food_vouchers=employee.get("food_vouchers", 0),
+        additional_insurance=employee.get("additional_insurance", 0),
+    )
+
+    existing = await db.payroll_entries.find_one({
+        "employee_id": entry.employee_id,
+        "period_month": entry.period_month,
+        "period_year": entry.period_year,
+    })
+    if existing:
+        raise HTTPException(status_code=409, detail="Вече има ведомост за този служител за този месец")
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.user_id,
+        "company_id": company_id,
+        "employee_id": entry.employee_id,
+        "employee_name": employee["name"],
+        "period_month": entry.period_month,
+        "period_year": entry.period_year,
+        "bonus_amount": round(entry.bonus_amount, 2),
+        "notes": entry.notes,
+        "image_base64": entry.image_base64,
+        "created_at": datetime.now(timezone.utc),
+        **breakdown,
+    }
+    await db.payroll_entries.insert_one(doc)
+
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="create",
+        entity_type="payroll",
+        entity_id=doc["id"],
+        company_id=company_id,
+        details={"employee": employee["name"], "period": f"{entry.period_month}/{entry.period_year}", "total_employer_cost": breakdown["total_employer_cost"]}
+    )
+
+    doc.pop("_id", None)
+    doc.pop("image_base64", None)
+    return doc
+
+@api_router.get("/payroll")
+async def get_payroll_entries(
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    current_user: User = Depends(get_current_user)
+):
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    query = {"company_id": company_id} if company_id else {"user_id": current_user.user_id}
+    if year:
+        query["period_year"] = year
+    if month:
+        query["period_month"] = month
+
+    entries = await db.payroll_entries.find(query, {"_id": 0, "image_base64": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(1000)
+    return entries
+
+@api_router.delete("/payroll/{entry_id}")
+async def delete_payroll_entry(entry_id: str, current_user: User = Depends(get_current_user)):
+    result = await db.payroll_entries.delete_one({"id": entry_id, "user_id": current_user.user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    return {"message": "Записът е изтрит"}
+
+async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, start_date: Optional[str], end_date: Optional[str]) -> float:
+    """Сумира total_employer_cost на всички ведомостни записи, чийто месец
+    попада в зададения период - използвано в /statistics/summary и в
+    прогнозата за разходи, за да включат реалния разход за персонал."""
+    query = {"company_id": company_id} if company_id else {"user_id": user_id}
+    entries = await db.payroll_entries.find(query, {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1}).to_list(10000)
+
+    total = 0.0
+    for e in entries:
+        period_date = f"{e['period_year']}-{e['period_month']:02d}-01"
+        if start_date and period_date < start_date[:10]:
+            continue
+        if end_date and period_date > end_date[:10]:
+            continue
+        total += e.get("total_employer_cost", 0)
+    return total
 
 # ===================== AUDIT LOG =====================
 

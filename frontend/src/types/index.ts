@@ -112,6 +112,7 @@ export interface Summary {
   fiscal_vat: number;
   vat_to_pay: number;
   total_non_invoice_expenses: number;
+  total_payroll_cost: number;
   total_income: number;
   total_expense: number;
   profit: number;
@@ -292,4 +293,65 @@ export interface ItemStatsResponse {
   top_by_value: ItemStatistics[];
   top_by_frequency: ItemStatistics[];
   price_trends: ItemStatistics[];
+}
+
+// Payroll / Ведомост за заплати
+export type PayrollAgreementType = 'gross' | 'net';
+
+export interface Employee {
+  id: string;
+  user_id: string;
+  company_id?: string;
+  name: string;
+  position?: string;
+  hire_date?: string;
+  base_salary: number;
+  agreement_type: PayrollAgreementType;
+  food_vouchers: number;
+  additional_insurance: number;
+  active: boolean;
+  created_at: string;
+}
+
+export interface EmployeeCreate {
+  name: string;
+  position?: string;
+  hire_date?: string;
+  base_salary: number;
+  agreement_type: PayrollAgreementType;
+  food_vouchers?: number;
+  additional_insurance?: number;
+}
+
+export interface PayrollRates {
+  employee_rate_percent: number;
+  employer_rate_percent: number;
+  income_tax_percent: number;
+  min_insurance_income: number;
+  max_insurance_income: number;
+}
+
+export interface PayrollBreakdown {
+  gross_amount: number;
+  insurance_base: number;
+  employee_contributions: number;
+  employer_contributions: number;
+  income_tax: number;
+  net_amount: number;
+  food_vouchers: number;
+  additional_insurance: number;
+  total_employer_cost: number;
+}
+
+export interface PayrollEntry extends PayrollBreakdown {
+  id: string;
+  user_id: string;
+  company_id?: string;
+  employee_id: string;
+  employee_name: string;
+  period_month: number;
+  period_year: number;
+  bonus_amount: number;
+  notes?: string;
+  created_at: string;
 }

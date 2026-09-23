@@ -900,6 +900,16 @@ export default function StatsScreen() {
                       <Text style={styles.statValue}>{summary?.total_non_invoice_expenses.toFixed(0) || 0} €</Text>
                     </View>
                   </View>
+
+                  {!!summary?.total_payroll_cost && (
+                    <View style={styles.statRow}>
+                      <View style={[styles.statItem, { flex: 1 }]}>
+                        <Ionicons name="people" size={20} color="#10B981" />
+                        <Text style={styles.statLabel}>{t('payroll.totalCostThisMonth')}</Text>
+                        <Text style={styles.statValue}>{summary.total_payroll_cost.toFixed(2)} €</Text>
+                      </View>
+                    </View>
+                  )}
                 </View>
 
                 {/* Top 3 quick view */}
