@@ -2,11 +2,12 @@ import React, { createContext, useContext, useEffect, ReactNode, useMemo } from 
 import { useAuthStore } from '../stores/authStore';
 import { User } from '../types';
 
-// Role hierarchy: owner > manager > staff
-export type UserRole = 'owner' | 'manager' | 'staff';
+// Role hierarchy: owner > manager > staff. "accountant" sits outside this
+// hierarchy - an external, cross-company role rather than a rung on it.
+export type UserRole = 'owner' | 'manager' | 'staff' | 'accountant';
 
 // Permission types
-export type Permission = 
+export type Permission =
   | 'manage_users'      // Invite, remove users, change roles
   | 'manage_company'    // Edit company settings
   | 'view_audit_log'    // View audit logs
@@ -21,7 +22,7 @@ export type Permission =
 const rolePermissions: Record<UserRole, Permission[]> = {
   owner: [
     'manage_users',
-    'manage_company', 
+    'manage_company',
     'view_audit_log',
     'manage_budget',
     'export_data',
@@ -43,6 +44,17 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     'add_revenue',
     'add_expenses',
   ],
+  // An accountant gets full read/reporting access plus the ability to fix
+  // invoice data (ЕИК, ДДС третиране) and process payroll/assets, but no
+  // organizational control (no user management, no company profile edits)
+  // and no daily cash-register entry (that's operational staff's job).
+  accountant: [
+    'view_audit_log',
+    'manage_budget',
+    'export_data',
+    'view_statistics',
+    'manage_invoices',
+  ],
 };
 
 interface AuthContextType {
@@ -59,6 +71,7 @@ interface AuthContextType {
   isOwner: boolean;
   isManager: boolean;
   isStaff: boolean;
+  isAccountant: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -82,18 +95,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     const hasRole = (role: UserRole): boolean => {
       if (!user) return false;
+      // "accountant" is a lateral role outside the owner > manager > staff
+      // ladder, not a rung on it - only an exact match counts.
+      if (userRole === 'accountant' || role === 'accountant') {
+        return userRole === role;
+      }
       const roleHierarchy: UserRole[] = ['owner', 'manager', 'staff'];
       const userRoleIndex = roleHierarchy.indexOf(userRole);
       const requiredRoleIndex = roleHierarchy.indexOf(role);
       return userRoleIndex <= requiredRoleIndex;
     };
-    
+
     return {
       hasPermission,
       hasRole,
       isOwner: userRole === 'owner',
       isManager: userRole === 'manager',
       isStaff: userRole === 'staff',
+      isAccountant: userRole === 'accountant',
     };
   }, [user]);
 

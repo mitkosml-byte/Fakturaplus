@@ -169,24 +169,26 @@ export default function CompanySettingsScreen() {
                 </Text>
               </View>
 
-              {/* Join Existing Company via Invitation */}
-              {!company && (
-                <TouchableOpacity
-                  style={styles.joinSection}
-                  onPress={() => router.push('/join-company')}
-                >
-                  <View style={styles.joinToggle}>
-                    <Ionicons name="people" size={20} color="#8B5CF6" />
-                    <Text style={styles.joinToggleText}>
-                      {t('company.joinExisting')}
-                    </Text>
-                    <Ionicons name="chevron-forward" size={20} color="#64748B" />
-                  </View>
-                  <Text style={styles.joinHint}>
-                    {t('company.joinHint')}
+              {/* Join Existing Company via Invitation - always available, not
+                  just for users without a company, since an accountant with
+                  their own company can still accept invitations to client
+                  companies (server-side validation enforces who actually
+                  may accept which invitation) */}
+              <TouchableOpacity
+                style={styles.joinSection}
+                onPress={() => router.push('/join-company')}
+              >
+                <View style={styles.joinToggle}>
+                  <Ionicons name="people" size={20} color="#8B5CF6" />
+                  <Text style={styles.joinToggleText}>
+                    {t('company.joinExisting')}
                   </Text>
-                </TouchableOpacity>
-              )}
+                  <Ionicons name="chevron-forward" size={20} color="#64748B" />
+                </View>
+                <Text style={styles.joinHint}>
+                  {t('company.joinHint')}
+                </Text>
+              </TouchableOpacity>
 
               {/* Company Form */}
               <View style={styles.formContainer}>

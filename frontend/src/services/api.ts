@@ -1,4 +1,4 @@
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -114,6 +114,18 @@ class ApiService {
   
   async leaveCompany(): Promise<{ message: string }> {
     return this.fetch('/company/leave', { method: 'POST' });
+  }
+
+  // Multi-company access (accountant switcher)
+  async getCompanyMemberships(): Promise<CompanyMembership[]> {
+    return this.fetch('/companies/memberships');
+  }
+
+  async switchCompany(companyId: string): Promise<User> {
+    return this.fetch('/companies/switch', {
+      method: 'POST',
+      body: JSON.stringify({ company_id: companyId }),
+    });
   }
 
   // OCR

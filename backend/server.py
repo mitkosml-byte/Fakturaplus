@@ -174,6 +174,18 @@ class InvitationCreate(BaseModel):
     phone: Optional[str] = None
     role: str = "staff"
 
+class CompanyMembership(BaseModel):
+    """Проследява ВСИЧКИ фирми, до които потребител има достъп - не само
+    текущата активна (users.company_id/role). За обикновен owner/manager/
+    staff си остава един-единствен запис. За счетоводител с достъп до
+    няколко фирми клиенти, това е списъкът, от който се "превключва"
+    активната фирма (виж /companies/switch)."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    company_id: str
+    role: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 class VatTreatment(str, Enum):
     STANDARD_20 = "standard_20"        # Стандартна ставка 20%
     REDUCED_9 = "reduced_9"            # Намалена ставка 9% (хотели, книги...)
@@ -400,7 +412,7 @@ class SessionDataResponse(BaseModel):
 
 # ===================== AUTH HELPERS =====================
 
-VALID_ROLES = {"owner", "manager", "staff"}
+VALID_ROLES = {"owner", "manager", "staff", "accountant"}
 
 async def repair_invalid_role(user_doc: dict) -> dict:
     """Поправя легаси/невалидни стойности на role (напр. от стари версии на схемата).
@@ -426,6 +438,27 @@ def sanitize_user(user_doc: dict) -> dict:
     user_doc["has_password"] = bool(user_doc.get("password_hash"))
     user_doc.pop("password_hash", None)
     return user_doc
+
+async def ensure_membership(user_id: str, company_id: str, role: str):
+    """Записва (или обновява) връзката потребител-фирма в company_memberships.
+
+    users.company_id/role показват само коя фирма е АКТИВНА в момента за
+    потребителя - именно затова всеки съществуващ endpoint в приложението
+    automatически "проглежда" правилната фирма веднага щом /companies/switch
+    ги смени. company_memberships пази пълния списък, от който се превключва."""
+    await db.company_memberships.update_one(
+        {"user_id": user_id, "company_id": company_id},
+        {
+            "$set": {"role": role},
+            "$setOnInsert": {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "company_id": company_id,
+                "created_at": datetime.now(timezone.utc),
+            },
+        },
+        upsert=True
+    )
 
 async def get_session_token(request: Request) -> Optional[str]:
     # Check cookie first
@@ -794,7 +827,11 @@ async def update_user_role(user_id: str, request: Request, current_user: User = 
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Потребителят не е намерен")
-    
+
+    # Keep the membership record (used by the accountant company switcher)
+    # in sync, in case this user held accountant-level access here.
+    await ensure_membership(user_id, current_user.company_id, role)
+
     return {"message": "Ролята е обновена"}
 
 @api_router.get("/auth/users")
@@ -809,6 +846,25 @@ async def get_all_users(current_user: User = Depends(get_current_user)):
         {"company_id": current_user.company_id},
         {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "picture": 1, "created_at": 1}
     ).to_list(1000)
+
+    # An accountant with access to this company might currently be
+    # switched into a DIFFERENT client's data, so their live users.company_id
+    # won't match here - pull them in separately via their membership record.
+    existing_ids = {u["user_id"] for u in users}
+    accountant_memberships = await db.company_memberships.find(
+        {"company_id": current_user.company_id, "role": "accountant"},
+        {"_id": 0, "user_id": 1}
+    ).to_list(1000)
+    extra_ids = [m["user_id"] for m in accountant_memberships if m["user_id"] not in existing_ids]
+    if extra_ids:
+        extra_users = await db.users.find(
+            {"user_id": {"$in": extra_ids}},
+            {"_id": 0, "user_id": 1, "email": 1, "name": 1, "picture": 1, "created_at": 1}
+        ).to_list(1000)
+        for u in extra_users:
+            u["role"] = "accountant"  # overrides whatever company they're currently active in
+        users.extend(extra_users)
+
     return users
 
 @api_router.delete("/auth/users/{user_id}")
@@ -823,16 +879,46 @@ async def remove_user_from_company(user_id: str, current_user: User = Depends(ge
     target_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not target_user:
         raise HTTPException(status_code=404, detail="Потребителят не е намерен")
-    
+
+    # An accountant's membership may exist here even while they're
+    # currently switched into a different client's data, so check
+    # company_memberships first rather than requiring an exact
+    # company_id match.
+    accountant_membership = await db.company_memberships.find_one({
+        "user_id": user_id,
+        "company_id": current_user.company_id,
+        "role": "accountant",
+    })
+    if accountant_membership:
+        await db.company_memberships.delete_one({
+            "user_id": user_id,
+            "company_id": current_user.company_id,
+        })
+        # If they're currently looking at this exact company, switch them
+        # back to another membership of theirs (or clear it entirely).
+        if target_user.get("company_id") == current_user.company_id:
+            fallback = await db.company_memberships.find_one({"user_id": user_id}, {"_id": 0})
+            if fallback:
+                await db.users.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"company_id": fallback["company_id"], "role": fallback["role"]}}
+                )
+            else:
+                await db.users.update_one(
+                    {"user_id": user_id},
+                    {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
+                )
+        return {"message": "Достъпът на счетоводителя е премахнат"}
+
     if target_user.get("company_id") != current_user.company_id:
         raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
-    
+
     # Remove company_id from user (don't delete user)
     await db.users.update_one(
         {"user_id": user_id},
         {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
     )
-    
+
     return {"message": "Потребителят е премахнат от фирмата"}
 
 # ===================== INVITATION ENDPOINTS =====================
@@ -849,7 +935,7 @@ async def create_invitation(invitation_data: InvitationCreate, current_user: Use
     if not invitation_data.email and not invitation_data.phone:
         raise HTTPException(status_code=400, detail="Въведете имейл или телефон")
     
-    if invitation_data.role not in ["manager", "staff"]:
+    if invitation_data.role not in ["manager", "staff", "accountant"]:
         raise HTTPException(status_code=400, detail="Невалидна роля за покана")
     
     # Check if user with this email already exists in the company
@@ -972,11 +1058,23 @@ async def accept_invitation(request: Request, current_user: User = Depends(get_c
     if invitation.get("email") and invitation["email"].lower() != current_user.email.lower():
         raise HTTPException(status_code=403, detail="Тази покана е издадена за друг имейл адрес")
 
-    # Check if user already has a company
-    if current_user.company_id:
+    # Accountant invitations are the one case that doesn't require leaving
+    # your current company first - a счетоводител can hold access to
+    # several client companies at once and switch between them (see
+    # /companies/switch). Every other role keeps the original one-company
+    # rule, unchanged.
+    if invitation["role"] != "accountant" and current_user.company_id:
         raise HTTPException(status_code=400, detail="Вече сте член на фирма. Първо напуснете текущата фирма.")
 
-    # Accept invitation - link user to company
+    # Preserve whatever company/role the user is switching away from as a
+    # membership, so they can switch back to it later.
+    if current_user.company_id:
+        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role)
+    await ensure_membership(current_user.user_id, invitation["company_id"], invitation["role"])
+
+    # Accept invitation - link user to company (this becomes their new
+    # active company/role; for a счетоводител accepting a 2nd+ invitation
+    # this switches them into the newly-joined company)
     await db.users.update_one(
         {"user_id": current_user.user_id},
         {"$set": {
@@ -984,7 +1082,7 @@ async def accept_invitation(request: Request, current_user: User = Depends(get_c
             "role": invitation["role"]
         }}
     )
-    
+
     # Mark invitation as accepted
     await db.invitations.update_one(
         {"id": invitation["id"]},
@@ -999,20 +1097,103 @@ async def accept_invitation(request: Request, current_user: User = Depends(get_c
         "company": company
     }
 
+# ===================== MULTI-COMPANY ACCESS (ACCOUNTANT SWITCHER) =====================
+
+@api_router.get("/companies/memberships")
+async def get_company_memberships(current_user: User = Depends(get_current_user)):
+    """Списък с всички фирми, до които потребителят има достъп (за
+    счетоводители с достъп до няколко фирми клиенти) - използва се за
+    менюто за превключване на активната фирма."""
+    memberships = await db.company_memberships.find(
+        {"user_id": current_user.user_id}, {"_id": 0}
+    ).to_list(100)
+
+    # Backfill: make sure the currently-active company is always
+    # represented, even for users who never went through /companies/switch
+    if current_user.company_id and not any(m["company_id"] == current_user.company_id for m in memberships):
+        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role)
+        memberships.append({"company_id": current_user.company_id, "role": current_user.role})
+
+    result = []
+    for m in memberships:
+        company = await db.companies.find_one({"id": m["company_id"]}, {"_id": 0, "name": 1})
+        result.append({
+            "company_id": m["company_id"],
+            "company_name": company.get("name") if company else "—",
+            "role": m["role"],
+            "is_active": m["company_id"] == current_user.company_id,
+        })
+
+    result.sort(key=lambda m: (not m["is_active"], m["company_name"]))
+    return result
+
+@api_router.post("/companies/switch")
+async def switch_active_company(request: Request, current_user: User = Depends(get_current_user)):
+    """Превключва коя фирма е активна за потребителя. Работи само за фирми,
+    за които вече има запис в company_memberships (собствена фирма или
+    приета покана като счетоводител)."""
+    body = await request.json()
+    target_company_id = body.get("company_id")
+    if not target_company_id:
+        raise HTTPException(status_code=400, detail="Липсва company_id")
+
+    if target_company_id == current_user.company_id:
+        user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+        return sanitize_user(user_doc)
+
+    membership = await db.company_memberships.find_one({
+        "user_id": current_user.user_id,
+        "company_id": target_company_id,
+    })
+    if not membership:
+        raise HTTPException(status_code=403, detail="Нямате достъп до тази фирма")
+
+    # Preserve the company/role we're switching away from as a membership
+    if current_user.company_id:
+        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role)
+
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$set": {"company_id": target_company_id, "role": membership["role"]}}
+    )
+
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    return sanitize_user(user_doc)
+
 @api_router.post("/company/leave")
 async def leave_company(current_user: User = Depends(get_current_user)):
     """Напускане на фирма (не може Owner)"""
     if not current_user.company_id:
         raise HTTPException(status_code=400, detail="Не сте член на фирма")
-    
+
+    if current_user.role == "accountant":
+        # Just drop this one client relationship - switch back to another
+        # membership (typically their own home company) if they have one.
+        await db.company_memberships.delete_one({
+            "user_id": current_user.user_id,
+            "company_id": current_user.company_id,
+        })
+        fallback = await db.company_memberships.find_one({"user_id": current_user.user_id}, {"_id": 0})
+        if fallback:
+            await db.users.update_one(
+                {"user_id": current_user.user_id},
+                {"$set": {"company_id": fallback["company_id"], "role": fallback["role"]}}
+            )
+        else:
+            await db.users.update_one(
+                {"user_id": current_user.user_id},
+                {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
+            )
+        return {"message": "Успешно напуснахте фирмата"}
+
     if current_user.role == "owner":
         raise HTTPException(status_code=400, detail="Титулярят не може да напусне фирмата. Прехвърлете собствеността първо.")
-    
+
     await db.users.update_one(
         {"user_id": current_user.user_id},
         {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
     )
-    
+
     return {"message": "Успешно напуснахте фирмата"}
 
 # ===================== NOTIFICATION SETTINGS ENDPOINTS =====================

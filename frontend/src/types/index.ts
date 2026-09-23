@@ -3,7 +3,7 @@ export interface User {
   email: string;
   name: string;
   picture?: string;
-  role: 'owner' | 'manager' | 'staff';
+  role: 'owner' | 'manager' | 'staff' | 'accountant';
   company_id?: string;
   has_password?: boolean;
   created_at: string;
@@ -31,11 +31,18 @@ export interface Invitation {
   invited_by: string;
   email?: string;
   phone?: string;
-  role: 'manager' | 'staff';
+  role: 'manager' | 'staff' | 'accountant';
   code: string;
   status: 'pending' | 'accepted' | 'cancelled' | 'expired';
   expires_at: string;
   created_at: string;
+}
+
+export interface CompanyMembership {
+  company_id: string;
+  company_name: string;
+  role: 'owner' | 'manager' | 'staff' | 'accountant';
+  is_active: boolean;
 }
 
 export type VatTreatment =

@@ -1917,6 +1917,14 @@ export const translations: Translations = {
   'assets.deleteAsset': { bg: 'Изтрий актива', en: 'Delete asset' },
   'assets.deleteAssetConfirm': { bg: 'Активът и историята на амортизацията му ще бъдат изтрити безвъзвратно.', en: 'The asset and its depreciation history will be permanently deleted.' },
   'assets.summaryTitle': { bg: 'Активни активи', en: 'Active assets' },
+
+  'companySwitcher.switchCompany': { bg: 'Смяна на фирма', en: 'Switch company' },
+  'companySwitcher.yourCompanies': { bg: 'Вашите фирми', en: 'Your companies' },
+  'companySwitcher.viewingAs': { bg: 'Преглеждате като', en: 'Viewing as' },
+  'companySwitcher.switched': { bg: 'Превключено', en: 'Switched' },
+  'companySwitcher.switchedTo': { bg: 'Вече преглеждате', en: 'You are now viewing' },
+  'invitations.roleAccountant': { bg: 'Счетоводител', en: 'Accountant' },
+  'invitations.accountantHint': { bg: 'Достъп до статистики, фактури, ведомости и ДМА на тази фирма, без право да управлява потребители или данните на фирмата. Може да работи с няколко фирми клиенти от един акаунт.', en: "Access to this company's statistics, invoices, payroll and fixed assets, without managing users or company settings. Can work across several client companies from one account." },
 };
 
 // Zustand store for language

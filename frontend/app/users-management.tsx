@@ -39,7 +39,7 @@ export default function UsersManagementScreen() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePhone, setInvitePhone] = useState('');
-  const [inviteRole, setInviteRole] = useState<'manager' | 'staff'>('staff');
+  const [inviteRole, setInviteRole] = useState<'manager' | 'staff' | 'accountant'>('staff');
   const [inviting, setInviting] = useState(false);
   
   // Invitation code modal
@@ -191,6 +191,7 @@ export default function UsersManagementScreen() {
       owner: { bg: 'Титуляр', en: 'Owner' },
       manager: { bg: 'Мениджър', en: 'Manager' },
       staff: { bg: 'Служител', en: 'Staff' },
+      accountant: { bg: 'Счетоводител', en: 'Accountant' },
     };
     return roles[role]?.[language] || role;
   };
@@ -200,6 +201,7 @@ export default function UsersManagementScreen() {
       owner: '#8B5CF6',
       manager: '#3B82F6',
       staff: '#64748B',
+      accountant: '#F59E0B',
     };
     return colors[role] || '#64748B';
   };
@@ -449,7 +451,18 @@ export default function UsersManagementScreen() {
                         {getRoleName('manager')}
                       </Text>
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.roleOption, inviteRole === 'accountant' && styles.roleOptionActive]}
+                      onPress={() => setInviteRole('accountant')}
+                    >
+                      <Text style={[styles.roleOptionText, inviteRole === 'accountant' && styles.roleOptionTextActive]}>
+                        {getRoleName('accountant')}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
+                  {inviteRole === 'accountant' && (
+                    <Text style={styles.accountantHint}>{t('invitations.accountantHint')}</Text>
+                  )}
                 </View>
 
                 <TouchableOpacity
@@ -758,6 +771,12 @@ const styles = StyleSheet.create({
   },
   roleOptionTextActive: {
     color: '#8B5CF6',
+  },
+  accountantHint: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 10,
+    lineHeight: 17,
   },
   inviteButton: {
     flexDirection: 'row',

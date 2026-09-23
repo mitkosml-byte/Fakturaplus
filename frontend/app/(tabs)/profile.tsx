@@ -9,6 +9,7 @@ import {
   ImageBackground,
   RefreshControl,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +18,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation, useLanguageStore, Language } from '../../src/i18n';
 import { api } from '../../src/services/api';
-import { Company } from '../../src/types';
+import { Company, CompanyMembership } from '../../src/types';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -29,6 +30,9 @@ export default function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
+  const [memberships, setMemberships] = useState<CompanyMembership[]>([]);
+  const [showSwitcherModal, setShowSwitcherModal] = useState(false);
+  const [switching, setSwitching] = useState<string | null>(null);
 
   const loadCompany = useCallback(async () => {
     try {
@@ -39,24 +43,51 @@ export default function ProfileScreen() {
     }
   }, []);
 
+  const loadMemberships = useCallback(async () => {
+    try {
+      const data = await api.getCompanyMemberships();
+      setMemberships(data);
+    } catch (error) {
+      // Not critical - the switcher simply stays hidden
+    }
+  }, []);
+
   // Tab screens stay mounted, so returning from company-settings after an
   // edit doesn't remount this screen - only re-fetching on focus picks up
   // the change without needing a manual pull-to-refresh.
   useFocusEffect(
     useCallback(() => {
       loadCompany();
-    }, [loadCompany])
+      loadMemberships();
+    }, [loadCompany, loadMemberships])
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refreshUser(), loadCompany()]);
+      await Promise.all([refreshUser(), loadCompany(), loadMemberships()]);
     } catch (error) {
       console.error('Error refreshing profile:', error);
     }
     setRefreshing(false);
-  }, [refreshUser, loadCompany]);
+  }, [refreshUser, loadCompany, loadMemberships]);
+
+  const handleSwitchCompany = async (companyId: string) => {
+    if (companyId === company?.id) {
+      setShowSwitcherModal(false);
+      return;
+    }
+    setSwitching(companyId);
+    try {
+      await api.switchCompany(companyId);
+      await Promise.all([refreshUser(), loadCompany(), loadMemberships()]);
+      setShowSwitcherModal(false);
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setSwitching(null);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert(
@@ -87,6 +118,7 @@ export default function ProfileScreen() {
       owner: { bg: 'Титуляр', en: 'Owner' },
       manager: { bg: 'Мениджър', en: 'Manager' },
       staff: { bg: 'Служител', en: 'Staff' },
+      accountant: { bg: 'Счетоводител', en: 'Accountant' },
     };
     return roles[role]?.[language] || role;
   };
@@ -96,6 +128,7 @@ export default function ProfileScreen() {
       owner: '#8B5CF6',
       manager: '#3B82F6',
       staff: '#64748B',
+      accountant: '#F59E0B',
     };
     return colors[role] || '#64748B';
   };
@@ -126,12 +159,20 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Company Banner */}
+            {/* Company Banner - tappable switcher when the user has access to more than one company */}
             {company && (
-              <View style={styles.companyBanner}>
-                <Ionicons name="business" size={20} color="#8B5CF6" />
-                <Text style={styles.companyName}>{company.name}</Text>
-              </View>
+              memberships.length > 1 ? (
+                <TouchableOpacity style={styles.companyBanner} onPress={() => setShowSwitcherModal(true)}>
+                  <Ionicons name="business" size={20} color="#8B5CF6" />
+                  <Text style={styles.companyName}>{company.name}</Text>
+                  <Ionicons name="swap-horizontal" size={18} color="#8B5CF6" />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.companyBanner}>
+                  <Ionicons name="business" size={20} color="#8B5CF6" />
+                  <Text style={styles.companyName}>{company.name}</Text>
+                </View>
+              )
             )}
 
             {/* User Card */}
@@ -148,10 +189,10 @@ export default function ProfileScreen() {
               <Text style={styles.userName}>{user?.name || t('role.user')}</Text>
               <Text style={styles.userEmail}>{user?.email || ''}</Text>
               <View style={styles.roleContainer}>
-                <Ionicons 
-                  name={user?.role === 'owner' ? 'star' : user?.role === 'manager' ? 'briefcase' : 'person'} 
-                  size={16} 
-                  color={getRoleColor(user?.role || 'staff')} 
+                <Ionicons
+                  name={user?.role === 'owner' ? 'star' : user?.role === 'manager' ? 'briefcase' : user?.role === 'accountant' ? 'calculator' : 'person'}
+                  size={16}
+                  color={getRoleColor(user?.role || 'staff')}
                 />
                 <Text style={[styles.roleText, { color: getRoleColor(user?.role || 'staff') }]}>
                   {getRoleName(user?.role || 'staff')}
@@ -429,6 +470,55 @@ export default function ProfileScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Company Switcher Modal */}
+      <Modal
+        visible={showSwitcherModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSwitcherModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowSwitcherModal(false)}
+        >
+          <View style={styles.switcherModalContent}>
+            <Text style={styles.languageModalTitle}>{t('companySwitcher.yourCompanies')}</Text>
+
+            {memberships.map((m) => (
+              <TouchableOpacity
+                key={m.company_id}
+                style={[styles.switcherOption, m.is_active && styles.switcherOptionActive]}
+                onPress={() => handleSwitchCompany(m.company_id)}
+                disabled={!!switching}
+              >
+                <View style={styles.switcherOptionIcon}>
+                  <Ionicons name="business" size={18} color={m.is_active ? '#8B5CF6' : '#94A3B8'} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.switcherOptionName}>{m.company_name}</Text>
+                  <Text style={[styles.switcherOptionRole, { color: getRoleColor(m.role) }]}>
+                    {getRoleName(m.role)}
+                  </Text>
+                </View>
+                {switching === m.company_id ? (
+                  <ActivityIndicator size="small" color="#8B5CF6" />
+                ) : m.is_active ? (
+                  <Ionicons name="checkmark-circle" size={22} color="#8B5CF6" />
+                ) : null}
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              style={styles.languageModalCancel}
+              onPress={() => setShowSwitcherModal(false)}
+            >
+              <Text style={styles.languageModalCancelText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ImageBackground>
   );
 }
@@ -646,5 +736,45 @@ const styles = StyleSheet.create({
   languageModalCancelText: {
     fontSize: 16,
     color: '#64748B',
+  },
+  switcherModalContent: {
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    padding: 24,
+    width: '90%',
+    maxWidth: 380,
+  },
+  switcherOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  switcherOptionActive: {
+    borderColor: 'rgba(139, 92, 246, 0.4)',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+  },
+  switcherOptionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(148, 163, 184, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  switcherOptionName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'white',
+  },
+  switcherOptionRole: {
+    fontSize: 12,
+    marginTop: 2,
+    fontWeight: '500',
   },
 });
