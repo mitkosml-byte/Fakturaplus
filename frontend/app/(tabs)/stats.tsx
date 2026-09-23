@@ -910,6 +910,16 @@ export default function StatsScreen() {
                       </View>
                     </View>
                   )}
+
+                  {!!summary?.total_depreciation_expense && (
+                    <View style={styles.statRow}>
+                      <View style={[styles.statItem, { flex: 1 }]}>
+                        <Ionicons name="business" size={20} color="#F59E0B" />
+                        <Text style={styles.statLabel}>{t('assets.depreciationThisMonth')}</Text>
+                        <Text style={styles.statValue}>{summary.total_depreciation_expense.toFixed(2)} €</Text>
+                      </View>
+                    </View>
+                  )}
                 </View>
 
                 {/* Top 3 quick view */}

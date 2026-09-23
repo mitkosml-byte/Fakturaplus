@@ -1,4 +1,4 @@
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -637,6 +637,36 @@ class ApiService {
 
   async deletePayrollEntry(id: string): Promise<void> {
     await this.fetch(`/payroll/${id}`, { method: 'DELETE' });
+  }
+
+  // Fixed Assets / Дълготрайни активи (ДМА)
+  async getAssetCategories(): Promise<AssetCategoriesResponse> {
+    return this.fetch('/assets/categories');
+  }
+
+  async getAssets(status?: string): Promise<FixedAsset[]> {
+    const query = status ? `?status=${status}` : '';
+    return this.fetch(`/assets${query}`);
+  }
+
+  async createAsset(asset: FixedAssetCreate): Promise<FixedAsset> {
+    return this.fetch('/assets', { method: 'POST', body: JSON.stringify(asset) });
+  }
+
+  async updateAsset(id: string, update: Partial<FixedAssetCreate>): Promise<FixedAsset> {
+    return this.fetch(`/assets/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async disposeAsset(id: string, params: { disposal_date: string; disposal_reason?: string }): Promise<FixedAsset> {
+    return this.fetch(`/assets/${id}/dispose`, { method: 'POST', body: JSON.stringify(params) });
+  }
+
+  async deleteAsset(id: string): Promise<void> {
+    await this.fetch(`/assets/${id}`, { method: 'DELETE' });
+  }
+
+  async getAssetsSummary(): Promise<AssetsSummary> {
+    return this.fetch('/assets/summary');
   }
 }
 

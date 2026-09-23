@@ -2484,6 +2484,9 @@ async def get_summary(
     company_id = user_doc.get("company_id") if user_doc else None
     total_payroll_cost = await get_payroll_cost_for_period(company_id, current_user.user_id, start_date, end_date)
 
+    # Get depreciation expense (ДМА) for the same period
+    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, current_user.user_id, start_date, end_date)
+
     # Calculate totals
     total_invoice_amount = sum(inv.get("total_amount", 0) for inv in invoices)
     total_invoice_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
@@ -2500,8 +2503,8 @@ async def get_summary(
     # Общ приход (фискализиран + джобче)
     total_income = total_fiscal_revenue + total_pocket_money
 
-    # Общ разход (фактури + разходи без фактури + разход за персонал)
-    total_expense = total_invoice_amount + total_expenses + total_payroll_cost
+    # Общ разход (фактури + разходи без фактури + разход за персонал + амортизации)
+    total_expense = total_invoice_amount + total_expenses + total_payroll_cost + total_depreciation_expense
 
     return {
         "total_invoice_amount": round(total_invoice_amount, 2),
@@ -2512,6 +2515,7 @@ async def get_summary(
         "vat_to_pay": round(vat_to_pay, 2),
         "total_non_invoice_expenses": round(total_expenses, 2),
         "total_payroll_cost": round(total_payroll_cost, 2),
+        "total_depreciation_expense": round(total_depreciation_expense, 2),
         "total_income": round(total_income, 2),
         "total_expense": round(total_expense, 2),
         "profit": round(total_income - total_expense, 2),
@@ -4794,6 +4798,321 @@ async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, s
             continue
         total += e.get("total_employer_cost", 0)
     return total
+
+# ===================== FIXED ASSETS / ДЪЛГОТРАЙНИ АКТИВИ (ДМА) =====================
+
+class AssetCategory(str, Enum):
+    CAT_I = "cat_i"       # Сгради, съоръжения, предавателни устройства
+    CAT_II = "cat_ii"     # Машини, производствено оборудване, апаратура
+    CAT_III = "cat_iii"   # Превозни средства (без леки автомобили), пътни настилки
+    CAT_IV = "cat_iv"     # Компютри, периферни устройства, софтуер
+    CAT_V = "cat_v"       # Леки автомобили
+    CAT_VI = "cat_vi"     # Активи с ограничен срок на ползване по договор/закон
+    CAT_VII = "cat_vii"   # Други амортизируеми активи
+
+# Максимални годишни данъчни амортизационни норми по чл. 55 ЗКПО
+ASSET_CATEGORY_INFO = {
+    "cat_i": {"label": "Категория I – Сгради, съоръжения, предавателни устройства", "max_rate": 4.0},
+    "cat_ii": {"label": "Категория II – Машини, производствено оборудване, апаратура", "max_rate": 30.0},
+    "cat_iii": {"label": "Категория III – Превозни средства (без леки автомобили), пътни настилки", "max_rate": 10.0},
+    "cat_iv": {"label": "Категория IV – Компютри, периферни устройства, софтуер", "max_rate": 50.0},
+    "cat_v": {"label": "Категория V – Леки автомобили", "max_rate": 25.0},
+    "cat_vi": {"label": "Категория VI – Активи с ограничен срок на ползване по договор/закон", "max_rate": 33.33},
+    "cat_vii": {"label": "Категория VII – Други амортизируеми активи", "max_rate": 15.0},
+}
+
+# Праг на същественост за данъчен дълготраен материален актив по чл. 50 ЗКПО
+# (700 лв., конвертирани към еврото по фиксирания курс 1.95583)
+ASSET_LOW_VALUE_THRESHOLD_EUR = 357.93
+
+class AssetStatus(str, Enum):
+    ACTIVE = "active"
+    FULLY_DEPRECIATED = "fully_depreciated"
+    DISPOSED = "disposed"
+
+class FixedAsset(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    company_id: Optional[str] = None
+    inventory_number: str
+    name: str
+    category: AssetCategory
+    acquisition_date: str   # YYYY-MM-DD, дата на придобиване
+    in_service_date: str    # YYYY-MM-DD, дата на въвеждане в експлоатация
+    acquisition_value: float
+    annual_depreciation_rate_percent: float
+    responsible_person: Optional[str] = None  # материално отговорно лице
+    image_base64: Optional[str] = None
+    notes: Optional[str] = None
+    status: AssetStatus = AssetStatus.ACTIVE
+    disposal_date: Optional[str] = None
+    disposal_reason: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    monthly_depreciation: float = 0
+    accumulated_depreciation: float = 0
+    net_book_value: float = 0
+
+class FixedAssetCreate(BaseModel):
+    name: str
+    category: AssetCategory
+    acquisition_date: str
+    in_service_date: str
+    acquisition_value: float
+    annual_depreciation_rate_percent: Optional[float] = None  # ако липсва, взима се максималната норма за категорията
+    responsible_person: Optional[str] = None
+    image_base64: Optional[str] = None
+    notes: Optional[str] = None
+
+class FixedAssetUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[AssetCategory] = None
+    acquisition_date: Optional[str] = None
+    in_service_date: Optional[str] = None
+    acquisition_value: Optional[float] = None
+    annual_depreciation_rate_percent: Optional[float] = None
+    responsible_person: Optional[str] = None
+    image_base64: Optional[str] = None
+    notes: Optional[str] = None
+
+class AssetDisposeRequest(BaseModel):
+    disposal_date: str
+    disposal_reason: Optional[str] = None
+
+def _ym_add(year: int, month: int, delta: int) -> tuple:
+    idx = year * 12 + (month - 1) + delta
+    return idx // 12, idx % 12 + 1
+
+def _ym_diff(y1: int, m1: int, y2: int, m2: int) -> int:
+    return (y2 * 12 + m2) - (y1 * 12 + m1)
+
+def get_asset_depreciation_start_ym(in_service_date: str) -> tuple:
+    """Данъчната/счетоводната амортизация започва от началото на месеца,
+    следващ месеца на въвеждане в експлоатация (чл. 58 ЗКПО)."""
+    d = datetime.fromisoformat(in_service_date[:10])
+    return _ym_add(d.year, d.month, 1)
+
+def compute_asset_monthly_depreciation(acquisition_value: float, annual_rate_percent: float) -> float:
+    return acquisition_value * (annual_rate_percent / 100) / 12
+
+def get_asset_depreciation_for_month(asset: dict, year: int, month: int) -> float:
+    """Линейна (равномерна) амортизация за конкретен месец, автоматично
+    спряна при достигане на пълната стойност на актива или при бракуване."""
+    start_y, start_m = get_asset_depreciation_start_ym(asset["in_service_date"])
+    if (year, month) < (start_y, start_m):
+        return 0.0
+    if asset.get("status") == "disposed" and asset.get("disposal_date"):
+        dd = datetime.fromisoformat(asset["disposal_date"][:10])
+        if (year, month) > (dd.year, dd.month):
+            return 0.0
+    monthly = compute_asset_monthly_depreciation(asset["acquisition_value"], asset["annual_depreciation_rate_percent"])
+    if monthly <= 0:
+        return 0.0
+    elapsed = _ym_diff(start_y, start_m, year, month) + 1
+    accumulated_before = monthly * (elapsed - 1)
+    if accumulated_before >= asset["acquisition_value"]:
+        return 0.0
+    remaining = asset["acquisition_value"] - accumulated_before
+    return round(min(monthly, remaining), 2)
+
+def get_asset_accumulated_depreciation(asset: dict, as_of_year: int, as_of_month: int) -> float:
+    start_y, start_m = get_asset_depreciation_start_ym(asset["in_service_date"])
+    if (as_of_year, as_of_month) < (start_y, start_m):
+        return 0.0
+    monthly = compute_asset_monthly_depreciation(asset["acquisition_value"], asset["annual_depreciation_rate_percent"])
+    end_y, end_m = as_of_year, as_of_month
+    if asset.get("status") == "disposed" and asset.get("disposal_date"):
+        dd = datetime.fromisoformat(asset["disposal_date"][:10])
+        if (dd.year, dd.month) < (end_y, end_m):
+            end_y, end_m = dd.year, dd.month
+    elapsed = max(0, _ym_diff(start_y, start_m, end_y, end_m) + 1)
+    accumulated = monthly * elapsed
+    return round(min(accumulated, asset["acquisition_value"]), 2)
+
+def enrich_asset_with_depreciation(asset: dict) -> dict:
+    now = datetime.now(timezone.utc)
+    accumulated = get_asset_accumulated_depreciation(asset, now.year, now.month)
+    net_book_value = round(asset["acquisition_value"] - accumulated, 2)
+    asset["monthly_depreciation"] = round(compute_asset_monthly_depreciation(asset["acquisition_value"], asset["annual_depreciation_rate_percent"]), 2)
+    asset["accumulated_depreciation"] = accumulated
+    asset["net_book_value"] = net_book_value
+    if asset.get("status") != "disposed" and net_book_value <= 0.005:
+        asset["status"] = "fully_depreciated"
+    return asset
+
+async def next_asset_inventory_number(company_id: Optional[str], user_id: str) -> str:
+    scope = company_id or f"user:{user_id}"
+    counter_id = f"asset_{scope}"
+    result = await db.counters.find_one_and_update(
+        {"_id": counter_id},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=True
+    )
+    return f"ДМА-{result['seq']:04d}"
+
+@api_router.get("/assets/categories")
+async def get_asset_categories(current_user: User = Depends(get_current_user)):
+    return {
+        "categories": [{"value": k, **v} for k, v in ASSET_CATEGORY_INFO.items()],
+        "low_value_threshold": ASSET_LOW_VALUE_THRESHOLD_EUR,
+    }
+
+@api_router.post("/assets", response_model=FixedAsset)
+async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get_current_user)):
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    category_info = ASSET_CATEGORY_INFO[asset.category.value]
+    rate = asset.annual_depreciation_rate_percent
+    if rate is None:
+        rate = category_info["max_rate"]
+    elif rate > category_info["max_rate"]:
+        raise HTTPException(status_code=400, detail=f"Нормата не може да надвишава {category_info['max_rate']}% за {category_info['label']}")
+    elif rate <= 0:
+        raise HTTPException(status_code=400, detail="Нормата трябва да е положително число")
+
+    inventory_number = await next_asset_inventory_number(company_id, current_user.user_id)
+
+    asset_obj = FixedAsset(
+        user_id=current_user.user_id,
+        company_id=company_id,
+        inventory_number=inventory_number,
+        annual_depreciation_rate_percent=rate,
+        **asset.dict(exclude={"annual_depreciation_rate_percent"})
+    )
+    await db.assets.insert_one(asset_obj.dict())
+
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="create",
+        entity_type="asset",
+        entity_id=asset_obj.id,
+        company_id=company_id,
+        details={"name": asset_obj.name, "inventory_number": inventory_number, "acquisition_value": asset_obj.acquisition_value}
+    )
+
+    return enrich_asset_with_depreciation(asset_obj.dict())
+
+@api_router.get("/assets")
+async def get_assets(status: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    query = {"company_id": company_id} if company_id else {"user_id": current_user.user_id}
+    assets = await db.assets.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    enriched = [enrich_asset_with_depreciation(a) for a in assets]
+    if status:
+        enriched = [a for a in enriched if a["status"] == status]
+    return enriched
+
+@api_router.get("/assets/summary")
+async def get_assets_summary(current_user: User = Depends(get_current_user)):
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    query = {"company_id": company_id} if company_id else {"user_id": current_user.user_id}
+    assets = await db.assets.find(query, {"_id": 0}).to_list(1000)
+    enriched = [enrich_asset_with_depreciation(a) for a in assets]
+
+    active = [a for a in enriched if a["status"] != "disposed"]
+    disposed = [a for a in enriched if a["status"] == "disposed"]
+
+    return {
+        "total_acquisition_value": round(sum(a["acquisition_value"] for a in active), 2),
+        "total_accumulated_depreciation": round(sum(a["accumulated_depreciation"] for a in active), 2),
+        "total_net_book_value": round(sum(a["net_book_value"] for a in active), 2),
+        "monthly_depreciation_total": round(sum(a["monthly_depreciation"] for a in active if a["status"] == "active"), 2),
+        "active_count": len(active),
+        "disposed_count": len(disposed),
+    }
+
+@api_router.put("/assets/{asset_id}", response_model=FixedAsset)
+async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: User = Depends(get_current_user)):
+    existing = await db.assets.find_one({"id": asset_id, "user_id": current_user.user_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Активът не е намерен")
+
+    update_data = {k: v for k, v in update.dict().items() if v is not None}
+
+    category = update_data.get("category", existing["category"])
+    if "annual_depreciation_rate_percent" in update_data:
+        category_info = ASSET_CATEGORY_INFO[category]
+        if update_data["annual_depreciation_rate_percent"] > category_info["max_rate"]:
+            raise HTTPException(status_code=400, detail=f"Нормата не може да надвишава {category_info['max_rate']}% за {category_info['label']}")
+
+    await db.assets.update_one({"id": asset_id}, {"$set": update_data})
+    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
+    return enrich_asset_with_depreciation(asset)
+
+@api_router.post("/assets/{asset_id}/dispose", response_model=FixedAsset)
+async def dispose_asset(asset_id: str, request: AssetDisposeRequest, current_user: User = Depends(get_current_user)):
+    existing = await db.assets.find_one({"id": asset_id, "user_id": current_user.user_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Активът не е намерен")
+
+    await db.assets.update_one(
+        {"id": asset_id},
+        {"$set": {
+            "status": "disposed",
+            "disposal_date": request.disposal_date,
+            "disposal_reason": request.disposal_reason,
+        }}
+    )
+
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="dispose",
+        entity_type="asset",
+        entity_id=asset_id,
+        company_id=company_id,
+        details={"name": existing["name"], "reason": request.disposal_reason}
+    )
+
+    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
+    return enrich_asset_with_depreciation(asset)
+
+@api_router.delete("/assets/{asset_id}")
+async def delete_asset(asset_id: str, current_user: User = Depends(get_current_user)):
+    result = await db.assets.delete_one({"id": asset_id, "user_id": current_user.user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Активът не е намерен")
+    return {"message": "Активът е изтрит"}
+
+async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: str, start_date: Optional[str], end_date: Optional[str]) -> float:
+    """Сумира амортизацията за всички активи, чиито месечни начисления
+    попадат в зададения период - използвано в /statistics/summary и в
+    прогнозата за разходи, аналогично на get_payroll_cost_for_period."""
+    query = {"company_id": company_id} if company_id else {"user_id": user_id}
+    assets = await db.assets.find(query, {"_id": 0}).to_list(10000)
+    if not assets:
+        return 0.0
+
+    now = datetime.now(timezone.utc)
+    total = 0.0
+    for asset in assets:
+        start_y, start_m = get_asset_depreciation_start_ym(asset["in_service_date"])
+        if asset.get("status") == "disposed" and asset.get("disposal_date"):
+            dd = datetime.fromisoformat(asset["disposal_date"][:10])
+            end_y, end_m = dd.year, dd.month
+        else:
+            end_y, end_m = now.year, now.month
+
+        y, m = start_y, start_m
+        while (y, m) <= (end_y, end_m):
+            month_key = f"{y}-{m:02d}-01"
+            if start_date and month_key < start_date[:10]:
+                y, m = _ym_add(y, m, 1)
+                continue
+            if end_date and month_key > end_date[:10]:
+                break
+            total += get_asset_depreciation_for_month(asset, y, m)
+            y, m = _ym_add(y, m, 1)
+
+    return round(total, 2)
 
 # ===================== AUDIT LOG =====================
 

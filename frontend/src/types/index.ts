@@ -113,6 +113,7 @@ export interface Summary {
   vat_to_pay: number;
   total_non_invoice_expenses: number;
   total_payroll_cost: number;
+  total_depreciation_expense: number;
   total_income: number;
   total_expense: number;
   profit: number;
@@ -354,4 +355,63 @@ export interface PayrollEntry extends PayrollBreakdown {
   bonus_amount: number;
   notes?: string;
   created_at: string;
+}
+
+// Fixed Assets / Дълготрайни активи (ДМА)
+export type AssetCategory = 'cat_i' | 'cat_ii' | 'cat_iii' | 'cat_iv' | 'cat_v' | 'cat_vi' | 'cat_vii';
+export type AssetStatus = 'active' | 'fully_depreciated' | 'disposed';
+
+export interface AssetCategoryInfo {
+  value: AssetCategory;
+  label: string;
+  max_rate: number;
+}
+
+export interface AssetCategoriesResponse {
+  categories: AssetCategoryInfo[];
+  low_value_threshold: number;
+}
+
+export interface FixedAsset {
+  id: string;
+  user_id: string;
+  company_id?: string;
+  inventory_number: string;
+  name: string;
+  category: AssetCategory;
+  acquisition_date: string;
+  in_service_date: string;
+  acquisition_value: number;
+  annual_depreciation_rate_percent: number;
+  responsible_person?: string;
+  image_base64?: string;
+  notes?: string;
+  status: AssetStatus;
+  disposal_date?: string;
+  disposal_reason?: string;
+  created_at: string;
+  monthly_depreciation: number;
+  accumulated_depreciation: number;
+  net_book_value: number;
+}
+
+export interface FixedAssetCreate {
+  name: string;
+  category: AssetCategory;
+  acquisition_date: string;
+  in_service_date: string;
+  acquisition_value: number;
+  annual_depreciation_rate_percent?: number;
+  responsible_person?: string;
+  image_base64?: string;
+  notes?: string;
+}
+
+export interface AssetsSummary {
+  total_acquisition_value: number;
+  total_accumulated_depreciation: number;
+  total_net_book_value: number;
+  monthly_depreciation_total: number;
+  active_count: number;
+  disposed_count: number;
 }
