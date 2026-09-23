@@ -503,10 +503,13 @@ const styles = StyleSheet.create({
   },
   periodChipsRow: {
     marginTop: 12,
+    height: 44,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   periodChipsContent: {
     paddingHorizontal: 16,
-    gap: 8,
+    alignItems: 'center',
   },
   periodChip: {
     paddingHorizontal: 14,
@@ -514,6 +517,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#1E293B',
     marginRight: 8,
+    flexShrink: 0,
   },
   periodChipActive: {
     backgroundColor: '#8B5CF6',
