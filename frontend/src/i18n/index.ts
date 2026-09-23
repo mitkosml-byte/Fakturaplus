@@ -201,6 +201,50 @@ export const translations: Translations = {
     bg: 'ДДС',
     en: 'VAT',
   },
+  'scan.supplierEik': {
+    bg: 'ЕИК/Булстат на доставчика',
+    en: "Supplier's EIK/Bulstat",
+  },
+  'scan.eikInvalidFormat': {
+    bg: 'Невалиден формат (9 или 13 цифри)',
+    en: 'Invalid format (9 or 13 digits)',
+  },
+  'scan.eikInvalidChecksum': {
+    bg: 'Контролната цифра не съвпада - проверете номера',
+    en: "Check digit doesn't match - please verify the number",
+  },
+  'scan.eikValid': {
+    bg: 'Коректен ЕИК',
+    en: 'Valid EIK',
+  },
+  'scan.vatTreatment': {
+    bg: 'ДДС третиране',
+    en: 'VAT treatment',
+  },
+  'vat.standard_20': {
+    bg: 'Стандартна 20%',
+    en: 'Standard 20%',
+  },
+  'vat.reduced_9': {
+    bg: 'Намалена 9%',
+    en: 'Reduced 9%',
+  },
+  'vat.zero_rate': {
+    bg: 'Нулева ставка',
+    en: 'Zero rate',
+  },
+  'vat.exempt': {
+    bg: 'Освободена доставка',
+    en: 'Exempt supply',
+  },
+  'vat.reverse_charge': {
+    bg: 'Обратно начисляване',
+    en: 'Reverse charge',
+  },
+  'vat.outside_scope': {
+    bg: 'Извън обхвата на ЗДДС',
+    en: 'Outside VAT scope',
+  },
   'scan.totalAmount': {
     bg: 'Обща сума',
     en: 'Total Amount',

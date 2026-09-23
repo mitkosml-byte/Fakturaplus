@@ -38,15 +38,25 @@ export interface Invitation {
   created_at: string;
 }
 
+export type VatTreatment =
+  | 'standard_20'
+  | 'reduced_9'
+  | 'zero_rate'
+  | 'exempt'
+  | 'reverse_charge'
+  | 'outside_scope';
+
 export interface Invoice {
   id: string;
   user_id: string;
   company_id?: string;
   supplier: string;
+  supplier_eik?: string;
   invoice_number: string;
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;
+  vat_treatment?: VatTreatment;
   date: string;
   image_base64?: string;
   notes?: string;

@@ -154,6 +154,10 @@ class ApiService {
     });
   }
 
+  async validateEik(eik: string): Promise<{ valid: boolean; normalized: string; reason: string | null }> {
+    return this.fetch(`/utils/validate-eik?eik=${encodeURIComponent(eik)}`);
+  }
+
   async deleteInvoice(id: string): Promise<void> {
     await this.fetch(`/invoices/${id}`, { method: 'DELETE' });
   }

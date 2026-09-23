@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,7 @@ import { Alert } from '../../src/utils/alert';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { api } from '../../src/services/api';
-import { OCRResult, InvoiceItemCreate } from '../../src/types';
+import { OCRResult, InvoiceItemCreate, VatTreatment } from '../../src/types';
 import { format, parse } from 'date-fns';
 import { bg, enUS } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
@@ -48,14 +48,48 @@ export default function ScanScreen() {
 
   // Form fields (editable after OCR)
   const [supplier, setSupplier] = useState('');
+  const [supplierEik, setSupplierEik] = useState('');
+  const [eikCheck, setEikCheck] = useState<{ valid: boolean; reason: string | null } | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [amountWithoutVat, setAmountWithoutVat] = useState('');
   const [vatAmount, setVatAmount] = useState('');
   const [totalAmount, setTotalAmount] = useState('');
+  const [vatTreatment, setVatTreatment] = useState<VatTreatment | ''>('');
   const [notes, setNotes] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date());
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [items, setItems] = useState<EditableItem[]>([]);
+
+  // Suggest a VAT treatment from the amounts (mirrors the backend's own
+  // fallback) so the picker isn't just left blank, but only until the user
+  // has actually chosen one themselves.
+  useEffect(() => {
+    if (vatTreatment) return;
+    const base = parseFloat(amountWithoutVat);
+    const vat = parseFloat(vatAmount);
+    if (!base) return;
+    const ratio = vat / base;
+    if (Math.abs(ratio - 0.20) < 0.01) setVatTreatment('standard_20');
+    else if (Math.abs(ratio - 0.09) < 0.01) setVatTreatment('reduced_9');
+  }, [amountWithoutVat, vatAmount, vatTreatment]);
+
+  // Live ЕИК format/checksum check, debounced so it doesn't fire on every keystroke
+  useEffect(() => {
+    const trimmed = supplierEik.trim();
+    if (!trimmed) {
+      setEikCheck(null);
+      return;
+    }
+    const timeout = setTimeout(async () => {
+      try {
+        const result = await api.validateEik(trimmed);
+        setEikCheck({ valid: result.valid, reason: result.reason });
+      } catch {
+        setEikCheck(null);
+      }
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [supplierEik]);
 
   // Delegates to the phone's own camera app (via the OS camera picker)
   // instead of a custom in-page live preview. The in-page camera had no
@@ -102,6 +136,7 @@ export default function ScanScreen() {
       const result = await api.scanInvoice(base64);
       setOcrResult(result);
       setSupplier(result.supplier);
+      setSupplierEik(result.supplier_eik || '');
       setInvoiceNumber(result.invoice_number);
       setAmountWithoutVat(result.amount_without_vat.toString());
       setVatAmount(result.vat_amount.toString());
@@ -162,10 +197,12 @@ export default function ScanScreen() {
     try {
       await api.createInvoice({
         supplier,
+        supplier_eik: supplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
         amount_without_vat: parseFloat(amountWithoutVat) || 0,
         vat_amount: parseFloat(vatAmount) || 0,
         total_amount: parseFloat(totalAmount) || 0,
+        vat_treatment: vatTreatment || undefined,
         date: invoiceDate.toISOString(),
         image_base64: capturedImage || undefined,
         notes: notes || undefined,
@@ -196,10 +233,13 @@ export default function ScanScreen() {
     setCapturedImage(null);
     setOcrResult(null);
     setSupplier('');
+    setSupplierEik('');
+    setEikCheck(null);
     setInvoiceNumber('');
     setAmountWithoutVat('');
     setVatAmount('');
     setTotalAmount('');
+    setVatTreatment('');
     setNotes('');
     setItems([]);
     setInvoiceDate(new Date());
@@ -295,6 +335,33 @@ export default function ScanScreen() {
                   </View>
 
                   <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('scan.supplierEik')}</Text>
+                    <View style={styles.eikInputRow}>
+                      <TextInput
+                        style={[styles.input, styles.eikInput]}
+                        value={supplierEik}
+                        onChangeText={setSupplierEik}
+                        keyboardType="number-pad"
+                        placeholder="131071587"
+                        placeholderTextColor="#64748B"
+                        maxLength={13}
+                      />
+                      {eikCheck && (
+                        <Ionicons
+                          name={eikCheck.valid ? 'checkmark-circle' : 'alert-circle'}
+                          size={22}
+                          color={eikCheck.valid ? '#10B981' : '#F59E0B'}
+                        />
+                      )}
+                    </View>
+                    {eikCheck && !eikCheck.valid && (
+                      <Text style={styles.eikWarningText}>
+                        {eikCheck.reason === 'checksum' ? t('scan.eikInvalidChecksum') : t('scan.eikInvalidFormat')}
+                      </Text>
+                    )}
+                  </View>
+
+                  <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.invoiceNumber')} *</Text>
                     <TextInput
                       style={styles.input}
@@ -369,6 +436,23 @@ export default function ScanScreen() {
                       placeholder="0.00"
                       placeholderTextColor="#64748B"
                     />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('scan.vatTreatment')}</Text>
+                    <View style={styles.vatTreatmentGrid}>
+                      {(['standard_20', 'reduced_9', 'zero_rate', 'exempt', 'reverse_charge', 'outside_scope'] as VatTreatment[]).map((option) => (
+                        <TouchableOpacity
+                          key={option}
+                          style={[styles.vatTreatmentChip, vatTreatment === option && styles.vatTreatmentChipActive]}
+                          onPress={() => setVatTreatment(option)}
+                        >
+                          <Text style={[styles.vatTreatmentChipText, vatTreatment === option && styles.vatTreatmentChipTextActive]}>
+                            {t(`vat.${option}`)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </View>
 
                   {/* Line items - pre-filled from OCR, editable */}
@@ -612,6 +696,44 @@ const styles = StyleSheet.create({
   textArea: {
     height: 80,
     textAlignVertical: 'top',
+  },
+  eikInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  eikInput: {
+    flex: 1,
+  },
+  eikWarningText: {
+    fontSize: 12,
+    color: '#F59E0B',
+    marginTop: 6,
+  },
+  vatTreatmentGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  vatTreatmentChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  vatTreatmentChipActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+  },
+  vatTreatmentChipText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  vatTreatmentChipTextActive: {
+    color: 'white',
   },
   row: {
     flexDirection: 'row',

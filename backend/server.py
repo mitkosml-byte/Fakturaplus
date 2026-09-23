@@ -174,15 +174,25 @@ class InvitationCreate(BaseModel):
     phone: Optional[str] = None
     role: str = "staff"
 
+class VatTreatment(str, Enum):
+    STANDARD_20 = "standard_20"        # Стандартна ставка 20%
+    REDUCED_9 = "reduced_9"            # Намалена ставка 9% (хотели, книги...)
+    ZERO_RATE = "zero_rate"            # Нулева ставка (износ / ВОД)
+    EXEMPT = "exempt"                  # Освободена доставка
+    REVERSE_CHARGE = "reverse_charge"  # Обратно начисляване / ВОП (протокол чл.117/чл.84)
+    OUTSIDE_SCOPE = "outside_scope"    # Извън обхвата на ЗДДС
+
 class Invoice(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     company_id: Optional[str] = None  # Връзка към фирмата
     supplier: str
+    supplier_eik: Optional[str] = None  # ЕИК/Булстат на доставчика
     invoice_number: str
     amount_without_vat: float
     vat_amount: float
     total_amount: float
+    vat_treatment: Optional[VatTreatment] = None  # ДДС третиране за дневника на покупки
     date: datetime
     image_base64: Optional[str] = None
     notes: Optional[str] = None
@@ -244,10 +254,12 @@ class PriceAlert(BaseModel):
 
 class InvoiceCreate(BaseModel):
     supplier: str
+    supplier_eik: Optional[str] = None
     invoice_number: str
     amount_without_vat: float
     vat_amount: float
     total_amount: float
+    vat_treatment: Optional[VatTreatment] = None
     date: str
     image_base64: Optional[str] = None
     notes: Optional[str] = None
@@ -255,10 +267,12 @@ class InvoiceCreate(BaseModel):
 
 class InvoiceUpdate(BaseModel):
     supplier: Optional[str] = None
+    supplier_eik: Optional[str] = None
     invoice_number: Optional[str] = None
     amount_without_vat: Optional[float] = None
     vat_amount: Optional[float] = None
     total_amount: Optional[float] = None
+    vat_treatment: Optional[VatTreatment] = None
     date: Optional[str] = None
     notes: Optional[str] = None
 
@@ -539,6 +553,60 @@ async def logout(request: Request, response: Response):
         await db.user_sessions.delete_one({"session_token": session_token})
     response.delete_cookie(key="session_token", path="/")
     return {"message": "Успешно излязохте"}
+
+# ===================== BULGARIAN TAX ID (EIK/BULSTAT) VALIDATION =====================
+
+def _eik_check_digit(digits: List[int], weights1: List[int], weights2: List[int]) -> int:
+    """Shared mod-11 check-digit step used by both the 9-digit and the
+    branch (13-digit) EIK/Bulstat algorithms: try the primary weights,
+    fall back to the secondary weights on a remainder of 10, and use 0
+    if even that comes out to 10."""
+    total = sum(d * w for d, w in zip(digits, weights1))
+    remainder = total % 11
+    if remainder < 10:
+        return remainder
+    total = sum(d * w for d, w in zip(digits, weights2))
+    remainder = total % 11
+    return 0 if remainder == 10 else remainder
+
+def validate_eik(raw: str) -> dict:
+    """Validate a Bulgarian unified identification code (ЕИК/Булстат).
+
+    Accepts the plain 9-digit form, the 13-digit branch/VAT-registration
+    form, and a "BG" VAT-number prefix. Returns whether the format and
+    checksum are correct, since a wrong digit is the most common way an
+    OCR read or a manual entry ends up with an unusable tax ID.
+    """
+    if not raw:
+        return {"valid": False, "normalized": "", "reason": "empty"}
+
+    normalized = raw.strip().upper()
+    if normalized.startswith("BG"):
+        normalized = normalized[2:]
+
+    if not normalized.isdigit() or len(normalized) not in (9, 13):
+        return {"valid": False, "normalized": normalized, "reason": "format"}
+
+    digits = [int(c) for c in normalized]
+
+    check9 = _eik_check_digit(digits[:8], [1, 2, 3, 4, 5, 6, 7, 8], [3, 4, 5, 6, 7, 8, 9, 10])
+    if check9 != digits[8]:
+        return {"valid": False, "normalized": normalized, "reason": "checksum"}
+
+    if len(normalized) == 9:
+        return {"valid": True, "normalized": normalized, "reason": None}
+
+    check13 = _eik_check_digit(digits[8:12], [2, 7, 3, 5], [4, 9, 5, 7])
+    if check13 != digits[12]:
+        return {"valid": False, "normalized": normalized, "reason": "checksum"}
+
+    return {"valid": True, "normalized": normalized, "reason": None}
+
+@api_router.get("/utils/validate-eik")
+async def check_eik(eik: str, current_user: User = Depends(get_current_user)):
+    """Format + checksum check for a Bulgarian ЕИК/Булстат, used by the UI
+    for live feedback while entering or reviewing a supplier's tax ID."""
+    return validate_eik(eik)
 
 # ===================== EMAIL/PASSWORD AUTH =====================
 
@@ -1639,7 +1707,18 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     
     invoice_dict = invoice.dict()
     invoice_date = datetime.fromisoformat(invoice_dict["date"].replace("Z", "+00:00"))
-    
+
+    # Suggest a VAT treatment when the caller didn't set one, based on the
+    # VAT-to-base ratio - saves the common case (standard 20%) a manual pick,
+    # while leaving anything unusual (0%, reverse charge...) for the user to
+    # classify correctly themselves.
+    if invoice_dict.get("vat_treatment") is None and invoice_dict.get("amount_without_vat"):
+        vat_ratio = invoice_dict["vat_amount"] / invoice_dict["amount_without_vat"]
+        if abs(vat_ratio - 0.20) < 0.01:
+            invoice_dict["vat_treatment"] = VatTreatment.STANDARD_20
+        elif abs(vat_ratio - 0.09) < 0.01:
+            invoice_dict["vat_treatment"] = VatTreatment.REDUCED_9
+
     # Process items and convert to dict format
     items_list = None
     price_alerts = []

@@ -406,6 +406,18 @@ export default function InvoicesScreen() {
                   <Text style={styles.detailSectionLabel}>{t('invoices.supplier')}</Text>
                   <Text style={styles.detailSectionValue}>{selectedInvoice.supplier}</Text>
                 </View>
+                {selectedInvoice.supplier_eik && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionLabel}>{t('scan.supplierEik')}</Text>
+                    <Text style={styles.detailSectionValue}>{selectedInvoice.supplier_eik}</Text>
+                  </View>
+                )}
+                {selectedInvoice.vat_treatment && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionLabel}>{t('scan.vatTreatment')}</Text>
+                    <Text style={styles.detailSectionValue}>{t(`vat.${selectedInvoice.vat_treatment}`)}</Text>
+                  </View>
+                )}
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.invoiceNo')}</Text>
                   <Text style={styles.detailSectionValue}>{selectedInvoice.invoice_number}</Text>
