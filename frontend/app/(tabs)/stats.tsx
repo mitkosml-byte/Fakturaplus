@@ -1582,12 +1582,13 @@ const styles = StyleSheet.create({
   },
   tabButton: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 4,
     borderRadius: 10,
-    gap: 8,
+    gap: 4,
   },
   tabButtonActive: {
     backgroundColor: '#8B5CF6',
@@ -1596,6 +1597,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748B',
     fontWeight: '500',
+    textAlign: 'center',
   },
   tabButtonTextActive: {
     color: 'white',
