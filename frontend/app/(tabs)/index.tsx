@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
@@ -84,9 +85,14 @@ export default function HomeScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // Tab screens stay mounted, so returning here (e.g. after scanning and
+  // saving a new invoice) doesn't remount the screen - only re-fetching on
+  // focus picks up the change without needing a manual pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
   // Load current day revenue when revenue modal opens or date changes
   useEffect(() => {
@@ -134,11 +140,13 @@ export default function HomeScreen() {
     }
   }, [isOwner]);
 
-  useEffect(() => {
-    if (isOwner) {
-      loadRoiData();
-    }
-  }, [isOwner, loadRoiData]);
+  useFocusEffect(
+    useCallback(() => {
+      if (isOwner) {
+        loadRoiData();
+      }
+    }, [isOwner, loadRoiData])
+  );
 
   // Create personal expense
   const handleCreatePersonalExpense = async () => {

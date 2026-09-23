@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { api } from '../../src/services/api';
 import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse } from '../../src/types';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
@@ -152,9 +153,14 @@ export default function StatsScreen() {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // Tab screens stay mounted, so returning here (e.g. after scanning and
+  // saving a new invoice) doesn't remount the screen - only re-fetching on
+  // focus picks up the change without needing a manual pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
   useEffect(() => {
     if (activeTab === 'suppliers' && !supplierOverview) {

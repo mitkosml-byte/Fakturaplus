@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
 import { Invoice } from '../../src/types';
@@ -48,9 +49,14 @@ export default function InvoicesScreen() {
     }
   }, [searchQuery]);
 
-  useEffect(() => {
-    loadInvoices();
-  }, [loadInvoices]);
+  // Tab screens stay mounted, so returning here (e.g. after scanning and
+  // saving a new invoice) doesn't remount the screen - only re-fetching on
+  // focus picks up the change without needing a manual pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      loadInvoices();
+    }, [loadInvoices])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
