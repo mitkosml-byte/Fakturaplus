@@ -1625,6 +1625,26 @@ export const translations: Translations = {
     bg: 'Експортирайте вашите данни',
     en: 'Export your data',
   },
+  'export.vatLedger': {
+    bg: 'Дневник на покупки/продажби',
+    en: 'Purchases/sales VAT ledger',
+  },
+  'export.vatLedgerDesc': {
+    bg: 'Работен дневник по ЗДДС за счетоводителя, групиран по ставки — основа за справка-декларацията',
+    en: "Working ЗДДС ledger for the accountant, grouped by VAT rate — the base for the monthly return",
+  },
+  'export.lastMonth': {
+    bg: 'Миналия месец',
+    en: 'Last month',
+  },
+  'export.thisMonth': {
+    bg: 'Този месец',
+    en: 'This month',
+  },
+  'export.download': {
+    bg: 'Изтегли',
+    en: 'Download',
+  },
   'export.excel': {
     bg: 'Excel файл (.xlsx)',
     en: 'Excel File (.xlsx)',

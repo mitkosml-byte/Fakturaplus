@@ -3138,6 +3138,81 @@ async def export_statistics_pdf(
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF export not available")
 
+@api_router.get("/export/vat-ledger/excel")
+async def export_vat_ledger_excel(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Export a working ДДС purchases/sales ledger (Дневник на покупки и
+    продажби) for the given period, grouped by VAT-rate category - meant
+    as the accountant's source data for filing, not a byte-exact copy of
+    NRA's own file layout."""
+    now = datetime.now(timezone.utc)
+    if not start_date and not end_date:
+        start_date = now.replace(day=1).strftime("%Y-%m-%d")
+        if now.month == 12:
+            end_date = now.replace(year=now.year + 1, month=1, day=1).strftime("%Y-%m-%d")
+        else:
+            end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
+
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    inv_query = {}
+    if company_id:
+        inv_query["company_id"] = company_id
+    else:
+        inv_query["user_id"] = current_user.user_id
+    inv_query["date"] = {
+        "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
+        "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
+    }
+    purchases = await db.invoices.find(inv_query, {"_id": 0, "image_base64": 0}).sort("date", 1).to_list(10000)
+
+    # daily_revenue is keyed by user_id, not company_id
+    if company_id:
+        company_users = await db.users.find({"company_id": company_id}, {"_id": 0, "user_id": 1}).to_list(1000)
+        user_ids = [u["user_id"] for u in company_users]
+        rev_query = {"user_id": {"$in": user_ids}}
+    else:
+        rev_query = {"user_id": current_user.user_id}
+    rev_query["date"] = {"$gte": start_date, "$lte": end_date}
+    sales = await db.daily_revenue.find(rev_query, {"_id": 0}).sort("date", 1).to_list(10000)
+
+    company_name = ""
+    if company_id:
+        company = await db.companies.find_one({"id": company_id})
+        company_name = company.get("name", "") if company else ""
+
+    period_label = f"Период: {start_date} - {end_date}"
+
+    try:
+        excel_data = ExportService.generate_vat_ledger_excel(
+            purchases=purchases,
+            sales=sales,
+            company_name=company_name,
+            period_label=period_label
+        )
+
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+            action="export",
+            entity_type="vat_ledger",
+            company_id=company_id,
+            details={"format": "excel", "start_date": start_date, "end_date": end_date}
+        )
+
+        filename = f"dnevnik_pokupki_prodajbi_{start_date}_{end_date}.xlsx"
+        return Response(
+            content=excel_data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Excel export not available")
+
 # ===================== BACKUP ENDPOINTS =====================
 
 class BackupData(BaseModel):

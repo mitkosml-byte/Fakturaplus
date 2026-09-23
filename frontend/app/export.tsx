@@ -20,27 +20,24 @@ export default function ExportScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
+  const [ledgerPeriod, setLedgerPeriod] = useState<'thisMonth' | 'lastMonth'>('lastMonth');
 
   // Use environment variable for API URL - no hardcoded fallback for production
   const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-  const exportData = async (format: 'excel' | 'pdf') => {
-    setLoading(format);
-    
+  const downloadFile = async (endpoint: string, filename: string, loadingKey: string) => {
+    setLoading(loadingKey);
+
     try {
       // Get auth token from storage
       const AsyncStorage = require('@react-native-async-storage/async-storage').default;
       const token = await AsyncStorage.getItem('session_token');
-      
+
       if (!token) {
         Alert.alert(t('common.error'), t('export.notLoggedIn'));
         return;
       }
 
-      const endpoint = format === 'excel' 
-        ? '/api/export/invoices/excel'
-        : '/api/export/invoices/pdf';
-      
       const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'GET',
         headers: {
@@ -54,36 +51,51 @@ export default function ExportScreen() {
 
       const blob = await response.blob();
       const reader = new FileReader();
-      
+
       reader.onloadend = async () => {
         const base64data = reader.result as string;
         const base64 = base64data.split(',')[1];
-        
-        const filename = format === 'excel' 
-          ? `invoices_${new Date().toISOString().slice(0, 10)}.xlsx`
-          : `invoices_${new Date().toISOString().slice(0, 10)}.pdf`;
-        
+
         const fileUri = `${(FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory}${filename}`;
-        
+
         await (FileSystem as any).writeAsStringAsync(fileUri, base64, {
           encoding: (FileSystem as any).EncodingType.Base64,
         });
-        
+
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(fileUri);
         } else {
           Alert.alert(t('common.success'), t('export.fileSaved'));
         }
       };
-      
+
       reader.readAsDataURL(blob);
-      
+
     } catch (error) {
       console.error('Export error:', error);
       Alert.alert(t('common.error'), t('export.failed'));
     } finally {
       setLoading(null);
     }
+  };
+
+  const exportData = (format: 'excel' | 'pdf') => {
+    const endpoint = format === 'excel'
+      ? '/api/export/invoices/excel'
+      : '/api/export/invoices/pdf';
+    const filename = `invoices_${new Date().toISOString().slice(0, 10)}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
+    downloadFile(endpoint, filename, format);
+  };
+
+  const exportVatLedger = () => {
+    const now = new Date();
+    const targetMonth = ledgerPeriod === 'lastMonth' ? now.getMonth() - 1 : now.getMonth();
+    const start = new Date(now.getFullYear(), targetMonth, 1);
+    const end = new Date(now.getFullYear(), targetMonth + 1, 0);
+    const toDateStr = (d: Date) => d.toISOString().slice(0, 10);
+    const endpoint = `/api/export/vat-ledger/excel?start_date=${toDateStr(start)}&end_date=${toDateStr(end)}`;
+    const filename = `dnevnik_${toDateStr(start).slice(0, 7)}.xlsx`;
+    downloadFile(endpoint, filename, 'ledger');
   };
 
   return (
@@ -100,6 +112,53 @@ export default function ExportScreen() {
 
         <View style={styles.content}>
           <Text style={styles.subtitle}>{t('export.subtitle')}</Text>
+
+          {/* VAT Ledger Export */}
+          <View style={styles.ledgerCard}>
+            <View style={styles.ledgerHeader}>
+              <View style={[styles.iconContainer, { backgroundColor: 'rgba(139, 92, 246, 0.2)', marginRight: 12 }]}>
+                <Ionicons name="albums" size={28} color="#8B5CF6" />
+              </View>
+              <View style={styles.cardContent}>
+                <Text style={styles.cardTitle}>{t('export.vatLedger')}</Text>
+                <Text style={styles.cardDesc}>{t('export.vatLedgerDesc')}</Text>
+              </View>
+            </View>
+
+            <View style={styles.ledgerPeriodRow}>
+              <TouchableOpacity
+                style={[styles.ledgerPeriodChip, ledgerPeriod === 'lastMonth' && styles.ledgerPeriodChipActive]}
+                onPress={() => setLedgerPeriod('lastMonth')}
+              >
+                <Text style={[styles.ledgerPeriodText, ledgerPeriod === 'lastMonth' && styles.ledgerPeriodTextActive]}>
+                  {t('export.lastMonth')}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ledgerPeriodChip, ledgerPeriod === 'thisMonth' && styles.ledgerPeriodChipActive]}
+                onPress={() => setLedgerPeriod('thisMonth')}
+              >
+                <Text style={[styles.ledgerPeriodText, ledgerPeriod === 'thisMonth' && styles.ledgerPeriodTextActive]}>
+                  {t('export.thisMonth')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={styles.ledgerDownloadButton}
+              onPress={exportVatLedger}
+              disabled={loading !== null}
+            >
+              {loading === 'ledger' ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <>
+                  <Ionicons name="download" size={18} color="white" />
+                  <Text style={styles.ledgerDownloadText}>{t('export.download')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
 
           {/* Excel Export */}
           <TouchableOpacity 
@@ -184,6 +243,56 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     marginBottom: 24,
     textAlign: 'center',
+  },
+  ledgerCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#8B5CF640',
+  },
+  ledgerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  ledgerPeriodRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
+  ledgerPeriodChip: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
+  },
+  ledgerPeriodChipActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  ledgerPeriodText: {
+    fontSize: 13,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  ledgerPeriodTextActive: {
+    color: 'white',
+  },
+  ledgerDownloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#8B5CF6',
+    borderRadius: 10,
+    paddingVertical: 12,
+  },
+  ledgerDownloadText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '600',
   },
   exportCard: {
     flexDirection: 'row',
