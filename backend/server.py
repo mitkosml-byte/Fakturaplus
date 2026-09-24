@@ -2026,7 +2026,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         existing_invoice = await db.invoices.find_one({
             "user_id": {"$in": company_user_ids},
             "invoice_number": invoice.invoice_number,
-            "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"}
+            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"}
         }, {"_id": 0, "id": 1, "date": 1, "user_id": 1})
         
         if existing_invoice:
@@ -2042,7 +2042,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         existing_invoice = await db.invoices.find_one({
             "user_id": current_user.user_id,
             "invoice_number": invoice.invoice_number,
-            "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"}
+            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"}
         }, {"_id": 0, "id": 1, "date": 1})
         
         if existing_invoice:
@@ -2100,7 +2100,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
                 last_price_record = await db.item_price_history.find_one(
                     {
                         "company_id": company_id,
-                        "supplier": {"$regex": f"^{invoice.supplier}$", "$options": "i"},
+                        "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"},
                         "item_name": normalized_name
                     },
                     {"_id": 0},
@@ -2205,9 +2205,9 @@ async def get_invoices(
     _, query = await get_company_scope(current_user)
 
     if supplier:
-        query["supplier"] = {"$regex": supplier, "$options": "i"}
+        query["supplier"] = {"$regex": re.escape(supplier), "$options": "i"}
     if invoice_number:
-        query["invoice_number"] = {"$regex": invoice_number, "$options": "i"}
+        query["invoice_number"] = {"$regex": re.escape(invoice_number), "$options": "i"}
     if start_date:
         query["date"] = {"$gte": datetime.fromisoformat(start_date.replace("Z", "+00:00"))}
     if end_date:
@@ -3114,7 +3114,7 @@ async def get_detailed_supplier_stats(
 
     # Get all invoices for this supplier (no date filter for full history)
     _, query = await get_company_scope(current_user)
-    query["supplier"] = {"$regex": f"^{supplier_name}$", "$options": "i"}
+    query["supplier"] = {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}
 
     invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", 1).to_list(10000)
     
@@ -3258,7 +3258,7 @@ async def compare_suppliers(
     _, base_scope = await get_company_scope(current_user)
 
     for supplier_name in supplier_names:
-        query = {**base_scope, "supplier": {"$regex": f"^{supplier_name}$", "$options": "i"}}
+        query = {**base_scope, "supplier": {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}}
         if date_query:
             query["date"] = date_query
         
@@ -3297,7 +3297,7 @@ async def get_single_supplier_stats(
 ):
     """Get detailed statistics for a specific supplier"""
     _, query = await get_company_scope(current_user)
-    query["supplier"] = {"$regex": f"^{supplier_name}$", "$options": "i"}
+    query["supplier"] = {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}
 
     if start_date or end_date:
         query["date"] = {}
@@ -3885,7 +3885,7 @@ async def get_item_price_history(
         "item_name": item_name
     }
     if supplier:
-        query["supplier"] = {"$regex": f"^{unquote(supplier)}$", "$options": "i"}
+        query["supplier"] = {"$regex": f"^{re.escape(unquote(supplier))}$", "$options": "i"}
     
     history = await db.item_price_history.find(query, {"_id": 0}).sort("invoice_date", 1).to_list(1000)
     
