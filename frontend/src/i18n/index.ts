@@ -86,10 +86,6 @@ export const translations: Translations = {
     bg: 'В канала',
     en: 'Expenses',
   },
-  'home.accumulatedFor': {
-    bg: 'Натрупано за',
-    en: 'Accumulated for',
-  },
   'home.fiscal': {
     bg: 'Фискален',
     en: 'Fiscal',
@@ -98,17 +94,17 @@ export const translations: Translations = {
     bg: 'Джобче',
     en: 'Pocket',
   },
-  'home.addFiscalRevenue': {
-    bg: 'Добави фискализиран оборот',
-    en: 'Add fiscal revenue',
+  'home.fiscalRevenueLabel': {
+    bg: 'Фискализиран оборот',
+    en: 'Fiscal revenue',
   },
-  'home.addToPocket': {
-    bg: 'Добави към джобче',
-    en: 'Add to pocket',
+  'home.pocketLabel': {
+    bg: 'Джобче',
+    en: 'Pocket',
   },
-  'home.willBeAdded': {
-    bg: 'Ще се добави към съществуващото',
-    en: 'Will be added to existing',
+  'home.editInPlaceNotice': {
+    bg: 'Полетата по-долу показват вече записаното за тази дата. Промяна на стойност я замества с новата — не се добавя към старата.',
+    en: "These fields show what's already logged for this date. Changing a value replaces it — it doesn't add to the old one.",
   },
   'home.includesVAT': {
     bg: 'Влиза в ДДС',

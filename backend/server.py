@@ -2236,26 +2236,29 @@ async def delete_invoice(invoice_id: str, current_user: User = Depends(get_curre
 
 @api_router.post("/daily-revenue", response_model=DailyRevenue)
 async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User = Depends(get_current_user)):
+    """Записва оборота за деня - ЗАМЕСТВА предишната стойност, не я
+    добавя към нея (фронтендът зарежда текущите стойности в полетата
+    при отваряне, точно за да могат да се коригират директно)."""
     company_id, scope = await get_company_scope(current_user)
 
     # Check if ANY teammate already logged revenue for this date - the
     # fiscal till total for a given day belongs to the whole company, not
-    # to whoever happened to type it in (e.g. two shifts, two entries).
+    # to whoever happened to type it in.
     existing = await db.daily_revenue.find_one({**scope, "date": revenue.date}, {"_id": 0})
 
     if existing:
-        # ADD to existing values instead of replacing
-        new_fiscal = existing.get("fiscal_revenue", 0) + revenue.fiscal_revenue
-        new_pocket = existing.get("pocket_money", 0) + revenue.pocket_money
-
         await db.daily_revenue.update_one(
             {"id": existing["id"]},
-            {"$set": {"fiscal_revenue": new_fiscal, "pocket_money": new_pocket}}
+            {"$set": {
+                "fiscal_revenue": revenue.fiscal_revenue,
+                "pocket_money": revenue.pocket_money,
+                "vat_rate_percent": revenue.vat_rate_percent,
+            }}
         )
-        existing["fiscal_revenue"] = new_fiscal
-        existing["pocket_money"] = new_pocket
+        existing["fiscal_revenue"] = revenue.fiscal_revenue
+        existing["pocket_money"] = revenue.pocket_money
+        existing["vat_rate_percent"] = revenue.vat_rate_percent
         existing.setdefault("company_id", company_id)
-        existing.setdefault("vat_rate_percent", 20.0)
         return DailyRevenue(**existing)
 
     revenue_obj = DailyRevenue(
@@ -2298,12 +2301,14 @@ async def get_revenue_by_date(date: str, current_user: User = Depends(get_curren
         return {
             "date": date,
             "fiscal_revenue": existing.get("fiscal_revenue", 0),
-            "pocket_money": existing.get("pocket_money", 0)
+            "pocket_money": existing.get("pocket_money", 0),
+            "vat_rate_percent": existing.get("vat_rate_percent", 20.0)
         }
     return {
         "date": date,
         "fiscal_revenue": 0,
-        "pocket_money": 0
+        "pocket_money": 0,
+        "vat_rate_percent": 20.0
     }
 
 @api_router.get("/daily-revenue", response_model=List[DailyRevenue])

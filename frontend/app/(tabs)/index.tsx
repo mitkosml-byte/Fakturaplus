@@ -57,8 +57,7 @@ export default function HomeScreen() {
   // one is ever open at a time, and this guards against a rapid double-tap
   // on Save creating a duplicate record.
   const [isSubmittingForm, setIsSubmittingForm] = useState(false);
-  const [currentDayRevenue, setCurrentDayRevenue] = useState({ fiscal_revenue: 0, pocket_money: 0 });
-  
+
   // Expense form
   const [expenseDescription, setExpenseDescription] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
@@ -79,13 +78,20 @@ export default function HomeScreen() {
     }
   }, []);
 
+  // Pre-fills the form with whatever is already logged for this date, so
+  // saving corrects that value directly instead of adding a delta to it -
+  // opening the form for a date with nothing logged yet leaves it at 0.
   const loadCurrentDayRevenue = useCallback(async (date: Date) => {
     try {
       const dateStr = format(date, 'yyyy-MM-dd');
       const data = await api.getRevenueByDate(dateStr);
-      setCurrentDayRevenue(data);
+      setFiscalRevenue(data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
+      setPocketMoney(data.pocket_money > 0 ? data.pocket_money.toString() : '');
+      setRevenueVatRate(data.vat_rate_percent || 20);
     } catch (error) {
-      setCurrentDayRevenue({ fiscal_revenue: 0, pocket_money: 0 });
+      setFiscalRevenue('');
+      setPocketMoney('');
+      setRevenueVatRate(20);
     }
   }, []);
 
@@ -616,25 +622,15 @@ export default function HomeScreen() {
               locale={language}
             />
 
-            {/* Current totals display */}
-            {(currentDayRevenue.fiscal_revenue > 0 || currentDayRevenue.pocket_money > 0) && (
-              <View style={styles.currentTotalsCard}>
-                <Text style={styles.currentTotalsTitle}>{t('home.accumulatedFor')} {format(revenueDate, 'd MMM', { locale: dateLocale })}:</Text>
-                <View style={styles.currentTotalsRow}>
-                  <View style={styles.currentTotalItem}>
-                    <Text style={styles.currentTotalValue}>{currentDayRevenue.fiscal_revenue.toFixed(2)} €</Text>
-                    <Text style={styles.currentTotalLabel}>{t('home.fiscal')}</Text>
-                  </View>
-                  <View style={styles.currentTotalItem}>
-                    <Text style={styles.currentTotalValue}>{currentDayRevenue.pocket_money.toFixed(2)} €</Text>
-                    <Text style={styles.currentTotalLabel}>{t('home.pocket')}</Text>
-                  </View>
-                </View>
-              </View>
-            )}
+            {/* Explains the edit-in-place semantics up front, since it's not
+                the obvious default for a "add revenue" form. */}
+            <View style={styles.editNoticeBanner}>
+              <Ionicons name="information-circle" size={18} color="#8B5CF6" />
+              <Text style={styles.editNoticeText}>{t('home.editInPlaceNotice')}</Text>
+            </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('home.addFiscalRevenue')} (€)</Text>
+              <Text style={styles.inputLabel}>{t('home.fiscalRevenueLabel')} (€)</Text>
               <TextInput
                 style={styles.input}
                 value={fiscalRevenue}
@@ -643,7 +639,7 @@ export default function HomeScreen() {
                 placeholder="0.00"
                 placeholderTextColor="#64748B"
               />
-              <Text style={styles.inputHint}>{t('home.willBeAdded')} • {t('home.includesVAT')}</Text>
+              <Text style={styles.inputHint}>{t('home.includesVAT')}</Text>
             </View>
 
             <View style={styles.inputGroup}>
@@ -665,7 +661,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('home.addToPocket')} (€)</Text>
+              <Text style={styles.inputLabel}>{t('home.pocketLabel')} (€)</Text>
               <TextInput
                 style={styles.input}
                 value={pocketMoney}
@@ -674,7 +670,7 @@ export default function HomeScreen() {
                 placeholder="0.00"
                 placeholderTextColor="#64748B"
               />
-              <Text style={styles.inputHint}>{t('home.willBeAdded')} • {t('home.excludesVAT')}</Text>
+              <Text style={styles.inputHint}>{t('home.excludesVAT')}</Text>
             </View>
 
             <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue} disabled={isSubmittingForm}>
@@ -1059,36 +1055,22 @@ const styles = StyleSheet.create({
   vatRateChipTextActive: {
     color: 'white',
   },
-  currentTotalsCard: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+  editNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderColor: 'rgba(139, 92, 246, 0.3)',
   },
-  currentTotalsTitle: {
-    fontSize: 14,
-    color: '#10B981',
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  currentTotalsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  currentTotalItem: {
-    alignItems: 'center',
-  },
-  currentTotalValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#10B981',
-  },
-  currentTotalLabel: {
+  editNoticeText: {
+    flex: 1,
     fontSize: 12,
-    color: '#94A3B8',
-    marginTop: 4,
+    color: '#C4B5FD',
+    lineHeight: 17,
   },
   submitButton: {
     backgroundColor: '#8B5CF6',

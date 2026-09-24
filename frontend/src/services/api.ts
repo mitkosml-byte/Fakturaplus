@@ -336,6 +336,7 @@ class ApiService {
     date: string;
     fiscal_revenue: number;
     pocket_money: number;
+    vat_rate_percent: number;
   }> {
     return this.fetch(`/daily-revenue/by-date/${date}`);
   }
