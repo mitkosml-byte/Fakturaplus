@@ -5,6 +5,7 @@ export interface User {
   picture?: string;
   role: 'owner' | 'manager' | 'staff' | 'accountant';
   company_id?: string;
+  permissions?: string[];
   has_password?: boolean;
   created_at: string;
 }
@@ -32,6 +33,7 @@ export interface Invitation {
   email?: string;
   phone?: string;
   role: 'manager' | 'staff' | 'accountant';
+  permissions?: string[];
   code: string;
   status: 'pending' | 'accepted' | 'cancelled' | 'expired';
   expires_at: string;

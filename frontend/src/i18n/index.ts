@@ -1930,6 +1930,11 @@ export const translations: Translations = {
   'companySwitcher.switchedTo': { bg: 'Вече преглеждате', en: 'You are now viewing' },
   'invitations.roleAccountant': { bg: 'Счетоводител', en: 'Accountant' },
   'invitations.accountantHint': { bg: 'Достъп до статистики, фактури, ведомости и ДМА на тази фирма, без право да управлява потребители или данните на фирмата. Може да работи с няколко фирми клиенти от един акаунт.', en: "Access to this company's statistics, invoices, payroll and fixed assets, without managing users or company settings. Can work across several client companies from one account." },
+  'invitations.permissionsTitle': { bg: 'Права на достъп', en: 'Access permissions' },
+  'invitations.permissionsHint': { bg: 'Отметнати са правата по подразбиране за тази роля. Може да ги коригирате.', en: "The role's default permissions are pre-checked. You can adjust them." },
+  'users.editAccess': { bg: 'Редакция на достъп', en: 'Edit access' },
+  'users.role': { bg: 'Роля', en: 'Role' },
+  'users.saveChanges': { bg: 'Запази промените', en: 'Save changes' },
 
   'notifications.title': { bg: 'Известия за ДДС', en: 'VAT notifications' },
   'notifications.thresholdTitle': { bg: 'Известие при надхвърляне', en: 'Threshold alert' },

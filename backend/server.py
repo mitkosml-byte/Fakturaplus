@@ -131,6 +131,7 @@ class User(BaseModel):
     picture: Optional[str] = None
     role: str = "staff"  # "owner", "manager", or "staff"
     company_id: Optional[str] = None  # Връзка към фирмата
+    permissions: List[str] = Field(default_factory=list)  # Конкретните права за тази фирма - виж ROLE_PERMISSIONS
     password_hash: Optional[str] = None  # За email/password auth
     auth_provider: str = "email"  # "google" or "email"
     has_password: bool = False  # Дали акаунтът има парола (за да предложим "задай парола" на Google потребители)
@@ -164,6 +165,7 @@ class Invitation(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     role: str = "staff"  # Роля за поканения
+    permissions: List[str] = Field(default_factory=list)  # Конкретните права, избрани от титуляря при поканата
     code: str = Field(default_factory=lambda: uuid.uuid4().hex[:8].upper())  # 8-символен код
     status: str = "pending"  # "pending", "accepted", "cancelled", "expired"
     expires_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(days=7))
@@ -173,6 +175,7 @@ class InvitationCreate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     role: str = "staff"
+    permissions: Optional[List[str]] = None  # None = ролята по подразбиране
 
 class CompanyMembership(BaseModel):
     """Проследява ВСИЧКИ фирми, до които потребител има достъп - не само
@@ -184,6 +187,7 @@ class CompanyMembership(BaseModel):
     user_id: str
     company_id: str
     role: str
+    permissions: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class VatTreatment(str, Enum):
@@ -437,10 +441,17 @@ async def repair_invalid_role(user_doc: dict) -> dict:
     return user_doc
 
 def sanitize_user(user_doc: dict) -> dict:
-    """Премахва password_hash от документа на потребителя и добавя has_password флаг."""
+    """Премахва password_hash от документа на потребителя и добавя has_password флаг.
+
+    Also backfills permissions for any account from before per-user
+    permissions existed, so every response that returns a user (login,
+    register, /auth/me, company switch...) always carries a real list -
+    never an empty one that would silently strip a legacy owner's access."""
     user_doc = dict(user_doc)
     user_doc["has_password"] = bool(user_doc.get("password_hash"))
     user_doc.pop("password_hash", None)
+    if not user_doc.get("permissions"):
+        user_doc["permissions"] = resolve_permissions(user_doc.get("role", "staff"), None)
     return user_doc
 
 async def get_company_scope(current_user: User) -> tuple:
@@ -468,10 +479,18 @@ async def get_company_scope(current_user: User) -> tuple:
         ]
     }
 
-# Mirrors the role-permission matrix in frontend/src/contexts/AuthContext.tsx.
+# Mirrors the role-permission matrix in frontend/src/utils/permissions.ts.
 # That copy decides what a role can SEE (which menu links/screens render);
 # this one is what actually protects the data - keep both in sync whenever
 # a role or a gated feature changes here.
+#
+# ROLE_PERMISSIONS is the DEFAULT set a role starts with (used the moment
+# someone is invited or switched to that role, before any fine-tuning).
+# ROLE_CONFIGURABLE_PERMISSIONS is the ceiling of what the owner may tick
+# on or off for that role via the permissions checklist - manage_users and
+# manage_company never appear there for anyone but the owner, since those
+# concern the company's legal data and who else gets access to it, not a
+# day-to-day work permission.
 ROLE_PERMISSIONS = {
     "owner": {
         "manage_users", "manage_company", "view_audit_log", "manage_budget",
@@ -487,21 +506,47 @@ ROLE_PERMISSIONS = {
     },
 }
 
+_STAFF_LIKE_CONFIGURABLE = {
+    "view_audit_log", "manage_budget", "export_data", "view_statistics",
+    "manage_invoices", "add_revenue", "add_expenses",
+}
+
+ROLE_CONFIGURABLE_PERMISSIONS = {
+    "manager": _STAFF_LIKE_CONFIGURABLE,
+    "staff": _STAFF_LIKE_CONFIGURABLE,
+    # Deliberately narrow - see the accountant note in ROLE_PERMISSIONS above.
+    "accountant": {"view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices"},
+}
+
+def resolve_permissions(role: str, requested: Optional[List[str]]) -> List[str]:
+    """Turns whatever permission list a client sent (possibly None, possibly
+    tampered with) into the actual list to store for a member with this role.
+
+    None (no explicit choice made) -> the role's default set. Otherwise,
+    filtered down to that role's configurable ceiling, so a request can
+    never grant a permission the role isn't allowed to hold - owner's set
+    is fixed and never came from a request in the first place."""
+    if requested is None:
+        return sorted(ROLE_PERMISSIONS.get(role, set()))
+    ceiling = ROLE_CONFIGURABLE_PERMISSIONS.get(role, set())
+    return sorted(set(requested) & ceiling)
+
 def require_permission(current_user: User, permission: str):
-    if permission not in ROLE_PERMISSIONS.get(current_user.role, set()):
+    if permission not in set(current_user.permissions or []):
         raise HTTPException(status_code=403, detail="Нямате права за тази операция")
 
-async def ensure_membership(user_id: str, company_id: str, role: str):
+async def ensure_membership(user_id: str, company_id: str, role: str, permissions: Optional[List[str]] = None):
     """Записва (или обновява) връзката потребител-фирма в company_memberships.
 
     users.company_id/role показват само коя фирма е АКТИВНА в момента за
     потребителя - именно затова всеки съществуващ endpoint в приложението
     automatически "проглежда" правилната фирма веднага щом /companies/switch
     ги смени. company_memberships пази пълния списък, от който се превключва."""
+    resolved_permissions = permissions if permissions is not None else resolve_permissions(role, None)
     await db.company_memberships.update_one(
         {"user_id": user_id, "company_id": company_id},
         {
-            "$set": {"role": role},
+            "$set": {"role": role, "permissions": resolved_permissions},
             "$setOnInsert": {
                 "id": str(uuid.uuid4()),
                 "user_id": user_id,
@@ -597,6 +642,7 @@ async def create_session(request: Request, response: Response):
             "name": session_data.name,
             "picture": session_data.picture,
             "role": "owner",  # First user is owner
+            "permissions": resolve_permissions("owner", None),
             "company_id": new_company.id,
             "auth_provider": "google",
             "created_at": datetime.now(timezone.utc)
@@ -752,6 +798,7 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
         "name": user_data.name.strip(),
         "picture": None,
         "role": "owner",
+        "permissions": resolve_permissions("owner", None),
         "company_id": new_company.id,
         "password_hash": password_hash,
         "auth_provider": "email",
@@ -855,36 +902,41 @@ async def change_password(data: ChangePassword, current_user: User = Depends(get
 async def update_user_role(user_id: str, request: Request, current_user: User = Depends(get_current_user)):
     body = await request.json()
     role = body.get("role")
-    
+    # None here means "no explicit checklist edit" - resolve_permissions
+    # then falls back to the role's default set, same as at invite time.
+    requested_permissions = body.get("permissions")
+
     if current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Само титулярят може да променя роли")
-    
+
     if role not in ["owner", "manager", "staff", "accountant"]:
         raise HTTPException(status_code=400, detail="Невалидна роля. Допустими: owner, manager, staff, accountant")
-    
+
     # Get target user
     target_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not target_user:
         raise HTTPException(status_code=404, detail="Потребителят не е намерен")
-    
+
     # Ensure same company
     if target_user.get("company_id") != current_user.company_id:
         raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
-    
+
     # Cannot change own role if owner
     if user_id == current_user.user_id and current_user.role == "owner":
         raise HTTPException(status_code=400, detail="Не можете да променяте собствената си роля на собственик")
-    
+
+    permissions = resolve_permissions(role, requested_permissions)
+
     result = await db.users.update_one(
         {"user_id": user_id},
-        {"$set": {"role": role}}
+        {"$set": {"role": role, "permissions": permissions}}
     )
-    if result.modified_count == 0:
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Потребителят не е намерен")
 
     # Keep the membership record (used by the accountant company switcher)
     # in sync, in case this user held accountant-level access here.
-    await ensure_membership(user_id, current_user.company_id, role)
+    await ensure_membership(user_id, current_user.company_id, role, permissions)
 
     return {"message": "Ролята е обновена"}
 
@@ -898,18 +950,27 @@ async def get_all_users(current_user: User = Depends(get_current_user)):
     
     users = await db.users.find(
         {"company_id": current_user.company_id},
-        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "picture": 1, "created_at": 1}
+        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "permissions": 1, "picture": 1, "created_at": 1}
     ).to_list(1000)
+    for u in users:
+        if not u.get("permissions"):
+            u["permissions"] = resolve_permissions(u.get("role", "staff"), None)
 
     # An accountant with access to this company might currently be
     # switched into a DIFFERENT client's data, so their live users.company_id
-    # won't match here - pull them in separately via their membership record.
+    # (and users.permissions, which follows the ACTIVE company) won't match
+    # here - pull them in separately via their membership record, which
+    # holds the role/permissions specific to THIS company.
     existing_ids = {u["user_id"] for u in users}
     accountant_memberships = await db.company_memberships.find(
         {"company_id": current_user.company_id, "role": "accountant"},
-        {"_id": 0, "user_id": 1}
+        {"_id": 0, "user_id": 1, "permissions": 1}
     ).to_list(1000)
-    extra_ids = [m["user_id"] for m in accountant_memberships if m["user_id"] not in existing_ids]
+    membership_permissions = {
+        m["user_id"]: m.get("permissions") or resolve_permissions("accountant", None)
+        for m in accountant_memberships
+    }
+    extra_ids = [uid for uid in membership_permissions if uid not in existing_ids]
     if extra_ids:
         extra_users = await db.users.find(
             {"user_id": {"$in": extra_ids}},
@@ -917,6 +978,7 @@ async def get_all_users(current_user: User = Depends(get_current_user)):
         ).to_list(1000)
         for u in extra_users:
             u["role"] = "accountant"  # overrides whatever company they're currently active in
+            u["permissions"] = membership_permissions[u["user_id"]]
         users.extend(extra_users)
 
     return users
@@ -1025,7 +1087,8 @@ async def create_invitation(invitation_data: InvitationCreate, current_user: Use
         invited_by=current_user.user_id,
         email=invitation_data.email,
         phone=invitation_data.phone,
-        role=invitation_data.role
+        role=invitation_data.role,
+        permissions=resolve_permissions(invitation_data.role, invitation_data.permissions),
     )
     
     await db.invitations.insert_one(invitation.dict())
@@ -1127,11 +1190,13 @@ async def accept_invitation(request: Request, current_user: User = Depends(get_c
     if invitation["role"] != "accountant" and current_user.company_id:
         raise HTTPException(status_code=400, detail="Вече сте член на фирма. Първо напуснете текущата фирма.")
 
+    invitation_permissions = invitation.get("permissions") or resolve_permissions(invitation["role"], None)
+
     # Preserve whatever company/role the user is switching away from as a
     # membership, so they can switch back to it later.
     if current_user.company_id:
-        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role)
-    await ensure_membership(current_user.user_id, invitation["company_id"], invitation["role"])
+        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role, current_user.permissions)
+    await ensure_membership(current_user.user_id, invitation["company_id"], invitation["role"], invitation_permissions)
 
     # Accept invitation - link user to company (this becomes their new
     # active company/role; for a счетоводител accepting a 2nd+ invitation
@@ -1140,7 +1205,8 @@ async def accept_invitation(request: Request, current_user: User = Depends(get_c
         {"user_id": current_user.user_id},
         {"$set": {
             "company_id": invitation["company_id"],
-            "role": invitation["role"]
+            "role": invitation["role"],
+            "permissions": invitation_permissions,
         }}
     )
 
@@ -1172,7 +1238,7 @@ async def get_company_memberships(current_user: User = Depends(get_current_user)
     # Backfill: make sure the currently-active company is always
     # represented, even for users who never went through /companies/switch
     if current_user.company_id and not any(m["company_id"] == current_user.company_id for m in memberships):
-        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role)
+        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role, current_user.permissions)
         memberships.append({"company_id": current_user.company_id, "role": current_user.role})
 
     company_ids = [m["company_id"] for m in memberships]
@@ -1216,11 +1282,12 @@ async def switch_active_company(request: Request, current_user: User = Depends(g
 
     # Preserve the company/role we're switching away from as a membership
     if current_user.company_id:
-        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role)
+        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role, current_user.permissions)
 
+    target_permissions = membership.get("permissions") or resolve_permissions(membership["role"], None)
     await db.users.update_one(
         {"user_id": current_user.user_id},
-        {"$set": {"company_id": target_company_id, "role": membership["role"]}}
+        {"$set": {"company_id": target_company_id, "role": membership["role"], "permissions": target_permissions}}
     )
 
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
@@ -1241,14 +1308,15 @@ async def leave_company(current_user: User = Depends(get_current_user)):
         })
         fallback = await db.company_memberships.find_one({"user_id": current_user.user_id}, {"_id": 0})
         if fallback:
+            fallback_permissions = fallback.get("permissions") or resolve_permissions(fallback["role"], None)
             await db.users.update_one(
                 {"user_id": current_user.user_id},
-                {"$set": {"company_id": fallback["company_id"], "role": fallback["role"]}}
+                {"$set": {"company_id": fallback["company_id"], "role": fallback["role"], "permissions": fallback_permissions}}
             )
         else:
             await db.users.update_one(
                 {"user_id": current_user.user_id},
-                {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
+                {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
             )
         return {"message": "Успешно напуснахте фирмата"}
 
@@ -1257,7 +1325,7 @@ async def leave_company(current_user: User = Depends(get_current_user)):
 
     await db.users.update_one(
         {"user_id": current_user.user_id},
-        {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
+        {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
     )
 
     return {"message": "Успешно напуснахте фирмата"}
@@ -1347,7 +1415,7 @@ async def create_or_update_company(company_data: CompanyCreate, current_user: Us
         # Link current user to this company as owner
         await db.users.update_one(
             {"user_id": current_user.user_id},
-            {"$set": {"company_id": company.id, "role": "owner"}}
+            {"$set": {"company_id": company.id, "role": "owner", "permissions": resolve_permissions("owner", None)}}
         )
         
         return company

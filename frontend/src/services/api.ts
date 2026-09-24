@@ -75,10 +75,10 @@ class ApiService {
     return this.fetch('/auth/users');
   }
   
-  async updateUserRole(userId: string, role: string): Promise<{ message: string }> {
+  async updateUserRole(userId: string, role: string, permissions?: string[]): Promise<{ message: string }> {
     return this.fetch(`/auth/role/${userId}`, {
       method: 'PUT',
-      body: JSON.stringify({ role }),
+      body: JSON.stringify({ role, permissions }),
     });
   }
   
@@ -87,7 +87,7 @@ class ApiService {
   }
   
   // Invitations
-  async createInvitation(data: { email?: string; phone?: string; role: string }): Promise<{
+  async createInvitation(data: { email?: string; phone?: string; role: string; permissions?: string[] }): Promise<{
     message: string;
     invitation: { id: string; code: string; expires_at: string; company_name: string };
   }> {
