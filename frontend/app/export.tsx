@@ -12,9 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { useTranslation } from '../src/i18n';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
-import Constants from 'expo-constants';
+import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFile';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
 
@@ -25,58 +23,20 @@ export default function ExportScreen() {
   const [loading, setLoading] = useState<string | null>(null);
   const [ledgerPeriod, setLedgerPeriod] = useState<'thisMonth' | 'lastMonth'>('lastMonth');
 
-  // Use environment variable for API URL - no hardcoded fallback for production
-  const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-
   const downloadFile = async (endpoint: string, filename: string, loadingKey: string) => {
     setLoading(loadingKey);
-
     try {
-      // Get auth token from storage
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-      const token = await AsyncStorage.getItem('session_token');
-
-      if (!token) {
-        Alert.alert(t('common.error'), t('export.notLoggedIn'));
-        return;
+      const { shared } = await downloadAndShareFile(endpoint, filename);
+      if (!shared) {
+        Alert.alert(t('common.success'), t('export.fileSaved'));
       }
-
-      const response = await fetch(`${API_URL}${endpoint}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Export failed');
-      }
-
-      const blob = await response.blob();
-      const reader = new FileReader();
-
-      reader.onloadend = async () => {
-        const base64data = reader.result as string;
-        const base64 = base64data.split(',')[1];
-
-        const fileUri = `${(FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory}${filename}`;
-
-        await (FileSystem as any).writeAsStringAsync(fileUri, base64, {
-          encoding: (FileSystem as any).EncodingType.Base64,
-        });
-
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(fileUri);
-        } else {
-          Alert.alert(t('common.success'), t('export.fileSaved'));
-        }
-      };
-
-      reader.readAsDataURL(blob);
-
     } catch (error) {
       console.error('Export error:', error);
-      Alert.alert(t('common.error'), t('export.failed'));
+      if (error instanceof NotLoggedInError) {
+        Alert.alert(t('common.error'), t('export.notLoggedIn'));
+      } else {
+        Alert.alert(t('common.error'), t('export.failed'));
+      }
     } finally {
       setLoading(null);
     }

@@ -9,6 +9,10 @@ class ApiService {
     this.token = token;
   }
 
+  getToken(): string | null {
+    return this.token;
+  }
+
   private async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -225,31 +229,6 @@ class ApiService {
 
   async getChartData(period: 'week' | 'month' | 'year' = 'week'): Promise<ChartDataPoint[]> {
     return this.fetch(`/statistics/chart-data?period=${period}`);
-  }
-
-  // Export
-  getExportExcelUrl(params?: { start_date?: string; end_date?: string }): string {
-    const queryParams = new URLSearchParams();
-    if (params?.start_date) queryParams.set('start_date', params.start_date);
-    if (params?.end_date) queryParams.set('end_date', params.end_date);
-    const query = queryParams.toString();
-    return `${API_URL}/api/export/invoices/excel${query ? `?${query}` : ''}`;
-  }
-
-  getExportPdfUrl(params?: { start_date?: string; end_date?: string }): string {
-    const queryParams = new URLSearchParams();
-    if (params?.start_date) queryParams.set('start_date', params.start_date);
-    if (params?.end_date) queryParams.set('end_date', params.end_date);
-    const query = queryParams.toString();
-    return `${API_URL}/api/export/invoices/pdf${query ? `?${query}` : ''}`;
-  }
-
-  getExportStatisticsPdfUrl(params?: { start_date?: string; end_date?: string }): string {
-    const queryParams = new URLSearchParams();
-    if (params?.start_date) queryParams.set('start_date', params.start_date);
-    if (params?.end_date) queryParams.set('end_date', params.end_date);
-    const query = queryParams.toString();
-    return `${API_URL}/api/export/statistics/pdf${query ? `?${query}` : ''}`;
   }
 
   // Notification Settings

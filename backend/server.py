@@ -1899,6 +1899,15 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
     elif "," in image_data:
         image_data = image_data.split(",")[1]
 
+    # Reject oversized images before they're decoded and forwarded to the
+    # Anthropic API - otherwise a single request can exhaust server memory
+    # on decode and amplify AI API cost with no real invoice-photo use case
+    # ever needing more than this. Base64 is ~4/3 the size of the raw
+    # bytes, so this caps the decoded image at roughly 10MB.
+    MAX_OCR_IMAGE_BASE64_CHARS = 14_000_000
+    if len(image_data) > MAX_OCR_IMAGE_BASE64_CHARS:
+        raise HTTPException(status_code=413, detail="Изображението е твърде голямо. Моля, използвайте по-малка снимка (до ~10MB).")
+
     # Get company_id for supplier matching
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
@@ -3355,7 +3364,9 @@ async def get_single_supplier_stats(
 # duplicate of both used to live here and has been removed.)
 
 @api_router.get("/export/statistics/pdf")
+@limiter.limit("20/minute")
 async def export_statistics_pdf(
+    request: Request,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
@@ -3405,7 +3416,9 @@ async def export_statistics_pdf(
         raise HTTPException(status_code=500, detail="PDF export not available")
 
 @api_router.get("/export/vat-ledger/excel")
+@limiter.limit("20/minute")
 async def export_vat_ledger_excel(
+    request: Request,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
@@ -3534,7 +3547,8 @@ class BackupRestoreRequest(BaseModel):
     expenses: List[RestoreExpense] = []
 
 @api_router.post("/backup/create")
-async def create_backup(current_user: User = Depends(get_current_user)):
+@limiter.limit("5/minute")
+async def create_backup(request: Request, current_user: User = Depends(get_current_user)):
     """Създава backup на всички данни на ЦЯЛАТА фирма (не само тези,
     въведени лично от текущия потребител), за да е реален backup на
     книгите на компанията."""
@@ -3631,7 +3645,8 @@ async def list_backups(current_user: User = Depends(get_current_user)):
     return {"backups": backups}
 
 @api_router.post("/backup/restore")
-async def restore_backup(backup_data: BackupRestoreRequest, current_user: User = Depends(get_current_user)):
+@limiter.limit("5/minute")
+async def restore_backup(request: Request, backup_data: BackupRestoreRequest, current_user: User = Depends(get_current_user)):
     """Възстановява данни от backup - само Owner, само в собствената му
     фирма (company_id винаги се презаписва от сесията, никога от подадените
     данни). Всеки запис се обработва поотделно, за да не провали един
@@ -4468,7 +4483,9 @@ audit_service = AuditService(db)
 forecast_service = ForecastService(db)
 
 @api_router.get("/export/invoices/excel")
+@limiter.limit("20/minute")
 async def export_invoices_excel(
+    request: Request,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
@@ -4515,7 +4532,9 @@ async def export_invoices_excel(
         raise HTTPException(status_code=500, detail="Excel export not available")
 
 @api_router.get("/export/invoices/pdf")
+@limiter.limit("20/minute")
 async def export_invoices_pdf(
+    request: Request,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)

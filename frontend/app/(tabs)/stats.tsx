@@ -10,8 +10,6 @@ import {
   ImageBackground,
   ActivityIndicator,
   Modal,
-  Platform,
-  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +20,7 @@ import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { Alert } from '../../src/utils/alert';
+import { downloadAndShareFile } from '../../src/utils/downloadFile';
 
 const { width } = Dimensions.get('window');
 const chartWidth = width - 80;
@@ -195,12 +194,7 @@ export default function StatsScreen() {
 
   const handleExportStatisticsPdf = async () => {
     try {
-      const url = api.getExportStatisticsPdfUrl();
-      if (Platform.OS === 'web') {
-        window.open(url, '_blank');
-      } else {
-        await Linking.openURL(url);
-      }
+      await downloadAndShareFile('/api/export/statistics/pdf', `statistics_${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (error) {
       Alert.alert(t('common.error'), t('invoices.downloadError'));
     }
