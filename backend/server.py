@@ -293,19 +293,23 @@ class InvoiceUpdate(BaseModel):
 class DailyRevenue(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
+    company_id: Optional[str] = None
     date: str
     fiscal_revenue: float = 0
     pocket_money: float = 0  # "джобче" - не влиза в ДДС
+    vat_rate_percent: float = 20.0  # Ставката на фискализирания оборот (20% стандартна, 9% намалена, 0%)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class DailyRevenueCreate(BaseModel):
     date: str
     fiscal_revenue: float = 0
     pocket_money: float = 0
+    vat_rate_percent: float = 20.0
 
 class NonInvoiceExpense(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
+    company_id: Optional[str] = None
     description: str
     amount: float
     date: str
@@ -438,6 +442,31 @@ def sanitize_user(user_doc: dict) -> dict:
     user_doc["has_password"] = bool(user_doc.get("password_hash"))
     user_doc.pop("password_hash", None)
     return user_doc
+
+async def get_company_scope(current_user: User) -> tuple:
+    """Resolves the current user's company_id and a MongoDB query filter
+    that scopes a read to the WHOLE company's records (every teammate),
+    not just the ones the current user personally entered.
+
+    Also matches records that predate a collection's company_id field (or
+    were created by a solo user before they had a company) - identified by
+    company_id being null/missing - as long as they belong to a CURRENT
+    member of this company, so this fix doesn't hide pre-existing history.
+    Returns (company_id, query_filter_dict).
+    """
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+    if not company_id:
+        return None, {"user_id": current_user.user_id}
+
+    member_docs = await db.users.find({"company_id": company_id}, {"_id": 0, "user_id": 1}).to_list(1000)
+    member_ids = [m["user_id"] for m in member_docs]
+    return company_id, {
+        "$or": [
+            {"company_id": company_id},
+            {"user_id": {"$in": member_ids}, "company_id": None},
+        ]
+    }
 
 async def ensure_membership(user_id: str, company_id: str, role: str):
     """Записва (или обновява) връзката потребител-фирма в company_memberships.
@@ -661,7 +690,8 @@ def validate_password(password: str) -> tuple[bool, str]:
     return True, ""
 
 @api_router.post("/auth/register")
-async def register_user(user_data: UserRegister, response: Response):
+@limiter.limit("5/minute")
+async def register_user(request: Request, user_data: UserRegister, response: Response):
     """Register new user with email/password"""
     # Validate email
     if not validate_email(user_data.email):
@@ -732,7 +762,8 @@ async def register_user(user_data: UserRegister, response: Response):
     return {"user": sanitize_user(user_doc), "session_token": session_token}
 
 @api_router.post("/auth/login")
-async def login_user(user_data: UserLogin, response: Response):
+@limiter.limit("10/minute")
+async def login_user(request: Request, user_data: UserLogin, response: Response):
     """Login with email/password"""
     # Find user
     user = await db.users.find_one({"email": user_data.email.lower()})
@@ -947,13 +978,20 @@ async def create_invitation(invitation_data: InvitationCreate, current_user: Use
         if existing_user:
             raise HTTPException(status_code=400, detail="Потребител с този имейл вече е член на фирмата")
     
-    # Check for pending invitation
+    # Check for pending invitation - only match on whichever contact method
+    # was actually provided; a bare {"phone": None}/{"email": None} clause
+    # for the one NOT provided would otherwise match every other pending
+    # invitation that also omitted it, flagging unrelated invites as
+    # duplicates.
+    contact_clauses = []
+    if invitation_data.email:
+        contact_clauses.append({"email": invitation_data.email})
+    if invitation_data.phone:
+        contact_clauses.append({"phone": invitation_data.phone})
+
     pending = await db.invitations.find_one({
         "company_id": current_user.company_id,
-        "$or": [
-            {"email": invitation_data.email} if invitation_data.email else {"email": None},
-            {"phone": invitation_data.phone} if invitation_data.phone else {"phone": None}
-        ],
+        "$or": contact_clauses,
         "status": "pending"
     })
     if pending:
@@ -1302,12 +1340,15 @@ async def get_my_company(current_user: User = Depends(get_current_user)):
 
 @api_router.put("/company", response_model=Company)
 async def update_company(company_update: CompanyUpdate, current_user: User = Depends(get_current_user)):
-    """Обновява фирмата на текущия потребител"""
+    """Обновява фирмата на текущия потребител (само Owner)"""
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    
+
     if not user_doc or not user_doc.get("company_id"):
         raise HTTPException(status_code=404, detail="Нямате свързана фирма. Първо създайте фирма.")
-    
+
+    if user_doc.get("role") != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да редактира данните на фирмата")
+
     update_data = {k: v for k, v in company_update.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="Няма данни за обновяване")
@@ -1322,20 +1363,9 @@ async def update_company(company_update: CompanyUpdate, current_user: User = Dep
     updated_company = await db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
     return Company(**updated_company)
 
-@api_router.get("/company/users")
-async def get_company_users(current_user: User = Depends(get_current_user)):
-    """Връща всички потребители от същата фирма"""
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    
-    if not user_doc or not user_doc.get("company_id"):
-        return []
-    
-    users = await db.users.find(
-        {"company_id": user_doc["company_id"]},
-        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "picture": 1}
-    ).to_list(1000)
-    
-    return users
+# (/company/users used to duplicate /auth/users here - removed; /auth/users
+# is the one the frontend actually calls, and it also merges in accountant
+# memberships, which this one never did.)
 
 # ===================== AI DATA CORRECTION MODULE =====================
 
@@ -2056,8 +2086,8 @@ async def get_invoices(
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    query = {"user_id": current_user.user_id}
-    
+    _, query = await get_company_scope(current_user)
+
     if supplier:
         query["supplier"] = {"$regex": supplier, "$options": "i"}
     if invoice_number:
@@ -2069,7 +2099,7 @@ async def get_invoices(
             query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
         else:
             query["date"] = {"$lte": datetime.fromisoformat(end_date.replace("Z", "+00:00"))}
-    
+
     invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
     return [Invoice(**inv) for inv in invoices]
 
@@ -2079,21 +2109,16 @@ async def get_reverse_charge_protocols(current_user: User = Depends(get_current_
     ЗДДС) across the whole company, newest first - lets the owner or
     accountant see every protocol's number and check none has slipped
     past its 15-day filing deadline."""
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-
-    query = {"vat_treatment": VatTreatment.REVERSE_CHARGE}
-    if company_id:
-        query["company_id"] = company_id
-    else:
-        query["user_id"] = current_user.user_id
+    _, query = await get_company_scope(current_user)
+    query["vat_treatment"] = VatTreatment.REVERSE_CHARGE
 
     invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
     return [Invoice(**inv) for inv in invoices]
 
 @api_router.get("/invoices/{invoice_id}", response_model=Invoice)
 async def get_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
-    invoice = await db.invoices.find_one({"id": invoice_id, "user_id": current_user.user_id}, {"_id": 0})
+    _, scope = await get_company_scope(current_user)
+    invoice = await db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
     return Invoice(**invoice)
@@ -2104,21 +2129,21 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     if "date" in update_data:
         update_data["date"] = datetime.fromisoformat(update_data["date"].replace("Z", "+00:00"))
 
-    existing = await db.invoices.find_one({"id": invoice_id, "user_id": current_user.user_id}, {"_id": 0})
+    company_id, scope = await get_company_scope(current_user)
+    existing = await db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
 
     # Newly switched to reverse charge and no протокол yet - assign one,
     # same as on create.
     if update_data.get("vat_treatment") == VatTreatment.REVERSE_CHARGE and not existing.get("protocol_number"):
-        user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
         protocol_year = update_data.get("date", existing["date"]).year
         update_data["protocol_number"] = await next_protocol_number(
-            user_doc.get("company_id") if user_doc else None, current_user.user_id, protocol_year
+            company_id, current_user.user_id, protocol_year
         )
 
     result = await db.invoices.update_one(
-        {"id": invoice_id, "user_id": current_user.user_id},
+        {"id": invoice_id, **scope},
         {"$set": update_data}
     )
     if result.modified_count == 0:
@@ -2126,14 +2151,13 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
 
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     await audit_service.log_action(
         user_id=current_user.user_id,
         user_name=current_user.name,
         action="update",
         entity_type="invoice",
         entity_id=invoice_id,
-        company_id=user_doc.get("company_id") if user_doc else None,
+        company_id=company_id,
         details={k: v for k, v in update_data.items() if k != "date"}
     )
 
@@ -2141,19 +2165,19 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
 
 @api_router.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
-    invoice = await db.invoices.find_one({"id": invoice_id, "user_id": current_user.user_id}, {"_id": 0})
-    result = await db.invoices.delete_one({"id": invoice_id, "user_id": current_user.user_id})
+    company_id, scope = await get_company_scope(current_user)
+    invoice = await db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
+    result = await db.invoices.delete_one({"id": invoice_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     await audit_service.log_action(
         user_id=current_user.user_id,
         user_name=current_user.name,
         action="delete",
         entity_type="invoice",
         entity_id=invoice_id,
-        company_id=user_doc.get("company_id") if user_doc else None,
+        company_id=company_id,
         details={"supplier": invoice.get("supplier"), "invoice_number": invoice.get("invoice_number"), "total_amount": invoice.get("total_amount")} if invoice else None
     )
 
@@ -2163,43 +2187,46 @@ async def delete_invoice(invoice_id: str, current_user: User = Depends(get_curre
 
 @api_router.post("/daily-revenue", response_model=DailyRevenue)
 async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User = Depends(get_current_user)):
-    # Check if entry for this date already exists
-    existing = await db.daily_revenue.find_one({
-        "user_id": current_user.user_id,
-        "date": revenue.date
-    }, {"_id": 0})
-    
+    company_id, scope = await get_company_scope(current_user)
+
+    # Check if ANY teammate already logged revenue for this date - the
+    # fiscal till total for a given day belongs to the whole company, not
+    # to whoever happened to type it in (e.g. two shifts, two entries).
+    existing = await db.daily_revenue.find_one({**scope, "date": revenue.date}, {"_id": 0})
+
     if existing:
         # ADD to existing values instead of replacing
         new_fiscal = existing.get("fiscal_revenue", 0) + revenue.fiscal_revenue
         new_pocket = existing.get("pocket_money", 0) + revenue.pocket_money
-        
+
         await db.daily_revenue.update_one(
             {"id": existing["id"]},
             {"$set": {"fiscal_revenue": new_fiscal, "pocket_money": new_pocket}}
         )
         existing["fiscal_revenue"] = new_fiscal
         existing["pocket_money"] = new_pocket
+        existing.setdefault("company_id", company_id)
+        existing.setdefault("vat_rate_percent", 20.0)
         return DailyRevenue(**existing)
-    
+
     revenue_obj = DailyRevenue(
         user_id=current_user.user_id,
+        company_id=company_id,
         date=revenue.date,
         fiscal_revenue=revenue.fiscal_revenue,
-        pocket_money=revenue.pocket_money
+        pocket_money=revenue.pocket_money,
+        vat_rate_percent=revenue.vat_rate_percent
     )
     await db.daily_revenue.insert_one(revenue_obj.dict())
     return revenue_obj
 
 @api_router.get("/daily-revenue/today")
 async def get_today_revenue(current_user: User = Depends(get_current_user)):
-    """Get today's revenue totals"""
+    """Get today's revenue totals for the whole company"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    existing = await db.daily_revenue.find_one({
-        "user_id": current_user.user_id,
-        "date": today
-    }, {"_id": 0})
-    
+    _, scope = await get_company_scope(current_user)
+    existing = await db.daily_revenue.find_one({**scope, "date": today}, {"_id": 0})
+
     if existing:
         return {
             "date": today,
@@ -2214,12 +2241,10 @@ async def get_today_revenue(current_user: User = Depends(get_current_user)):
 
 @api_router.get("/daily-revenue/by-date/{date}")
 async def get_revenue_by_date(date: str, current_user: User = Depends(get_current_user)):
-    """Get revenue for a specific date"""
-    existing = await db.daily_revenue.find_one({
-        "user_id": current_user.user_id,
-        "date": date
-    }, {"_id": 0})
-    
+    """Get revenue for a specific date, for the whole company"""
+    _, scope = await get_company_scope(current_user)
+    existing = await db.daily_revenue.find_one({**scope, "date": date}, {"_id": 0})
+
     if existing:
         return {
             "date": date,
@@ -2238,8 +2263,8 @@ async def get_daily_revenues(
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    query = {"user_id": current_user.user_id}
-    
+    _, query = await get_company_scope(current_user)
+
     if start_date:
         query["date"] = {"$gte": start_date}
     if end_date:
@@ -2247,7 +2272,7 @@ async def get_daily_revenues(
             query["date"]["$lte"] = end_date
         else:
             query["date"] = {"$lte": end_date}
-    
+
     revenues = await db.daily_revenue.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
     return [DailyRevenue(**r) for r in revenues]
 
@@ -2255,8 +2280,10 @@ async def get_daily_revenues(
 
 @api_router.post("/expenses", response_model=NonInvoiceExpense)
 async def create_expense(expense: NonInvoiceExpenseCreate, current_user: User = Depends(get_current_user)):
+    company_id, _ = await get_company_scope(current_user)
     expense_obj = NonInvoiceExpense(
         user_id=current_user.user_id,
+        company_id=company_id,
         **expense.dict()
     )
     await db.expenses.insert_one(expense_obj.dict())
@@ -2268,8 +2295,8 @@ async def get_expenses(
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    query = {"user_id": current_user.user_id}
-    
+    _, query = await get_company_scope(current_user)
+
     if start_date:
         query["date"] = {"$gte": start_date}
     if end_date:
@@ -2277,13 +2304,14 @@ async def get_expenses(
             query["date"]["$lte"] = end_date
         else:
             query["date"] = {"$lte": end_date}
-    
+
     expenses = await db.expenses.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
     return [NonInvoiceExpense(**e) for e in expenses]
 
 @api_router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str, current_user: User = Depends(get_current_user)):
-    result = await db.expenses.delete_one({"id": expense_id, "user_id": current_user.user_id})
+    _, scope = await get_company_scope(current_user)
+    result = await db.expenses.delete_one({"id": expense_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Разходът не е намерен")
     return {"message": "Разходът е изтрит"}
@@ -2402,26 +2430,30 @@ async def get_roi_analysis(
     
     total_personal = sum(e.get("amount", 0) for e in personal_expenses)
     total_investment = sum(e.get("amount", 0) for e in personal_expenses if e.get("expense_type") == "investment")
-    
+
+    # Business performance is company-wide (the whole team's entries), even
+    # though the ROI/investment side above is the owner's personal ledger.
+    _, scope = await get_company_scope(current_user)
+
     # Get business revenue for period
     revenues = await db.daily_revenue.find({
-        "user_id": current_user.user_id,
+        **scope,
         "date": {"$gte": period_start, "$lt": period_end}
     }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
-    
+
     total_revenue = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
-    
+
     # Get business expenses (invoices + non-invoice expenses)
     invoices = await db.invoices.find({
-        "user_id": current_user.user_id,
+        **scope,
         "date": {
             "$gte": datetime.fromisoformat(period_start + "T00:00:00+00:00"),
             "$lt": datetime.fromisoformat(period_end + "T00:00:00+00:00")
         }
     }, {"_id": 0, "total_amount": 1}).to_list(1000)
-    
+
     business_expenses = await db.expenses.find({
-        "user_id": current_user.user_id,
+        **scope,
         "date": {"$gte": period_start, "$lt": period_end}
     }, {"_id": 0, "amount": 1}).to_list(1000)
     
@@ -2544,7 +2576,8 @@ async def get_roi_trend(
     """Връща ROI тренд за последните N месеца (само за собственик)"""
     if current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Само титулярът има достъп до ROI тренд")
-    
+
+    _, scope = await get_company_scope(current_user)
     now = datetime.now(timezone.utc)
     trend_data = []
     
@@ -2574,22 +2607,22 @@ async def get_roi_trend(
         
         # Revenue
         revenues = await db.daily_revenue.find({
-            "user_id": current_user.user_id,
+            **scope,
             "date": {"$gte": period_start, "$lt": period_end}
         }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
         total_revenue = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
-        
+
         # Business expenses
         invoices = await db.invoices.find({
-            "user_id": current_user.user_id,
+            **scope,
             "date": {
                 "$gte": datetime.fromisoformat(period_start + "T00:00:00+00:00"),
                 "$lt": datetime.fromisoformat(period_end + "T00:00:00+00:00")
             }
         }, {"_id": 0, "total_amount": 1}).to_list(1000)
-        
+
         expenses = await db.expenses.find({
-            "user_id": current_user.user_id,
+            **scope,
             "date": {"$gte": period_start, "$lt": period_end}
         }, {"_id": 0, "amount": 1}).to_list(1000)
         
@@ -2636,33 +2669,33 @@ async def get_summary(
     if end_date:
         date_query["$lte"] = end_date
     
+    company_id, scope = await get_company_scope(current_user)
+
     # Get invoices
-    inv_query = {"user_id": current_user.user_id}
+    inv_query = dict(scope)
     if start_date or end_date:
         inv_query["date"] = {}
         if start_date:
             inv_query["date"]["$gte"] = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
         if end_date:
             inv_query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-    
+
     invoices = await db.invoices.find(inv_query, {"_id": 0, "total_amount": 1, "vat_amount": 1}).to_list(1000)
-    
+
     # Get daily revenues
-    rev_query = {"user_id": current_user.user_id}
+    rev_query = dict(scope)
     if date_query:
         rev_query["date"] = date_query
-    revenues = await db.daily_revenue.find(rev_query, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
-    
+    revenues = await db.daily_revenue.find(rev_query, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1}).to_list(1000)
+
     # Get expenses
-    exp_query = {"user_id": current_user.user_id}
+    exp_query = dict(scope)
     if date_query:
         exp_query["date"] = date_query
     expenses = await db.expenses.find(exp_query, {"_id": 0, "amount": 1}).to_list(1000)
 
     # Get payroll cost (real employer cost: gross + employer contributions +
     # benefits), for the same period
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
     total_payroll_cost = await get_payroll_cost_for_period(company_id, current_user.user_id, start_date, end_date)
 
     # Get depreciation expense (ДМА) for the same period
@@ -2675,8 +2708,14 @@ async def get_summary(
     total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues)
     total_expenses = sum(e.get("amount", 0) for e in expenses)
 
-    # ДДС от фискализиран оборот (20% от 120% = 16.67% от тотала)
-    fiscal_vat = total_fiscal_revenue * 0.2 / 1.2
+    # ДДС от фискализиран оборот - изчислено по действителната ставка на
+    # всеки запис (20% стандартна, 9% намалена, 0% и т.н.), а не с фиксирано
+    # предположение за 20% - важно за хотели/ресторанти/хлебарници и др.
+    fiscal_vat = sum(
+        r.get("fiscal_revenue", 0) * r.get("vat_rate_percent", 20.0) / (100 + r.get("vat_rate_percent", 20.0))
+        for r in revenues
+        if r.get("vat_rate_percent", 20.0) > 0
+    )
 
     # Общ ДДС за плащане = ДДС от продажби - ДДС от покупки (фактури)
     vat_to_pay = fiscal_vat - total_invoice_vat
@@ -2718,24 +2757,17 @@ async def get_chart_data(
         start = now - timedelta(days=365)
     
     start_str = start.strftime("%Y-%m-%d")
-    
+
+    _, scope = await get_company_scope(current_user)
+
     # Get data
-    inv_query = {
-        "user_id": current_user.user_id,
-        "date": {"$gte": start}
-    }
+    inv_query = {**scope, "date": {"$gte": start}}
     invoices = await db.invoices.find(inv_query, {"_id": 0, "date": 1, "total_amount": 1, "vat_amount": 1}).to_list(1000)
-    
-    rev_query = {
-        "user_id": current_user.user_id,
-        "date": {"$gte": start_str}
-    }
-    revenues = await db.daily_revenue.find(rev_query, {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
-    
-    exp_query = {
-        "user_id": current_user.user_id,
-        "date": {"$gte": start_str}
-    }
+
+    rev_query = {**scope, "date": {"$gte": start_str}}
+    revenues = await db.daily_revenue.find(rev_query, {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1}).to_list(1000)
+
+    exp_query = {**scope, "date": {"$gte": start_str}}
     expenses = await db.expenses.find(exp_query, {"_id": 0, "date": 1, "amount": 1}).to_list(1000)
     
     # Group by date
@@ -2751,7 +2783,9 @@ async def get_chart_data(
     for rev in revenues:
         date_str = rev["date"][:10] if isinstance(rev["date"], str) else rev["date"].strftime("%Y-%m-%d")
         daily_data[date_str]["income"] += rev.get("fiscal_revenue", 0) + rev.get("pocket_money", 0)
-        daily_data[date_str]["vat"] += rev.get("fiscal_revenue", 0) * 0.2 / 1.2  # ДДС от продажби
+        rate = rev.get("vat_rate_percent", 20.0)
+        if rate > 0:
+            daily_data[date_str]["vat"] += rev.get("fiscal_revenue", 0) * rate / (100 + rate)  # ДДС от продажби
     
     for exp in expenses:
         date_str = exp["date"][:10] if isinstance(exp["date"], str) else exp["date"].strftime("%Y-%m-%d")
@@ -2790,19 +2824,19 @@ async def get_supplier_statistics(
             end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
     
     # Build query for current period
-    query = {"user_id": current_user.user_id}
+    _, query = await get_company_scope(current_user)
     if start_date or end_date:
         query["date"] = {}
         if start_date:
             query["date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
         if end_date:
             query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
-    
+
     # Get all invoices for the period
     invoices = await db.invoices.find(query, {
-        "_id": 0, 
-        "supplier": 1, 
-        "total_amount": 1, 
+        "_id": 0,
+        "supplier": 1,
+        "total_amount": 1,
         "vat_amount": 1,
         "amount_without_vat": 1,
         "date": 1
@@ -2953,13 +2987,11 @@ async def get_detailed_supplier_stats(
     from urllib.parse import unquote
     
     supplier_name = unquote(supplier_name)
-    
+
     # Get all invoices for this supplier (no date filter for full history)
-    query = {
-        "user_id": current_user.user_id,
-        "supplier": {"$regex": f"^{supplier_name}$", "$options": "i"}
-    }
-    
+    _, query = await get_company_scope(current_user)
+    query["supplier"] = {"$regex": f"^{supplier_name}$", "$options": "i"}
+
     invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", 1).to_list(10000)
     
     if not invoices:
@@ -3099,12 +3131,10 @@ async def compare_suppliers(
         date_query["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
     
     comparison = []
-    
+    _, base_scope = await get_company_scope(current_user)
+
     for supplier_name in supplier_names:
-        query = {
-            "user_id": current_user.user_id,
-            "supplier": {"$regex": f"^{supplier_name}$", "$options": "i"}
-        }
+        query = {**base_scope, "supplier": {"$regex": f"^{supplier_name}$", "$options": "i"}}
         if date_query:
             query["date"] = date_query
         
@@ -3142,11 +3172,9 @@ async def get_single_supplier_stats(
     current_user: User = Depends(get_current_user)
 ):
     """Get detailed statistics for a specific supplier"""
-    query = {
-        "user_id": current_user.user_id,
-        "supplier": {"$regex": f"^{supplier_name}$", "$options": "i"}
-    }
-    
+    _, query = await get_company_scope(current_user)
+    query["supplier"] = {"$regex": f"^{supplier_name}$", "$options": "i"}
+
     if start_date or end_date:
         query["date"] = {}
         if start_date:
@@ -3197,146 +3225,10 @@ async def get_single_supplier_stats(
     }
 
 # ===================== EXPORT ENDPOINTS =====================
-
-@api_router.get("/export/excel")
-async def export_excel(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment, PatternFill
-    
-    # Get data
-    query = {"user_id": current_user.user_id}
-    if start_date or end_date:
-        query["date"] = {}
-        if start_date:
-            query["date"]["$gte"] = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-        if end_date:
-            query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-    
-    invoices = await db.invoices.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Фактури"
-    
-    # Header style
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
-    
-    # Headers
-    headers = ["Дата", "Доставчик", "№ Фактура", "Без ДДС", "ДДС", "Общо", "Бележки"]
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center")
-    
-    # Data
-    for row, inv in enumerate(invoices, 2):
-        date_val = inv["date"]
-        if isinstance(date_val, datetime):
-            date_str = date_val.strftime("%Y-%m-%d")
-        else:
-            date_str = str(date_val)[:10]
-        
-        ws.cell(row=row, column=1, value=date_str)
-        ws.cell(row=row, column=2, value=inv.get("supplier", ""))
-        ws.cell(row=row, column=3, value=inv.get("invoice_number", ""))
-        ws.cell(row=row, column=4, value=inv.get("amount_without_vat", 0))
-        ws.cell(row=row, column=5, value=inv.get("vat_amount", 0))
-        ws.cell(row=row, column=6, value=inv.get("total_amount", 0))
-        ws.cell(row=row, column=7, value=inv.get("notes", ""))
-    
-    # Adjust column widths
-    ws.column_dimensions['A'].width = 12
-    ws.column_dimensions['B'].width = 25
-    ws.column_dimensions['C'].width = 15
-    ws.column_dimensions['D'].width = 12
-    ws.column_dimensions['E'].width = 12
-    ws.column_dimensions['F'].width = 12
-    ws.column_dimensions['G'].width = 30
-    
-    # Save to bytes
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-    
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=fakturi.xlsx"}
-    )
-
-@api_router.get("/export/pdf")
-async def export_pdf(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    
-    # Get data
-    query = {"user_id": current_user.user_id}
-    if start_date or end_date:
-        query["date"] = {}
-        if start_date:
-            query["date"]["$gte"] = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-        if end_date:
-            query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-    
-    invoices = await db.invoices.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
-    
-    output = io.BytesIO()
-    doc = SimpleDocTemplate(output, pagesize=landscape(A4))
-    
-    # Table data
-    data = [["Data", "Dostavchik", "No Faktura", "Bez DDS", "DDS", "Obshto"]]
-    
-    for inv in invoices:
-        date_val = inv["date"]
-        if isinstance(date_val, datetime):
-            date_str = date_val.strftime("%Y-%m-%d")
-        else:
-            date_str = str(date_val)[:10]
-        
-        data.append([
-            date_str,
-            inv.get("supplier", "")[:30],
-            inv.get("invoice_number", ""),
-            f"{inv.get('amount_without_vat', 0):.2f}",
-            f"{inv.get('vat_amount', 0):.2f}",
-            f"{inv.get('total_amount', 0):.2f}"
-        ])
-    
-    # Create table
-    table = Table(data, colWidths=[80, 150, 100, 80, 80, 80])
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4F46E5')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F3F4F6')),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#E5E7EB')),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-    ]))
-    
-    doc.build([table])
-    output.seek(0)
-    
-    return StreamingResponse(
-        output,
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=fakturi.pdf"}
-    )
+# (Simple whole-list Excel/PDF export lives at /export/invoices/excel and
+# /export/invoices/pdf further below, via ExportService - correctly
+# company-scoped and Cyrillic-safe. An older, buggier, ASCII-only inline
+# duplicate of both used to live here and has been removed.)
 
 @api_router.get("/export/statistics/pdf")
 async def export_statistics_pdf(
@@ -3405,27 +3297,16 @@ async def export_vat_ledger_excel(
         else:
             end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, scope = await get_company_scope(current_user)
 
-    inv_query = {}
-    if company_id:
-        inv_query["company_id"] = company_id
-    else:
-        inv_query["user_id"] = current_user.user_id
+    inv_query = dict(scope)
     inv_query["date"] = {
         "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
         "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
     }
     purchases = await db.invoices.find(inv_query, {"_id": 0, "image_base64": 0}).sort("date", 1).to_list(10000)
 
-    # daily_revenue is keyed by user_id, not company_id
-    if company_id:
-        company_users = await db.users.find({"company_id": company_id}, {"_id": 0, "user_id": 1}).to_list(1000)
-        user_ids = [u["user_id"] for u in company_users]
-        rev_query = {"user_id": {"$in": user_ids}}
-    else:
-        rev_query = {"user_id": current_user.user_id}
+    rev_query = dict(scope)
     rev_query["date"] = {"$gte": start_date, "$lte": end_date}
     sales = await db.daily_revenue.find(rev_query, {"_id": 0}).sort("date", 1).to_list(10000)
 
@@ -3485,45 +3366,78 @@ class BackupMetadata(BaseModel):
     expense_count: int
     google_drive_file_id: Optional[str] = None
 
+# Restore-only input models: validated shapes for what /backup/restore will
+# accept, matching what /backup/create produces. company_id/user_id are
+# deliberately NOT accepted here - they're always overwritten server-side
+# from the caller's own session, so a restore can never inject records
+# into (or spoof ownership from) a different company.
+class RestoreInvoice(BaseModel):
+    id: str
+    supplier: str
+    supplier_eik: Optional[str] = None
+    invoice_number: str
+    amount_without_vat: float
+    vat_amount: float
+    total_amount: float
+    vat_treatment: Optional[str] = None
+    protocol_number: Optional[str] = None
+    date: str
+    image_base64: Optional[str] = None
+    notes: Optional[str] = None
+    items: Optional[List[dict]] = None
+    created_at: Optional[str] = None
+
+class RestoreDailyRevenue(BaseModel):
+    id: str
+    date: str
+    fiscal_revenue: float = 0
+    pocket_money: float = 0
+    vat_rate_percent: float = 20.0
+    created_at: Optional[str] = None
+
+class RestoreExpense(BaseModel):
+    id: str
+    description: str
+    amount: float
+    date: str
+    created_at: Optional[str] = None
+
+class BackupRestoreRequest(BaseModel):
+    invoices: List[RestoreInvoice] = []
+    daily_revenues: List[RestoreDailyRevenue] = []
+    expenses: List[RestoreExpense] = []
+
 @api_router.post("/backup/create")
 async def create_backup(current_user: User = Depends(get_current_user)):
-    """Създава backup на всички данни на потребителя"""
+    """Създава backup на всички данни на ЦЯЛАТА фирма (не само тези,
+    въведени лично от текущия потребител), за да е реален backup на
+    книгите на компанията."""
     import json
-    
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
+
+    company_id, scope = await get_company_scope(current_user)
+
     # Събиране на фактури
-    invoices = await db.invoices.find(
-        {"user_id": current_user.user_id},
-        {"_id": 0}
-    ).to_list(10000)
-    
+    invoices = await db.invoices.find(scope, {"_id": 0}).to_list(10000)
+
     # Конвертиране на datetime обекти
     for inv in invoices:
         if isinstance(inv.get("date"), datetime):
             inv["date"] = inv["date"].isoformat()
         if isinstance(inv.get("created_at"), datetime):
             inv["created_at"] = inv["created_at"].isoformat()
-    
+
     # Събиране на дневни обороти
-    revenues = await db.daily_revenue.find(
-        {"user_id": current_user.user_id},
-        {"_id": 0}
-    ).to_list(10000)
-    
+    revenues = await db.daily_revenue.find(scope, {"_id": 0}).to_list(10000)
+
     for rev in revenues:
         if isinstance(rev.get("date"), datetime):
             rev["date"] = rev["date"].isoformat()
         if isinstance(rev.get("created_at"), datetime):
             rev["created_at"] = rev["created_at"].isoformat()
-    
+
     # Събиране на разходи
-    expenses = await db.expenses.find(
-        {"user_id": current_user.user_id},
-        {"_id": 0}
-    ).to_list(10000)
-    
+    expenses = await db.expenses.find(scope, {"_id": 0}).to_list(10000)
+
     for exp in expenses:
         if isinstance(exp.get("date"), datetime):
             exp["date"] = exp["date"].isoformat()
@@ -3585,64 +3499,85 @@ async def list_backups(current_user: User = Depends(get_current_user)):
     return {"backups": backups}
 
 @api_router.post("/backup/restore")
-async def restore_backup(backup_data: dict, current_user: User = Depends(get_current_user)):
-    """Възстановява данни от backup"""
-    
-    restored_counts = {
-        "invoices": 0,
-        "revenues": 0,
-        "expenses": 0
-    }
-    
+async def restore_backup(backup_data: BackupRestoreRequest, current_user: User = Depends(get_current_user)):
+    """Възстановява данни от backup - само Owner, само в собствената му
+    фирма (company_id винаги се презаписва от сесията, никога от подадените
+    данни). Всеки запис се обработва поотделно, за да не провали един
+    невалиден ред цялото възстановяване."""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да възстановява резервно копие")
+
+    company_id, _ = await get_company_scope(current_user)
+
+    restored_counts = {"invoices": 0, "revenues": 0, "expenses": 0}
+    skipped_counts = {"invoices": 0, "revenues": 0, "expenses": 0}
+
     # Възстановяване на фактури
-    if "invoices" in backup_data:
-        for invoice in backup_data["invoices"]:
-            # Проверка за дублиране
-            existing = await db.invoices.find_one({
-                "user_id": current_user.user_id,
-                "id": invoice.get("id")
-            })
-            if not existing:
-                invoice["user_id"] = current_user.user_id
-                if isinstance(invoice.get("date"), str):
-                    invoice["date"] = datetime.fromisoformat(invoice["date"].replace("Z", "+00:00"))
-                if isinstance(invoice.get("created_at"), str):
-                    invoice["created_at"] = datetime.fromisoformat(invoice["created_at"].replace("Z", "+00:00"))
-                await db.invoices.insert_one(invoice)
-                restored_counts["invoices"] += 1
-    
-    # Възстановяване на дневни обороти
-    if "daily_revenues" in backup_data:
-        for revenue in backup_data["daily_revenues"]:
-            existing = await db.daily_revenue.find_one({
-                "user_id": current_user.user_id,
-                "id": revenue.get("id")
-            })
-            if not existing:
-                revenue["user_id"] = current_user.user_id
-                if isinstance(revenue.get("date"), str):
-                    revenue["date"] = datetime.fromisoformat(revenue["date"].replace("Z", "+00:00"))
-                await db.daily_revenue.insert_one(revenue)
-                restored_counts["revenues"] += 1
-    
-    # Възстановяване на разходи
-    if "expenses" in backup_data:
-        for expense in backup_data["expenses"]:
-            existing = await db.expenses.find_one({
-                "user_id": current_user.user_id,
-                "id": expense.get("id")
-            })
-            if not existing:
-                expense["user_id"] = current_user.user_id
-                if isinstance(expense.get("date"), str):
-                    expense["date"] = datetime.fromisoformat(expense["date"].replace("Z", "+00:00"))
-                await db.expenses.insert_one(expense)
-                restored_counts["expenses"] += 1
+    for invoice in backup_data.invoices:
+        try:
+            existing = await db.invoices.find_one({"id": invoice.id})
+            if existing:
+                continue
+            doc = invoice.dict()
+            doc["user_id"] = current_user.user_id
+            doc["company_id"] = company_id
+            doc["date"] = datetime.fromisoformat(doc["date"].replace("Z", "+00:00"))
+            doc["created_at"] = (
+                datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
+                if doc.get("created_at") else datetime.now(timezone.utc)
+            )
+            await db.invoices.insert_one(doc)
+            restored_counts["invoices"] += 1
+        except Exception as e:
+            logger.warning(f"Backup restore: skipped invalid invoice {invoice.id}: {e}")
+            skipped_counts["invoices"] += 1
+
+    # Възстановяване на дневни обороти (date си остава низ "YYYY-MM-DD",
+    # както при нормално създаване - НЕ datetime обект)
+    for revenue in backup_data.daily_revenues:
+        try:
+            existing = await db.daily_revenue.find_one({"id": revenue.id})
+            if existing:
+                continue
+            doc = revenue.dict()
+            doc["user_id"] = current_user.user_id
+            doc["company_id"] = company_id
+            doc["date"] = doc["date"][:10]
+            doc["created_at"] = (
+                datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
+                if doc.get("created_at") else datetime.now(timezone.utc)
+            )
+            await db.daily_revenue.insert_one(doc)
+            restored_counts["revenues"] += 1
+        except Exception as e:
+            logger.warning(f"Backup restore: skipped invalid daily revenue {revenue.id}: {e}")
+            skipped_counts["revenues"] += 1
+
+    # Възстановяване на разходи (date също остава низ)
+    for expense in backup_data.expenses:
+        try:
+            existing = await db.expenses.find_one({"id": expense.id})
+            if existing:
+                continue
+            doc = expense.dict()
+            doc["user_id"] = current_user.user_id
+            doc["company_id"] = company_id
+            doc["date"] = doc["date"][:10]
+            doc["created_at"] = (
+                datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
+                if doc.get("created_at") else datetime.now(timezone.utc)
+            )
+            await db.expenses.insert_one(doc)
+            restored_counts["expenses"] += 1
+        except Exception as e:
+            logger.warning(f"Backup restore: skipped invalid expense {expense.id}: {e}")
+            skipped_counts["expenses"] += 1
     
     return {
         "success": True,
         "message": "Данните са възстановени успешно",
-        "restored": restored_counts
+        "restored": restored_counts,
+        "skipped": skipped_counts
     }
 
 @api_router.get("/backup/status")
@@ -4377,15 +4312,8 @@ async def export_invoices_excel(
     current_user: User = Depends(get_current_user)
 ):
     """Export invoices to Excel"""
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    query = {}
-    if company_id:
-        query["company_id"] = company_id
-    else:
-        query["user_id"] = current_user.user_id
-    
+    company_id, query = await get_company_scope(current_user)
+
     if start_date:
         query["date"] = {"$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00")}
     if end_date:
@@ -4430,15 +4358,8 @@ async def export_invoices_pdf(
     current_user: User = Depends(get_current_user)
 ):
     """Export invoices to PDF"""
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    query = {}
-    if company_id:
-        query["company_id"] = company_id
-    else:
-        query["user_id"] = current_user.user_id
-    
+    company_id, query = await get_company_scope(current_user)
+
     if start_date:
         query["date"] = {"$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00")}
     if end_date:
@@ -4540,14 +4461,15 @@ async def get_budget_status(current_user: User = Depends(get_current_user)):
     
     # Calculate current expenses
     month_start = datetime.fromisoformat(f"{current_month}-01T00:00:00+00:00")
-    
+    _, scope = await get_company_scope(current_user)
+
     invoices = await db.invoices.find(
-        {"company_id": company_id, "date": {"$gte": month_start}},
+        {**scope, "date": {"$gte": month_start}},
         {"total_amount": 1}
     ).to_list(10000)
-    
-    expenses = await db.non_invoice_expenses.find(
-        {"company_id": company_id, "date": {"$gte": month_start}},
+
+    expenses = await db.expenses.find(
+        {**scope, "date": {"$gte": current_month + "-01"}},
         {"amount": 1}
     ).to_list(10000)
     
@@ -4760,8 +4682,18 @@ def calculate_payroll(
 
     if agreement_type == PayrollAgreementType.NET or agreement_type == "net":
         # Gross-up: намери брутното, което след удръжки дава точно това нето.
+        # Формулата долу приема, че осигурителният доход = брутото - вярно е
+        # само докато резултатът попада в диапазона мин/макс осигурителен
+        # доход. Извън него удръжките се таксуват върху ограничения праг, не
+        # върху нарастващото бруто, затова без тази проверка изплатеното
+        # нето тихо се разминава с договореното при по-високи (или много
+        # ниски) заплати - виж съответната клауза долу.
         net_target = base_amount
         gross_amount = net_target / ((1 - employee_rate) * (1 - tax_rate))
+        if gross_amount > max_income:
+            gross_amount = net_target / (1 - tax_rate) + max_income * employee_rate
+        elif gross_amount < min_income:
+            gross_amount = net_target / (1 - tax_rate) + min_income * employee_rate
     else:
         gross_amount = base_amount
 
@@ -4844,7 +4776,8 @@ async def get_employees(active_only: bool = False, current_user: User = Depends(
 @api_router.put("/employees/{employee_id}", response_model=Employee)
 async def update_employee(employee_id: str, update: EmployeeUpdate, current_user: User = Depends(get_current_user)):
     update_data = {k: v for k, v in update.dict().items() if v is not None}
-    result = await db.employees.update_one({"id": employee_id, "user_id": current_user.user_id}, {"$set": update_data})
+    _, scope = await get_company_scope(current_user)
+    result = await db.employees.update_one({"id": employee_id, **scope}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -4852,7 +4785,8 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, current_user
 
 @api_router.delete("/employees/{employee_id}")
 async def delete_employee(employee_id: str, current_user: User = Depends(get_current_user)):
-    result = await db.employees.delete_one({"id": employee_id, "user_id": current_user.user_id})
+    _, scope = await get_company_scope(current_user)
+    result = await db.employees.delete_one({"id": employee_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
     return {"message": "Служителят е изтрит"}
@@ -4860,12 +4794,11 @@ async def delete_employee(employee_id: str, current_user: User = Depends(get_cur
 @api_router.post("/payroll/preview")
 async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
     """Изчислява разбивка без да записва - за преглед преди потвърждение."""
-    employee = await db.employees.find_one({"id": entry.employee_id, "user_id": current_user.user_id}, {"_id": 0})
+    company_id, scope = await get_company_scope(current_user)
+    employee = await db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
     rates = await get_payroll_rates_dict(company_id)
 
     base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
@@ -4881,12 +4814,11 @@ async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depend
 
 @api_router.post("/payroll")
 async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
-    employee = await db.employees.find_one({"id": entry.employee_id, "user_id": current_user.user_id}, {"_id": 0})
+    company_id, scope = await get_company_scope(current_user)
+    employee = await db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
     rates = await get_payroll_rates_dict(company_id)
 
     base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
@@ -4958,7 +4890,8 @@ async def get_payroll_entries(
 
 @api_router.delete("/payroll/{entry_id}")
 async def delete_payroll_entry(entry_id: str, current_user: User = Depends(get_current_user)):
-    result = await db.payroll_entries.delete_one({"id": entry_id, "user_id": current_user.user_id})
+    _, scope = await get_company_scope(current_user)
+    result = await db.payroll_entries.delete_one({"id": entry_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Записът не е намерен")
     return {"message": "Записът е изтрит"}
@@ -5210,7 +5143,8 @@ async def get_assets_summary(current_user: User = Depends(get_current_user)):
 
 @api_router.put("/assets/{asset_id}", response_model=FixedAsset)
 async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: User = Depends(get_current_user)):
-    existing = await db.assets.find_one({"id": asset_id, "user_id": current_user.user_id}, {"_id": 0})
+    _, scope = await get_company_scope(current_user)
+    existing = await db.assets.find_one({"id": asset_id, **scope}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Активът не е намерен")
 
@@ -5222,18 +5156,19 @@ async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: Us
         if update_data["annual_depreciation_rate_percent"] > category_info["max_rate"]:
             raise HTTPException(status_code=400, detail=f"Нормата не може да надвишава {category_info['max_rate']}% за {category_info['label']}")
 
-    await db.assets.update_one({"id": asset_id}, {"$set": update_data})
+    await db.assets.update_one({"id": asset_id, **scope}, {"$set": update_data})
     asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     return enrich_asset_with_depreciation(asset)
 
 @api_router.post("/assets/{asset_id}/dispose", response_model=FixedAsset)
 async def dispose_asset(asset_id: str, request: AssetDisposeRequest, current_user: User = Depends(get_current_user)):
-    existing = await db.assets.find_one({"id": asset_id, "user_id": current_user.user_id}, {"_id": 0})
+    company_id, scope = await get_company_scope(current_user)
+    existing = await db.assets.find_one({"id": asset_id, **scope}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Активът не е намерен")
 
     await db.assets.update_one(
-        {"id": asset_id},
+        {"id": asset_id, **scope},
         {"$set": {
             "status": "disposed",
             "disposal_date": request.disposal_date,
@@ -5241,8 +5176,6 @@ async def dispose_asset(asset_id: str, request: AssetDisposeRequest, current_use
         }}
     )
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
     await audit_service.log_action(
         user_id=current_user.user_id,
         user_name=current_user.name,
@@ -5258,7 +5191,8 @@ async def dispose_asset(asset_id: str, request: AssetDisposeRequest, current_use
 
 @api_router.delete("/assets/{asset_id}")
 async def delete_asset(asset_id: str, current_user: User = Depends(get_current_user)):
-    result = await db.assets.delete_one({"id": asset_id, "user_id": current_user.user_id})
+    _, scope = await get_company_scope(current_user)
+    result = await db.assets.delete_one({"id": asset_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Активът не е намерен")
     return {"message": "Активът е изтрит"}
@@ -5333,10 +5267,12 @@ async def create_indexes():
         await db.invoices.create_index([("user_id", 1), ("date", -1)])
         
         # Revenues indexes
-        await db.daily_revenues.create_index([("company_id", 1), ("date", -1)])
-        
+        await db.daily_revenue.create_index([("company_id", 1), ("date", -1)])
+        await db.daily_revenue.create_index([("user_id", 1), ("date", -1)])
+
         # Expenses indexes
-        await db.non_invoice_expenses.create_index([("company_id", 1), ("date", -1)])
+        await db.expenses.create_index([("company_id", 1), ("date", -1)])
+        await db.expenses.create_index([("user_id", 1), ("date", -1)])
         
         # Price history indexes
         await db.item_price_history.create_index([("company_id", 1), ("item_name", 1)])

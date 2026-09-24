@@ -52,6 +52,7 @@ export default function HomeScreen() {
   // Revenue form
   const [fiscalRevenue, setFiscalRevenue] = useState('');
   const [pocketMoney, setPocketMoney] = useState('');
+  const [revenueVatRate, setRevenueVatRate] = useState(20);
   const [revenueDate, setRevenueDate] = useState(new Date());
   const [currentDayRevenue, setCurrentDayRevenue] = useState({ fiscal_revenue: 0, pocket_money: 0 });
   
@@ -223,10 +224,12 @@ export default function HomeScreen() {
         date: format(revenueDate, 'yyyy-MM-dd'),
         fiscal_revenue: parseFloat(fiscalRevenue) || 0,
         pocket_money: parseFloat(pocketMoney) || 0,
+        vat_rate_percent: revenueVatRate,
       });
       setRevenueModalVisible(false);
       setFiscalRevenue('');
       setPocketMoney('');
+      setRevenueVatRate(20);
       setRevenueDate(new Date());
       loadData();
       Alert.alert(t('common.success'), t('msg.revenueSaved'));
@@ -629,6 +632,24 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>{t('home.vatRate')}</Text>
+              <View style={styles.vatRateRow}>
+                {[20, 9, 0].map((rate) => (
+                  <TouchableOpacity
+                    key={rate}
+                    style={[styles.vatRateChip, revenueVatRate === rate && styles.vatRateChipActive]}
+                    onPress={() => setRevenueVatRate(rate)}
+                  >
+                    <Text style={[styles.vatRateChipText, revenueVatRate === rate && styles.vatRateChipTextActive]}>
+                      {rate}%
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.inputHint}>{t('home.vatRateHint')}</Text>
+            </View>
+
+            <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>{t('home.addToPocket')} (€)</Text>
               <TextInput
                 style={styles.input}
@@ -993,6 +1014,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#64748B',
     marginTop: 6,
+  },
+  vatRateRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  vatRateChip: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  vatRateChipActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+  },
+  vatRateChipText: {
+    fontSize: 14,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  vatRateChipTextActive: {
+    color: 'white',
   },
   currentTotalsCard: {
     backgroundColor: 'rgba(16, 185, 129, 0.15)',

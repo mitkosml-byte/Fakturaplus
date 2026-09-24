@@ -187,7 +187,7 @@ class ApiService {
     return this.fetch(`/daily-revenue${query ? `?${query}` : ''}`);
   }
 
-  async createDailyRevenue(revenue: { date: string; fiscal_revenue: number; pocket_money: number }): Promise<DailyRevenue> {
+  async createDailyRevenue(revenue: { date: string; fiscal_revenue: number; pocket_money: number; vat_rate_percent?: number }): Promise<DailyRevenue> {
     return this.fetch('/daily-revenue', {
       method: 'POST',
       body: JSON.stringify(revenue),
@@ -233,7 +233,7 @@ class ApiService {
     if (params?.start_date) queryParams.set('start_date', params.start_date);
     if (params?.end_date) queryParams.set('end_date', params.end_date);
     const query = queryParams.toString();
-    return `${API_URL}/api/export/excel${query ? `?${query}` : ''}`;
+    return `${API_URL}/api/export/invoices/excel${query ? `?${query}` : ''}`;
   }
 
   getExportPdfUrl(params?: { start_date?: string; end_date?: string }): string {
@@ -241,7 +241,7 @@ class ApiService {
     if (params?.start_date) queryParams.set('start_date', params.start_date);
     if (params?.end_date) queryParams.set('end_date', params.end_date);
     const query = queryParams.toString();
-    return `${API_URL}/api/export/pdf${query ? `?${query}` : ''}`;
+    return `${API_URL}/api/export/invoices/pdf${query ? `?${query}` : ''}`;
   }
 
   getExportStatisticsPdfUrl(params?: { start_date?: string; end_date?: string }): string {
@@ -323,6 +323,7 @@ class ApiService {
     success: boolean;
     message: string;
     restored: { invoices: number; revenues: number; expenses: number };
+    skipped?: { invoices: number; revenues: number; expenses: number };
   }> {
     return this.fetch('/backup/restore', {
       method: 'POST',

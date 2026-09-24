@@ -117,6 +117,14 @@ export const translations: Translations = {
     bg: 'НЕ влиза в ДДС',
     en: 'Excludes VAT',
   },
+  'home.vatRate': {
+    bg: 'ДДС ставка на оборота',
+    en: 'VAT rate on this revenue',
+  },
+  'home.vatRateHint': {
+    bg: 'Изберете 9% за намалена ставка (хотели, ресторанти...) или 0% за нулева/освободена. По подразбиране 20%.',
+    en: 'Choose 9% for the reduced rate (hotels, restaurants...) or 0% for zero-rate/exempt. Defaults to 20%.',
+  },
   'home.save': {
     bg: 'Запиши',
     en: 'Save',
@@ -888,6 +896,10 @@ export const translations: Translations = {
   'backup.restoredRecords': {
     bg: 'Възстановени записи',
     en: 'Restored records',
+  },
+  'backup.skippedRecords': {
+    bg: 'Пропуснати (вече съществуващи или невалидни) записи',
+    en: 'Skipped (already existing or invalid) records',
   },
   'backup.restoreError': {
     bg: 'Неуспешно възстановяване',

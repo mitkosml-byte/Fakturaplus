@@ -140,10 +140,15 @@ export default function BackupScreen() {
                 
                 // Send to server for restoration
                 const restoreResult = await api.restoreBackup(backupData);
-                
+
+                const skippedTotal = restoreResult.skipped
+                  ? restoreResult.skipped.invoices + restoreResult.skipped.revenues + restoreResult.skipped.expenses
+                  : 0;
+                const skippedNote = skippedTotal > 0 ? `\n\n⚠️ ${t('backup.skippedRecords')}: ${skippedTotal}` : '';
+
                 Alert.alert(
                   t('backup.successTitle'),
-                  `${t('backup.restored')}\n\n📊 ${t('backup.restoredRecords')}:\n• ${t('backup.invoices')}: ${restoreResult.restored.invoices}\n• ${t('backup.revenues')}: ${restoreResult.restored.revenues}\n• ${t('backup.expenses')}: ${restoreResult.restored.expenses}`
+                  `${t('backup.restored')}\n\n📊 ${t('backup.restoredRecords')}:\n• ${t('backup.invoices')}: ${restoreResult.restored.invoices}\n• ${t('backup.revenues')}: ${restoreResult.restored.revenues}\n• ${t('backup.expenses')}: ${restoreResult.restored.expenses}${skippedNote}`
                 );
                 
                 await loadBackupStatus();

@@ -299,7 +299,7 @@ class ExportService:
         header_fill = PatternFill(start_color="8B5CF6", end_color="8B5CF6", fill_type="solid")
         total_font = Font(bold=True)
         total_fill = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
-        money_format = '#,##0.00 лв'
+        money_format = '#,##0.00 €'
 
         def write_title(ws, title):
             ws.merge_cells('A1:D1')
@@ -395,31 +395,42 @@ class ExportService:
         ws2 = wb.create_sheet("Дневник продажби")
         write_title(ws2, "Дневник на продажбите")
 
-        sales_headers = ["№", "Дата", "Вид документ", "ДО 20%", "ДДС 20%", "Необлагаема част (джобни)", "Общо"]
+        # Split by the actual VAT rate of each entry (20%/9%/0%), not a
+        # blanket 20% assumption - matters for restaurants/hotels/bakeries
+        # and anyone else on the reduced or zero rate.
+        sales_headers = ["№", "Дата", "Вид документ", "ДО 20%", "ДДС 20%", "ДО 9%", "ДДС 9%", "ДО нулева ставка", "Необлагаема част (джобни)", "Общо"]
         for col, header in enumerate(sales_headers, 1):
             cell = ws2.cell(row=header_row, column=col, value=header)
             cell.font = header_font
             cell.fill = header_fill
 
-        sales_totals = [0.0, 0.0, 0.0, 0.0]
+        sales_totals = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         row2 = header_row
         for idx, rev in enumerate(sales, 1):
             row2 = header_row + idx
             fiscal_revenue = rev.get("fiscal_revenue", 0) or 0
             pocket_money = rev.get("pocket_money", 0) or 0
-            base = round(fiscal_revenue / 1.2, 2)
-            vat = round(fiscal_revenue - base, 2)
+            rate = rev.get("vat_rate_percent", 20.0) or 0.0
             total = fiscal_revenue + pocket_money
 
-            row_values = [idx, rev.get("date", ""), "Отчет за извършени продажби (81)", base, vat, pocket_money, total]
+            base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
+            if rate and abs(rate - 20.0) < 0.01:
+                base_20 = round(fiscal_revenue * 100 / (100 + rate), 2)
+                vat_20 = round(fiscal_revenue - base_20, 2)
+            elif rate and abs(rate - 9.0) < 0.01:
+                base_9 = round(fiscal_revenue * 100 / (100 + rate), 2)
+                vat_9 = round(fiscal_revenue - base_9, 2)
+            else:
+                base_0 = fiscal_revenue
+
+            values = [base_20, vat_20, base_9, vat_9, base_0]
+            row_values = [idx, rev.get("date", ""), "Отчет за извършени продажби (81)", *values, pocket_money, total]
             for col, value in enumerate(row_values, 1):
                 cell = ws2.cell(row=row2, column=col, value=value)
                 if col >= 4:
                     cell.number_format = money_format
-            sales_totals[0] += base
-            sales_totals[1] += vat
-            sales_totals[2] += pocket_money
-            sales_totals[3] += total
+            for i, v in enumerate(values + [pocket_money, total]):
+                sales_totals[i] += v
 
         total_row2 = row2 + 1
         ws2.cell(row=total_row2, column=3, value="ОБЩО:").font = total_font
@@ -429,7 +440,7 @@ class ExportService:
             cell.fill = total_fill
             cell.number_format = money_format
 
-        for col, width in zip(range(1, len(sales_headers) + 1), [5, 12, 28, 11, 10, 22, 13]):
+        for col, width in zip(range(1, len(sales_headers) + 1), [5, 12, 28, 11, 10, 11, 10, 13, 22, 13]):
             ws2.column_dimensions[get_column_letter(col)].width = width
 
         output = io.BytesIO()

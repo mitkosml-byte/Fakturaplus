@@ -75,9 +75,11 @@ export interface Invoice {
 export interface DailyRevenue {
   id: string;
   user_id: string;
+  company_id?: string;
   date: string;
   fiscal_revenue: number;
   pocket_money: number;
+  vat_rate_percent: number;
   created_at: string;
 }
 
