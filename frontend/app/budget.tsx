@@ -15,9 +15,12 @@ import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
+import { useAuth } from '../src/contexts/AuthContext';
+import { AccessDenied } from '../src/components';
 
 export default function BudgetScreen() {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const router = useRouter();
   const [budgetStatus, setBudgetStatus] = useState<any>(null);
   const [recurringExpenses, setRecurringExpenses] = useState<any[]>([]);
@@ -131,6 +134,10 @@ export default function BudgetScreen() {
     if (percent >= 80) return '#F59E0B';
     return '#10B981';
   };
+
+  if (!hasPermission('manage_budget')) {
+    return <AccessDenied />;
+  }
 
   if (loading) {
     return (

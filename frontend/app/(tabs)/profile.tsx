@@ -25,7 +25,7 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 export default function ProfileScreen() {
   const { t } = useTranslation();
   const { language, setLanguage } = useLanguageStore();
-  const { user, logout, refreshUser, hasPermission } = useAuth();
+  const { user, logout, refreshUser, hasPermission, isOwner } = useAuth();
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
@@ -346,16 +346,19 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/backup')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-              <Ionicons name="cloud-upload" size={20} color="#10B981" />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.backup')}</Text>
-              <Text style={styles.menuSubtitle}>{t('profile.backupRestore')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
-          </TouchableOpacity>
+          {/* Backup/Restore - Owner only (backend requires owner too) */}
+          {isOwner && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/backup')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                <Ionicons name="cloud-upload" size={20} color="#10B981" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('profile.backup')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.backupRestore')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.menuItem} onPress={() => setShowLanguageModal(true)}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>

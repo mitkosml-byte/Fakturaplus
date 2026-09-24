@@ -22,6 +22,8 @@ import { Employee, PayrollAgreementType, PayrollRates, PayrollBreakdown, Payroll
 import { format } from 'date-fns';
 import { bg, enUS } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../src/i18n';
+import { useAuth } from '../src/contexts/AuthContext';
+import { AccessDenied } from '../src/components';
 
 const emptyEmployeeForm = () => ({
   name: '',
@@ -34,6 +36,7 @@ const emptyEmployeeForm = () => ({
 
 export default function PayrollScreen() {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const { language } = useLanguageStore();
   const dateLocale = language === 'bg' ? bg : enUS;
   const router = useRouter();
@@ -306,6 +309,10 @@ export default function PayrollScreen() {
       Alert.alert(t('common.error'), error.message);
     }
   };
+
+  if (!hasPermission('manage_budget')) {
+    return <AccessDenied />;
+  }
 
   return (
     <View style={styles.container}>

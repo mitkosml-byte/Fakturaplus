@@ -15,9 +15,12 @@ import { useTranslation } from '../src/i18n';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import Constants from 'expo-constants';
+import { useAuth } from '../src/contexts/AuthContext';
+import { AccessDenied } from '../src/components';
 
 export default function ExportScreen() {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [ledgerPeriod, setLedgerPeriod] = useState<'thisMonth' | 'lastMonth'>('lastMonth');
@@ -97,6 +100,10 @@ export default function ExportScreen() {
     const filename = `dnevnik_${toDateStr(start).slice(0, 7)}.xlsx`;
     downloadFile(endpoint, filename, 'ledger');
   };
+
+  if (!hasPermission('export_data')) {
+    return <AccessDenied />;
+  }
 
   return (
     <View style={styles.container}>

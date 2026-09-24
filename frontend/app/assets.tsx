@@ -23,6 +23,8 @@ import { FixedAsset, AssetCategory, AssetCategoryInfo, AssetsSummary } from '../
 import { format } from 'date-fns';
 import { bg, enUS } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../src/i18n';
+import { useAuth } from '../src/contexts/AuthContext';
+import { AccessDenied } from '../src/components';
 
 const CATEGORY_SHORT_LABELS: Record<AssetCategory, string> = {
   cat_i: 'I · Сгради',
@@ -51,6 +53,7 @@ const emptyAssetForm = () => ({
 
 export default function AssetsScreen() {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const { language } = useLanguageStore();
   const dateLocale = language === 'bg' ? bg : enUS;
   const router = useRouter();
@@ -237,6 +240,10 @@ export default function AssetsScreen() {
     if (status === 'disposed') return t('assets.statusDisposed');
     return t('assets.statusActive');
   };
+
+  if (!hasPermission('manage_budget')) {
+    return <AccessDenied />;
+  }
 
   return (
     <View style={styles.container}>

@@ -14,6 +14,8 @@ import { api } from '../src/services/api';
 import { format } from 'date-fns';
 import { bg, enUS } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../src/i18n';
+import { useAuth } from '../src/contexts/AuthContext';
+import { AccessDenied } from '../src/components';
 
 type ActionFilter = 'all' | 'create' | 'update' | 'delete' | 'export';
 
@@ -37,6 +39,7 @@ const ACTION_ICONS: Record<string, { name: any; color: string }> = {
 
 export default function AuditLogScreen() {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const { language } = useLanguageStore();
   const dateLocale = language === 'bg' ? bg : enUS;
   const router = useRouter();
@@ -105,6 +108,10 @@ export default function AuditLogScreen() {
       return value;
     }
   };
+
+  if (!hasPermission('view_audit_log')) {
+    return <AccessDenied />;
+  }
 
   return (
     <View style={styles.container}>

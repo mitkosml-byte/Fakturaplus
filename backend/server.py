@@ -468,6 +468,29 @@ async def get_company_scope(current_user: User) -> tuple:
         ]
     }
 
+# Mirrors the role-permission matrix in frontend/src/contexts/AuthContext.tsx.
+# That copy decides what a role can SEE (which menu links/screens render);
+# this one is what actually protects the data - keep both in sync whenever
+# a role or a gated feature changes here.
+ROLE_PERMISSIONS = {
+    "owner": {
+        "manage_users", "manage_company", "view_audit_log", "manage_budget",
+        "export_data", "view_statistics", "manage_invoices", "add_revenue", "add_expenses",
+    },
+    "manager": {
+        "manage_budget", "export_data", "view_statistics", "manage_invoices",
+        "add_revenue", "add_expenses",
+    },
+    "staff": {"manage_invoices", "add_revenue", "add_expenses"},
+    "accountant": {
+        "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
+    },
+}
+
+def require_permission(current_user: User, permission: str):
+    if permission not in ROLE_PERMISSIONS.get(current_user.role, set()):
+        raise HTTPException(status_code=403, detail="Нямате права за тази операция")
+
 async def ensure_membership(user_id: str, company_id: str, role: str):
     """Записва (или обновява) връзката потребител-фирма в company_memberships.
 
@@ -2129,6 +2152,7 @@ async def get_reverse_charge_protocols(current_user: User = Depends(get_current_
     ЗДДС) across the whole company, newest first - lets the owner or
     accountant see every protocol's number and check none has slipped
     past its 15-day filing deadline."""
+    require_permission(current_user, "view_statistics")
     _, query = await get_company_scope(current_user)
     query["vat_treatment"] = VatTreatment.REVERSE_CHARGE
 
@@ -3259,6 +3283,7 @@ async def export_statistics_pdf(
     current_user: User = Depends(get_current_user)
 ):
     """Export a one-page financial report (summary + top suppliers/items) as PDF"""
+    require_permission(current_user, "export_data")
     stats = await get_summary(start_date=start_date, end_date=end_date, current_month_only=not (start_date or end_date), current_user=current_user)
     suppliers_data = await get_supplier_statistics(start_date=start_date, end_date=end_date, current_user=current_user)
     items_data = await get_item_statistics(start_date=start_date, end_date=end_date, top_n=10, current_user=current_user)
@@ -3311,6 +3336,7 @@ async def export_vat_ledger_excel(
     продажби) for the given period, grouped by VAT-rate category - meant
     as the accountant's source data for filing, not a byte-exact copy of
     NRA's own file layout."""
+    require_permission(current_user, "export_data")
     now = datetime.now(timezone.utc)
     if not start_date and not end_date:
         start_date = now.replace(day=1).strftime("%Y-%m-%d")
@@ -3434,6 +3460,9 @@ async def create_backup(current_user: User = Depends(get_current_user)):
     """Създава backup на всички данни на ЦЯЛАТА фирма (не само тези,
     въведени лично от текущия потребител), за да е реален backup на
     книгите на компанията."""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да прави резервно копие")
+
     import json
 
     company_id, scope = await get_company_scope(current_user)
@@ -3513,6 +3542,9 @@ async def create_backup(current_user: User = Depends(get_current_user)):
 @api_router.get("/backup/list")
 async def list_backups(current_user: User = Depends(get_current_user)):
     """Връща списък с всички backups на потребителя"""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да вижда резервните копия")
+
     backups = await db.backup_metadata.find(
         {"user_id": current_user.user_id},
         {"_id": 0}
@@ -3605,6 +3637,9 @@ async def restore_backup(backup_data: BackupRestoreRequest, current_user: User =
 @api_router.get("/backup/status")
 async def get_backup_status(current_user: User = Depends(get_current_user)):
     """Връща статус на последния backup"""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да вижда статуса на резервните копия")
+
     last_backup = await db.backup_metadata.find_one(
         {"user_id": current_user.user_id},
         {"_id": 0}
@@ -4345,6 +4380,7 @@ async def export_invoices_excel(
     current_user: User = Depends(get_current_user)
 ):
     """Export invoices to Excel"""
+    require_permission(current_user, "export_data")
     company_id, query = await get_company_scope(current_user)
 
     if start_date:
@@ -4391,6 +4427,7 @@ async def export_invoices_pdf(
     current_user: User = Depends(get_current_user)
 ):
     """Export invoices to PDF"""
+    require_permission(current_user, "export_data")
     company_id, query = await get_company_scope(current_user)
 
     if start_date:
@@ -4438,6 +4475,7 @@ class BudgetCreate(BaseModel):
 @api_router.get("/budget")
 async def get_budgets(current_user: User = Depends(get_current_user)):
     """Get all budgets for company"""
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -4450,6 +4488,7 @@ async def get_budgets(current_user: User = Depends(get_current_user)):
 @api_router.post("/budget")
 async def create_budget(budget: BudgetCreate, current_user: User = Depends(get_current_user)):
     """Create or update budget for a month"""
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -4480,6 +4519,7 @@ async def create_budget(budget: BudgetCreate, current_user: User = Depends(get_c
 @api_router.get("/budget/status")
 async def get_budget_status(current_user: User = Depends(get_current_user)):
     """Get current month budget status"""
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -4762,12 +4802,14 @@ async def get_payroll_rates_dict(company_id: Optional[str]) -> dict:
 
 @api_router.get("/payroll/rates")
 async def get_payroll_rates(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     return await get_payroll_rates_dict(company_id)
 
 @api_router.put("/payroll/rates")
 async def update_payroll_rates(request: Request, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     if not company_id:
@@ -4787,6 +4829,7 @@ async def update_payroll_rates(request: Request, current_user: User = Depends(ge
 
 @api_router.post("/employees", response_model=Employee)
 async def create_employee(employee: EmployeeCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
@@ -4796,6 +4839,7 @@ async def create_employee(employee: EmployeeCreate, current_user: User = Depends
 
 @api_router.get("/employees", response_model=List[Employee])
 async def get_employees(active_only: bool = False, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
@@ -4808,6 +4852,7 @@ async def get_employees(active_only: bool = False, current_user: User = Depends(
 
 @api_router.put("/employees/{employee_id}", response_model=Employee)
 async def update_employee(employee_id: str, update: EmployeeUpdate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     _, scope = await get_company_scope(current_user)
     result = await db.employees.update_one({"id": employee_id, **scope}, {"$set": update_data})
@@ -4818,6 +4863,7 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, current_user
 
 @api_router.delete("/employees/{employee_id}")
 async def delete_employee(employee_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     _, scope = await get_company_scope(current_user)
     result = await db.employees.delete_one({"id": employee_id, **scope})
     if result.deleted_count == 0:
@@ -4827,6 +4873,7 @@ async def delete_employee(employee_id: str, current_user: User = Depends(get_cur
 @api_router.post("/payroll/preview")
 async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
     """Изчислява разбивка без да записва - за преглед преди потвърждение."""
+    require_permission(current_user, "manage_budget")
     company_id, scope = await get_company_scope(current_user)
     employee = await db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
     if not employee:
@@ -4847,6 +4894,7 @@ async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depend
 
 @api_router.post("/payroll")
 async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     company_id, scope = await get_company_scope(current_user)
     employee = await db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
     if not employee:
@@ -4909,6 +4957,7 @@ async def get_payroll_entries(
     month: Optional[int] = None,
     current_user: User = Depends(get_current_user)
 ):
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
@@ -4923,6 +4972,7 @@ async def get_payroll_entries(
 
 @api_router.delete("/payroll/{entry_id}")
 async def delete_payroll_entry(entry_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     _, scope = await get_company_scope(current_user)
     result = await db.payroll_entries.delete_one({"id": entry_id, **scope})
     if result.deleted_count == 0:
@@ -5111,6 +5161,7 @@ async def get_asset_categories(current_user: User = Depends(get_current_user)):
 
 @api_router.post("/assets", response_model=FixedAsset)
 async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
@@ -5148,6 +5199,7 @@ async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get
 
 @api_router.get("/assets")
 async def get_assets(status: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
@@ -5160,6 +5212,7 @@ async def get_assets(status: Optional[str] = None, current_user: User = Depends(
 
 @api_router.get("/assets/summary")
 async def get_assets_summary(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
@@ -5181,6 +5234,7 @@ async def get_assets_summary(current_user: User = Depends(get_current_user)):
 
 @api_router.put("/assets/{asset_id}", response_model=FixedAsset)
 async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     _, scope = await get_company_scope(current_user)
     existing = await db.assets.find_one({"id": asset_id, **scope}, {"_id": 0})
     if not existing:
@@ -5200,6 +5254,7 @@ async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: Us
 
 @api_router.post("/assets/{asset_id}/dispose", response_model=FixedAsset)
 async def dispose_asset(asset_id: str, request: AssetDisposeRequest, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     company_id, scope = await get_company_scope(current_user)
     existing = await db.assets.find_one({"id": asset_id, **scope}, {"_id": 0})
     if not existing:
@@ -5229,6 +5284,7 @@ async def dispose_asset(asset_id: str, request: AssetDisposeRequest, current_use
 
 @api_router.delete("/assets/{asset_id}")
 async def delete_asset(asset_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
     _, scope = await get_company_scope(current_user)
     result = await db.assets.delete_one({"id": asset_id, **scope})
     if result.deleted_count == 0:
@@ -5276,13 +5332,10 @@ async def get_audit_logs(
     limit: int = 50,
     current_user: User = Depends(get_current_user)
 ):
-    """Get audit logs (Owner/Manager only)"""
+    """Get audit logs (Owner/Accountant only - see ROLE_PERMISSIONS)"""
+    require_permission(current_user, "view_audit_log")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1, "role": 1})
     company_id = user_doc.get("company_id") if user_doc else None
-    role = user_doc.get("role", "staff") if user_doc else "staff"
-    
-    if role not in ["owner", "manager"]:
-        raise HTTPException(status_code=403, detail="Access denied")
     
     logs = await audit_service.get_logs(
         company_id=company_id,

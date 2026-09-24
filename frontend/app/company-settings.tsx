@@ -19,11 +19,14 @@ import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { Company } from '../src/types';
 import { useTranslation } from '../src/i18n';
+import { useAuth } from '../src/contexts/AuthContext';
+import { AccessDenied } from '../src/components';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function CompanySettingsScreen() {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -130,6 +133,12 @@ export default function CompanySettingsScreen() {
         </View>
       </ImageBackground>
     );
+  }
+
+  // Owner can always edit; anyone without a company yet needs access to
+  // create/join one - same condition profile.tsx uses to show this link.
+  if (!hasPermission('manage_company') && company) {
+    return <AccessDenied />;
   }
 
   return (
