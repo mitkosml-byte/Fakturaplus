@@ -54,6 +54,10 @@ export default function HomeScreen() {
   const [pocketMoney, setPocketMoney] = useState('');
   const [revenueVatRate, setRevenueVatRate] = useState(20);
   const [revenueDate, setRevenueDate] = useState(new Date());
+  // Shared across the revenue/expense/personal-expense modals below - only
+  // one is ever open at a time, and this guards against a rapid double-tap
+  // on Save creating a duplicate record.
+  const [isSubmittingForm, setIsSubmittingForm] = useState(false);
   const [currentDayRevenue, setCurrentDayRevenue] = useState({ fiscal_revenue: 0, pocket_money: 0 });
   
   // Expense form
@@ -160,8 +164,10 @@ export default function HomeScreen() {
       Alert.alert(t('common.error'), t('common.fillAllFields'));
       return;
     }
+    if (isSubmittingForm) return;
 
     const now = new Date();
+    setIsSubmittingForm(true);
     try {
       await api.createPersonalExpense({
         amount,
@@ -171,7 +177,7 @@ export default function HomeScreen() {
         period_month: now.getMonth() + 1,
         period_year: now.getFullYear(),
       });
-      
+
       Alert.alert(t('common.success'), t('personal.created'));
       setPersonalAmount('');
       setPersonalDescription('');
@@ -181,6 +187,8 @@ export default function HomeScreen() {
       loadRoiData();
     } catch (error) {
       Alert.alert(t('common.error'), t('common.operationFailed'));
+    } finally {
+      setIsSubmittingForm(false);
     }
   };
 
@@ -218,7 +226,9 @@ export default function HomeScreen() {
       Alert.alert(t('common.error'), t('msg.enterAtLeastOne'));
       return;
     }
+    if (isSubmittingForm) return;
 
+    setIsSubmittingForm(true);
     try {
       await api.createDailyRevenue({
         date: format(revenueDate, 'yyyy-MM-dd'),
@@ -235,6 +245,8 @@ export default function HomeScreen() {
       Alert.alert(t('common.success'), t('msg.revenueSaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
+    } finally {
+      setIsSubmittingForm(false);
     }
   };
 
@@ -243,7 +255,9 @@ export default function HomeScreen() {
       Alert.alert(t('common.error'), t('msg.fillAllFields'));
       return;
     }
+    if (isSubmittingForm) return;
 
+    setIsSubmittingForm(true);
     try {
       await api.createExpense({
         description: expenseDescription,
@@ -258,6 +272,8 @@ export default function HomeScreen() {
       Alert.alert(t('common.success'), t('msg.expenseSaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
+    } finally {
+      setIsSubmittingForm(false);
     }
   };
 
@@ -539,8 +555,8 @@ export default function HomeScreen() {
                 </ScrollView>
               </View>
 
-              <TouchableOpacity style={styles.submitButton} onPress={handleCreatePersonalExpense}>
-                <Text style={styles.submitButtonText}>{t('common.save')}</Text>
+              <TouchableOpacity style={styles.submitButton} onPress={handleCreatePersonalExpense} disabled={isSubmittingForm}>
+                {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
@@ -662,8 +678,8 @@ export default function HomeScreen() {
               <Text style={styles.inputHint}>{t('home.willBeAdded')} • {t('home.excludesVAT')}</Text>
             </View>
 
-            <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue}>
-              <Text style={styles.submitButtonText}>{t('home.save')}</Text>
+            <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue} disabled={isSubmittingForm}>
+              {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('home.save')}</Text>}
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -795,9 +811,13 @@ export default function HomeScreen() {
                   />
                 </View>
 
-                <TouchableOpacity style={[styles.submitButton, { backgroundColor: '#F59E0B' }]} onPress={handleAddExpense}>
-                  <Ionicons name="add-circle" size={20} color="white" />
-                  <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
+                <TouchableOpacity style={[styles.submitButton, { backgroundColor: '#F59E0B' }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
+                  {isSubmittingForm ? <ActivityIndicator color="white" /> : (
+                    <>
+                      <Ionicons name="add-circle" size={20} color="white" />
+                      <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
               </View>
             </ScrollView>

@@ -204,6 +204,12 @@ export default function ExportScreen() {
             <Ionicons name="information-circle" size={20} color="#8B5CF6" />
             <Text style={styles.infoText}>{t('export.info')}</Text>
           </View>
+
+          <TouchableOpacity style={styles.statsLinkCard} onPress={() => router.push('/(tabs)/stats')}>
+            <Ionicons name="stats-chart" size={20} color="#8B5CF6" />
+            <Text style={styles.statsLinkText}>{t('export.statsExportHint')}</Text>
+            <Ionicons name="chevron-forward" size={18} color="#64748B" />
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     </View>
@@ -337,5 +343,19 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 13,
     lineHeight: 20,
+  },
+  statsLinkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 12,
+    gap: 10,
+  },
+  statsLinkText: {
+    flex: 1,
+    color: '#CBD5E1',
+    fontSize: 13,
   },
 });

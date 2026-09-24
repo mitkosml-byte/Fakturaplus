@@ -475,14 +475,6 @@ export const translations: Translations = {
     bg: 'Как да използвате приложението',
     en: 'How to use the app',
   },
-  'profile.about': {
-    bg: 'За приложението',
-    en: 'About',
-  },
-  'profile.version': {
-    bg: 'Версия',
-    en: 'Version',
-  },
   'profile.logout': {
     bg: 'Изход',
     en: 'Logout',
@@ -1741,6 +1733,10 @@ export const translations: Translations = {
     bg: 'Експортът включва всички ваши фактури, приходи и разходи за текущия период.',
     en: 'Export includes all your invoices, revenues and expenses for the current period.',
   },
+  'export.statsExportHint': {
+    bg: 'Търсите PDF с обобщена статистика и графики? Той е в раздел Статистики.',
+    en: 'Looking for a summary PDF with charts? That one lives in the Statistics tab.',
+  },
   'export.notLoggedIn': {
     bg: 'Не сте влезли в системата',
     en: 'Not logged in',
@@ -1911,7 +1907,7 @@ export const translations: Translations = {
   'assets.acquisitionDate': { bg: 'Дата на придобиване', en: 'Acquisition date' },
   'assets.inServiceDate': { bg: 'Дата на въвеждане в експлоатация', en: 'Date put into service' },
   'assets.depreciationRate': { bg: 'Годишна норма на амортизация (%)', en: 'Annual depreciation rate (%)' },
-  'assets.depreciationRateHint': { bg: 'Не може да надвишава максималната норма за избраната категория', en: "Cannot exceed the selected category's maximum rate" },
+  'assets.depreciationRateHint': { bg: 'Това е данъчната норма по чл. 55 ЗКПО (максимална за категорията). Счетоводната Ви амортизация може да е различна, според собствената Ви амортизационна политика — коригирайте, ако е така.', en: 'This is the tax depreciation rate under Art. 55 CITA (the category maximum). Your real accounting depreciation may differ per your own policy — adjust if so.' },
   'assets.responsiblePerson': { bg: 'Материално отговорно лице', en: 'Responsible person' },
   'assets.responsiblePersonPlaceholder': { bg: 'напр. Иван Иванов', en: "e.g. the employee's name" },
   'assets.notes': { bg: 'Бележки', en: 'Notes' },

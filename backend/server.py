@@ -836,8 +836,8 @@ async def update_user_role(user_id: str, request: Request, current_user: User = 
     if current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Само титулярят може да променя роли")
     
-    if role not in ["owner", "manager", "staff"]:
-        raise HTTPException(status_code=400, detail="Невалидна роля. Допустими: owner, manager, staff")
+    if role not in ["owner", "manager", "staff", "accountant"]:
+        raise HTTPException(status_code=400, detail="Невалидна роля. Допустими: owner, manager, staff, accountant")
     
     # Get target user
     target_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
@@ -1782,7 +1782,8 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 - Разпознавай възможно най-много от вариациите в изписването (главни/малки букви, съкращения на правни форми, различно разположение на текста)."""
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
-async def scan_invoice(image_base64: str = None, request: Request = None, current_user: User = Depends(get_current_user)):
+@limiter.limit("20/minute")
+async def scan_invoice(request: Request, image_base64: str = None, current_user: User = Depends(get_current_user)):
     if not AI_FEATURES_ENABLED:
         raise HTTPException(status_code=503, detail="AI разпознаването временно не е налично. Моля, въведете данните ръчно.")
 
@@ -1869,6 +1870,25 @@ async def scan_invoice(image_base64: str = None, request: Request = None, curren
     except Exception as e:
         logger.exception("OCR Error")
         raise HTTPException(status_code=500, detail=f"Грешка при сканиране: {str(e)}")
+
+def ai_exception_to_http(e: Exception, log_context: str) -> HTTPException:
+    """Maps a raised Anthropic SDK exception to the same kind of clear,
+    Bulgarian, status-coded error /ocr/scan already returns - for AI
+    features where a failure means "the feature didn't work" rather than
+    "here's an empty/legitimate result" (see run_ai_item_merge)."""
+    if isinstance(e, anthropic_sdk.AuthenticationError):
+        logger.error(f"{log_context}: invalid or missing Anthropic API key")
+        return HTTPException(status_code=503, detail="AI функцията не е конфигурирана правилно на сървъра.")
+    if isinstance(e, anthropic_sdk.RateLimitError):
+        return HTTPException(status_code=503, detail="AI услугата е временно претоварена. Моля, опитайте отново след малко.")
+    if isinstance(e, anthropic_sdk.APIConnectionError):
+        logger.exception(f"{log_context}: could not reach the Anthropic API (network/TLS)")
+        return HTTPException(status_code=502, detail="Сървърът не успя да се свърже с AI услугата (мрежов проблем).")
+    if isinstance(e, anthropic_sdk.APIStatusError):
+        logger.error(f"{log_context} (API status): {e}")
+        return HTTPException(status_code=502, detail="Грешка при връзка с AI услугата.")
+    logger.exception(log_context)
+    return HTTPException(status_code=500, detail=f"Грешка: {str(e)}")
 
 # ===================== PROTOCOL BY чл.117 ЗДДС NUMBERING =====================
 
@@ -2397,7 +2417,9 @@ async def delete_personal_expense(
     return {"message": "Личният разход е изтрит"}
 
 @api_router.get("/roi/analysis")
+@limiter.limit("20/minute")
 async def get_roi_analysis(
+    request: Request,
     month: Optional[int] = None,
     year: Optional[int] = None,
     current_user: User = Depends(get_current_user)
@@ -4078,7 +4100,13 @@ async def run_ai_item_merge(company_id: str) -> dict:
 
     except Exception as e:
         logger.error(f"AI merge error: {str(e)}")
-        return {"merged_groups": [], "total_merged": 0, "error": str(e)}
+        # Unlike generate_roi_insights (where the AI call is an optional
+        # bonus on top of already-useful non-AI results), this IS the whole
+        # feature - swallowing the error here would make a real AI outage
+        # look identical to "no similar items found". Re-raise so the
+        # direct-call endpoint can surface a proper error; the background
+        # auto-merge path already wraps this call in its own try/except.
+        raise
 
 # Ready-run-immediately gate for the background auto-merge: at most once
 # per company per cooldown window, so an active user saving many invoices
@@ -4110,7 +4138,9 @@ async def maybe_schedule_ai_item_merge(company_id: Optional[str]):
         logger.error(f"Background AI item merge error: {str(e)}")
 
 @api_router.post("/items/ai-merge")
+@limiter.limit("10/minute")
 async def ai_merge_similar_items(
+    request: Request,
     current_user: User = Depends(get_current_user)
 ):
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
@@ -4119,7 +4149,10 @@ async def ai_merge_similar_items(
     if not company_id:
         return {"merged_groups": [], "total_merged": 0}
 
-    return await run_ai_item_merge(company_id)
+    try:
+        return await run_ai_item_merge(company_id)
+    except Exception as e:
+        raise ai_exception_to_http(e, "AI item merge error")
 
 @api_router.get("/items/merge-mappings")
 async def get_merge_mappings(current_user: User = Depends(get_current_user)):
@@ -4931,7 +4964,12 @@ ASSET_CATEGORY_INFO = {
     "cat_iii": {"label": "Категория III – Превозни средства (без леки автомобили), пътни настилки", "max_rate": 10.0},
     "cat_iv": {"label": "Категория IV – Компютри, периферни устройства, софтуер", "max_rate": 50.0},
     "cat_v": {"label": "Категория V – Леки автомобили", "max_rate": 25.0},
-    "cat_vi": {"label": "Категория VI – Активи с ограничен срок на ползване по договор/закон", "max_rate": 33.33},
+    # Category VI's real legal cap is 100% / срока по договор или закон в
+    # години - различен за всеки конкретен актив (напр. 2-годишен лиценз ->
+    # 50%, 10-годишна концесия -> 10%), затова 33.33% тук е само предложен
+    # ориентир (приема се 3-годишен срок), не наложен таван - виж validation
+    # в create_asset/update_asset, което нарочно не го налага за тази категория.
+    "cat_vi": {"label": "Категория VI – Активи с ограничен срок на ползване по договор/закон (нормата = 100% / срока в години)", "max_rate": 33.33},
     "cat_vii": {"label": "Категория VII – Други амортизируеми активи", "max_rate": 15.0},
 }
 
@@ -5080,7 +5118,7 @@ async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get
     rate = asset.annual_depreciation_rate_percent
     if rate is None:
         rate = category_info["max_rate"]
-    elif rate > category_info["max_rate"]:
+    elif rate > category_info["max_rate"] and asset.category.value != "cat_vi":
         raise HTTPException(status_code=400, detail=f"Нормата не може да надвишава {category_info['max_rate']}% за {category_info['label']}")
     elif rate <= 0:
         raise HTTPException(status_code=400, detail="Нормата трябва да е положително число")
@@ -5153,7 +5191,7 @@ async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: Us
     category = update_data.get("category", existing["category"])
     if "annual_depreciation_rate_percent" in update_data:
         category_info = ASSET_CATEGORY_INFO[category]
-        if update_data["annual_depreciation_rate_percent"] > category_info["max_rate"]:
+        if update_data["annual_depreciation_rate_percent"] > category_info["max_rate"] and category != "cat_vi":
             raise HTTPException(status_code=400, detail=f"Нормата не може да надвишава {category_info['max_rate']}% за {category_info['label']}")
 
     await db.assets.update_one({"id": asset_id, **scope}, {"$set": update_data})

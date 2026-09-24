@@ -404,17 +404,6 @@ export default function ProfileScreen() {
             </View>
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/help')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
-              <Ionicons name="information-circle" size={20} color="#EC4899" />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.about')}</Text>
-              <Text style={styles.menuSubtitle}>{t('profile.version')} 1.0.0</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
-          </TouchableOpacity>
         </View>
 
             {/* Logout Button */}
