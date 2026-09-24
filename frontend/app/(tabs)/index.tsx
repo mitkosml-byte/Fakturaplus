@@ -21,17 +21,16 @@ import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
 import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
 import { format, addDays, subDays } from 'date-fns';
-import { bg, enUS } from 'date-fns/locale';
+import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function HomeScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
   const { isOwner } = useAuth();
-  const dateLocale = language === 'bg' ? bg : enUS;
   
   const [summary, setSummary] = useState<Summary | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -409,13 +408,13 @@ export default function HomeScreen() {
                   <View style={styles.roiStatItem}>
                     <Text style={styles.roiStatLabel}>{t('roi.totalInvestment')}</Text>
                     <Text style={[styles.roiStatValue, { color: '#EF4444' }]}>
-                      {roiData.total_personal_investment.toFixed(2)} лв
+                      {roiData.total_personal_investment.toFixed(2)} €
                     </Text>
                   </View>
                   <View style={styles.roiStatItem}>
                     <Text style={styles.roiStatLabel}>{t('roi.totalProfit')}</Text>
                     <Text style={[styles.roiStatValue, { color: roiData.total_profit >= 0 ? '#10B981' : '#EF4444' }]}>
-                      {roiData.total_profit.toFixed(2)} лв
+                      {roiData.total_profit.toFixed(2)} €
                     </Text>
                   </View>
                   <View style={styles.roiStatItem}>

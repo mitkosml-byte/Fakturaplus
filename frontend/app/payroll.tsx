@@ -20,8 +20,7 @@ import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { Employee, PayrollAgreementType, PayrollRates, PayrollBreakdown, PayrollEntry } from '../src/types';
 import { format } from 'date-fns';
-import { bg, enUS } from 'date-fns/locale';
-import { useTranslation, useLanguageStore } from '../src/i18n';
+import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
 
@@ -35,10 +34,8 @@ const emptyEmployeeForm = () => ({
 });
 
 export default function PayrollScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
-  const { language } = useLanguageStore();
-  const dateLocale = language === 'bg' ? bg : enUS;
   const router = useRouter();
 
   const [employees, setEmployees] = useState<Employee[]>([]);

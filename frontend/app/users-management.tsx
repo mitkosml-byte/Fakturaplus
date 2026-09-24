@@ -22,6 +22,7 @@ import { User, Invitation } from '../src/types';
 import { useAuth } from '../src/contexts/AuthContext';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import * as Clipboard from 'expo-clipboard';
+import { getRoleName as sharedGetRoleName, getRoleColor } from '../src/utils/roles';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -186,25 +187,7 @@ export default function UsersManagementScreen() {
     );
   };
 
-  const getRoleName = (role: string) => {
-    const roles: Record<string, { bg: string; en: string }> = {
-      owner: { bg: 'Титуляр', en: 'Owner' },
-      manager: { bg: 'Мениджър', en: 'Manager' },
-      staff: { bg: 'Служител', en: 'Staff' },
-      accountant: { bg: 'Счетоводител', en: 'Accountant' },
-    };
-    return roles[role]?.[language] || role;
-  };
-
-  const getRoleColor = (role: string) => {
-    const colors: Record<string, string> = {
-      owner: '#8B5CF6',
-      manager: '#3B82F6',
-      staff: '#64748B',
-      accountant: '#F59E0B',
-    };
-    return colors[role] || '#64748B';
-  };
+  const getRoleName = (role: string) => sharedGetRoleName(role, language);
 
   if (loading) {
     return (

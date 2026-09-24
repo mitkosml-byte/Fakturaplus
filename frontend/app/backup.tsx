@@ -20,7 +20,6 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { api } from '../src/services/api';
 import { format } from 'date-fns';
-import { bg, enUS } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
@@ -28,10 +27,9 @@ import { AccessDenied } from '../src/components';
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function BackupScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { isOwner } = useAuth();
   const { language } = useLanguageStore();
-  const dateLocale = language === 'bg' ? bg : enUS;
   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

@@ -22,7 +22,6 @@ import { api } from '../../src/services/api';
 import { Invoice } from '../../src/types';
 import { validateEikFormat } from '../../src/utils/eik';
 import { format } from 'date-fns';
-import { bg, enUS } from 'date-fns/locale';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
@@ -66,10 +65,9 @@ function getPeriodRange(
 }
 
 export default function InvoicesScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
-  const dateLocale = language === 'bg' ? bg : enUS;
-  
+
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');

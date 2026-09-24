@@ -14,18 +14,15 @@ import { useRouter } from 'expo-router';
 import { api } from '../src/services/api';
 import { Invoice } from '../src/types';
 import { format } from 'date-fns';
-import { bg, enUS } from 'date-fns/locale';
-import { useTranslation, useLanguageStore } from '../src/i18n';
+import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export default function ProtocolsScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
-  const { language } = useLanguageStore();
-  const dateLocale = language === 'bg' ? bg : enUS;
   const router = useRouter();
 
   const [protocols, setProtocols] = useState<Invoice[]>([]);

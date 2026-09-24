@@ -16,14 +16,14 @@ import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { NotificationSettings } from '../src/types';
-import { useLanguageStore } from '../src/i18n';
+import { useTranslation } from '../src/i18n';
 
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function NotificationsSettingsScreen() {
   const router = useRouter();
-  const { language } = useLanguageStore();
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -59,13 +59,10 @@ export default function NotificationsSettingsScreen() {
         periodic_enabled: periodicEnabled,
         periodic_dates: selectedDates,
       });
-      Alert.alert(
-        language === 'bg' ? 'Успех' : 'Success', 
-        language === 'bg' ? 'Настройките са запазени' : 'Settings saved'
-      );
+      Alert.alert(t('common.success'), t('notifications.saved'));
       router.back();
     } catch (error: any) {
-      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setSaving(false);
     }
@@ -101,7 +98,7 @@ export default function NotificationsSettingsScreen() {
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
-            <Text style={styles.title}>Известия за ДДС</Text>
+            <Text style={styles.title}>{t('notifications.title')}</Text>
             <View style={{ width: 40 }} />
           </View>
 
@@ -112,8 +109,8 @@ export default function NotificationsSettingsScreen() {
               <Ionicons name="alert-circle" size={24} color="#EF4444" />
             </View>
             <View style={styles.sectionTitleContainer}>
-              <Text style={styles.sectionTitle}>Известие при надхвърляне</Text>
-              <Text style={styles.sectionSubtitle}>Известие когато ДДС надхвърли сума</Text>
+              <Text style={styles.sectionTitle}>{t('notifications.thresholdTitle')}</Text>
+              <Text style={styles.sectionSubtitle}>{t('notifications.thresholdSubtitle')}</Text>
             </View>
             <Switch
               value={thresholdEnabled}
@@ -125,17 +122,17 @@ export default function NotificationsSettingsScreen() {
 
           {thresholdEnabled && (
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Сума на ДДС (€)</Text>
+              <Text style={styles.inputLabel}>{t('notifications.thresholdAmountLabel')}</Text>
               <TextInput
                 style={styles.input}
                 value={thresholdAmount}
                 onChangeText={setThresholdAmount}
                 keyboardType="decimal-pad"
-                placeholder="Напр. 5000"
+                placeholder={t('notifications.thresholdAmountPlaceholder')}
                 placeholderTextColor="#64748B"
               />
               <Text style={styles.inputHint}>
-                Известие когато ДДС за плащане надхвърли тази сума
+                {t('notifications.thresholdHint')}
               </Text>
             </View>
           )}
@@ -147,8 +144,8 @@ export default function NotificationsSettingsScreen() {
               <Ionicons name="calendar" size={24} color="#8B5CF6" />
             </View>
             <View style={styles.sectionTitleContainer}>
-              <Text style={styles.sectionTitle}>Периодични известия</Text>
-              <Text style={styles.sectionSubtitle}>Напомняне на избрани дати</Text>
+              <Text style={styles.sectionTitle}>{t('notifications.periodicTitle')}</Text>
+              <Text style={styles.sectionSubtitle}>{t('notifications.periodicSubtitle')}</Text>
             </View>
             <Switch
               value={periodicEnabled}
@@ -160,7 +157,7 @@ export default function NotificationsSettingsScreen() {
 
           {periodicEnabled && (
             <View style={styles.datesContainer}>
-              <Text style={styles.inputLabel}>Изберете дати от месеца</Text>
+              <Text style={styles.inputLabel}>{t('notifications.selectDatesLabel')}</Text>
               <View style={styles.datesGrid}>
                 {DAYS_OF_MONTH.map(day => (
                   <TouchableOpacity
@@ -182,7 +179,7 @@ export default function NotificationsSettingsScreen() {
               </View>
               {selectedDates.length > 0 && (
                 <Text style={styles.selectedDatesText}>
-                  Избрани: {selectedDates.join(', ')}
+                  {t('notifications.selectedDatesLabel')}: {selectedDates.join(', ')}
                 </Text>
               )}
             </View>
@@ -192,8 +189,7 @@ export default function NotificationsSettingsScreen() {
             <View style={styles.infoCard}>
               <Ionicons name="information-circle" size={24} color="#64748B" />
               <Text style={styles.infoText}>
-                Известията се изпращат като push нотификации. 
-                Уверете се, че сте ги разрешили.
+                {t('notifications.pushInfo')}
               </Text>
             </View>
           </ScrollView>
@@ -207,7 +203,7 @@ export default function NotificationsSettingsScreen() {
               {saving ? (
                 <ActivityIndicator color="white" />
               ) : (
-                <Text style={styles.saveButtonText}>Запази настройки</Text>
+                <Text style={styles.saveButtonText}>{t('notifications.save')}</Text>
               )}
             </TouchableOpacity>
           </View>

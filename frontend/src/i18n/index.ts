@@ -1,6 +1,7 @@
 // Localization system for the app
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
+import { bg as dateFnsBg, enUS as dateFnsEnUS } from 'date-fns/locale';
 
 export type Language = 'bg' | 'en';
 
@@ -1933,6 +1934,20 @@ export const translations: Translations = {
   'companySwitcher.switchedTo': { bg: 'Вече преглеждате', en: 'You are now viewing' },
   'invitations.roleAccountant': { bg: 'Счетоводител', en: 'Accountant' },
   'invitations.accountantHint': { bg: 'Достъп до статистики, фактури, ведомости и ДМА на тази фирма, без право да управлява потребители или данните на фирмата. Може да работи с няколко фирми клиенти от един акаунт.', en: "Access to this company's statistics, invoices, payroll and fixed assets, without managing users or company settings. Can work across several client companies from one account." },
+
+  'notifications.title': { bg: 'Известия за ДДС', en: 'VAT notifications' },
+  'notifications.thresholdTitle': { bg: 'Известие при надхвърляне', en: 'Threshold alert' },
+  'notifications.thresholdSubtitle': { bg: 'Известие когато ДДС надхвърли сума', en: 'Alert when VAT exceeds an amount' },
+  'notifications.thresholdAmountLabel': { bg: 'Сума на ДДС (€)', en: 'VAT amount (€)' },
+  'notifications.thresholdAmountPlaceholder': { bg: 'Напр. 5000', en: 'e.g. 5000' },
+  'notifications.thresholdHint': { bg: 'Известие когато ДДС за плащане надхвърли тази сума', en: 'Notifies you when the VAT due exceeds this amount' },
+  'notifications.periodicTitle': { bg: 'Периодични известия', en: 'Periodic reminders' },
+  'notifications.periodicSubtitle': { bg: 'Напомняне на избрани дати', en: 'Reminders on chosen dates' },
+  'notifications.selectDatesLabel': { bg: 'Изберете дати от месеца', en: 'Choose dates of the month' },
+  'notifications.selectedDatesLabel': { bg: 'Избрани', en: 'Selected' },
+  'notifications.pushInfo': { bg: 'Известията се изпращат като push нотификации. Уверете се, че сте ги разрешили.', en: 'Notifications are sent as push notifications. Make sure you have allowed them.' },
+  'notifications.save': { bg: 'Запази настройки', en: 'Save settings' },
+  'notifications.saved': { bg: 'Настройките са запазени', en: 'Settings saved' },
 };
 
 // Zustand store for language
@@ -1974,6 +1989,8 @@ export function useTranslation() {
     }
     return translation[language] || translation['bg'] || key;
   };
-  
-  return { t, language };
+
+  const dateLocale = language === 'bg' ? dateFnsBg : dateFnsEnUS;
+
+  return { t, language, dateLocale };
 }

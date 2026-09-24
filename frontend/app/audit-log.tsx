@@ -12,8 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { api } from '../src/services/api';
 import { format } from 'date-fns';
-import { bg, enUS } from 'date-fns/locale';
-import { useTranslation, useLanguageStore } from '../src/i18n';
+import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
 
@@ -38,10 +37,8 @@ const ACTION_ICONS: Record<string, { name: any; color: string }> = {
 };
 
 export default function AuditLogScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
-  const { language } = useLanguageStore();
-  const dateLocale = language === 'bg' ? bg : enUS;
   const router = useRouter();
 
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);

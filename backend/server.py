@@ -1175,12 +1175,17 @@ async def get_company_memberships(current_user: User = Depends(get_current_user)
         await ensure_membership(current_user.user_id, current_user.company_id, current_user.role)
         memberships.append({"company_id": current_user.company_id, "role": current_user.role})
 
+    company_ids = [m["company_id"] for m in memberships]
+    companies = await db.companies.find(
+        {"id": {"$in": company_ids}}, {"_id": 0, "id": 1, "name": 1}
+    ).to_list(1000)
+    company_names = {c["id"]: c["name"] for c in companies}
+
     result = []
     for m in memberships:
-        company = await db.companies.find_one({"id": m["company_id"]}, {"_id": 0, "name": 1})
         result.append({
             "company_id": m["company_id"],
-            "company_name": company.get("name") if company else "—",
+            "company_name": company_names.get(m["company_id"], "—"),
             "role": m["role"],
             "is_active": m["company_id"] == current_user.company_id,
         })
@@ -3566,11 +3571,29 @@ async def restore_backup(backup_data: BackupRestoreRequest, current_user: User =
     restored_counts = {"invoices": 0, "revenues": 0, "expenses": 0}
     skipped_counts = {"invoices": 0, "revenues": 0, "expenses": 0}
 
+    # One existence-check query per collection instead of one per record -
+    # a backup can hold thousands of rows, and this was previously an
+    # N+1 (a find_one per item) on top of the N inserts already needed.
+    existing_invoice_ids = {
+        d["id"] for d in await db.invoices.find(
+            {"id": {"$in": [inv.id for inv in backup_data.invoices]}}, {"id": 1}
+        ).to_list(len(backup_data.invoices) or 1)
+    }
+    existing_revenue_ids = {
+        d["id"] for d in await db.daily_revenue.find(
+            {"id": {"$in": [r.id for r in backup_data.daily_revenues]}}, {"id": 1}
+        ).to_list(len(backup_data.daily_revenues) or 1)
+    }
+    existing_expense_ids = {
+        d["id"] for d in await db.expenses.find(
+            {"id": {"$in": [e.id for e in backup_data.expenses]}}, {"id": 1}
+        ).to_list(len(backup_data.expenses) or 1)
+    }
+
     # Възстановяване на фактури
     for invoice in backup_data.invoices:
         try:
-            existing = await db.invoices.find_one({"id": invoice.id})
-            if existing:
+            if invoice.id in existing_invoice_ids:
                 continue
             doc = invoice.dict()
             doc["user_id"] = current_user.user_id
@@ -3590,8 +3613,7 @@ async def restore_backup(backup_data: BackupRestoreRequest, current_user: User =
     # както при нормално създаване - НЕ datetime обект)
     for revenue in backup_data.daily_revenues:
         try:
-            existing = await db.daily_revenue.find_one({"id": revenue.id})
-            if existing:
+            if revenue.id in existing_revenue_ids:
                 continue
             doc = revenue.dict()
             doc["user_id"] = current_user.user_id
@@ -3610,8 +3632,7 @@ async def restore_backup(backup_data: BackupRestoreRequest, current_user: User =
     # Възстановяване на разходи (date също остава низ)
     for expense in backup_data.expenses:
         try:
-            existing = await db.expenses.find_one({"id": expense.id})
-            if existing:
+            if expense.id in existing_expense_ids:
                 continue
             doc = expense.dict()
             doc["user_id"] = current_user.user_id
