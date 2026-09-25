@@ -397,9 +397,12 @@ export default function StatsScreen() {
   const getSupplierBarData = () => {
     const ranking = getCurrentRanking().slice(0, 7);
     return ranking.map((supplier, index) => ({
-      value: supplierRankingType === 'frequency' ? supplier.invoice_count : 
+      value: supplierRankingType === 'frequency' ? supplier.invoice_count :
              supplierRankingType === 'avg' ? supplier.avg_invoice : supplier.total_amount,
-      label: supplier.supplier.substring(0, 6),
+      // Company names are often quoted (e.g. "Марс-1" ООД) - strip a
+      // leading quote before truncating so the label doesn't start with
+      // a stray punctuation mark instead of an actual letter.
+      label: supplier.supplier.replace(/^["'„”]+/, '').substring(0, 6),
       frontColor: CHART_COLORS[index % CHART_COLORS.length],
     }));
   };
@@ -1191,23 +1194,38 @@ export default function StatsScreen() {
                         </View>
                       )}
                       
-                      {supplierChartType === 'bar' && getSupplierBarData().length > 0 && (
-                        <BarChart
-                          data={getSupplierBarData()}
-                          width={chartWidth}
-                          height={200}
-                          barWidth={28}
-                          spacing={12}
-                          noOfSections={4}
-                          barBorderRadius={4}
-                          yAxisColor="#334155"
-                          xAxisColor="#334155"
-                          yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                          xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
-                          hideRules
-                          isAnimated
-                        />
-                      )}
+                      {(() => {
+                        const barData = getSupplierBarData();
+                        if (barData.length === 0) return null;
+                        // Size bars/spacing to the actual item count so all
+                        // of them fit within the chart's width - a fixed
+                        // barWidth/spacing overflowed past the visible area
+                        // with 6-7 suppliers, clipping the last bar instead
+                        // of shrinking to fit.
+                        const yAxisLabelWidth = 34;
+                        const spacing = 8;
+                        const plotWidth = chartWidth - yAxisLabelWidth;
+                        const barWidth = Math.max(16, Math.min(30, Math.floor((plotWidth - spacing * (barData.length + 1)) / barData.length)));
+                        return (
+                          <BarChart
+                            data={barData}
+                            width={plotWidth}
+                            height={200}
+                            barWidth={barWidth}
+                            spacing={spacing}
+                            initialSpacing={spacing}
+                            noOfSections={4}
+                            barBorderRadius={4}
+                            yAxisColor="#334155"
+                            xAxisColor="#334155"
+                            yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                            xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                            yAxisLabelWidth={yAxisLabelWidth}
+                            hideRules
+                            isAnimated
+                          />
+                        );
+                      })()}
                       
                       {supplierChartType === 'line' && getSupplierBarData().length > 0 && (
                         <LineChart
