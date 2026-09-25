@@ -210,6 +210,14 @@ export default function LoginScreen() {
                   </TouchableOpacity>
                 </View>
 
+                {authMode === 'login' && (
+                  <TouchableOpacity onPress={() => router.push('/forgot-password')} style={styles.forgotPasswordLink}>
+                    <Text style={styles.forgotPasswordText}>
+                      {language === 'bg' ? 'Забравена парола?' : 'Forgot password?'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
                 {authMode === 'register' && !showInviteCode && (
                   <TouchableOpacity onPress={() => setShowInviteCode(true)} style={styles.inviteCodeToggle}>
                     <Ionicons name="key-outline" size={16} color="#8B5CF6" />
@@ -395,6 +403,15 @@ const styles = StyleSheet.create({
   },
   inputIcon: {
     marginRight: 12,
+  },
+  forgotPasswordLink: {
+    alignItems: 'flex-end',
+    marginBottom: 12,
+  },
+  forgotPasswordText: {
+    color: '#8B5CF6',
+    fontSize: 13,
+    fontWeight: '500',
   },
   inviteCodeToggle: {
     flexDirection: 'row',

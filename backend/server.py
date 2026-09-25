@@ -65,6 +65,32 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 AI_FEATURES_ENABLED = bool(ANTHROPIC_API_KEY)
 anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if AI_FEATURES_ENABLED else None
 
+# Outgoing email (password-reset codes) via Resend's REST API. Same
+# disabled-until-configured pattern as the AI features above - the rest of
+# the app, including registration/login, works without it.
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL', 'Фактура+ <onboarding@resend.dev>')
+EMAIL_FEATURES_ENABLED = bool(RESEND_API_KEY)
+
+async def send_email(to_email: str, subject: str, html_body: str) -> bool:
+    if not EMAIL_FEATURES_ENABLED:
+        return False
+    try:
+        async with httpx.AsyncClient() as client_http:
+            resp = await client_http.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+                json={"from": RESEND_FROM_EMAIL, "to": [to_email], "subject": subject, "html": html_body},
+                timeout=10.0,
+            )
+            if resp.status_code >= 300:
+                logger.error(f"Resend API error {resp.status_code}: {resp.text}")
+                return False
+            return True
+    except Exception as e:
+        logger.error(f"Failed to send email via Resend: {e}")
+        return False
+
 # Create the main app
 app = FastAPI(
     title="Invoice Manager API",
@@ -161,6 +187,22 @@ class UserLogin(BaseModel):
 
 class ChangePassword(BaseModel):
     current_password: Optional[str] = None  # Не се изисква, ако акаунтът все още няма парола (напр. Google вход)
+    new_password: str
+
+class PasswordResetCode(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    code: str = Field(default_factory=lambda: uuid.uuid4().hex[:8].upper())
+    used: bool = False
+    expires_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(minutes=30))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    code: str
     new_password: str
 
 # Invitation model for user invitations
@@ -946,6 +988,79 @@ async def change_password(data: ChangePassword, current_user: User = Depends(get
         {"$set": {"password_hash": new_hash}}
     )
     return {"message": "Паролата е сменена успешно"}
+
+@api_router.post("/auth/forgot-password")
+@limiter.limit("3/minute")
+async def forgot_password(request: Request, data: ForgotPasswordRequest):
+    """Изпраща код за възстановяване на паролата по имейл. Винаги връща
+    същия отговор, независимо дали имейлът съществува, има парола, или
+    не - иначе би издало кои имейли са регистрирани в системата."""
+    if not EMAIL_FEATURES_ENABLED:
+        raise HTTPException(status_code=503, detail="Възстановяването на парола временно не е налично. Моля, свържете се с администратора.")
+
+    generic_response = {"message": "Ако имейлът съществува в системата, изпратихме код за възстановяване на паролата."}
+
+    user = await db.users.find_one({"email": data.email.lower()})
+    if not user or not user.get("password_hash"):
+        # Doesn't exist, or is a Google-only account with no password to reset.
+        return generic_response
+
+    reset_code = PasswordResetCode(user_id=user["user_id"])
+    await db.password_reset_codes.insert_one(reset_code.dict())
+
+    await send_email(
+        to_email=user["email"],
+        subject="Код за възстановяване на паролата - Фактура+",
+        html_body=(
+            f"<p>Здравейте, {user.get('name', '')}!</p>"
+            f"<p>Получихме заявка за възстановяване на паролата на вашия акаунт във Фактура+.</p>"
+            f"<p>Вашият код за възстановяване е:</p>"
+            f"<h2 style=\"letter-spacing:4px;\">{reset_code.code}</h2>"
+            f"<p>Кодът е валиден 30 минути. Ако не сте заявили това, просто игнорирайте този имейл.</p>"
+        ),
+    )
+    return generic_response
+
+@api_router.post("/auth/reset-password")
+@limiter.limit("10/minute")
+async def reset_password(request: Request, data: ResetPasswordRequest):
+    """Задава нова парола с код, изпратен по имейл от /auth/forgot-password."""
+    is_valid, error_msg = validate_password(data.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+
+    # Same generic error whether the email doesn't exist or the code is
+    # wrong/expired/already used - same enumeration concern as login.
+    generic_error = HTTPException(status_code=400, detail="Невалиден или изтекъл код")
+
+    user = await db.users.find_one({"email": data.email.lower()})
+    if not user:
+        raise generic_error
+
+    code = data.code.upper().strip()
+    reset_doc = await db.password_reset_codes.find_one({
+        "user_id": user["user_id"], "code": code, "used": False
+    })
+    if not reset_doc:
+        raise generic_error
+
+    expires_at = reset_doc["expires_at"]
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
+        raise generic_error
+
+    new_hash = pwd_context.hash(data.new_password)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"password_hash": new_hash}})
+    await db.password_reset_codes.update_one({"id": reset_doc["id"]}, {"$set": {"used": True}})
+
+    # A password reset proves account ownership via email, but doesn't
+    # prove every existing session is still trustworthy - if the reset was
+    # triggered because a session got hijacked, that session shouldn't
+    # survive the reset.
+    await db.user_sessions.delete_many({"user_id": user["user_id"]})
+
+    return {"message": "Паролата е сменена успешно. Моля, влезте отново."}
 
 @api_router.put("/auth/role/{user_id}")
 async def update_user_role(user_id: str, request: Request, current_user: User = Depends(get_current_user)):

@@ -63,6 +63,20 @@ class ApiService {
     return this.fetch('/auth/me');
   }
 
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    return this.fetch('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword(email: string, code: string, newPassword: string): Promise<{ message: string }> {
+    return this.fetch('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, new_password: newPassword }),
+    });
+  }
+
   async changePassword(newPassword: string, currentPassword?: string): Promise<{ message: string }> {
     return this.fetch('/auth/change-password', {
       method: 'PUT',

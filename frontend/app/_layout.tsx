@@ -17,11 +17,15 @@ import { OfflineBanner } from '../src/components/OfflineBanner';
 // resolve back to whichever of the two the router already considered
 // "current" instead of actually leaving the tabs group.
 //
-// Only "login" is a public screen. Every other top-level route (e.g.
-// company-settings, users-management, budget) is pushed on top of the
-// tabs stack and still requires auth, so redirecting whenever the user
-// isn't literally inside "(tabs)" would bounce them back out of those
-// screens the instant they navigate to one.
+// "login" and "forgot-password" are the only public screens - the latter
+// has to be reachable while logged out, since that's the only time it's
+// ever needed. Every other top-level route (e.g. company-settings,
+// users-management, budget) is pushed on top of the tabs stack and still
+// requires auth, so redirecting whenever the user isn't literally inside
+// "(tabs)" would bounce them back out of those screens the instant they
+// navigate to one.
+const PUBLIC_SCREENS = ['login', 'forgot-password'];
+
 function useProtectedRoute() {
   const { isAuthenticated, isLoading } = useAuth();
   const segments = useSegments();
@@ -30,9 +34,10 @@ function useProtectedRoute() {
   useEffect(() => {
     if (isLoading) return;
     const onLoginScreen = segments[0] === 'login';
+    const onPublicScreen = PUBLIC_SCREENS.includes(segments[0] as string);
     if (isAuthenticated && onLoginScreen) {
       router.replace('/(tabs)');
-    } else if (!isAuthenticated && !onLoginScreen) {
+    } else if (!isAuthenticated && !onPublicScreen) {
       router.replace('/login');
     }
   }, [isAuthenticated, isLoading, segments]);
