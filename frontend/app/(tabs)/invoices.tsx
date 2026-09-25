@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Modal,
   ImageBackground,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -70,6 +71,11 @@ export default function InvoicesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  // Which of this invoice's items triggered a price-increase alert when it
+  // was created - fetched lazily per invoice_id so the item rows can flag
+  // "up X% from last purchase" without duplicating that comparison here.
+  const [selectedInvoiceAlerts, setSelectedInvoiceAlerts] = useState<any[]>([]);
+  const [loadingInvoiceAlerts, setLoadingInvoiceAlerts] = useState(false);
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
   const [customStartDate, setCustomStartDate] = useState<Date>(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [customEndDate, setCustomEndDate] = useState<Date>(new Date());
@@ -121,6 +127,27 @@ export default function InvoicesScreen() {
     await loadInvoices();
     setRefreshing(false);
   }, [loadInvoices]);
+
+  useEffect(() => {
+    if (!selectedInvoice || !selectedInvoice.items || selectedInvoice.items.length === 0) {
+      setSelectedInvoiceAlerts([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingInvoiceAlerts(true);
+    api.getPriceAlerts(undefined, selectedInvoice.id)
+      .then((data) => {
+        if (!cancelled) setSelectedInvoiceAlerts(data.alerts || []);
+      })
+      .catch((error) => {
+        console.error('Error loading invoice price alerts:', error);
+        if (!cancelled) setSelectedInvoiceAlerts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingInvoiceAlerts(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedInvoice]);
 
   const handleDeleteInvoice = async (id: string) => {
     Alert.alert(
@@ -428,7 +455,7 @@ export default function InvoicesScreen() {
             </View>
 
             {selectedInvoice && (
-              <View>
+              <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.supplier')}</Text>
                   <Text style={styles.detailSectionValue}>{selectedInvoice.supplier}</Text>
@@ -485,6 +512,71 @@ export default function InvoicesScreen() {
                   <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
                   <Text style={styles.totalSectionValue}>{selectedInvoice.total_amount.toFixed(2)} €</Text>
                 </View>
+
+                {selectedInvoice.items && selectedInvoice.items.length > 0 && (() => {
+                  const items = selectedInvoice.items!;
+                  const itemsSum = items.reduce(
+                    (sum, it) => sum + (it.total_price ?? (it.quantity || 0) * it.unit_price),
+                    0
+                  );
+                  const mismatch = Math.abs(itemsSum - selectedInvoice.amount_without_vat) > 0.05;
+                  return (
+                    <View style={styles.itemsSection}>
+                      <View style={styles.itemsSectionHeader}>
+                        <Text style={styles.detailSectionLabel}>{t('invoices.items')}</Text>
+                        {loadingInvoiceAlerts && <ActivityIndicator size="small" color="#64748B" />}
+                      </View>
+
+                      <View style={styles.itemsTableHeader}>
+                        <Text style={[styles.itemsTableHeaderText, { flex: 2 }]}>{t('invoices.itemName')}</Text>
+                        <Text style={[styles.itemsTableHeaderText, styles.itemsColRight, { flex: 1 }]}>{t('invoices.itemQty')}</Text>
+                        <Text style={[styles.itemsTableHeaderText, styles.itemsColRight, { flex: 1 }]}>{t('invoices.itemUnitPrice')}</Text>
+                        <Text style={[styles.itemsTableHeaderText, styles.itemsColRight, { flex: 1 }]}>{t('invoices.itemTotal')}</Text>
+                      </View>
+
+                      {items.map((item, index) => {
+                        const alert = selectedInvoiceAlerts.find((a) => a.item_name === item.name);
+                        const lineTotal = item.total_price ?? (item.quantity || 0) * item.unit_price;
+                        return (
+                          <View key={index} style={styles.itemRow}>
+                            <View style={{ flex: 2 }}>
+                              <Text style={styles.itemRowName} numberOfLines={2}>{item.name}</Text>
+                              {alert && (
+                                <View style={styles.itemPriceAlertBadge}>
+                                  <Ionicons name="trending-up" size={11} color="#EF4444" />
+                                  <Text style={styles.itemPriceAlertText}>
+                                    +{alert.change_percent}% {t('invoices.vsLastPurchase')}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={[styles.itemRowValue, styles.itemsColRight, { flex: 1 }]}>
+                              {item.quantity} {item.unit}
+                            </Text>
+                            <Text style={[styles.itemRowValue, styles.itemsColRight, { flex: 1 }]}>
+                              {item.unit_price.toFixed(2)}€
+                            </Text>
+                            <Text style={[styles.itemRowValue, styles.itemsColRight, styles.itemRowTotal, { flex: 1 }]}>
+                              {lineTotal.toFixed(2)}€
+                            </Text>
+                          </View>
+                        );
+                      })}
+
+                      <View style={styles.itemsSumRow}>
+                        <Text style={styles.itemsSumLabel}>{t('invoices.itemsSum')}</Text>
+                        <Text style={styles.itemsSumValue}>{itemsSum.toFixed(2)} €</Text>
+                      </View>
+                      {mismatch && (
+                        <View style={styles.itemsMismatchNote}>
+                          <Ionicons name="alert-circle-outline" size={14} color="#F59E0B" />
+                          <Text style={styles.itemsMismatchText}>{t('invoices.itemsMismatch')}</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
+
                 {selectedInvoice.notes && (
                   <View style={styles.detailSection}>
                     <Text style={styles.detailSectionLabel}>{t('invoices.notes')}</Text>
@@ -502,7 +594,7 @@ export default function InvoicesScreen() {
                   <Ionicons name="trash" size={20} color="#EF4444" />
                   <Text style={styles.deleteButtonText}>{t('invoices.deleteInvoice')}</Text>
                 </TouchableOpacity>
-              </View>
+              </ScrollView>
             )}
           </View>
         </View>
@@ -793,6 +885,10 @@ const styles = StyleSheet.create({
     padding: 24,
     width: '100%',
     maxWidth: 400,
+    maxHeight: '90%',
+  },
+  detailScroll: {
+    maxHeight: '100%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -894,6 +990,90 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#8B5CF6',
+  },
+  itemsSection: {
+    marginBottom: 16,
+  },
+  itemsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  itemsTableHeader: {
+    flexDirection: 'row',
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+    marginBottom: 4,
+  },
+  itemsTableHeaderText: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  itemsColRight: {
+    textAlign: 'right',
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 6,
+    gap: 4,
+  },
+  itemRowName: {
+    fontSize: 13,
+    color: 'white',
+    fontWeight: '500',
+  },
+  itemRowValue: {
+    fontSize: 13,
+    color: '#CBD5E1',
+  },
+  itemRowTotal: {
+    fontWeight: '600',
+    color: 'white',
+  },
+  itemPriceAlertBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 3,
+  },
+  itemPriceAlertText: {
+    fontSize: 10,
+    color: '#EF4444',
+    fontWeight: '600',
+  },
+  itemsSumRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 6,
+    paddingHorizontal: 4,
+  },
+  itemsSumLabel: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  itemsSumValue: {
+    fontSize: 13,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  itemsMismatchNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  itemsMismatchText: {
+    fontSize: 11,
+    color: '#F59E0B',
+    flex: 1,
   },
   deleteButton: {
     flexDirection: 'row',

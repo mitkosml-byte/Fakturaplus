@@ -3967,19 +3967,22 @@ async def get_backup_status(current_user: User = Depends(get_current_user)):
 @api_router.get("/items/price-alerts")
 async def get_price_alerts(
     status: Optional[str] = None,  # unread, read, dismissed
+    invoice_id: Optional[str] = None,  # за показване на конкретна фактура кои артикули са с повишена цена
     current_user: User = Depends(get_current_user)
 ):
     """Връща ценови аларми за фирмата"""
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
-    
+
     if not company_id:
         return {"alerts": [], "total": 0, "unread_count": 0}
-    
+
     query = {"company_id": company_id}
     if status:
         query["status"] = status
-    
+    if invoice_id:
+        query["invoice_id"] = invoice_id
+
     alerts = await db.price_alerts.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
     
     # Count unread

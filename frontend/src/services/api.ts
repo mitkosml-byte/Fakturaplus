@@ -393,13 +393,16 @@ class ApiService {
   }
 
   // Item Price Tracking
-  async getPriceAlerts(status?: string): Promise<{
+  async getPriceAlerts(status?: string, invoiceId?: string): Promise<{
     alerts: any[];
     total: number;
     unread_count: number;
   }> {
-    const query = status ? `?status=${status}` : '';
-    return this.fetch(`/items/price-alerts${query}`);
+    const queryParams = new URLSearchParams();
+    if (status) queryParams.set('status', status);
+    if (invoiceId) queryParams.set('invoice_id', invoiceId);
+    const query = queryParams.toString();
+    return this.fetch(`/items/price-alerts${query ? `?${query}` : ''}`);
   }
 
   async updatePriceAlert(alertId: string, status: 'read' | 'dismissed'): Promise<{ message: string }> {

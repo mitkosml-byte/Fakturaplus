@@ -618,6 +618,38 @@ export const translations: Translations = {
     bg: 'Бележки',
     en: 'Notes',
   },
+  'invoices.items': {
+    bg: 'Артикули',
+    en: 'Items',
+  },
+  'invoices.itemName': {
+    bg: 'Артикул',
+    en: 'Item',
+  },
+  'invoices.itemQty': {
+    bg: 'Кол-во',
+    en: 'Qty',
+  },
+  'invoices.itemUnitPrice': {
+    bg: 'Ед. цена',
+    en: 'Unit price',
+  },
+  'invoices.itemTotal': {
+    bg: 'Общо',
+    en: 'Total',
+  },
+  'invoices.itemsSum': {
+    bg: 'Сбор на артикулите',
+    en: 'Items sum',
+  },
+  'invoices.itemsMismatch': {
+    bg: 'Сборът на артикулите се различава от стойността без ДДС на фактурата - възможна грешка при въвеждането.',
+    en: "The items' sum differs from the invoice's amount without VAT - possible entry error.",
+  },
+  'invoices.vsLastPurchase': {
+    bg: 'спрямо предишна доставка',
+    en: 'vs. last purchase',
+  },
   'invoices.deleteInvoice': {
     bg: 'Изтрий фактурата',
     en: 'Delete Invoice',
