@@ -47,9 +47,14 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
-# MongoDB connection
+# MongoDB connection. serverSelectionTimeoutMS caps how long any single
+# operation waits to find a usable server - without it, the driver's
+# 30s-per-attempt default means the ~12 sequential index-creation calls in
+# create_indexes() below can take minutes to fail if the database is
+# unreachable at startup, which blocks the port binding that Render (and
+# any other host) waits on to consider the deploy alive.
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
 db = client[os.environ.get('DB_NAME', 'test_database')]
 
 # AI features (OCR scanning, AI item merge, AI ROI insights) run on the
