@@ -110,6 +110,34 @@ export const translations: Translations = {
     bg: 'Джобче',
     en: 'Pocket',
   },
+  'home.cardRevenueLabel': {
+    bg: 'От тях – платено с карта',
+    en: 'Of which - paid by card',
+  },
+  'home.cardRevenueHint': {
+    bg: 'Остатъкът от фискализирания оборот се приема за в брой',
+    en: 'The rest of the fiscal revenue is treated as cash',
+  },
+  'home.cashRevenue': {
+    bg: 'Оборот в брой',
+    en: 'Cash Turnover',
+  },
+  'home.cardRevenue': {
+    bg: 'Оборот с карта',
+    en: 'Card Turnover',
+  },
+  'home.unpaidInvoices': {
+    bg: 'Неплатени фактури',
+    en: 'Unpaid Invoices',
+  },
+  'home.unpaidInvoicesCount': {
+    bg: 'неплатени',
+    en: 'unpaid',
+  },
+  'home.overdueInvoicesCount': {
+    bg: 'просрочени',
+    en: 'overdue',
+  },
   'home.editInPlaceNotice': {
     bg: 'Полетата по-долу показват вече записаното за тази дата. Промяна на стойност я замества с новата — не се добавя към старата.',
     en: "These fields show what's already logged for this date. Changing a value replaces it — it doesn't add to the old one.",
@@ -241,6 +269,26 @@ export const translations: Translations = {
   'scan.protocolAssigned': {
     bg: 'Издаден протокол по чл.117 №',
     en: 'Issued чл.117 protocol №',
+  },
+  'scan.paymentMethod': {
+    bg: 'Начин на плащане',
+    en: 'Payment method',
+  },
+  'scan.paymentMethod.cash': {
+    bg: 'В брой',
+    en: 'Cash',
+  },
+  'scan.paymentMethod.bank_transfer': {
+    bg: 'Банков превод',
+    en: 'Bank transfer',
+  },
+  'scan.cashAutoPaidNote': {
+    bg: 'Плащанията в брой се маркират автоматично като платени.',
+    en: 'Cash payments are automatically marked as paid.',
+  },
+  'scan.paymentDueDateDefault': {
+    bg: 'Срок за плащане (по подразбиране 14 дни)',
+    en: 'Payment due date (defaults to 14 days)',
   },
   'invoices.protocolDeadline': {
     bg: 'Краен срок за протокола',
@@ -659,8 +707,60 @@ export const translations: Translations = {
     en: 'Scan your first invoice',
   },
   'invoices.searchPlaceholder': {
-    bg: 'Търси по доставчик...',
-    en: 'Search by supplier...',
+    bg: 'Търси по доставчик или номер...',
+    en: 'Search by supplier or number...',
+  },
+  'invoices.paymentFilterAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'invoices.paymentFilterUnpaid': {
+    bg: 'Неплатени',
+    en: 'Unpaid',
+  },
+  'invoices.paymentFilterOverdue': {
+    bg: 'Просрочени',
+    en: 'Overdue',
+  },
+  'invoices.paymentFilterPaid': {
+    bg: 'Платени',
+    en: 'Paid',
+  },
+  'invoices.unpaid': {
+    bg: 'Неплатена',
+    en: 'Unpaid',
+  },
+  'invoices.overdue': {
+    bg: 'Просрочена',
+    en: 'Overdue',
+  },
+  'invoices.paymentSection': {
+    bg: 'Плащане',
+    en: 'Payment',
+  },
+  'invoices.paymentMethodCash': {
+    bg: 'В брой',
+    en: 'Cash',
+  },
+  'invoices.paymentMethodBankTransfer': {
+    bg: 'Банков превод',
+    en: 'Bank transfer',
+  },
+  'invoices.paymentDueDate': {
+    bg: 'Срок за плащане',
+    en: 'Payment due date',
+  },
+  'invoices.markAsPaid': {
+    bg: 'Маркирай като платена',
+    en: 'Mark as paid',
+  },
+  'invoices.paidOn': {
+    bg: 'Платена на',
+    en: 'Paid on',
+  },
+  'invoices.overdueSince': {
+    bg: 'Просрочена от',
+    en: 'Overdue since',
   },
   'invoices.downloadError': {
     bg: 'Не можах да изтегля файла',

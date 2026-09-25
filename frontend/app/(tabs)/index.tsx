@@ -52,6 +52,7 @@ export default function HomeScreen() {
   // Revenue form
   const [fiscalRevenue, setFiscalRevenue] = useState('');
   const [pocketMoney, setPocketMoney] = useState('');
+  const [cardRevenue, setCardRevenue] = useState('');
   const [revenueVatRate, setRevenueVatRate] = useState(20);
   const [revenueDate, setRevenueDate] = useState(new Date());
   // Shared across the revenue/expense/personal-expense modals below - only
@@ -88,10 +89,12 @@ export default function HomeScreen() {
       const data = await api.getRevenueByDate(dateStr);
       setFiscalRevenue(data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
       setPocketMoney(data.pocket_money > 0 ? data.pocket_money.toString() : '');
+      setCardRevenue(data.card_revenue > 0 ? data.card_revenue.toString() : '');
       setRevenueVatRate(data.vat_rate_percent || 20);
     } catch (error) {
       setFiscalRevenue('');
       setPocketMoney('');
+      setCardRevenue('');
       setRevenueVatRate(20);
     }
   }, []);
@@ -240,11 +243,13 @@ export default function HomeScreen() {
         date: format(revenueDate, 'yyyy-MM-dd'),
         fiscal_revenue: parseFloat(fiscalRevenue) || 0,
         pocket_money: parseFloat(pocketMoney) || 0,
+        card_revenue: parseFloat(cardRevenue) || 0,
         vat_rate_percent: revenueVatRate,
       });
       setRevenueModalVisible(false);
       setFiscalRevenue('');
       setPocketMoney('');
+      setCardRevenue('');
       setRevenueVatRate(20);
       setRevenueDate(new Date());
       loadData();
@@ -327,6 +332,29 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Cash vs Card breakdown of the fiscalized revenue */}
+        <View style={styles.summaryContainer}>
+          <View style={[styles.summaryCard, styles.cashCard]}>
+            <View style={styles.cardIcon}>
+              <Ionicons name="cash-outline" size={24} color="#10B981" />
+            </View>
+            <Text style={styles.cardLabel}>{t('home.cashRevenue')}</Text>
+            <Text style={[styles.cardValue, { color: '#10B981' }]}>
+              {(summary?.total_cash_revenue || 0).toFixed(2)} €
+            </Text>
+          </View>
+
+          <View style={[styles.summaryCard, styles.cardCard]}>
+            <View style={styles.cardIcon}>
+              <Ionicons name="card-outline" size={24} color="#3B82F6" />
+            </View>
+            <Text style={styles.cardLabel}>{t('home.cardRevenue')}</Text>
+            <Text style={[styles.cardValue, { color: '#3B82F6' }]}>
+              {(summary?.total_card_revenue || 0).toFixed(2)} €
+            </Text>
+          </View>
+        </View>
+
         {/* VAT Card */}
         <View style={styles.vatCard}>
           <View style={styles.vatHeader}>
@@ -347,6 +375,35 @@ export default function HomeScreen() {
             </View>
           </View>
         </View>
+
+        {/* Unpaid supplier invoices reminder - company-wide, not scoped to
+            this month, since money owed from any past period is still owed */}
+        {(summary?.unpaid_invoice_count || 0) > 0 && (
+          <TouchableOpacity
+            style={[styles.unpaidCard, (summary?.overdue_invoice_count || 0) > 0 && styles.unpaidCardOverdue]}
+            onPress={() => router.push({ pathname: '/(tabs)/invoices', params: { paymentFilter: 'unpaid' } })}
+            activeOpacity={0.8}
+          >
+            <View style={styles.unpaidHeader}>
+              <Ionicons
+                name={(summary?.overdue_invoice_count || 0) > 0 ? 'alert-circle' : 'time-outline'}
+                size={24}
+                color={(summary?.overdue_invoice_count || 0) > 0 ? '#EF4444' : '#F59E0B'}
+              />
+              <Text style={styles.unpaidTitle}>{t('home.unpaidInvoices')}</Text>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </View>
+            <Text style={[styles.unpaidValue, { color: (summary?.overdue_invoice_count || 0) > 0 ? '#EF4444' : '#F59E0B' }]}>
+              {(summary?.total_unpaid_amount || 0).toFixed(2)} €
+            </Text>
+            <Text style={styles.unpaidSubtitle}>
+              {summary?.unpaid_invoice_count} {t('home.unpaidInvoicesCount')}
+              {(summary?.overdue_invoice_count || 0) > 0
+                ? ` · ${summary?.overdue_invoice_count} ${t('home.overdueInvoicesCount')}`
+                : ''}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* Average Daily Turnover - taps through to the same stat in Statistics,
             broken down by period, for deeper business analysis */}
@@ -664,6 +721,19 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>{t('home.cardRevenueLabel')} (€)</Text>
+              <TextInput
+                style={styles.input}
+                value={cardRevenue}
+                onChangeText={setCardRevenue}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor="#64748B"
+              />
+              <Text style={styles.inputHint}>{t('home.cardRevenueHint')}</Text>
+            </View>
+
+            <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>{t('home.vatRate')}</Text>
               <View style={styles.vatRateRow}>
                 {[20, 9, 0].map((rate) => (
@@ -903,6 +973,46 @@ const styles = StyleSheet.create({
   expenseCard: {
     borderLeftWidth: 4,
     borderLeftColor: '#EF4444',
+  },
+  cashCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#10B981',
+  },
+  cardCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#3B82F6',
+  },
+  unpaidCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  unpaidCardOverdue: {
+    borderColor: '#EF4444',
+  },
+  unpaidHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  unpaidTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    marginLeft: 12,
+    flex: 1,
+  },
+  unpaidValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  unpaidSubtitle: {
+    fontSize: 13,
+    color: '#94A3B8',
   },
   cardIcon: {
     width: 40,

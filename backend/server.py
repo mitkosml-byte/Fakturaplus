@@ -262,6 +262,13 @@ class Invoice(BaseModel):
     image_base64: Optional[str] = None
     notes: Optional[str] = None
     items: Optional[List[dict]] = None  # Списък с артикули
+    # Плащане към доставчика - незададено (None) означава "не се следи",
+    # за да не се третират стари фактури (преди тази функционалност) като
+    # неплатени по подразбиране.
+    payment_method: Optional[str] = None  # cash | bank_transfer
+    is_paid: bool = False
+    payment_due_date: Optional[datetime] = None  # само при bank_transfer
+    paid_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 # Invoice Item models
@@ -329,6 +336,8 @@ class InvoiceCreate(BaseModel):
     image_base64: Optional[str] = None
     notes: Optional[str] = None
     items: Optional[List[InvoiceItemCreate]] = None  # Артикули
+    payment_method: Optional[str] = None  # cash | bank_transfer
+    payment_due_date: Optional[str] = None  # само при bank_transfer; ако липсва се изчислява
 
 class InvoiceUpdate(BaseModel):
     supplier: Optional[str] = None
@@ -341,6 +350,9 @@ class InvoiceUpdate(BaseModel):
     protocol_number: Optional[str] = None
     date: Optional[str] = None
     notes: Optional[str] = None
+    payment_method: Optional[str] = None
+    payment_due_date: Optional[str] = None
+    is_paid: Optional[bool] = None
 
 class DailyRevenue(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -349,6 +361,7 @@ class DailyRevenue(BaseModel):
     date: str
     fiscal_revenue: float = 0
     pocket_money: float = 0  # "джобче" - не влиза в ДДС
+    card_revenue: float = 0  # Частта от fiscal_revenue, платена с карта (остатъкът се приема за в брой)
     vat_rate_percent: float = 20.0  # Ставката на фискализирания оборот (20% стандартна, 9% намалена, 0%)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -356,6 +369,7 @@ class DailyRevenueCreate(BaseModel):
     date: str
     fiscal_revenue: float = 0
     pocket_money: float = 0
+    card_revenue: float = 0
     vat_rate_percent: float = 20.0
 
 class NonInvoiceExpense(BaseModel):
@@ -2260,6 +2274,24 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         elif abs(vat_ratio - 0.09) < 0.01:
             invoice_dict["vat_treatment"] = VatTreatment.REDUCED_9
 
+    # Payment tracking - cash purchases settle on the spot, so they mark
+    # themselves paid automatically instead of asking the user to tick a box
+    # for something that's already true. Bank transfer starts unpaid and
+    # gets a due date - the caller's own date if given, otherwise a 14-day
+    # default (common B2B trade credit term), so the reminder has something
+    # to compare against even if nobody set one explicitly.
+    is_paid = False
+    paid_at = None
+    payment_due_date = None
+    if invoice_dict.get("payment_method") == "cash":
+        is_paid = True
+        paid_at = invoice_date
+    elif invoice_dict.get("payment_method") == "bank_transfer":
+        if invoice_dict.get("payment_due_date"):
+            payment_due_date = datetime.fromisoformat(invoice_dict["payment_due_date"].replace("Z", "+00:00"))
+        else:
+            payment_due_date = invoice_date + timedelta(days=14)
+
     # Reverse-charge purchases (services from abroad, ВОП...) need a
     # self-billing протокол по чл.117 ЗДДС, issued within 15 days of the
     # tax point - assign the next sequential number automatically so
@@ -2350,7 +2382,10 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         company_id=company_id,
         date=invoice_date,
         items=items_list,
-        **{k: v for k, v in invoice_dict.items() if k not in ["date", "items"]}
+        is_paid=is_paid,
+        paid_at=paid_at,
+        payment_due_date=payment_due_date,
+        **{k: v for k, v in invoice_dict.items() if k not in ["date", "items", "payment_due_date"]}
     )
     await db.invoices.insert_one(invoice_obj.dict())
     
@@ -2393,8 +2428,10 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
 async def get_invoices(
     supplier: Optional[str] = None,
     invoice_number: Optional[str] = None,
+    search: Optional[str] = None,  # matches supplier OR invoice_number, unlike the two above which AND together
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    payment_status: Optional[str] = None,  # paid | unpaid | overdue
     current_user: User = Depends(get_current_user)
 ):
     _, query = await get_company_scope(current_user)
@@ -2403,6 +2440,9 @@ async def get_invoices(
         query["supplier"] = {"$regex": re.escape(supplier), "$options": "i"}
     if invoice_number:
         query["invoice_number"] = {"$regex": re.escape(invoice_number), "$options": "i"}
+    if search:
+        pattern = {"$regex": re.escape(search), "$options": "i"}
+        query["$or"] = [{"supplier": pattern}, {"invoice_number": pattern}]
     if start_date:
         query["date"] = {"$gte": datetime.fromisoformat(start_date.replace("Z", "+00:00"))}
     if end_date:
@@ -2410,6 +2450,15 @@ async def get_invoices(
             query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
         else:
             query["date"] = {"$lte": datetime.fromisoformat(end_date.replace("Z", "+00:00"))}
+    if payment_status == "paid":
+        query["is_paid"] = True
+    elif payment_status == "unpaid":
+        query["is_paid"] = False
+        query["payment_method"] = "bank_transfer"
+    elif payment_status == "overdue":
+        query["is_paid"] = False
+        query["payment_method"] = "bank_transfer"
+        query["payment_due_date"] = {"$lt": datetime.now(timezone.utc)}
 
     invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
     return [Invoice(**inv) for inv in invoices]
@@ -2441,11 +2490,26 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     update_data = {k: v for k, v in invoice_update.dict().items() if v is not None}
     if "date" in update_data:
         update_data["date"] = datetime.fromisoformat(update_data["date"].replace("Z", "+00:00"))
+    if "payment_due_date" in update_data:
+        update_data["payment_due_date"] = datetime.fromisoformat(update_data["payment_due_date"].replace("Z", "+00:00"))
 
     company_id, scope = await get_company_scope(current_user)
     existing = await db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+
+    # Same auto-paid/due-date rules as on create, so switching an invoice's
+    # payment method later behaves the same as picking it up front.
+    cash_auto_paid = update_data.get("payment_method") == "cash" and "is_paid" not in update_data
+    if cash_auto_paid:
+        update_data["is_paid"] = True
+        update_data["paid_at"] = update_data.get("date", existing["date"])  # paid on the spot, at invoice date
+    if update_data.get("payment_method") == "bank_transfer" and "payment_due_date" not in update_data and not existing.get("payment_due_date"):
+        update_data["payment_due_date"] = update_data.get("date", existing["date"]) + timedelta(days=14)
+    # Ticking "is_paid" directly (the passive tick-box path) stamps/clears
+    # paid_at to "now" - when the user actually confirmed the payment.
+    if "is_paid" in update_data and not cash_auto_paid:
+        update_data["paid_at"] = datetime.now(timezone.utc) if update_data["is_paid"] else None
 
     # Newly switched to reverse charge and no протокол yet - assign one,
     # same as on create.
@@ -2518,11 +2582,13 @@ async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User =
             {"$set": {
                 "fiscal_revenue": revenue.fiscal_revenue,
                 "pocket_money": revenue.pocket_money,
+                "card_revenue": revenue.card_revenue,
                 "vat_rate_percent": revenue.vat_rate_percent,
             }}
         )
         existing["fiscal_revenue"] = revenue.fiscal_revenue
         existing["pocket_money"] = revenue.pocket_money
+        existing["card_revenue"] = revenue.card_revenue
         existing["vat_rate_percent"] = revenue.vat_rate_percent
         existing.setdefault("company_id", company_id)
         return DailyRevenue(**existing)
@@ -2533,6 +2599,7 @@ async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User =
         date=revenue.date,
         fiscal_revenue=revenue.fiscal_revenue,
         pocket_money=revenue.pocket_money,
+        card_revenue=revenue.card_revenue,
         vat_rate_percent=revenue.vat_rate_percent
     )
     await db.daily_revenue.insert_one(revenue_obj.dict())
@@ -2568,12 +2635,14 @@ async def get_revenue_by_date(date: str, current_user: User = Depends(get_curren
             "date": date,
             "fiscal_revenue": existing.get("fiscal_revenue", 0),
             "pocket_money": existing.get("pocket_money", 0),
+            "card_revenue": existing.get("card_revenue", 0),
             "vat_rate_percent": existing.get("vat_rate_percent", 20.0)
         }
     return {
         "date": date,
         "fiscal_revenue": 0,
         "pocket_money": 0,
+        "card_revenue": 0,
         "vat_rate_percent": 20.0
     }
 
@@ -3006,11 +3075,31 @@ async def get_summary(
 
     invoices = await db.invoices.find(inv_query, {"_id": 0, "total_amount": 1, "vat_amount": 1}).to_list(1000)
 
+    # Outstanding payables (what's currently owed to suppliers) - always
+    # company-wide, never scoped to the period filter above: an invoice from
+    # two months ago that's still unpaid is still owed today, so it would be
+    # misleading to only surface it while browsing that particular month.
+    unpaid_query = {**scope, "payment_method": "bank_transfer", "is_paid": False}
+    unpaid_invoices = await db.invoices.find(unpaid_query, {"_id": 0, "total_amount": 1, "payment_due_date": 1}).to_list(1000)
+    now_ts = datetime.now(timezone.utc)
+    # Mongo drivers hand back naive UTC datetimes by default (no tz_aware
+    # flag set on the client), which can't be compared directly to an
+    # aware datetime.now(timezone.utc) - same fix as the session-expiry
+    # check above.
+    def _is_overdue(inv):
+        due = inv.get("payment_due_date")
+        if not due:
+            return False
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=timezone.utc)
+        return due < now_ts
+    overdue_invoices = [inv for inv in unpaid_invoices if _is_overdue(inv)]
+
     # Get daily revenues
     rev_query = dict(scope)
     if date_query:
         rev_query["date"] = date_query
-    revenues = await db.daily_revenue.find(rev_query, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1}).to_list(1000)
+    revenues = await db.daily_revenue.find(rev_query, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1, "card_revenue": 1, "vat_rate_percent": 1}).to_list(1000)
 
     # Get expenses
     exp_query = dict(scope)
@@ -3031,6 +3120,15 @@ async def get_summary(
     total_fiscal_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues)
     total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues)
     total_expenses = sum(e.get("amount", 0) for e in expenses)
+
+    # Card portion of the fiscalized revenue; everything else (the rest of
+    # fiscal_revenue plus all of pocket_money, which is cash by definition)
+    # counts as cash.
+    total_card_revenue = sum(r.get("card_revenue", 0) for r in revenues)
+    total_cash_revenue = total_fiscal_revenue - total_card_revenue + total_pocket_money
+
+    total_unpaid_amount = sum(inv.get("total_amount", 0) for inv in unpaid_invoices)
+    total_overdue_amount = sum(inv.get("total_amount", 0) for inv in overdue_invoices)
 
     # ДДС от фискализиран оборот - изчислено по действителната ставка на
     # всеки запис (20% стандартна, 9% намалена, 0% и т.н.), а не с фиксирано
@@ -3063,7 +3161,13 @@ async def get_summary(
         "total_income": round(total_income, 2),
         "total_expense": round(total_expense, 2),
         "profit": round(total_income - total_expense, 2),
-        "invoice_count": len(invoices)
+        "invoice_count": len(invoices),
+        "total_cash_revenue": round(total_cash_revenue, 2),
+        "total_card_revenue": round(total_card_revenue, 2),
+        "total_unpaid_amount": round(total_unpaid_amount, 2),
+        "unpaid_invoice_count": len(unpaid_invoices),
+        "total_overdue_amount": round(total_overdue_amount, 2),
+        "overdue_invoice_count": len(overdue_invoices),
     }
 
 @api_router.get("/statistics/chart-data")

@@ -158,19 +158,23 @@ class ApiService {
   async getInvoices(params?: {
     supplier?: string;
     invoice_number?: string;
+    search?: string;
     start_date?: string;
     end_date?: string;
+    payment_status?: 'paid' | 'unpaid' | 'overdue';
   }): Promise<Invoice[]> {
     const queryParams = new URLSearchParams();
     if (params?.supplier) queryParams.set('supplier', params.supplier);
     if (params?.invoice_number) queryParams.set('invoice_number', params.invoice_number);
+    if (params?.search) queryParams.set('search', params.search);
     if (params?.start_date) queryParams.set('start_date', params.start_date);
     if (params?.end_date) queryParams.set('end_date', params.end_date);
+    if (params?.payment_status) queryParams.set('payment_status', params.payment_status);
     const query = queryParams.toString();
     return this.fetch(`/invoices${query ? `?${query}` : ''}`);
   }
 
-  async createInvoice(invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at'>): Promise<Invoice> {
+  async createInvoice(invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at' | 'is_paid' | 'paid_at'>): Promise<Invoice> {
     return this.fetch('/invoices', {
       method: 'POST',
       body: JSON.stringify(invoice),
@@ -205,7 +209,7 @@ class ApiService {
     return this.fetch(`/daily-revenue${query ? `?${query}` : ''}`);
   }
 
-  async createDailyRevenue(revenue: { date: string; fiscal_revenue: number; pocket_money: number; vat_rate_percent?: number }): Promise<DailyRevenue> {
+  async createDailyRevenue(revenue: { date: string; fiscal_revenue: number; pocket_money: number; card_revenue?: number; vat_rate_percent?: number }): Promise<DailyRevenue> {
     return this.fetch('/daily-revenue', {
       method: 'POST',
       body: JSON.stringify(revenue),
@@ -329,6 +333,7 @@ class ApiService {
     date: string;
     fiscal_revenue: number;
     pocket_money: number;
+    card_revenue: number;
     vat_rate_percent: number;
   }> {
     return this.fetch(`/daily-revenue/by-date/${date}`);

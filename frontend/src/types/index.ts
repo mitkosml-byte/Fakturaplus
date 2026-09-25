@@ -55,6 +55,8 @@ export type VatTreatment =
   | 'reverse_charge'
   | 'outside_scope';
 
+export type PaymentMethod = 'cash' | 'bank_transfer';
+
 export interface Invoice {
   id: string;
   user_id: string;
@@ -71,6 +73,10 @@ export interface Invoice {
   image_base64?: string;
   notes?: string;
   items?: InvoiceItemCreate[];
+  payment_method?: PaymentMethod;
+  is_paid: boolean;
+  payment_due_date?: string;
+  paid_at?: string;
   created_at: string;
 }
 
@@ -81,6 +87,7 @@ export interface DailyRevenue {
   date: string;
   fiscal_revenue: number;
   pocket_money: number;
+  card_revenue: number;
   vat_rate_percent: number;
   created_at: string;
 }
@@ -129,6 +136,12 @@ export interface Summary {
   total_expense: number;
   profit: number;
   invoice_count: number;
+  total_cash_revenue: number;
+  total_card_revenue: number;
+  total_unpaid_amount: number;
+  unpaid_invoice_count: number;
+  total_overdue_amount: number;
+  overdue_invoice_count: number;
 }
 
 export interface ChartDataPoint {

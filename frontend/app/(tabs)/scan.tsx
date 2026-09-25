@@ -18,7 +18,7 @@ import { Alert } from '../../src/utils/alert';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { api } from '../../src/services/api';
-import { OCRResult, InvoiceItemCreate, VatTreatment } from '../../src/types';
+import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod } from '../../src/types';
 import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 
@@ -57,6 +57,9 @@ export default function ScanScreen() {
   const [invoiceDate, setInvoiceDate] = useState(new Date());
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [items, setItems] = useState<EditableItem[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>('');
+  const [paymentDueDate, setPaymentDueDate] = useState<Date | null>(null);
+  const [isDueDatePickerVisible, setDueDatePickerVisible] = useState(false);
 
   // Suggest a VAT treatment from the amounts (mirrors the backend's own
   // fallback) so the picker isn't just left blank, but only until the user
@@ -205,6 +208,8 @@ export default function ScanScreen() {
         image_base64: capturedImage || undefined,
         notes: notes || undefined,
         items: itemsPayload.length > 0 ? itemsPayload : undefined,
+        payment_method: paymentMethod || undefined,
+        payment_due_date: paymentMethod === 'bank_transfer' && paymentDueDate ? paymentDueDate.toISOString() : undefined,
       });
       if (saved.protocol_number) {
         Alert.alert(t('common.success'), `${t('msg.invoiceSaved')}\n\n${t('scan.protocolAssigned')} ${saved.protocol_number}`);
@@ -245,6 +250,8 @@ export default function ScanScreen() {
     setNotes('');
     setItems([]);
     setInvoiceDate(new Date());
+    setPaymentMethod('');
+    setPaymentDueDate(null);
   };
 
   return (
@@ -462,6 +469,57 @@ export default function ScanScreen() {
                       </View>
                     )}
                   </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
+                    <View style={styles.vatTreatmentGrid}>
+                      {(['cash', 'bank_transfer'] as PaymentMethod[]).map((option) => (
+                        <TouchableOpacity
+                          key={option}
+                          style={[styles.vatTreatmentChip, paymentMethod === option && styles.vatTreatmentChipActive]}
+                          onPress={() => setPaymentMethod(option)}
+                        >
+                          <Text style={[styles.vatTreatmentChipText, paymentMethod === option && styles.vatTreatmentChipTextActive]}>
+                            {t(`scan.paymentMethod.${option}`)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    {paymentMethod === 'cash' && (
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                        <Text style={styles.protocolNoteText}>{t('scan.cashAutoPaidNote')}</Text>
+                      </View>
+                    )}
+                    {paymentMethod === 'bank_transfer' && (
+                      <TouchableOpacity
+                        style={[styles.dateInputButton, { marginTop: 10 }]}
+                        onPress={() => setDueDatePickerVisible(true)}
+                      >
+                        <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                        <Text style={styles.dateInputText}>
+                          {paymentDueDate
+                            ? format(paymentDueDate, 'd MMMM yyyy', { locale: dateLocale })
+                            : t('scan.paymentDueDateDefault')}
+                        </Text>
+                        <Ionicons name="chevron-down" size={20} color="#64748B" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  <DateTimePickerModal
+                    isVisible={isDueDatePickerVisible}
+                    mode="date"
+                    date={paymentDueDate || new Date(invoiceDate.getTime() + 14 * 24 * 60 * 60 * 1000)}
+                    onConfirm={(date) => {
+                      setPaymentDueDate(date);
+                      setDueDatePickerVisible(false);
+                    }}
+                    onCancel={() => setDueDatePickerVisible(false)}
+                    confirmTextIOS={t('common.select')}
+                    cancelTextIOS={t('common.cancel')}
+                    locale={language}
+                  />
 
                   {/* Line items - pre-filled from OCR, editable */}
                   <View style={styles.itemsSection}>

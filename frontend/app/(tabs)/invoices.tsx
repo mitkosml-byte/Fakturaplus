@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
@@ -65,6 +65,7 @@ function getPeriodRange(
 export default function InvoicesScreen() {
   const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
+  const params = useLocalSearchParams<{ paymentFilter?: string }>();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -82,6 +83,15 @@ export default function InvoicesScreen() {
   const [startPickerVisible, setStartPickerVisible] = useState(false);
   const [endPickerVisible, setEndPickerVisible] = useState(false);
   const [showOnlyEikIssues, setShowOnlyEikIssues] = useState(false);
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'overdue'>('all');
+
+  // Lets the Home dashboard's unpaid-invoices reminder deep-link straight
+  // into this filter instead of always landing on "all".
+  useEffect(() => {
+    if (params.paymentFilter === 'paid' || params.paymentFilter === 'unpaid' || params.paymentFilter === 'overdue') {
+      setPaymentFilter(params.paymentFilter);
+    }
+  }, [params.paymentFilter]);
 
   // Reverse-charge suppliers are foreign and don't have a Bulgarian ЕИК,
   // so they're excluded from this check on purpose.
@@ -103,15 +113,16 @@ export default function InvoicesScreen() {
     try {
       const { start, end } = getPeriodRange(periodPreset, customStartDate, customEndDate);
       const data = await api.getInvoices({
-        ...(searchQuery ? { supplier: searchQuery } : {}),
+        ...(searchQuery ? { search: searchQuery } : {}),
         ...(start ? { start_date: start } : {}),
         ...(end ? { end_date: end } : {}),
+        ...(paymentFilter !== 'all' ? { payment_status: paymentFilter } : {}),
       });
       setInvoices(data);
     } catch (error) {
       console.error('Error loading invoices:', error);
     }
-  }, [searchQuery, periodPreset, customStartDate, customEndDate]);
+  }, [searchQuery, periodPreset, customStartDate, customEndDate, paymentFilter]);
 
   // Tab screens stay mounted, so returning here (e.g. after scanning and
   // saving a new invoice) doesn't remount the screen - only re-fetching on
@@ -148,6 +159,21 @@ export default function InvoicesScreen() {
       });
     return () => { cancelled = true; };
   }, [selectedInvoice]);
+
+  const [updatingPayment, setUpdatingPayment] = useState(false);
+
+  const handleTogglePaid = async (invoice: Invoice) => {
+    setUpdatingPayment(true);
+    try {
+      const updated = await api.updateInvoice(invoice.id, { is_paid: !invoice.is_paid });
+      setSelectedInvoice(updated);
+      setInvoices((prev) => prev.map((inv) => (inv.id === updated.id ? updated : inv)));
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setUpdatingPayment(false);
+    }
+  };
 
   const handleDeleteInvoice = async (id: string) => {
     Alert.alert(
@@ -210,6 +236,19 @@ export default function InvoicesScreen() {
           <Text style={styles.eikWarningBadgeText}>{t('invoices.missingEik')}</Text>
         </View>
       )}
+
+      {item.payment_method === 'bank_transfer' && !item.is_paid && (() => {
+        const overdue = !!item.payment_due_date && new Date(item.payment_due_date).getTime() < Date.now();
+        return (
+          <View style={[styles.eikWarningBadge, overdue && styles.overdueBadge]}>
+            <Ionicons name={overdue ? 'alert-circle' : 'time-outline'} size={13} color={overdue ? '#EF4444' : '#F59E0B'} />
+            <Text style={[styles.eikWarningBadgeText, overdue && { color: '#EF4444' }]}>
+              {overdue ? t('invoices.overdue') : t('invoices.unpaid')}
+              {item.payment_due_date ? ` · ${formatDate(item.payment_due_date)}` : ''}
+            </Text>
+          </View>
+        );
+      })()}
 
       <View style={styles.invoiceDetails}>
         <View style={styles.detailRow}>
@@ -357,6 +396,31 @@ export default function InvoicesScreen() {
               />
             </View>
           )}
+
+          {/* Payment status filter */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.periodChipsRow}
+            contentContainerStyle={styles.periodChipsContent}
+          >
+            {([
+              { key: 'all', label: t('invoices.paymentFilterAll') },
+              { key: 'unpaid', label: t('invoices.paymentFilterUnpaid') },
+              { key: 'overdue', label: t('invoices.paymentFilterOverdue') },
+              { key: 'paid', label: t('invoices.paymentFilterPaid') },
+            ] as const).map((opt) => (
+              <TouchableOpacity
+                key={opt.key}
+                style={[styles.periodChip, paymentFilter === opt.key && styles.periodChipActive]}
+                onPress={() => setPaymentFilter(opt.key)}
+              >
+                <Text style={[styles.periodChipText, paymentFilter === opt.key && styles.periodChipTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
 
           {/* ЕИК issues banner */}
           {eikIssueCount > 0 && (
@@ -512,6 +576,48 @@ export default function InvoicesScreen() {
                   <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
                   <Text style={styles.totalSectionValue}>{selectedInvoice.total_amount.toFixed(2)} €</Text>
                 </View>
+
+                {selectedInvoice.payment_method && (() => {
+                  const overdue = !selectedInvoice.is_paid && !!selectedInvoice.payment_due_date
+                    && new Date(selectedInvoice.payment_due_date).getTime() < Date.now();
+                  return (
+                    <View style={[styles.paymentSection, overdue && styles.paymentSectionOverdue]}>
+                      <View style={styles.paymentSectionHeader}>
+                        <Text style={styles.detailSectionLabel}>{t('invoices.paymentSection')}</Text>
+                        <Text style={styles.paymentMethodTag}>
+                          {selectedInvoice.payment_method === 'cash'
+                            ? t('invoices.paymentMethodCash')
+                            : t('invoices.paymentMethodBankTransfer')}
+                        </Text>
+                      </View>
+
+                      {selectedInvoice.payment_method === 'bank_transfer' && (
+                        <>
+                          {selectedInvoice.payment_due_date && !selectedInvoice.is_paid && (
+                            <Text style={[styles.paymentDueText, overdue && { color: '#EF4444' }]}>
+                              {overdue ? t('invoices.overdueSince') : t('invoices.paymentDueDate')}: {formatDate(selectedInvoice.payment_due_date)}
+                            </Text>
+                          )}
+                          <TouchableOpacity
+                            style={styles.paidCheckboxRow}
+                            onPress={() => handleTogglePaid(selectedInvoice)}
+                            disabled={updatingPayment}
+                          >
+                            <View style={[styles.checkbox, selectedInvoice.is_paid && styles.checkboxChecked]}>
+                              {selectedInvoice.is_paid && <Ionicons name="checkmark" size={16} color="white" />}
+                            </View>
+                            <Text style={styles.paidCheckboxLabel}>
+                              {selectedInvoice.is_paid && selectedInvoice.paid_at
+                                ? `${t('invoices.paidOn')} ${formatDate(selectedInvoice.paid_at)}`
+                                : t('invoices.markAsPaid')}
+                            </Text>
+                            {updatingPayment && <ActivityIndicator size="small" color="#8B5CF6" />}
+                          </TouchableOpacity>
+                        </>
+                      )}
+                    </View>
+                  );
+                })()}
 
                 {selectedInvoice.items && selectedInvoice.items.length > 0 && (() => {
                   const items = selectedInvoice.items!;
@@ -772,6 +878,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#F59E0B',
   },
+  overdueBadge: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+  },
   eikBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -990,6 +1099,60 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#8B5CF6',
+  },
+  paymentSection: {
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  paymentSectionOverdue: {
+    borderColor: '#EF4444',
+  },
+  paymentSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  paymentMethodTag: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8B5CF6',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  paymentDueText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginBottom: 10,
+  },
+  paidCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#64748B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#10B981',
+    borderColor: '#10B981',
+  },
+  paidCheckboxLabel: {
+    fontSize: 14,
+    color: 'white',
+    flex: 1,
   },
   itemsSection: {
     marginBottom: 16,
