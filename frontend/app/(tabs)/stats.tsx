@@ -877,6 +877,7 @@ export default function StatsScreen() {
                         barWidth={barWidth}
                         spacing={spacing}
                         initialSpacing={spacing}
+                        endSpacing={spacing}
                         noOfSections={4}
                         barBorderRadius={4}
                         frontColor="#10B981"
@@ -915,6 +916,7 @@ export default function StatsScreen() {
                         barWidth={barWidth}
                         spacing={spacing}
                         initialSpacing={spacing}
+                        endSpacing={spacing}
                         noOfSections={4}
                         barBorderRadius={4}
                         frontColor="#EF4444"
@@ -1307,6 +1309,7 @@ export default function StatsScreen() {
                             barWidth={barWidth}
                             spacing={spacing}
                             initialSpacing={spacing}
+                        endSpacing={spacing}
                             noOfSections={4}
                             barBorderRadius={4}
                             yAxisColor="#334155"
