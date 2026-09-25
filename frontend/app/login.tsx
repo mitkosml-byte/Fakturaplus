@@ -218,6 +218,17 @@ export default function LoginScreen() {
                   </TouchableOpacity>
                 )}
 
+                {authMode === 'login' && (
+                  <TouchableOpacity onPress={() => setAuthMode('register')} style={styles.newUserHint}>
+                    <Ionicons name="information-circle-outline" size={16} color="#8B5CF6" />
+                    <Text style={styles.newUserHintText}>
+                      {language === 'bg'
+                        ? 'Получихте покана или сте нов потребител? Регистрирайте се тук'
+                        : 'Got an invitation or new here? Register here'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
                 {authMode === 'register' && !showInviteCode && (
                   <TouchableOpacity onPress={() => setShowInviteCode(true)} style={styles.inviteCodeToggle}>
                     <Ionicons name="key-outline" size={16} color="#8B5CF6" />
@@ -412,6 +423,20 @@ const styles = StyleSheet.create({
     color: '#8B5CF6',
     fontSize: 13,
     fontWeight: '500',
+  },
+  newUserHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 16,
+    padding: 8,
+  },
+  newUserHintText: {
+    color: '#8B5CF6',
+    fontSize: 13,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   inviteCodeToggle: {
     flexDirection: 'row',
