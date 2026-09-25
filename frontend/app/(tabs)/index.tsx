@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
@@ -31,7 +31,8 @@ export default function HomeScreen() {
   const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
   const { isOwner } = useAuth();
-  
+  const router = useRouter();
+
   const [summary, setSummary] = useState<Summary | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [revenueModalVisible, setRevenueModalVisible] = useState(false);
@@ -346,6 +347,26 @@ export default function HomeScreen() {
             </View>
           </View>
         </View>
+
+        {/* Average Daily Turnover - taps through to the same stat in Statistics,
+            broken down by period, for deeper business analysis */}
+        <TouchableOpacity
+          style={styles.avgTurnoverCard}
+          onPress={() => router.push({ pathname: '/(tabs)/stats', params: { period: 'month' } })}
+          activeOpacity={0.8}
+        >
+          <View style={styles.avgTurnoverHeader}>
+            <Ionicons name="speedometer" size={24} color="#3B82F6" />
+            <Text style={styles.avgTurnoverTitle}>{t('home.avgDailyTurnover')}</Text>
+            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+          </View>
+          <Text style={styles.avgTurnoverValue}>
+            {(((summary?.total_income || 0)) / new Date().getDate()).toFixed(2)} €
+          </Text>
+          <Text style={styles.avgTurnoverSubtitle}>
+            {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(new Date().getDate()))}
+          </Text>
+        </TouchableOpacity>
 
         {/* Stats Overview */}
         <View style={styles.statsGrid}>
@@ -943,6 +964,36 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#E2E8F0',
     fontWeight: '500',
+  },
+  avgTurnoverCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+  },
+  avgTurnoverHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  avgTurnoverTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    marginLeft: 12,
+    flex: 1,
+  },
+  avgTurnoverValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#3B82F6',
+    marginBottom: 4,
+  },
+  avgTurnoverSubtitle: {
+    fontSize: 13,
+    color: '#94A3B8',
   },
   statsGrid: {
     flexDirection: 'row',

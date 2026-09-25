@@ -82,6 +82,14 @@ export const translations: Translations = {
     bg: 'Дневен оборот',
     en: 'Daily Revenue',
   },
+  'home.avgDailyTurnover': {
+    bg: 'Среден оборот на ден',
+    en: 'Average Daily Turnover',
+  },
+  'home.avgDailyTurnoverSubtitle': {
+    bg: 'този месец, за {days} дни · виж по периоди',
+    en: 'this month, over {days} days · view by period',
+  },
   'home.expenses': {
     bg: 'В канала',
     en: 'Expenses',
@@ -1235,6 +1243,14 @@ export const translations: Translations = {
   'stats.priceChange': {
     bg: 'Промяна в цена',
     en: 'Price Change',
+  },
+  'stats.avgDailyTurnover': {
+    bg: 'Среден оборот на ден',
+    en: 'Average Daily Turnover',
+  },
+  'stats.avgDailyTurnoverSubtitle': {
+    bg: 'средно за избрания период ({days} дни)',
+    en: 'averaged over the selected period ({days} days)',
   },
   'stats.priceInflation': {
     bg: 'Обща инфлация на цените',

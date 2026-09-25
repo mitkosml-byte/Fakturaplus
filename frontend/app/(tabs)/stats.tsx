@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { api } from '../../src/services/api';
 import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse } from '../../src/types';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
@@ -27,6 +27,15 @@ const chartWidth = width - 80;
 const pieChartRadius = (width - 80) / 3;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
+// Mirrors the rolling-window lengths GET /statistics/chart-data uses on the
+// backend (now - timedelta(days=N)) - needed here to average turnover over
+// the whole window, not just the days that happen to have entries.
+const PERIOD_DAY_COUNT: Record<'week' | 'month' | 'year', number> = {
+  week: 7,
+  month: 30,
+  year: 365,
+};
+
 // Color palette for charts
 const CHART_COLORS = [
   '#8B5CF6', '#10B981', '#F59E0B', '#EF4444', '#3B82F6',
@@ -36,9 +45,19 @@ const CHART_COLORS = [
 export default function StatsScreen() {
   const { t } = useTranslation();
   const { hasPermission, isOwner } = useAuth();
+  const params = useLocalSearchParams<{ period?: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
+
+  // Lets other screens (e.g. the Home dashboard's average-turnover card)
+  // deep-link straight into a specific period here instead of always
+  // landing on the default "week" view.
+  useEffect(() => {
+    if (params.period === 'week' || params.period === 'month' || params.period === 'year') {
+      setPeriod(params.period);
+    }
+  }, [params.period]);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'suppliers' | 'items'>('overview');
   
@@ -778,6 +797,24 @@ export default function StatsScreen() {
                       </Text>
                     </TouchableOpacity>
                   ))}
+                </View>
+
+                {/* Average Daily Turnover - reacts to the same period selector above,
+                    so it doubles as period-by-period business analysis rather than
+                    a single fixed number. Divided by calendar days in the rolling
+                    window (not just days with entries), matching the backend's
+                    week/month/year window definition in getChartData. */}
+                <View style={styles.avgTurnoverStatCard}>
+                  <View style={styles.avgTurnoverStatHeader}>
+                    <Ionicons name="speedometer" size={24} color="#3B82F6" />
+                    <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
+                  </View>
+                  <Text style={styles.avgTurnoverStatValue}>
+                    {(chartData.reduce((sum, d) => sum + d.income, 0) / PERIOD_DAY_COUNT[period]).toFixed(2)} €
+                  </Text>
+                  <Text style={styles.avgTurnoverStatSubtitle}>
+                    {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(PERIOD_DAY_COUNT[period]))}
+                  </Text>
                 </View>
 
                 {/* Summary Cards */}
@@ -1934,6 +1971,36 @@ const styles = StyleSheet.create({
   },
   periodButtonTextActive: {
     color: 'white',
+  },
+  avgTurnoverStatCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+  },
+  avgTurnoverStatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  avgTurnoverStatTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    flex: 1,
+  },
+  avgTurnoverStatValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#3B82F6',
+    marginBottom: 4,
+  },
+  avgTurnoverStatSubtitle: {
+    fontSize: 13,
+    color: '#94A3B8',
   },
   summaryGrid: {
     flexDirection: 'row',
