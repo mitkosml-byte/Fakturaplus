@@ -605,6 +605,18 @@ async def ensure_membership(user_id: str, company_id: str, role: str, permission
         upsert=True
     )
 
+async def company_has_other_members(company_id: str, excluding_user_id: str) -> bool:
+    """Whether anyone besides excluding_user_id currently has this company
+    as their active one. Used to let a solo owner (e.g. of the throwaway
+    company auto-created on registration, before they ever invited or were
+    invited by anyone) leave it or switch away freely - the "transfer
+    ownership first" rule only matters when leaving would actually strand
+    someone else in a company with no owner."""
+    other = await db.users.find_one(
+        {"company_id": company_id, "user_id": {"$ne": excluding_user_id}}, {"_id": 0, "user_id": 1}
+    )
+    return other is not None
+
 async def get_session_token(request: Request) -> Optional[str]:
     # Check cookie first
     session_token = request.cookies.get("session_token")
@@ -1352,13 +1364,16 @@ async def accept_invitation(request: Request, current_user: User = Depends(get_c
     if invitation.get("email") and invitation["email"].lower() != current_user.email.lower():
         raise HTTPException(status_code=403, detail="Тази покана е издадена за друг имейл адрес")
 
-    # Accountant invitations are the one case that doesn't require leaving
-    # your current company first - a счетоводител can hold access to
-    # several client companies at once and switch between them (see
-    # /companies/switch). Every other role keeps the original one-company
-    # rule, unchanged.
+    # Accountant invitations don't require leaving your current company
+    # first - a счетоводител can hold access to several client companies
+    # at once and switch between them (see /companies/switch). Every other
+    # role keeps the one-company rule, UNLESS the current company would be
+    # left with no one in it anyway (e.g. the throwaway company that
+    # registration auto-creates for someone who wasn't invited yet) - in
+    # that case there's no one to strand, so let them switch straight over.
     if invitation["role"] != "accountant" and current_user.company_id:
-        raise HTTPException(status_code=400, detail="Вече сте член на фирма. Първо напуснете текущата фирма.")
+        if await company_has_other_members(current_user.company_id, current_user.user_id):
+            raise HTTPException(status_code=400, detail="Вече сте член на фирма. Първо напуснете текущата фирма.")
 
     invitation_permissions = invitation.get("permissions") or resolve_permissions(invitation["role"], None)
 
@@ -1490,7 +1505,7 @@ async def leave_company(current_user: User = Depends(get_current_user)):
             )
         return {"message": "Успешно напуснахте фирмата"}
 
-    if current_user.role == "owner":
+    if current_user.role == "owner" and await company_has_other_members(current_user.company_id, current_user.user_id):
         raise HTTPException(status_code=400, detail="Титулярят не може да напусне фирмата. Прехвърлете собствеността първо.")
 
     await db.users.update_one(
