@@ -418,6 +418,14 @@ export const translations: Translations = {
     bg: 'Доставчици',
     en: 'Suppliers',
   },
+  'stats.chartNavPrev': {
+    bg: 'Предишни 7 дни',
+    en: 'Previous 7 days',
+  },
+  'stats.chartNavNext': {
+    bg: 'Следващи 7 дни',
+    en: 'Next 7 days',
+  },
   'stats.week': {
     bg: 'Седмица',
     en: 'Week',

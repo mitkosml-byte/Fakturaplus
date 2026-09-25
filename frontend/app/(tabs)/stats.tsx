@@ -58,6 +58,16 @@ export default function StatsScreen() {
       setPeriod(params.period);
     }
   }, [params.period]);
+
+  // The income/expense charts below show a fixed 7-day window instead of
+  // cramming a whole month/year of bars into one view - 0 is the most
+  // recent 7 days, 1 the 7 before those, etc. Reset to the latest window
+  // whenever the period (and therefore the underlying data) changes.
+  const [chartPage, setChartPage] = useState(0);
+  useEffect(() => {
+    setChartPage(0);
+  }, [period]);
+
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'suppliers' | 'items'>('overview');
   
@@ -388,6 +398,23 @@ export default function StatsScreen() {
       </Text>
     ),
   }));
+
+  // Windows both bar charts into a fixed 7-day slice, paged with the
+  // chartPage state below - keeps every bar/label at the same comfortable
+  // width regardless of how many days the selected period actually spans,
+  // instead of squeezing a whole month/year into one cramped view.
+  const CHART_WINDOW_SIZE = 7;
+  const chartTotalPages = Math.max(1, Math.ceil(incomeBarData.length / CHART_WINDOW_SIZE));
+  const clampedChartPage = Math.min(chartPage, chartTotalPages - 1);
+  const chartWindowEnd = incomeBarData.length - clampedChartPage * CHART_WINDOW_SIZE;
+  const chartWindowStart = Math.max(0, chartWindowEnd - CHART_WINDOW_SIZE);
+  const windowedIncomeBarData = incomeBarData.slice(chartWindowStart, chartWindowEnd);
+  const windowedExpenseBarData = expenseBarData.slice(chartWindowStart, chartWindowEnd);
+  const chartRangeLabel = windowedIncomeBarData.length > 0
+    ? (windowedIncomeBarData.length === 1
+        ? windowedIncomeBarData[0].label
+        : `${windowedIncomeBarData[0].label} - ${windowedIncomeBarData[windowedIncomeBarData.length - 1].label}`)
+    : '';
 
   // Small "+12% спрямо миналия месец" style badge for the summary cards
   const renderTrendBadge = (current?: number, previous?: number, higherIsBetter: boolean = true) => {
@@ -853,25 +880,51 @@ export default function StatsScreen() {
                   </View>
                 </View>
 
+                {/* Chart window navigation - only relevant once the period
+                    spans more than one 7-day window (month/year); a plain
+                    week never needs it. */}
+                {chartTotalPages > 1 && (
+                  <View style={styles.chartNavRow}>
+                    <TouchableOpacity
+                      accessibilityLabel={t('stats.chartNavPrev')}
+                      style={[styles.chartNavButton, clampedChartPage >= chartTotalPages - 1 && styles.chartNavButtonDisabled]}
+                      onPress={() => setChartPage((p) => Math.min(chartTotalPages - 1, p + 1))}
+                      disabled={clampedChartPage >= chartTotalPages - 1}
+                    >
+                      <Ionicons name="chevron-back" size={18} color={clampedChartPage >= chartTotalPages - 1 ? '#334155' : '#8B5CF6'} />
+                    </TouchableOpacity>
+                    <Text style={styles.chartNavLabel}>{chartRangeLabel}</Text>
+                    <TouchableOpacity
+                      accessibilityLabel={t('stats.chartNavNext')}
+                      style={[styles.chartNavButton, clampedChartPage === 0 && styles.chartNavButtonDisabled]}
+                      onPress={() => setChartPage((p) => Math.max(0, p - 1))}
+                      disabled={clampedChartPage === 0}
+                    >
+                      <Ionicons name="chevron-forward" size={18} color={clampedChartPage === 0 ? '#334155' : '#8B5CF6'} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+
                 {/* Income Chart */}
                 <View style={styles.chartContainer}>
                   <View style={styles.chartHeader}>
                     <Ionicons name="arrow-up-circle" size={24} color="#10B981" />
                     <Text style={styles.chartTitle}>{t('stats.income')}</Text>
                   </View>
-                  {incomeBarData.length > 0 ? (() => {
-                    // Size bars/spacing to the actual day count so all of them
-                    // fit within the chart's width - a fixed barWidth/spacing
-                    // overflowed past the visible area with a full week/month
-                    // of days, clipping the last bar's label instead of
-                    // shrinking to fit (same fix as the supplier chart below).
+                  {windowedIncomeBarData.length > 0 ? (() => {
+                    // Size bars/spacing to the windowed (max 7) day count so
+                    // all of them fit within the chart's width comfortably -
+                    // a fixed barWidth/spacing overflowed past the visible
+                    // area with a full week's worth of days, clipping the
+                    // last bar's label instead of shrinking to fit (same fix
+                    // as the supplier chart below).
                     const yAxisLabelWidth = 34;
                     const spacing = 8;
                     const plotWidth = chartWidth - yAxisLabelWidth;
-                    const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (incomeBarData.length + 1)) / incomeBarData.length)));
+                    const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (windowedIncomeBarData.length + 1)) / windowedIncomeBarData.length)));
                     return (
                       <BarChart
-                        data={incomeBarData}
+                        data={windowedIncomeBarData}
                         width={plotWidth}
                         height={180}
                         barWidth={barWidth}
@@ -903,14 +956,14 @@ export default function StatsScreen() {
                     <Ionicons name="arrow-down-circle" size={24} color="#EF4444" />
                     <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
                   </View>
-                  {expenseBarData.length > 0 ? (() => {
+                  {windowedExpenseBarData.length > 0 ? (() => {
                     const yAxisLabelWidth = 34;
                     const spacing = 8;
                     const plotWidth = chartWidth - yAxisLabelWidth;
-                    const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (expenseBarData.length + 1)) / expenseBarData.length)));
+                    const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (windowedExpenseBarData.length + 1)) / windowedExpenseBarData.length)));
                     return (
                       <BarChart
-                        data={expenseBarData}
+                        data={windowedExpenseBarData}
                         width={plotWidth}
                         height={180}
                         barWidth={barWidth}
@@ -2064,6 +2117,31 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
+  },
+  chartNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 12,
+  },
+  chartNavButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#1E293B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chartNavButtonDisabled: {
+    opacity: 0.5,
+  },
+  chartNavLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#94A3B8',
+    minWidth: 90,
+    textAlign: 'center',
   },
   chartHeader: {
     flexDirection: 'row',
