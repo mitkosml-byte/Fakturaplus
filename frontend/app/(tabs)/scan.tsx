@@ -172,6 +172,24 @@ export default function ScanScreen() {
           // Keep default date if parsing fails
         }
       }
+
+      // A payment due date printed on the invoice means it's a deferred
+      // (bank transfer) payment, not cash - reading it in also implies the
+      // payment method, so the user doesn't have to separately remember to
+      // pick "Банков превод" after OCR already found the actual due date.
+      // The manual due-date picker stays available below as a fallback for
+      // when the invoice doesn't print one at all.
+      if (result.payment_due_date) {
+        try {
+          const parsedDueDate = new Date(result.payment_due_date);
+          if (!isNaN(parsedDueDate.getTime())) {
+            setPaymentMethod('bank_transfer');
+            setPaymentDueDate(parsedDueDate);
+          }
+        } catch (e) {
+          // Leave payment method unset if parsing fails - manual picker covers it
+        }
+      }
     } catch (error: any) {
       Alert.alert(language === 'bg' ? 'Грешка при сканиране' : 'Scan error', error.message || (language === 'bg' ? 'Моля, опитайте отново' : 'Please try again'));
     } finally {

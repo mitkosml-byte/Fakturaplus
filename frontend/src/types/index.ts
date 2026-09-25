@@ -117,6 +117,7 @@ export interface OCRResult {
   vat_amount: number;
   total_amount: number;
   invoice_date?: string;  // Дата на издаване от фактурата
+  payment_due_date?: string;  // Срок за плащане, ако е отпечатан на фактурата
   items?: OCRItemResult[];  // Разпознати продукти от таблицата с артикули
   corrections?: string[];  // AI корекции
   confidence?: number;  // Увереност в резултата

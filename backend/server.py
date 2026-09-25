@@ -469,6 +469,7 @@ class OCRResult(BaseModel):
     vat_amount: float
     total_amount: float
     invoice_date: Optional[str] = None  # Дата на издаване от фактурата
+    payment_due_date: Optional[str] = None  # Срок за плащане, ако е отпечатан на фактурата
     items: List[OCRItemResult] = []  # Разпознати продукти от таблицата с артикули
     corrections: Optional[List[str]] = None  # Списък с направени корекции
     confidence: Optional[float] = None  # Увереност в резултата (0-1)
@@ -1799,12 +1800,13 @@ async def normalize_item_name(item_name: str, company_id: Optional[str] = None) 
 
     return cleaned, False
 
-def fix_ocr_number_errors(value: str) -> str:
-    """Поправя типични OCR грешки в числа"""
+def fix_ocr_letter_errors(value: str) -> str:
+    """Замества букви, лесно объркваеми с цифри при OCR (без да маха
+    останалите символи - ползва се и за дати, където разделителите
+    -./ трябва да оцелеят)."""
     if not value:
         return value
-    
-    # Типични OCR грешки при числа
+
     fixes = {
         'O': '0',
         'o': '0',
@@ -1821,14 +1823,21 @@ def fix_ocr_number_errors(value: str) -> str:
         'z': '2',
         ',': '.',  # Запетая към точка за десетични
     }
-    
+
     result = value
     for wrong, correct in fixes.items():
         result = result.replace(wrong, correct)
-    
+    return result
+
+def fix_ocr_number_errors(value: str) -> str:
+    """Поправя типични OCR грешки в числа и маха всичко освен цифри и
+    точка - само за суми, НЕ за дати (виж normalize_date, който ползва
+    fix_ocr_letter_errors директно, за да запази разделителите -./)."""
+    if not value:
+        return value
+    result = fix_ocr_letter_errors(value)
     # Премахване на всичко освен цифри и точка
     result = re.sub(r'[^\d.]', '', result)
-    
     return result
 
 def parse_amount(value) -> float:
@@ -1900,10 +1909,11 @@ def normalize_date(date_str: str) -> Optional[str]:
     
     # Почистване
     date_str = date_str.strip()
-    
-    # Поправка на OCR грешки в числата
-    date_str = fix_ocr_number_errors(date_str)
-    
+
+    # Поправка на OCR грешки в числата (само буква->цифра, БЕЗ да маха
+    # разделителите -./, за разлика от fix_ocr_number_errors)
+    date_str = fix_ocr_letter_errors(date_str)
+
     # Различни формати
     patterns = [
         (r'(\d{4})-(\d{1,2})-(\d{1,2})', '%Y-%m-%d'),  # 2024-01-15
@@ -1960,7 +1970,14 @@ async def correct_ocr_data(
         if normalized_date and normalized_date != data.get("invoice_date"):
             corrected["invoice_date"] = normalized_date
             corrections.append(f"Дата нормализирана: '{data['invoice_date']}' → '{normalized_date}'")
-    
+
+    # 3б. Корекция на срок за плащане (ако е разпознат на фактурата)
+    if data.get("payment_due_date"):
+        normalized_due_date = normalize_date(str(data["payment_due_date"]))
+        if normalized_due_date and normalized_due_date != data.get("payment_due_date"):
+            corrected["payment_due_date"] = normalized_due_date
+            corrections.append(f"Срок за плащане нормализиран: '{data['payment_due_date']}' → '{normalized_due_date}'")
+
     # 4. Корекция на суми
     amount_fields = ["amount_without_vat", "vat_amount", "total_amount"]
     for field in amount_fields:
@@ -2046,6 +2063,7 @@ class ClaudeInvoiceExtraction(BaseModel):
     supplier_eik: Optional[str] = Field(default=None, description="ЕИК/Булстат на доставчика, ако е видим на фактурата")
     invoice_number: str = Field(description="Номер на фактурата")
     invoice_date: Optional[str] = Field(default=None, description="Дата на издаване, формат YYYY-MM-DD")
+    payment_due_date: Optional[str] = Field(default=None, description="Срок/падеж за плащане, формат YYYY-MM-DD, само ако е изрично отпечатан на фактурата")
     amount_without_vat: float = Field(description="Данъчна основа / обща сума без ДДС")
     vat_amount: float = Field(description="ДДС (обикновено 20%)")
     total_amount: float = Field(description="Обща сума за плащане с ДДС")
@@ -2068,6 +2086,9 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 Извлечи ВСЕКИ ред от таблицата с артикули - име на продукта, количество, мерна единица, единична цена и обща цена на реда. Не пропускай редове, дори ако таблицата е дълга, частично замъглена или пресечена в кадъра - извлечи всичко, което успееш да разчетеш логично, включително чрез съпоставка със съседни редове и типичния формат на таблицата. Не измисляй артикули, които не съществуват на фактурата.
 
 Имената на артикулите в българските фактури често са във формат "КОД БЪЛГАРСКО ИМЕ/ANGLISH NAME" (напр. "258 ЛУКАНКОВ САЛАМ ЧОРИЗ/LUKANKA SALAMI CHORIZO 20"). За полето "name" връщай САМО българското описание, без водещия числов код и без английския превод след "/" (в примера: "Луканков салам чориз"). Ако артикулът има само едно име (без "/"), използвай него директно.
+
+СРОК ЗА ПЛАЩАНЕ (payment_due_date):
+Много фактури печатат изрично срока/падежа за плащане - текст като "Срок за плащане", "Падеж", "Платимо до", "Дата на падеж", "Due date". Ако видиш такава изрична дата, върни я в payment_due_date (YYYY-MM-DD). Ако вместо дата е отпечатан само брой дни (напр. "Срок за плащане: 14 дни от датата на издаване"), изчисли конкретната дата спрямо датата на издаване на фактурата. Ако на фактурата изобщо няма отпечатан срок или брой дни за плащане, остави payment_due_date празно (null) - НЕ гадай и НЕ прилагай стандартен срок по подразбиране, това ще бъде направено от приложението само ако полето остане празно.
 
 ОБЩИ ПРАВИЛА:
 - Всички суми в полетата на артикулите и amount_without_vat са БЕЗ ДДС.
@@ -2153,6 +2174,7 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
             vat_amount=float(corrected.get("vat_amount", 0)),
             total_amount=float(corrected.get("total_amount", 0)),
             invoice_date=corrected.get("invoice_date"),
+            payment_due_date=corrected.get("payment_due_date"),
             items=[OCRItemResult(**item) for item in corrected.get("items", [])],
             corrections=correction_result.corrections_made,
             confidence=correction_result.confidence
