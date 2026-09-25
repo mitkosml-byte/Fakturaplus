@@ -1193,6 +1193,32 @@ export const translations: Translations = {
     en: 'Recent Invoices',
   },
   
+  // Loud price-alert popup
+  'priceAlertPopup.title': {
+    bg: 'Промяна в цените!',
+    en: 'Price change!',
+  },
+  'priceAlertPopup.subtitleSingle': {
+    bg: 'Забелязахме повишение на цената на артикул от последна фактура.',
+    en: 'We noticed a price increase on an item from a recent invoice.',
+  },
+  'priceAlertPopup.subtitleMultiple': {
+    bg: 'Забелязахме повишение на цените на {count} артикула от последни фактури.',
+    en: 'We noticed price increases on {count} items from recent invoices.',
+  },
+  'priceAlertPopup.more': {
+    bg: '+ още {count}',
+    en: '+ {count} more',
+  },
+  'priceAlertPopup.dismiss': {
+    bg: 'Затвори',
+    en: 'Dismiss',
+  },
+  'priceAlertPopup.viewDetails': {
+    bg: 'Виж в статистиката',
+    en: 'View in statistics',
+  },
+
   // Items & Price Tracking
   'stats.items': {
     bg: 'Артикули',
@@ -1209,6 +1235,42 @@ export const translations: Translations = {
   'stats.priceChange': {
     bg: 'Промяна в цена',
     en: 'Price Change',
+  },
+  'stats.priceInflation': {
+    bg: 'Обща инфлация на цените',
+    en: 'Overall Price Inflation',
+  },
+  'stats.inflationPeriod.month': {
+    bg: 'Месец',
+    en: 'Month',
+  },
+  'stats.inflationPeriod.quarter': {
+    bg: 'Тримесечие',
+    en: 'Quarter',
+  },
+  'stats.inflationPeriod.year': {
+    bg: 'Година',
+    en: 'Year',
+  },
+  'stats.inflationHeadline': {
+    bg: 'средно претеглена промяна на покупните цени',
+    en: 'weighted average change in purchase prices',
+  },
+  'stats.inflationItemsCompared': {
+    bg: 'артикула',
+    en: 'items',
+  },
+  'stats.inflationShowDetails': {
+    bg: 'Покажи по артикули',
+    en: 'Show by item',
+  },
+  'stats.inflationHideDetails': {
+    bg: 'Скрий детайлите',
+    en: 'Hide details',
+  },
+  'stats.inflationNoData': {
+    bg: 'Няма достатъчно данни за избрания период (нужни са поне 2 покупки на артикул).',
+    en: 'Not enough data for the selected period (at least 2 purchases per item are needed).',
   },
   'stats.oldPrice': {
     bg: 'Стара цена',

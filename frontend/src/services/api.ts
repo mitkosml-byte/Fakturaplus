@@ -420,6 +420,17 @@ class ApiService {
     });
   }
 
+  async getPriceInflation(startDate: string, endDate: string): Promise<{
+    period: { start_date: string; end_date: string };
+    overall_change_percent: number;
+    items_compared: number;
+    total_weighted_spend: number;
+    items: any[];
+  }> {
+    const queryParams = new URLSearchParams({ start_date: startDate, end_date: endDate });
+    return this.fetch(`/items/price-inflation?${queryParams.toString()}`);
+  }
+
   async getItemPriceHistory(itemName: string, supplier?: string): Promise<{
     item_name: string;
     history: any[];

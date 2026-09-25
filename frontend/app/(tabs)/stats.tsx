@@ -71,6 +71,12 @@ export default function StatsScreen() {
   const [itemBySupplier, setItemBySupplier] = useState<any>(null);
   const [loadingItemDetail, setLoadingItemDetail] = useState(false);
 
+  // Price inflation (overall spend-weighted price change across items over a period)
+  const [inflationPeriod, setInflationPeriod] = useState<'month' | 'quarter' | 'year'>('quarter');
+  const [inflationData, setInflationData] = useState<any>(null);
+  const [loadingInflation, setLoadingInflation] = useState(false);
+  const [inflationExpanded, setInflationExpanded] = useState(false);
+
   // Overview enrichments: previous-month comparison, top-3 quick view,
   // forecast and ROI trend
   const [previousSummary, setPreviousSummary] = useState<Summary | null>(null);
@@ -234,6 +240,29 @@ export default function StatsScreen() {
     }
   }, []);
   
+  const getInflationDateRange = (preset: 'month' | 'quarter' | 'year') => {
+    const end = new Date();
+    const start = new Date();
+    if (preset === 'month') start.setMonth(start.getMonth() - 1);
+    else if (preset === 'quarter') start.setMonth(start.getMonth() - 3);
+    else start.setFullYear(start.getFullYear() - 1);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    return { start_date: fmt(start), end_date: fmt(end) };
+  };
+
+  const loadInflation = useCallback(async (preset: 'month' | 'quarter' | 'year') => {
+    setLoadingInflation(true);
+    try {
+      const { start_date, end_date } = getInflationDateRange(preset);
+      const data = await api.getPriceInflation(start_date, end_date);
+      setInflationData(data);
+    } catch (error) {
+      console.error('Error loading price inflation:', error);
+    } finally {
+      setLoadingInflation(false);
+    }
+  }, []);
+
   const markAlertAsRead = async (alertId: string) => {
     try {
       await api.updatePriceAlert(alertId, 'read');
@@ -274,6 +303,12 @@ export default function StatsScreen() {
       loadItemStats();
     }
   }, [activeTab, itemStats, loadItemStats]);
+
+  useEffect(() => {
+    if (activeTab === 'items') {
+      loadInflation(inflationPeriod);
+    }
+  }, [activeTab, inflationPeriod, loadInflation]);
 
   useEffect(() => {
     if (selectedSupplier) {
@@ -1467,6 +1502,79 @@ export default function StatsScreen() {
                         </View>
                       </View>
                     )}
+
+                    {/* Price Inflation Card */}
+                    <View style={styles.inflationCard}>
+                      <View style={styles.priceAlertsHeader}>
+                        <Ionicons name="analytics" size={24} color="#F59E0B" />
+                        <Text style={styles.inflationTitle}>{t('stats.priceInflation')}</Text>
+                      </View>
+
+                      <View style={styles.rankingSelector}>
+                        {(['month', 'quarter', 'year'] as const).map((p) => (
+                          <TouchableOpacity
+                            key={p}
+                            style={[styles.rankingButton, inflationPeriod === p && styles.rankingButtonActive]}
+                            onPress={() => setInflationPeriod(p)}
+                          >
+                            <Text style={[styles.rankingButtonText, inflationPeriod === p && styles.rankingButtonTextActive]}>
+                              {t(`stats.inflationPeriod.${p}`)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      {loadingInflation ? (
+                        <ActivityIndicator size="small" color="#F59E0B" style={{ marginVertical: 16 }} />
+                      ) : inflationData && inflationData.items_compared > 0 ? (
+                        <>
+                          <View style={styles.inflationHeadline}>
+                            <Text style={[
+                              styles.inflationHeadlineValue,
+                              { color: inflationData.overall_change_percent > 0 ? '#EF4444' : inflationData.overall_change_percent < 0 ? '#10B981' : '#94A3B8' }
+                            ]}>
+                              {inflationData.overall_change_percent > 0 ? '+' : ''}{inflationData.overall_change_percent}%
+                            </Text>
+                            <Text style={styles.inflationHeadlineLabel}>
+                              {t('stats.inflationHeadline')} ({inflationData.items_compared} {t('stats.inflationItemsCompared')})
+                            </Text>
+                          </View>
+
+                          <TouchableOpacity
+                            style={styles.inflationToggle}
+                            onPress={() => setInflationExpanded(!inflationExpanded)}
+                          >
+                            <Text style={styles.inflationToggleText}>
+                              {inflationExpanded ? t('stats.inflationHideDetails') : t('stats.inflationShowDetails')}
+                            </Text>
+                            <Ionicons name={inflationExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#F59E0B" />
+                          </TouchableOpacity>
+
+                          {inflationExpanded && inflationData.items.map((item: any) => (
+                            <View key={item.item_name} style={styles.alertItem}>
+                              <View style={styles.alertInfo}>
+                                <Text style={styles.alertItemName} numberOfLines={1}>{item.item_name}</Text>
+                                <Text style={styles.alertSupplier}>{item.supplier} • {item.purchase_count}x</Text>
+                                <View style={styles.alertPrices}>
+                                  <Text style={styles.alertOldPrice}>{item.start_price.toFixed(2)}€</Text>
+                                  <Ionicons name="arrow-forward" size={14} color="#64748B" />
+                                  <Text style={[styles.alertNewPrice, { color: item.change_percent >= 0 ? '#EF4444' : '#10B981' }]}>
+                                    {item.end_price.toFixed(2)}€
+                                  </Text>
+                                  <View style={[styles.alertChangeBadge, { backgroundColor: item.change_percent >= 0 ? '#EF444420' : '#10B98120' }]}>
+                                    <Text style={[styles.alertChangeText, { color: item.change_percent >= 0 ? '#EF4444' : '#10B981' }]}>
+                                      {item.change_percent > 0 ? '+' : ''}{item.change_percent}%
+                                    </Text>
+                                  </View>
+                                </View>
+                              </View>
+                            </View>
+                          ))}
+                        </>
+                      ) : (
+                        <Text style={styles.inflationNoData}>{t('stats.inflationNoData')}</Text>
+                      )}
+                    </View>
 
                     {/* Ranking Type Selector */}
                     <View style={styles.rankingSelector}>
@@ -2824,7 +2932,55 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E293B',
     borderRadius: 8,
   },
-  
+
+  // Price Inflation Card
+  inflationCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#F59E0B',
+  },
+  inflationTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#F59E0B',
+    flex: 1,
+  },
+  inflationHeadline: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  inflationHeadlineValue: {
+    fontSize: 36,
+    fontWeight: 'bold',
+  },
+  inflationHeadlineLabel: {
+    fontSize: 13,
+    color: '#94A3B8',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  inflationToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+  },
+  inflationToggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F59E0B',
+  },
+  inflationNoData: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
+
   // Item Trend Badge
   itemTrendBadge: {
     flexDirection: 'row',

@@ -4271,6 +4271,88 @@ async def get_item_statistics(
         "price_trends": price_trends
     }
 
+@api_router.get("/items/price-inflation")
+async def get_price_inflation(
+    start_date: str,
+    end_date: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Обща 'инфлация' на покупните цени за избран период - за всеки
+    артикул, купен поне два пъти в периода, сравнява цената при първата и
+    последната покупка, после осреднява промяната претеглено спрямо
+    реално похарчената сума за артикула (не проста средна аритметична) -
+    така артикул, купуван често за големи суми, тежи повече в общия
+    процент от такъв, купен веднъж за дребна сума."""
+    from collections import defaultdict
+
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    empty_response = {
+        "period": {"start_date": start_date, "end_date": end_date},
+        "overall_change_percent": 0,
+        "items_compared": 0,
+        "total_weighted_spend": 0,
+        "items": [],
+    }
+    if not company_id:
+        return empty_response
+
+    query = {
+        "company_id": company_id,
+        "invoice_date": {
+            "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
+            "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
+        },
+    }
+    history = await db.item_price_history.find(query, {"_id": 0}).sort("invoice_date", 1).to_list(10000)
+    if not history:
+        return empty_response
+
+    by_item = defaultdict(list)
+    for record in history:
+        by_item[record["item_name"]].append(record)
+
+    items_result = []
+    for item_name, records in by_item.items():
+        if len(records) < 2:
+            continue  # Only one purchase in the period - no comparison point
+        first, last = records[0], records[-1]
+        start_price = first["unit_price"]
+        end_price = last["unit_price"]
+        if start_price <= 0:
+            continue
+        change_percent = ((end_price - start_price) / start_price) * 100
+        spend_in_period = sum(r["unit_price"] * r["quantity"] for r in records)
+
+        items_result.append({
+            "item_name": item_name,
+            "supplier": last["supplier"],
+            "start_price": round(start_price, 2),
+            "end_price": round(end_price, 2),
+            "change_percent": round(change_percent, 1),
+            "spend_in_period": round(spend_in_period, 2),
+            "purchase_count": len(records),
+            "first_date": first["invoice_date"].date().isoformat(),
+            "last_date": last["invoice_date"].date().isoformat(),
+        })
+
+    items_result.sort(key=lambda x: x["change_percent"], reverse=True)
+
+    total_weight = sum(i["spend_in_period"] for i in items_result)
+    if total_weight > 0:
+        overall_change = sum(i["change_percent"] * i["spend_in_period"] for i in items_result) / total_weight
+    else:
+        overall_change = 0
+
+    return {
+        "period": {"start_date": start_date, "end_date": end_date},
+        "overall_change_percent": round(overall_change, 1),
+        "items_compared": len(items_result),
+        "total_weighted_spend": round(total_weight, 2),
+        "items": items_result,
+    }
+
 @api_router.get("/statistics/items/{item_name}/by-supplier")
 async def get_item_by_supplier(
     item_name: str,

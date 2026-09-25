@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
 import { OfflineBanner } from '../src/components/OfflineBanner';
+import { PriceAlertPopup } from '../src/components/PriceAlertPopup';
 
 // Single source of truth for auth-based navigation. Screens (login.tsx,
 // the tabs layout) used to each run their own redirect effect; two
@@ -50,6 +51,7 @@ function AppShell() {
       <StatusBar style="light" />
       <View style={styles.container}>
         <OfflineBanner />
+        <PriceAlertPopup />
         <Stack
           screenOptions={{
             headerShown: false,
