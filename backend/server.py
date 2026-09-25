@@ -835,18 +835,22 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
 @limiter.limit("10/minute")
 async def login_user(request: Request, user_data: UserLogin, response: Response):
     """Login with email/password"""
-    # Find user
+    # Find user. The same generic error is used whether the email doesn't
+    # exist, has no password (Google-only account), or the password is
+    # wrong - a distinct message for any one of these would let an
+    # unauthenticated caller enumerate which emails have registered
+    # accounts and how they authenticate.
+    generic_error = HTTPException(status_code=401, detail="Невалиден имейл или парола")
     user = await db.users.find_one({"email": user_data.email.lower()})
     if not user:
-        raise HTTPException(status_code=401, detail="Невалиден имейл или парола")
-    
-    # Check if user has password (might be Google-only user)
+        raise generic_error
+
     if not user.get("password_hash"):
-        raise HTTPException(status_code=401, detail="Този акаунт използва Google вход. Моля, използвайте бутона за Google.")
-    
+        raise generic_error
+
     # Verify password
     if not pwd_context.verify(user_data.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Невалиден имейл или парола")
+        raise generic_error
     
     # Create session
     session_token = uuid.uuid4().hex
@@ -1015,24 +1019,30 @@ async def remove_user_from_company(user_id: str, current_user: User = Depends(ge
         if target_user.get("company_id") == current_user.company_id:
             fallback = await db.company_memberships.find_one({"user_id": user_id}, {"_id": 0})
             if fallback:
+                fallback_permissions = fallback.get("permissions") or resolve_permissions(fallback["role"], None)
                 await db.users.update_one(
                     {"user_id": user_id},
-                    {"$set": {"company_id": fallback["company_id"], "role": fallback["role"]}}
+                    {"$set": {"company_id": fallback["company_id"], "role": fallback["role"], "permissions": fallback_permissions}}
                 )
             else:
                 await db.users.update_one(
                     {"user_id": user_id},
-                    {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
+                    {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
                 )
         return {"message": "Достъпът на счетоводителя е премахнат"}
 
     if target_user.get("company_id") != current_user.company_id:
         raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
 
-    # Remove company_id from user (don't delete user)
+    # Remove company_id from user (don't delete user) - also reset their
+    # permissions to the forced staff role's defaults, otherwise a removed
+    # manager/staff member keeps their old permissions array (sanitize_user
+    # only backfills when it's empty, so a stale non-empty list survives
+    # the role downgrade and would still be honored by require_permission
+    # if they're later re-added to a company without an explicit re-invite).
     await db.users.update_one(
         {"user_id": user_id},
-        {"$unset": {"company_id": ""}, "$set": {"role": "staff"}}
+        {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
     )
 
     return {"message": "Потребителят е премахнат от фирмата"}

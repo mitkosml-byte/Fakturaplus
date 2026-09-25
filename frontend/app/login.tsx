@@ -10,6 +10,7 @@ import { Alert } from '../src/utils/alert';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLanguageStore, useTranslation } from '../src/i18n';
 import { api } from '../src/services/api';
+import { setStoredToken } from '../src/utils/tokenStorage';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -55,6 +56,9 @@ export default function LoginScreen() {
       }
       
       api.setToken(result.session_token);
+      // Persist the token so the session survives a reload/app restart -
+      // checkAuth() on the next app boot reads it back to restore login.
+      await setStoredToken(result.session_token);
       setUser(result.user);
       // The root layout's auth guard navigates to /(tabs) once
       // isAuthenticated flips true - no manual navigation needed here.
@@ -148,6 +152,8 @@ export default function LoginScreen() {
                       value={name}
                       onChangeText={setName}
                       autoCapitalize="words"
+                      textContentType="name"
+                      autoComplete="name"
                     />
                   </View>
                 )}
@@ -162,6 +168,8 @@ export default function LoginScreen() {
                     onChangeText={setEmail}
                     keyboardType="email-address"
                     autoCapitalize="none"
+                    textContentType="username"
+                    autoComplete="email"
                   />
                 </View>
 
@@ -174,6 +182,8 @@ export default function LoginScreen() {
                     value={password}
                     onChangeText={setPassword}
                     secureTextEntry={!showPassword}
+                    textContentType={authMode === 'register' ? 'newPassword' : 'password'}
+                    autoComplete={authMode === 'register' ? 'new-password' : 'password'}
                   />
                   <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
                     <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748B" />

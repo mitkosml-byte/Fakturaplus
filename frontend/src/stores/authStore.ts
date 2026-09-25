@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from '../types';
 import { api } from '../services/api';
+import { getStoredToken, setStoredToken, removeStoredToken } from '../utils/tokenStorage';
 
 interface AuthState {
   user: User | null;
@@ -26,6 +26,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   
   setToken: (token) => {
     api.setToken(token);
+    if (token) {
+      setStoredToken(token);
+    } else {
+      removeStoredToken();
+    }
     set({ token });
   },
 
@@ -33,7 +38,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       set({ isLoading: true });
       const result = await api.createSession(sessionId);
-      await AsyncStorage.setItem('session_token', result.session_token);
+      await setStoredToken(result.session_token);
       api.setToken(result.session_token);
       set({ 
         user: result.user, 
@@ -53,7 +58,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error) {
       console.error('Logout error:', error);
     }
-    await AsyncStorage.removeItem('session_token');
+    await removeStoredToken();
     api.setToken(null);
     set({ user: null, token: null, isAuthenticated: false });
   },
@@ -61,7 +66,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   checkAuth: async () => {
     try {
       set({ isLoading: true });
-      const token = await AsyncStorage.getItem('session_token');
+      const token = await getStoredToken();
       if (token) {
         api.setToken(token);
         const user = await api.getMe();
@@ -71,7 +76,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     } catch (error) {
       console.error('Auth check error:', error);
-      await AsyncStorage.removeItem('session_token');
+      await removeStoredToken();
       api.setToken(null);
       set({ user: null, token: null, isAuthenticated: false, isLoading: false });
     }
