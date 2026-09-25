@@ -45,10 +45,10 @@ class ApiService {
     });
   }
 
-  async register(email: string, password: string, name: string): Promise<{ user: User; session_token: string }> {
+  async register(email: string, password: string, name: string, invitationCode?: string): Promise<{ user: User; session_token: string; invite_error?: string | null }> {
     return this.fetch('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify({ email, password, name, invitation_code: invitationCode || undefined }),
     });
   }
 

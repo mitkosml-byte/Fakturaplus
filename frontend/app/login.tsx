@@ -27,6 +27,13 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  // Optional invitation code, shown only on registration - lets someone
+  // who was invited to a company join it directly on signup instead of
+  // landing in their own auto-created company with no obvious way back
+  // (the only other entry point is buried in Профил > Фирма > "Присъедини
+  // се по покана").
+  const [showInviteCode, setShowInviteCode] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
 
   useEffect(() => {
     loadLanguage();
@@ -50,15 +57,28 @@ export default function LoginScreen() {
     try {
       let result;
       if (authMode === 'register') {
-        result = await api.register(email.trim(), password, name.trim());
+        result = await api.register(email.trim(), password, name.trim(), inviteCode.trim() || undefined);
       } else {
         result = await api.login(email.trim(), password);
       }
-      
+
       api.setToken(result.session_token);
       // Persist the token so the session survives a reload/app restart -
       // checkAuth() on the next app boot reads it back to restore login.
       await setStoredToken(result.session_token);
+
+      // The account already exists and is logged in at this point - an
+      // invalid/expired code (invite_error) doesn't undo that, it just
+      // means they landed in their own new company instead of the
+      // inviter's. Say so, but don't block sign-up over it.
+      if (authMode === 'register' && inviteCode.trim() && 'invite_error' in result && result.invite_error) {
+        Alert.alert(
+          language === 'bg' ? 'Кодът не проработи' : "Code didn't work",
+          result.invite_error + '\n\n' + (language === 'bg'
+            ? 'Профилът е създаден. Можете да опитате отново от Профил > Фирма > "Присъедини се по покана".'
+            : 'Your account was created. You can try again from Profile > Company > "Join by invitation".')
+        );
+      }
       setUser(result.user);
       // The root layout's auth guard navigates to /(tabs) once
       // isAuthenticated flips true - no manual navigation needed here.
@@ -189,6 +209,31 @@ export default function LoginScreen() {
                     <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748B" />
                   </TouchableOpacity>
                 </View>
+
+                {authMode === 'register' && !showInviteCode && (
+                  <TouchableOpacity onPress={() => setShowInviteCode(true)} style={styles.inviteCodeToggle}>
+                    <Ionicons name="key-outline" size={16} color="#8B5CF6" />
+                    <Text style={styles.inviteCodeToggleText}>
+                      {language === 'bg' ? 'Имате код за покана? (по избор)' : 'Have an invitation code? (optional)'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {authMode === 'register' && showInviteCode && (
+                  <View style={styles.inputContainer}>
+                    <Ionicons name="key-outline" size={20} color="#64748B" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder={language === 'bg' ? 'Код за покана (по избор)' : 'Invitation code (optional)'}
+                      placeholderTextColor="#64748B"
+                      value={inviteCode}
+                      onChangeText={(v) => setInviteCode(v.toUpperCase())}
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      maxLength={8}
+                    />
+                  </View>
+                )}
 
                 <TouchableOpacity style={styles.emailButton} onPress={handleEmailAuth}>
                   <Text style={styles.emailButtonText}>
@@ -350,6 +395,18 @@ const styles = StyleSheet.create({
   },
   inputIcon: {
     marginRight: 12,
+  },
+  inviteCodeToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    paddingVertical: 4,
+  },
+  inviteCodeToggleText: {
+    color: '#8B5CF6',
+    fontSize: 13,
+    fontWeight: '500',
   },
   input: {
     flex: 1,

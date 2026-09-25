@@ -153,6 +153,7 @@ class UserRegister(BaseModel):
     email: str
     password: str
     name: str
+    invitation_code: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: str
@@ -788,29 +789,68 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
     # Create user
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     password_hash = pwd_context.hash(user_data.password)
-    
-    # Auto-create company for new user
-    company_name = user_data.name.split()[0] + " Company" if user_data.name else "My Company"
-    new_company = Company(
-        name=company_name,
-        eik=f"AUTO{uuid.uuid4().hex[:9].upper()}"
-    )
-    await db.companies.insert_one(new_company.dict())
-    
+
+    # If a valid invitation code was supplied, join that company directly
+    # instead of auto-creating one - otherwise the new account would need a
+    # separate accept-invitation call afterward, which fails (the fresh
+    # account already "has a company", tripping the one-company-per-user
+    # rule) since it's not yet a member of anything when this decision is
+    # made. An invalid/expired/mismatched code doesn't fail the whole
+    # registration - it just falls through to the normal own-company path,
+    # with invite_error in the response so the frontend can say why.
+    invitation = None
+    invite_error = None
+    if user_data.invitation_code:
+        code = user_data.invitation_code.upper().strip()
+        invitation = await db.invitations.find_one({"code": code, "status": "pending"})
+        if not invitation:
+            invite_error = "Невалиден или изтекъл код"
+        else:
+            expires_at = invitation["expires_at"]
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at < datetime.now(timezone.utc):
+                await db.invitations.update_one({"id": invitation["id"]}, {"$set": {"status": "expired"}})
+                invitation = None
+                invite_error = "Поканата е изтекла"
+            elif invitation.get("email") and invitation["email"].lower() != user_data.email.lower():
+                invitation = None
+                invite_error = "Тази покана е издадена за друг имейл адрес"
+
+    if invitation:
+        company_id = invitation["company_id"]
+        role = invitation["role"]
+        permissions = invitation.get("permissions") or resolve_permissions(role, None)
+    else:
+        # Auto-create company for new user
+        company_name = user_data.name.split()[0] + " Company" if user_data.name else "My Company"
+        new_company = Company(
+            name=company_name,
+            eik=f"AUTO{uuid.uuid4().hex[:9].upper()}"
+        )
+        await db.companies.insert_one(new_company.dict())
+        company_id = new_company.id
+        role = "owner"
+        permissions = resolve_permissions("owner", None)
+
     new_user = {
         "user_id": user_id,
         "email": user_data.email.lower(),
         "name": user_data.name.strip(),
         "picture": None,
-        "role": "owner",
-        "permissions": resolve_permissions("owner", None),
-        "company_id": new_company.id,
+        "role": role,
+        "permissions": permissions,
+        "company_id": company_id,
         "password_hash": password_hash,
         "auth_provider": "email",
         "created_at": datetime.now(timezone.utc)
     }
     await db.users.insert_one(new_user)
-    
+
+    if invitation:
+        await ensure_membership(user_id, company_id, role, permissions)
+        await db.invitations.update_one({"id": invitation["id"]}, {"$set": {"status": "accepted"}})
+
     # Create session
     session_token = uuid.uuid4().hex
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
@@ -821,7 +861,7 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
         "created_at": datetime.now(timezone.utc)
     }
     await db.user_sessions.insert_one(session_doc)
-    
+
     # Set cookie
     response.set_cookie(
         key="session_token",
@@ -832,9 +872,9 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
         max_age=7 * 24 * 60 * 60,
         path="/"
     )
-    
+
     user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    return {"user": sanitize_user(user_doc), "session_token": session_token}
+    return {"user": sanitize_user(user_doc), "session_token": session_token, "invite_error": invite_error}
 
 @api_router.post("/auth/login")
 @limiter.limit("10/minute")
