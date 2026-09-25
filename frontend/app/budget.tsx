@@ -63,6 +63,21 @@ export default function BudgetScreen() {
     setRefreshing(false);
   };
 
+  // Pre-fills the form with the current month's already-saved budget (if
+  // any) before opening it, so adjusting just the alert threshold - or
+  // anything else - doesn't require re-typing the limit from memory, and
+  // doesn't risk overwriting it with a blank/wrong value.
+  const openBudgetModal = () => {
+    if (budgetStatus?.has_budget) {
+      setBudgetLimit(budgetStatus.expense_limit.toString());
+      setAlertThreshold(budgetStatus.alert_threshold.toString());
+    } else {
+      setBudgetLimit('');
+      setAlertThreshold('80');
+    }
+    setShowBudgetModal(true);
+  };
+
   const saveBudget = async () => {
     if (!budgetLimit || parseFloat(budgetLimit) <= 0) {
       Alert.alert(t('common.error'), t('budget.invalidAmount'));
@@ -176,7 +191,7 @@ export default function BudgetScreen() {
                   <Text style={styles.budgetMonth}>
                     {new Date().toLocaleDateString('bg-BG', { month: 'long', year: 'numeric' })}
                   </Text>
-                  <TouchableOpacity onPress={() => setShowBudgetModal(true)}>
+                  <TouchableOpacity onPress={openBudgetModal}>
                     <Ionicons name="settings-outline" size={20} color="#64748B" />
                   </TouchableOpacity>
                 </View>
@@ -234,7 +249,7 @@ export default function BudgetScreen() {
                 )}
               </View>
             ) : (
-              <TouchableOpacity style={styles.noBudgetCard} onPress={() => setShowBudgetModal(true)}>
+              <TouchableOpacity style={styles.noBudgetCard} onPress={openBudgetModal}>
                 <Ionicons name="add-circle-outline" size={48} color="#64748B" />
                 <Text style={styles.noBudgetText}>{t('budget.noBudget')}</Text>
                 <Text style={styles.noBudgetHint}>{t('budget.tapToCreate')}</Text>
