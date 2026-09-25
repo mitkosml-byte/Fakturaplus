@@ -859,24 +859,37 @@ export default function StatsScreen() {
                     <Ionicons name="arrow-up-circle" size={24} color="#10B981" />
                     <Text style={styles.chartTitle}>{t('stats.income')}</Text>
                   </View>
-                  {incomeBarData.length > 0 ? (
-                    <BarChart
-                      data={incomeBarData}
-                      width={chartWidth}
-                      height={180}
-                      barWidth={20}
-                      spacing={16}
-                      noOfSections={4}
-                      barBorderRadius={4}
-                      frontColor="#10B981"
-                      yAxisColor="#334155"
-                      xAxisColor="#334155"
-                      yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                      xAxisLabelTextStyle={{ color: '#64748B', fontSize: 10 }}
-                      hideRules
-                      isAnimated
-                    />
-                  ) : (
+                  {incomeBarData.length > 0 ? (() => {
+                    // Size bars/spacing to the actual day count so all of them
+                    // fit within the chart's width - a fixed barWidth/spacing
+                    // overflowed past the visible area with a full week/month
+                    // of days, clipping the last bar's label instead of
+                    // shrinking to fit (same fix as the supplier chart below).
+                    const yAxisLabelWidth = 34;
+                    const spacing = 8;
+                    const plotWidth = chartWidth - yAxisLabelWidth;
+                    const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (incomeBarData.length + 1)) / incomeBarData.length)));
+                    return (
+                      <BarChart
+                        data={incomeBarData}
+                        width={plotWidth}
+                        height={180}
+                        barWidth={barWidth}
+                        spacing={spacing}
+                        initialSpacing={spacing}
+                        noOfSections={4}
+                        barBorderRadius={4}
+                        frontColor="#10B981"
+                        yAxisColor="#334155"
+                        xAxisColor="#334155"
+                        yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                        xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                        yAxisLabelWidth={yAxisLabelWidth}
+                        hideRules
+                        isAnimated
+                      />
+                    );
+                  })() : (
                     <View style={styles.noDataContainer}>
                       <Text style={styles.noDataText}>{t('stats.noData')}</Text>
                     </View>
@@ -889,24 +902,32 @@ export default function StatsScreen() {
                     <Ionicons name="arrow-down-circle" size={24} color="#EF4444" />
                     <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
                   </View>
-                  {expenseBarData.length > 0 ? (
-                    <BarChart
-                      data={expenseBarData}
-                      width={chartWidth}
-                      height={180}
-                      barWidth={20}
-                      spacing={16}
-                      noOfSections={4}
-                      barBorderRadius={4}
-                      frontColor="#EF4444"
-                      yAxisColor="#334155"
-                      xAxisColor="#334155"
-                      yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                      xAxisLabelTextStyle={{ color: '#64748B', fontSize: 10 }}
-                      hideRules
-                      isAnimated
-                    />
-                  ) : (
+                  {expenseBarData.length > 0 ? (() => {
+                    const yAxisLabelWidth = 34;
+                    const spacing = 8;
+                    const plotWidth = chartWidth - yAxisLabelWidth;
+                    const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (expenseBarData.length + 1)) / expenseBarData.length)));
+                    return (
+                      <BarChart
+                        data={expenseBarData}
+                        width={plotWidth}
+                        height={180}
+                        barWidth={barWidth}
+                        spacing={spacing}
+                        initialSpacing={spacing}
+                        noOfSections={4}
+                        barBorderRadius={4}
+                        frontColor="#EF4444"
+                        yAxisColor="#334155"
+                        xAxisColor="#334155"
+                        yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                        xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                        yAxisLabelWidth={yAxisLabelWidth}
+                        hideRules
+                        isAnimated
+                      />
+                    );
+                  })() : (
                     <View style={styles.noDataContainer}>
                       <Text style={styles.noDataText}>{t('stats.noData')}</Text>
                     </View>
