@@ -2026,6 +2026,7 @@ async def next_protocol_number(company_id: Optional[str], user_id: str, year: in
 
 @api_router.post("/invoices", response_model=Invoice)
 async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_invoices")
     # Get user's company_id
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
@@ -2261,6 +2262,7 @@ async def get_invoice(invoice_id: str, current_user: User = Depends(get_current_
 
 @api_router.put("/invoices/{invoice_id}", response_model=Invoice)
 async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_invoices")
     update_data = {k: v for k, v in invoice_update.dict().items() if v is not None}
     if "date" in update_data:
         update_data["date"] = datetime.fromisoformat(update_data["date"].replace("Z", "+00:00"))
@@ -2301,6 +2303,7 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
 
 @api_router.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_invoices")
     company_id, scope = await get_company_scope(current_user)
     invoice = await db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
     result = await db.invoices.delete_one({"id": invoice_id, **scope})
@@ -2326,6 +2329,7 @@ async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User =
     """Записва оборота за деня - ЗАМЕСТВА предишната стойност, не я
     добавя към нея (фронтендът зарежда текущите стойности в полетата
     при отваряне, точно за да могат да се коригират директно)."""
+    require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
 
     # Check if ANY teammate already logged revenue for this date - the
@@ -2421,6 +2425,7 @@ async def get_daily_revenues(
 
 @api_router.post("/expenses", response_model=NonInvoiceExpense)
 async def create_expense(expense: NonInvoiceExpenseCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_expenses")
     company_id, _ = await get_company_scope(current_user)
     expense_obj = NonInvoiceExpense(
         user_id=current_user.user_id,
@@ -2451,6 +2456,7 @@ async def get_expenses(
 
 @api_router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_expenses")
     _, scope = await get_company_scope(current_user)
     result = await db.expenses.delete_one({"id": expense_id, **scope})
     if result.deleted_count == 0:
