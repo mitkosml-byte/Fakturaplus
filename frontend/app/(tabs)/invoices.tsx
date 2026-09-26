@@ -1,62 +1,222 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
+  SectionList,
+  ScrollView,
   TouchableOpacity,
   TextInput,
   RefreshControl,
-  Alert,
   Modal,
-  Linking,
-  Platform,
   ImageBackground,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
 import { Invoice } from '../../src/types';
+import { validateEikFormat } from '../../src/utils/eik';
 import { format } from 'date-fns';
-import { bg, enUS } from 'date-fns/locale';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
+import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
+import ExcelImportModal from '../../src/components/ExcelImportModal';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
+type PeriodPreset = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'thisYear' | 'custom';
+
+function getPeriodRange(
+  preset: PeriodPreset,
+  customStart: Date,
+  customEnd: Date
+): { start?: string; end?: string } {
+  const now = new Date();
+  switch (preset) {
+    case 'thisMonth':
+      return {
+        start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+        end: now.toISOString(),
+      };
+    case 'lastMonth':
+      return {
+        start: new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString(),
+        end: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString(),
+      };
+    case 'last3Months':
+      return {
+        start: new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString(),
+        end: now.toISOString(),
+      };
+    case 'thisYear':
+      return {
+        start: new Date(now.getFullYear(), 0, 1).toISOString(),
+        end: now.toISOString(),
+      };
+    case 'custom':
+      return { start: customStart.toISOString(), end: customEnd.toISOString() };
+    default:
+      return {};
+  }
+}
+
 export default function InvoicesScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
-  const dateLocale = language === 'bg' ? bg : enUS;
-  
+  const params = useLocalSearchParams<{ paymentFilter?: string }>();
+
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [importModalVisible, setImportModalVisible] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  // Which of this invoice's items triggered a price-increase alert when it
+  // was created - fetched lazily per invoice_id so the item rows can flag
+  // "up X% from last purchase" without duplicating that comparison here.
+  const [selectedInvoiceAlerts, setSelectedInvoiceAlerts] = useState<any[]>([]);
+  const [loadingInvoiceAlerts, setLoadingInvoiceAlerts] = useState(false);
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
+  const [customStartDate, setCustomStartDate] = useState<Date>(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [customEndDate, setCustomEndDate] = useState<Date>(new Date());
+  const [startPickerVisible, setStartPickerVisible] = useState(false);
+  const [endPickerVisible, setEndPickerVisible] = useState(false);
+  const [showOnlyEikIssues, setShowOnlyEikIssues] = useState(false);
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'partial' | 'overdue'>('all');
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+
+  // Lets the Home dashboard's unpaid-invoices reminder deep-link straight
+  // into this filter instead of always landing on "all".
+  useEffect(() => {
+    if (
+      params.paymentFilter === 'paid' || params.paymentFilter === 'unpaid' ||
+      params.paymentFilter === 'partial' || params.paymentFilter === 'overdue'
+    ) {
+      setPaymentFilter(params.paymentFilter);
+      setFiltersExpanded(true);
+    }
+  }, [params.paymentFilter]);
+
+  // Reverse-charge suppliers are foreign and don't have a Bulgarian ЕИК,
+  // so they're excluded from this check on purpose.
+  const hasEikIssue = useCallback((inv: Invoice) => {
+    if (inv.vat_treatment === 'reverse_charge') return false;
+    return !validateEikFormat(inv.supplier_eik).valid;
+  }, []);
+
+  const periodOptions: { key: PeriodPreset; label: string }[] = [
+    { key: 'all', label: t('invoices.periodAll') },
+    { key: 'thisMonth', label: t('invoices.periodThisMonth') },
+    { key: 'lastMonth', label: t('invoices.periodLastMonth') },
+    { key: 'last3Months', label: t('invoices.periodLast3Months') },
+    { key: 'thisYear', label: t('invoices.periodThisYear') },
+    { key: 'custom', label: t('invoices.periodCustom') },
+  ];
 
   const loadInvoices = useCallback(async () => {
     try {
-      const data = await api.getInvoices(
-        searchQuery ? { supplier: searchQuery } : undefined
-      );
+      const { start, end } = getPeriodRange(periodPreset, customStartDate, customEndDate);
+      const data = await api.getInvoices({
+        ...(searchQuery ? { search: searchQuery } : {}),
+        ...(start ? { start_date: start } : {}),
+        ...(end ? { end_date: end } : {}),
+        ...(paymentFilter !== 'all' ? { payment_status: paymentFilter } : {}),
+      });
       setInvoices(data);
     } catch (error) {
       console.error('Error loading invoices:', error);
     }
-  }, [searchQuery]);
+  }, [searchQuery, periodPreset, customStartDate, customEndDate, paymentFilter]);
 
-  useEffect(() => {
-    loadInvoices();
-  }, [loadInvoices]);
+  // Tab screens stay mounted, so returning here (e.g. after scanning and
+  // saving a new invoice) doesn't remount the screen - only re-fetching on
+  // focus picks up the change without needing a manual pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      loadInvoices();
+    }, [loadInvoices])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadInvoices();
     setRefreshing(false);
   }, [loadInvoices]);
+
+  useEffect(() => {
+    if (!selectedInvoice || !selectedInvoice.items || selectedInvoice.items.length === 0) {
+      setSelectedInvoiceAlerts([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingInvoiceAlerts(true);
+    api.getPriceAlerts(undefined, selectedInvoice.id)
+      .then((data) => {
+        if (!cancelled) setSelectedInvoiceAlerts(data.alerts || []);
+      })
+      .catch((error) => {
+        console.error('Error loading invoice price alerts:', error);
+        if (!cancelled) setSelectedInvoiceAlerts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingInvoiceAlerts(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedInvoice]);
+
+  const [updatingPayment, setUpdatingPayment] = useState(false);
+  const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [paymentAmountInput, setPaymentAmountInput] = useState('');
+
+  const applyInvoiceUpdate = (updated: Invoice) => {
+    setSelectedInvoice(updated);
+    setInvoices((prev) => prev.map((inv) => (inv.id === updated.id ? updated : inv)));
+  };
+
+  const handleTogglePaid = async (invoice: Invoice) => {
+    setUpdatingPayment(true);
+    try {
+      const updated = await api.updateInvoice(invoice.id, { is_paid: !invoice.is_paid });
+      applyInvoiceUpdate(updated);
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setUpdatingPayment(false);
+    }
+  };
+
+  const openPaymentModal = (invoice: Invoice) => {
+    setPaymentAmountInput(invoice.paid_amount > 0 ? invoice.paid_amount.toFixed(2) : '');
+    setPaymentModalVisible(true);
+  };
+
+  const handleSavePaymentAmount = async () => {
+    if (!selectedInvoice) return;
+    const amount = parseFloat(paymentAmountInput);
+    if (isNaN(amount) || amount < 0) {
+      Alert.alert(t('common.error'), t('budget.invalidAmount'));
+      return;
+    }
+    if (amount > selectedInvoice.total_amount + 0.01) {
+      Alert.alert(t('common.error'), t('invoices.paidAmountExceedsTotal'));
+      return;
+    }
+    setUpdatingPayment(true);
+    try {
+      const updated = await api.updateInvoice(selectedInvoice.id, { paid_amount: amount });
+      applyInvoiceUpdate(updated);
+      setPaymentModalVisible(false);
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setUpdatingPayment(false);
+    }
+  };
 
   const handleDeleteInvoice = async (id: string) => {
     Alert.alert(
@@ -82,15 +242,9 @@ export default function InvoicesScreen() {
 
   const handleExport = async (type: 'excel' | 'pdf') => {
     try {
-      const url = type === 'excel' 
-        ? api.getExportExcelUrl()
-        : api.getExportPdfUrl();
-      
-      if (Platform.OS === 'web') {
-        window.open(url, '_blank');
-      } else {
-        await Linking.openURL(url);
-      }
+      const endpoint = type === 'excel' ? '/api/export/invoices/excel' : '/api/export/invoices/pdf';
+      const filename = `invoices_${new Date().toISOString().slice(0, 10)}.${type === 'excel' ? 'xlsx' : 'pdf'}`;
+      await downloadAndShareFile(endpoint, filename);
       setExportModalVisible(false);
     } catch (error: any) {
       Alert.alert(t('common.error'), language === 'bg' ? 'Не можах да изтегля файла' : 'Could not download file');
@@ -105,44 +259,100 @@ export default function InvoicesScreen() {
     }
   };
 
-  const renderInvoice = ({ item }: { item: Invoice }) => (
-    <TouchableOpacity
-      style={styles.invoiceCard}
-      onPress={() => setSelectedInvoice(item)}
-      onLongPress={() => handleDeleteInvoice(item.id)}
-    >
-      <View style={styles.invoiceHeader}>
-        <View style={styles.supplierContainer}>
-          <Ionicons name="business" size={20} color="#8B5CF6" />
-          <Text style={styles.supplierName} numberOfLines={1}>{item.supplier}</Text>
-        </View>
-        <Text style={styles.invoiceDate}>{formatDate(item.date)}</Text>
-      </View>
+  const renderInvoice = ({ item }: { item: Invoice }) => {
+    const eikIssue = hasEikIssue(item);
+    const isUnpaid = item.payment_method === 'bank_transfer' && !item.is_paid;
+    const overdue = isUnpaid && !!item.payment_due_date && new Date(item.payment_due_date).getTime() < Date.now();
+    const isPartial = isUnpaid && item.paid_amount > 0;
+    const statusLabel = overdue ? t('invoices.overdue') : (isPartial ? t('invoices.partiallyPaid') : t('invoices.unpaid'));
 
-      <View style={styles.invoiceDetails}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>{t('invoices.invoiceNo')}:</Text>
-          <Text style={styles.detailValue}>{item.invoice_number}</Text>
+    return (
+      <TouchableOpacity
+        style={styles.invoiceCard}
+        onPress={() => setSelectedInvoice(item)}
+        onLongPress={() => handleDeleteInvoice(item.id)}
+      >
+        <View style={styles.invoiceRowTop}>
+          <View style={styles.supplierContainer}>
+            <Ionicons name="business" size={18} color="#8B5CF6" />
+            <Text style={styles.supplierName} numberOfLines={1}>{item.supplier}</Text>
+          </View>
+          <Text style={styles.totalValueCompact}>{item.total_amount.toFixed(2)} €</Text>
         </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>{t('invoices.withoutVAT')}:</Text>
-          <Text style={styles.detailValue}>{item.amount_without_vat.toFixed(2)} €</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>{t('stats.vat')}:</Text>
-          <Text style={styles.detailValue}>{item.vat_amount.toFixed(2)} €</Text>
-        </View>
-      </View>
 
-      <View style={styles.invoiceFooter}>
-        <Text style={styles.totalLabel}>{t('invoices.total')}:</Text>
-        <Text style={styles.totalValue}>{item.total_amount.toFixed(2)} €</Text>
-      </View>
-    </TouchableOpacity>
+        <View style={styles.invoiceRowBottom}>
+          <Text style={styles.invoiceMeta} numberOfLines={1}>
+            {item.invoice_number} · {formatDate(item.date)}
+          </Text>
+
+          {(eikIssue || isUnpaid) && (
+            <View style={styles.compactBadgeRow}>
+              {eikIssue && (
+                <View style={styles.compactBadge}>
+                  <Ionicons name="alert-circle" size={11} color="#F59E0B" />
+                  <Text style={styles.compactBadgeText}>{t('invoices.missingEik')}</Text>
+                </View>
+              )}
+              {isUnpaid && (
+                <View style={[styles.compactBadge, overdue && styles.overdueBadge]}>
+                  <Ionicons name={overdue ? 'alert-circle' : (isPartial ? 'pie-chart-outline' : 'time-outline')} size={11} color={overdue ? '#EF4444' : '#F59E0B'} />
+                  <Text style={[styles.compactBadgeText, overdue && { color: '#EF4444' }]}>
+                    {statusLabel}{isPartial ? ` (${(item.total_amount - item.paid_amount).toFixed(2)} €)` : ''}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const activeFilterCount = (periodPreset !== 'all' ? 1 : 0) + (paymentFilter !== 'all' ? 1 : 0);
+  const eikIssueCount = useMemo(() => invoices.filter(hasEikIssue).length, [invoices, hasEikIssue]);
+  const visibleInvoices = useMemo(
+    () => (showOnlyEikIssues ? invoices.filter(hasEikIssue) : invoices),
+    [invoices, showOnlyEikIssues, hasEikIssue]
   );
 
-  const totalAmount = invoices.reduce((sum, inv) => sum + inv.total_amount, 0);
-  const totalVat = invoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
+  const totalAmount = visibleInvoices.reduce((sum, inv) => sum + inv.total_amount, 0);
+  const totalVat = visibleInvoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
+
+  const sections = useMemo(() => {
+    const groups = new Map<string, { title: string; data: Invoice[]; totalAmount: number; totalVat: number }>();
+    for (const inv of visibleInvoices) {
+      let key: string;
+      let title: string;
+      try {
+        const d = new Date(inv.date);
+        key = format(d, 'yyyy-MM');
+        title = format(d, 'LLLL yyyy', { locale: dateLocale });
+        title = title.charAt(0).toUpperCase() + title.slice(1);
+      } catch {
+        key = 'unknown';
+        title = inv.date;
+      }
+      if (!groups.has(key)) {
+        groups.set(key, { title, data: [], totalAmount: 0, totalVat: 0 });
+      }
+      const group = groups.get(key)!;
+      group.data.push(inv);
+      group.totalAmount += inv.total_amount;
+      group.totalVat += inv.vat_amount;
+    }
+    return Array.from(groups.entries())
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([key, group]) => ({ key, ...group }));
+  }, [visibleInvoices, dateLocale]);
+
+  const renderSectionHeader = ({ section }: { section: { title: string; data: Invoice[]; totalAmount: number } }) => (
+    <View style={styles.monthHeader}>
+      <Text style={styles.monthHeaderTitle}>{section.title}</Text>
+      <Text style={styles.monthHeaderStats}>
+        {section.data.length} · {t('invoices.monthlyTotal')} {section.totalAmount.toFixed(2)} €
+      </Text>
+    </View>
+  );
 
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -150,9 +360,14 @@ export default function InvoicesScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
             <Text style={styles.title}>{t('invoices.title')}</Text>
-            <TouchableOpacity style={styles.exportButton} onPress={() => setExportModalVisible(true)}>
-              <Ionicons name="download" size={24} color="#8B5CF6" />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={styles.exportButton} onPress={() => setImportModalVisible(true)} accessibilityLabel={t('import.button')}>
+                <Ionicons name="cloud-upload-outline" size={24} color="#8B5CF6" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.exportButton} onPress={() => setExportModalVisible(true)}>
+                <Ionicons name="download" size={24} color="#8B5CF6" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Search */}
@@ -173,11 +388,122 @@ export default function InvoicesScreen() {
             )}
           </View>
 
+          {/* Filters toggle — collapsed by default so the chip rows don't
+              permanently eat vertical space above the list */}
+          <TouchableOpacity
+            style={styles.filtersToggle}
+            onPress={() => setFiltersExpanded((prev) => !prev)}
+          >
+            <Ionicons name="options-outline" size={16} color="#8B5CF6" />
+            <Text style={styles.filtersToggleText}>
+              {t('invoices.filtersButton')}
+              {activeFilterCount > 0 ? ` · ${activeFilterCount} ${t('invoices.filtersActive')}` : ''}
+            </Text>
+            <Ionicons name={filtersExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#8B5CF6" />
+          </TouchableOpacity>
+
+          {filtersExpanded && (
+            <>
+              {/* Period filter */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.periodChipsRow}
+                contentContainerStyle={styles.periodChipsContent}
+              >
+                {periodOptions.map((opt) => (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[styles.periodChip, periodPreset === opt.key && styles.periodChipActive]}
+                    onPress={() => setPeriodPreset(opt.key)}
+                  >
+                    <Text style={[styles.periodChipText, periodPreset === opt.key && styles.periodChipTextActive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {periodPreset === 'custom' && (
+                <View style={styles.customRangeRow}>
+                  <TouchableOpacity style={styles.customRangeButton} onPress={() => setStartPickerVisible(true)}>
+                    <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+                    <Text style={styles.customRangeButtonText}>
+                      {t('invoices.periodFrom')}: {format(customStartDate, 'd MMM yyyy', { locale: dateLocale })}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.customRangeButton} onPress={() => setEndPickerVisible(true)}>
+                    <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+                    <Text style={styles.customRangeButtonText}>
+                      {t('invoices.periodTo')}: {format(customEndDate, 'd MMM yyyy', { locale: dateLocale })}
+                    </Text>
+                  </TouchableOpacity>
+                  <DateTimePickerModal
+                    isVisible={startPickerVisible}
+                    mode="date"
+                    date={customStartDate}
+                    onConfirm={(d) => { setCustomStartDate(d); setStartPickerVisible(false); }}
+                    onCancel={() => setStartPickerVisible(false)}
+                  />
+                  <DateTimePickerModal
+                    isVisible={endPickerVisible}
+                    mode="date"
+                    date={customEndDate}
+                    onConfirm={(d) => { setCustomEndDate(d); setEndPickerVisible(false); }}
+                    onCancel={() => setEndPickerVisible(false)}
+                  />
+                </View>
+              )}
+
+              {/* Payment status filter */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.periodChipsRow}
+                contentContainerStyle={styles.periodChipsContent}
+              >
+                {([
+                  { key: 'all', label: t('invoices.paymentFilterAll') },
+                  { key: 'unpaid', label: t('invoices.paymentFilterUnpaid') },
+                  { key: 'partial', label: t('invoices.partiallyPaid') },
+                  { key: 'overdue', label: t('invoices.paymentFilterOverdue') },
+                  { key: 'paid', label: t('invoices.paymentFilterPaid') },
+                ] as const).map((opt) => (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[styles.periodChip, paymentFilter === opt.key && styles.periodChipActive]}
+                    onPress={() => setPaymentFilter(opt.key)}
+                  >
+                    <Text style={[styles.periodChipText, paymentFilter === opt.key && styles.periodChipTextActive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          )}
+
+          {/* ЕИК issues banner */}
+          {eikIssueCount > 0 && (
+            <TouchableOpacity
+              style={[styles.eikBanner, showOnlyEikIssues && styles.eikBannerActive]}
+              onPress={() => setShowOnlyEikIssues((prev) => !prev)}
+            >
+              <Ionicons name="alert-circle" size={18} color="#F59E0B" />
+              <Text style={styles.eikBannerText}>
+                {eikIssueCount} {eikIssueCount === 1 ? t('invoices.missingEikSingular') : t('invoices.missingEikPlural')}
+              </Text>
+              <Text style={styles.eikBannerAction}>
+                {showOnlyEikIssues ? t('invoices.showAll') : t('invoices.showOnlyThese')}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {/* Summary */}
           <View style={styles.summaryBar}>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('invoices.count')}:</Text>
-              <Text style={styles.summaryValue}>{invoices.length}</Text>
+              <Text style={styles.summaryValue}>{visibleInvoices.length}</Text>
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('stats.vat')}:</Text>
@@ -190,9 +516,11 @@ export default function InvoicesScreen() {
           </View>
 
           {/* List */}
-          <FlatList
-            data={invoices}
+          <SectionList
+            sections={sections}
             renderItem={renderInvoice}
+            renderSectionHeader={renderSectionHeader}
+            stickySectionHeadersEnabled
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
             refreshControl={
@@ -240,6 +568,19 @@ export default function InvoicesScreen() {
         </View>
       </Modal>
 
+      <ExcelImportModal
+        visible={importModalVisible}
+        onClose={() => setImportModalVisible(false)}
+        entity="invoices"
+        title={t('import.button')}
+        fields={[
+          { key: 'supplier', label: t('invoices.supplier') },
+          { key: 'invoice_number', label: t('invoices.invoiceNo') },
+          { key: 'total_amount', label: t('invoices.total'), format: (v) => `${Number(v).toFixed(2)} €` },
+        ]}
+        onImported={loadInvoices}
+      />
+
       {/* Invoice Detail Modal */}
       <Modal visible={!!selectedInvoice} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -252,11 +593,41 @@ export default function InvoicesScreen() {
             </View>
 
             {selectedInvoice && (
-              <View>
+              <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.supplier')}</Text>
                   <Text style={styles.detailSectionValue}>{selectedInvoice.supplier}</Text>
                 </View>
+                {selectedInvoice.supplier_eik && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionLabel}>{t('scan.supplierEik')}</Text>
+                    <Text style={styles.detailSectionValue}>{selectedInvoice.supplier_eik}</Text>
+                  </View>
+                )}
+                {selectedInvoice.vat_treatment && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionLabel}>{t('scan.vatTreatment')}</Text>
+                    <Text style={styles.detailSectionValue}>{t(`vat.${selectedInvoice.vat_treatment}`)}</Text>
+                  </View>
+                )}
+                {selectedInvoice.vat_treatment === 'reverse_charge' && (() => {
+                  const deadline = new Date(new Date(selectedInvoice.date).getTime() + 15 * 24 * 60 * 60 * 1000);
+                  const overdue = deadline.getTime() < Date.now();
+                  return (
+                    <View style={[styles.protocolBanner, overdue && styles.protocolBannerOverdue]}>
+                      <Ionicons name={overdue ? 'alert-circle' : 'document-text'} size={18} color={overdue ? '#EF4444' : '#8B5CF6'} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.protocolBannerTitle}>
+                          {t('scan.protocolAssigned')} {selectedInvoice.protocol_number || '—'}
+                        </Text>
+                        <Text style={[styles.protocolBannerDeadline, overdue && { color: '#EF4444' }]}>
+                          {t('invoices.protocolDeadline')}: {formatDate(deadline.toISOString())}
+                          {overdue ? ` (${t('invoices.protocolOverdue')})` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })()}
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.invoiceNo')}</Text>
                   <Text style={styles.detailSectionValue}>{selectedInvoice.invoice_number}</Text>
@@ -279,6 +650,146 @@ export default function InvoicesScreen() {
                   <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
                   <Text style={styles.totalSectionValue}>{selectedInvoice.total_amount.toFixed(2)} €</Text>
                 </View>
+
+                {selectedInvoice.payment_method && (() => {
+                  const overdue = !selectedInvoice.is_paid && !!selectedInvoice.payment_due_date
+                    && new Date(selectedInvoice.payment_due_date).getTime() < Date.now();
+                  return (
+                    <View style={[styles.paymentSection, overdue && styles.paymentSectionOverdue]}>
+                      <View style={styles.paymentSectionHeader}>
+                        <Text style={styles.detailSectionLabel}>{t('invoices.paymentSection')}</Text>
+                        <Text style={styles.paymentMethodTag}>
+                          {selectedInvoice.payment_method === 'cash'
+                            ? t('invoices.paymentMethodCash')
+                            : t('invoices.paymentMethodBankTransfer')}
+                        </Text>
+                      </View>
+
+                      {selectedInvoice.payment_method === 'bank_transfer' && (
+                        <>
+                          {selectedInvoice.payment_due_date && !selectedInvoice.is_paid && (
+                            <Text style={[styles.paymentDueText, overdue && { color: '#EF4444' }]}>
+                              {overdue ? t('invoices.overdueSince') : t('invoices.paymentDueDate')}: {formatDate(selectedInvoice.payment_due_date)}
+                            </Text>
+                          )}
+
+                          {!selectedInvoice.is_paid && selectedInvoice.paid_amount > 0 && (
+                            <View style={styles.paymentProgressBox}>
+                              <Text style={styles.paymentProgressText}>
+                                {t('invoices.paidOfTotal')
+                                  .replace('{paid}', selectedInvoice.paid_amount.toFixed(2))
+                                  .replace('{total}', selectedInvoice.total_amount.toFixed(2))}
+                              </Text>
+                              <Text style={styles.paymentRemainingText}>
+                                {t('invoices.remainingAmount')}: {(selectedInvoice.total_amount - selectedInvoice.paid_amount).toFixed(2)} €
+                              </Text>
+                              <View style={styles.paymentProgressBar}>
+                                <View style={[
+                                  styles.paymentProgressBarFill,
+                                  { width: `${Math.min(100, (selectedInvoice.paid_amount / selectedInvoice.total_amount) * 100)}%` }
+                                ]} />
+                              </View>
+                            </View>
+                          )}
+
+                          <TouchableOpacity
+                            style={styles.paidCheckboxRow}
+                            onPress={() => handleTogglePaid(selectedInvoice)}
+                            disabled={updatingPayment}
+                          >
+                            <View style={[styles.checkbox, selectedInvoice.is_paid && styles.checkboxChecked]}>
+                              {selectedInvoice.is_paid && <Ionicons name="checkmark" size={16} color="white" />}
+                            </View>
+                            <Text style={styles.paidCheckboxLabel}>
+                              {selectedInvoice.is_paid && selectedInvoice.paid_at
+                                ? `${t('invoices.paidOn')} ${formatDate(selectedInvoice.paid_at)}`
+                                : t('invoices.markFullyPaid')}
+                            </Text>
+                            {updatingPayment && <ActivityIndicator size="small" color="#8B5CF6" />}
+                          </TouchableOpacity>
+
+                          {!selectedInvoice.is_paid && (
+                            <TouchableOpacity
+                              style={styles.recordPaymentButton}
+                              onPress={() => openPaymentModal(selectedInvoice)}
+                              disabled={updatingPayment}
+                            >
+                              <Ionicons name="cash-outline" size={16} color="#8B5CF6" />
+                              <Text style={styles.recordPaymentButtonText}>
+                                {selectedInvoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </>
+                      )}
+                    </View>
+                  );
+                })()}
+
+                {selectedInvoice.items && selectedInvoice.items.length > 0 && (() => {
+                  const items = selectedInvoice.items!;
+                  const itemsSum = items.reduce(
+                    (sum, it) => sum + (it.total_price ?? (it.quantity || 0) * it.unit_price),
+                    0
+                  );
+                  const mismatch = Math.abs(itemsSum - selectedInvoice.amount_without_vat) > 0.05;
+                  return (
+                    <View style={styles.itemsSection}>
+                      <View style={styles.itemsSectionHeader}>
+                        <Text style={styles.detailSectionLabel}>{t('invoices.items')}</Text>
+                        {loadingInvoiceAlerts && <ActivityIndicator size="small" color="#64748B" />}
+                      </View>
+
+                      <View style={styles.itemsTableHeader}>
+                        <Text style={[styles.itemsTableHeaderText, { flex: 2 }]}>{t('invoices.itemName')}</Text>
+                        <Text style={[styles.itemsTableHeaderText, styles.itemsColRight, { flex: 1 }]}>{t('invoices.itemQty')}</Text>
+                        <Text style={[styles.itemsTableHeaderText, styles.itemsColRight, { flex: 1 }]}>{t('invoices.itemUnitPrice')}</Text>
+                        <Text style={[styles.itemsTableHeaderText, styles.itemsColRight, { flex: 1 }]}>{t('invoices.itemTotal')}</Text>
+                      </View>
+
+                      {items.map((item, index) => {
+                        const alert = selectedInvoiceAlerts.find((a) => a.item_name === item.name);
+                        const lineTotal = item.total_price ?? (item.quantity || 0) * item.unit_price;
+                        return (
+                          <View key={index} style={styles.itemRow}>
+                            <View style={{ flex: 2 }}>
+                              <Text style={styles.itemRowName} numberOfLines={2}>{item.name}</Text>
+                              {alert && (
+                                <View style={styles.itemPriceAlertBadge}>
+                                  <Ionicons name="trending-up" size={11} color="#EF4444" />
+                                  <Text style={styles.itemPriceAlertText}>
+                                    +{alert.change_percent}% {t('invoices.vsLastPurchase')}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={[styles.itemRowValue, styles.itemsColRight, { flex: 1 }]}>
+                              {item.quantity} {item.unit}
+                            </Text>
+                            <Text style={[styles.itemRowValue, styles.itemsColRight, { flex: 1 }]}>
+                              {item.unit_price.toFixed(2)}€
+                            </Text>
+                            <Text style={[styles.itemRowValue, styles.itemsColRight, styles.itemRowTotal, { flex: 1 }]}>
+                              {lineTotal.toFixed(2)}€
+                            </Text>
+                          </View>
+                        );
+                      })}
+
+                      <View style={styles.itemsSumRow}>
+                        <Text style={styles.itemsSumLabel}>{t('invoices.itemsSum')}</Text>
+                        <Text style={styles.itemsSumValue}>{itemsSum.toFixed(2)} €</Text>
+                      </View>
+                      {mismatch && (
+                        <View style={styles.itemsMismatchNote}>
+                          <Ionicons name="alert-circle-outline" size={14} color="#F59E0B" />
+                          <Text style={styles.itemsMismatchText}>{t('invoices.itemsMismatch')}</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
+
                 {selectedInvoice.notes && (
                   <View style={styles.detailSection}>
                     <Text style={styles.detailSectionLabel}>{t('invoices.notes')}</Text>
@@ -296,10 +807,57 @@ export default function InvoicesScreen() {
                   <Ionicons name="trash" size={20} color="#EF4444" />
                   <Text style={styles.deleteButtonText}>{t('invoices.deleteInvoice')}</Text>
                 </TouchableOpacity>
-              </View>
+              </ScrollView>
             )}
           </View>
         </View>
+      </Modal>
+
+      {/* Record/edit payment amount - edit-in-place, same convention as the
+          daily-revenue form: the field shows what's already paid, and
+          saving REPLACES that value rather than adding to it. */}
+      <Modal visible={paymentModalVisible} animationType="fade" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedInvoice && selectedInvoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
+              </Text>
+              <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
+                <Ionicons name="close" size={28} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedInvoice && (
+              <>
+                <View style={styles.editNoticeBanner}>
+                  <Ionicons name="information-circle" size={18} color="#8B5CF6" />
+                  <Text style={styles.editNoticeText}>{t('invoices.paidAmountEditNotice')}</Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('invoices.paidAmountLabel')}</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={paymentAmountInput}
+                    onChangeText={setPaymentAmountInput}
+                    keyboardType="decimal-pad"
+                    placeholder="0.00"
+                    placeholderTextColor="#64748B"
+                    autoFocus
+                  />
+                  <Text style={styles.inputHint}>
+                    {t('invoices.totalAmount')}: {selectedInvoice.total_amount.toFixed(2)} €
+                  </Text>
+                </View>
+
+                <TouchableOpacity style={styles.submitButton} onPress={handleSavePaymentAmount} disabled={updatingPayment}>
+                  {updatingPayment ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
         </SafeAreaView>
       </View>
@@ -352,6 +910,91 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
   },
+  filtersToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: '#1E293B',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  filtersToggleText: {
+    fontSize: 13,
+    color: '#8B5CF6',
+    fontWeight: '600',
+  },
+  periodChipsRow: {
+    marginTop: 12,
+    height: 44,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  periodChipsContent: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  periodChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#1E293B',
+    marginRight: 8,
+    flexShrink: 0,
+  },
+  periodChipActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  periodChipText: {
+    fontSize: 13,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  periodChipTextActive: {
+    color: 'white',
+  },
+  customRangeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginTop: 10,
+  },
+  customRangeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#1E293B',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  customRangeButtonText: {
+    fontSize: 12,
+    color: '#E2E8F0',
+  },
+  monthHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  monthHeaderTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#C4B5FD',
+    textTransform: 'capitalize',
+  },
+  monthHeaderStats: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
   summaryBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -379,15 +1022,81 @@ const styles = StyleSheet.create({
   },
   invoiceCard: {
     backgroundColor: '#1E293B',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
   },
-  invoiceHeader: {
+  invoiceRowTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+  },
+  totalValueCompact: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#8B5CF6',
+    marginLeft: 8,
+  },
+  invoiceRowBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 8,
+  },
+  invoiceMeta: {
+    fontSize: 12,
+    color: '#64748B',
+    flexShrink: 1,
+  },
+  compactBadgeRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexShrink: 0,
+  },
+  compactBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  compactBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#F59E0B',
+  },
+  overdueBadge: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+  },
+  eikBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  eikBannerActive: {
+    backgroundColor: 'rgba(245, 158, 11, 0.25)',
+  },
+  eikBannerText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#F59E0B',
+    fontWeight: '600',
+  },
+  eikBannerAction: {
+    fontSize: 12,
+    color: '#F59E0B',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   supplierContainer: {
     flexDirection: 'row',
@@ -400,47 +1109,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'white',
     flex: 1,
-  },
-  invoiceDate: {
-    fontSize: 12,
-    color: '#64748B',
-  },
-  invoiceDetails: {
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-    paddingTop: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  detailLabel: {
-    fontSize: 13,
-    color: '#94A3B8',
-  },
-  detailValue: {
-    fontSize: 13,
-    color: '#E2E8F0',
-  },
-  invoiceFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  totalLabel: {
-    fontSize: 14,
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
-  totalValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#8B5CF6',
   },
   emptyContainer: {
     alignItems: 'center',
@@ -476,6 +1144,10 @@ const styles = StyleSheet.create({
     padding: 24,
     width: '100%',
     maxWidth: 400,
+    maxHeight: '90%',
+  },
+  detailScroll: {
+    maxHeight: '100%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -488,6 +1160,55 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
     marginBottom: 20,
+  },
+  editNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 16,
+  },
+  editNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#C4B5FD',
+    lineHeight: 16,
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 13,
+    color: '#94A3B8',
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: 'white',
+  },
+  inputHint: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 6,
+  },
+  submitButton: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  submitButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
   },
   exportOption: {
     flexDirection: 'row',
@@ -527,6 +1248,28 @@ const styles = StyleSheet.create({
   detailSection: {
     marginBottom: 16,
   },
+  protocolBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  protocolBannerOverdue: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+  },
+  protocolBannerTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'white',
+  },
+  protocolBannerDeadline: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
   detailSectionLabel: {
     fontSize: 12,
     color: '#64748B',
@@ -555,6 +1298,181 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#8B5CF6',
+  },
+  paymentSection: {
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  paymentSectionOverdue: {
+    borderColor: '#EF4444',
+  },
+  paymentSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  paymentMethodTag: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8B5CF6',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  paymentDueText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginBottom: 10,
+  },
+  paidCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#64748B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#10B981',
+    borderColor: '#10B981',
+  },
+  paidCheckboxLabel: {
+    fontSize: 14,
+    color: 'white',
+    flex: 1,
+  },
+  paymentProgressBox: {
+    marginBottom: 10,
+  },
+  paymentProgressText: {
+    fontSize: 13,
+    color: 'white',
+    fontWeight: '600',
+  },
+  paymentRemainingText: {
+    fontSize: 12,
+    color: '#F59E0B',
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  paymentProgressBar: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#334155',
+    overflow: 'hidden',
+  },
+  paymentProgressBarFill: {
+    height: '100%',
+    backgroundColor: '#8B5CF6',
+    borderRadius: 3,
+  },
+  recordPaymentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    alignSelf: 'flex-start',
+  },
+  recordPaymentButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8B5CF6',
+  },
+  itemsSection: {
+    marginBottom: 16,
+  },
+  itemsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  itemsTableHeader: {
+    flexDirection: 'row',
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+    marginBottom: 4,
+  },
+  itemsTableHeaderText: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  itemsColRight: {
+    textAlign: 'right',
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 6,
+    gap: 4,
+  },
+  itemRowName: {
+    fontSize: 13,
+    color: 'white',
+    fontWeight: '500',
+  },
+  itemRowValue: {
+    fontSize: 13,
+    color: '#CBD5E1',
+  },
+  itemRowTotal: {
+    fontWeight: '600',
+    color: 'white',
+  },
+  itemPriceAlertBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 3,
+  },
+  itemPriceAlertText: {
+    fontSize: 10,
+    color: '#EF4444',
+    fontWeight: '600',
+  },
+  itemsSumRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 6,
+    paddingHorizontal: 4,
+  },
+  itemsSumLabel: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  itemsSumValue: {
+    fontSize: 13,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  itemsMismatchNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  itemsMismatchText: {
+    fontSize: 11,
+    color: '#F59E0B',
+    flex: 1,
   },
   deleteButton: {
     flexDirection: 'row',

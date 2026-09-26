@@ -7,7 +7,6 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ImageBackground,
@@ -16,19 +15,24 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { Company } from '../src/types';
 import { useTranslation } from '../src/i18n';
+import { useAuth } from '../src/contexts/AuthContext';
+import { AccessDenied } from '../src/components';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function CompanySettingsScreen() {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
-  
+  const [hasOtherUsers, setHasOtherUsers] = useState(false);
+
   // Form fields
   const [name, setName] = useState('');
   const [eik, setEik] = useState('');
@@ -40,10 +44,6 @@ export default function CompanySettingsScreen() {
   const [email, setEmail] = useState('');
   const [bankName, setBankName] = useState('');
   const [bankIban, setBankIban] = useState('');
-  
-  // Join existing company
-  const [joinEik, setJoinEik] = useState('');
-  const [showJoinSection, setShowJoinSection] = useState(false);
 
   const loadCompany = useCallback(async () => {
     try {
@@ -60,6 +60,18 @@ export default function CompanySettingsScreen() {
         setEmail(data.email || '');
         setBankName(data.bank_name || '');
         setBankIban(data.bank_iban || '');
+
+        // The backend only blocks an EIK change once teammates have joined
+        // (it would silently change their company's tax ID too). Mirror
+        // that here instead of locking the field for every existing
+        // company - otherwise a sole owner could never fix the
+        // placeholder EIK the app auto-generates at signup.
+        try {
+          const users = await api.getCompanyUsers();
+          setHasOtherUsers(users.length > 1);
+        } catch (error) {
+          setHasOtherUsers(false);
+        }
       }
     } catch (error) {
       console.error('Error loading company:', error);
@@ -111,36 +123,6 @@ export default function CompanySettingsScreen() {
     }
   };
 
-  const handleJoinCompany = async () => {
-    if (!joinEik.trim()) {
-      Alert.alert(t('common.error'), t('company.enterEikError'));
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const result = await api.joinCompanyByEik(joinEik.trim());
-      Alert.alert(t('common.success'), result.message);
-      setCompany(result.company);
-      setName(result.company.name || '');
-      setEik(result.company.eik || '');
-      setVatNumber(result.company.vat_number || '');
-      setMol(result.company.mol || '');
-      setAddress(result.company.address || '');
-      setCity(result.company.city || '');
-      setPhone(result.company.phone || '');
-      setEmail(result.company.email || '');
-      setBankName(result.company.bank_name || '');
-      setBankIban(result.company.bank_iban || '');
-      setShowJoinSection(false);
-      setJoinEik('');
-    } catch (error: any) {
-      Alert.alert(t('common.error'), error.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   if (loading) {
     return (
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -151,6 +133,12 @@ export default function CompanySettingsScreen() {
         </View>
       </ImageBackground>
     );
+  }
+
+  // Owner can always edit; anyone without a company yet needs access to
+  // create/join one - same condition profile.tsx uses to show this link.
+  if (!hasPermission('manage_company') && company) {
+    return <AccessDenied />;
   }
 
   return (
@@ -190,55 +178,26 @@ export default function CompanySettingsScreen() {
                 </Text>
               </View>
 
-              {/* Join Existing Company Section */}
-              {!company && (
-                <View style={styles.joinSection}>
-                  <TouchableOpacity
-                    style={styles.joinToggle}
-                    onPress={() => setShowJoinSection(!showJoinSection)}
-                  >
-                    <Ionicons name="people" size={20} color="#8B5CF6" />
-                    <Text style={styles.joinToggleText}>
-                      {t('company.joinExisting')}
-                    </Text>
-                    <Ionicons 
-                      name={showJoinSection ? "chevron-up" : "chevron-down"} 
-                      size={20} 
-                      color="#64748B" 
-                    />
-                  </TouchableOpacity>
-                  
-                  {showJoinSection && (
-                    <View style={styles.joinForm}>
-                      <Text style={styles.joinHint}>
-                        {t('company.joinHint')}
-                      </Text>
-                      <TextInput
-                        style={styles.input}
-                        value={joinEik}
-                        onChangeText={setJoinEik}
-                        placeholder={t('company.enterEik')}
-                        placeholderTextColor="#64748B"
-                        keyboardType="number-pad"
-                      />
-                      <TouchableOpacity
-                        style={[styles.joinButton, saving && styles.buttonDisabled]}
-                        onPress={handleJoinCompany}
-                        disabled={saving}
-                      >
-                        {saving ? (
-                          <ActivityIndicator color="white" />
-                        ) : (
-                          <>
-                            <Ionicons name="log-in" size={20} color="white" />
-                            <Text style={styles.joinButtonText}>{t('company.join')}</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  )}
+              {/* Join Existing Company via Invitation - always available, not
+                  just for users without a company, since an accountant with
+                  their own company can still accept invitations to client
+                  companies (server-side validation enforces who actually
+                  may accept which invitation) */}
+              <TouchableOpacity
+                style={styles.joinSection}
+                onPress={() => router.push('/join-company')}
+              >
+                <View style={styles.joinToggle}>
+                  <Ionicons name="people" size={20} color="#8B5CF6" />
+                  <Text style={styles.joinToggleText}>
+                    {t('company.joinExisting')}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={20} color="#64748B" />
                 </View>
-              )}
+                <Text style={styles.joinHint}>
+                  {t('company.joinHint')}
+                </Text>
+              </TouchableOpacity>
 
               {/* Company Form */}
               <View style={styles.formContainer}>
@@ -266,9 +225,9 @@ export default function CompanySettingsScreen() {
                     placeholder="123456789"
                     placeholderTextColor="#64748B"
                     keyboardType="number-pad"
-                    editable={!company}
+                    editable={!company || !hasOtherUsers}
                   />
-                  {company && (
+                  {company && hasOtherUsers && (
                     <Text style={styles.inputHint}>{t('company.eikCantChange')}</Text>
                   )}
                 </View>
@@ -456,12 +415,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E293B',
     borderRadius: 16,
     marginBottom: 20,
-    overflow: 'hidden',
+    padding: 16,
   },
   joinToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
     gap: 12,
   },
   joinToggleText: {
@@ -470,32 +428,10 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '500',
   },
-  joinForm: {
-    padding: 16,
-    paddingTop: 0,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
   joinHint: {
     fontSize: 13,
     color: '#94A3B8',
-    marginBottom: 12,
-    marginTop: 12,
-  },
-  joinButton: {
-    flexDirection: 'row',
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 12,
-  },
-  joinButtonText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: '600',
+    marginTop: 8,
   },
   formContainer: {
     backgroundColor: '#1E293B',

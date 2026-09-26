@@ -13,16 +13,28 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { api } from '../../src/services/api';
 import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse } from '../../src/types';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { Alert } from '../../src/utils/alert';
+import { downloadAndShareFile } from '../../src/utils/downloadFile';
 
 const { width } = Dimensions.get('window');
 const chartWidth = width - 80;
 const pieChartRadius = (width - 80) / 3;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
+
+// Mirrors the rolling-window lengths GET /statistics/chart-data uses on the
+// backend (now - timedelta(days=N)) - needed here to average turnover over
+// the whole window, not just the days that happen to have entries.
+const PERIOD_DAY_COUNT: Record<'week' | 'month' | 'year', number> = {
+  week: 7,
+  month: 30,
+  year: 365,
+};
 
 // Color palette for charts
 const CHART_COLORS = [
@@ -32,10 +44,30 @@ const CHART_COLORS = [
 
 export default function StatsScreen() {
   const { t } = useTranslation();
-  const { hasPermission } = useAuth();
+  const { hasPermission, isOwner } = useAuth();
+  const params = useLocalSearchParams<{ period?: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
+
+  // Lets other screens (e.g. the Home dashboard's average-turnover card)
+  // deep-link straight into a specific period here instead of always
+  // landing on the default "week" view.
+  useEffect(() => {
+    if (params.period === 'week' || params.period === 'month' || params.period === 'year') {
+      setPeriod(params.period);
+    }
+  }, [params.period]);
+
+  // The income/expense charts below show a fixed 7-day window instead of
+  // cramming a whole month/year of bars into one view - 0 is the most
+  // recent 7 days, 1 the 7 before those, etc. Reset to the latest window
+  // whenever the period (and therefore the underlying data) changes.
+  const [chartPage, setChartPage] = useState(0);
+  useEffect(() => {
+    setChartPage(0);
+  }, [period]);
+
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'suppliers' | 'items'>('overview');
   
@@ -49,7 +81,14 @@ export default function StatsScreen() {
   const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
   const [supplierDetail, setSupplierDetail] = useState<SupplierDetailedResponse | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  
+
+  // Supplier comparison
+  const [compareMode, setCompareMode] = useState(false);
+  const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
+  const [compareModalVisible, setCompareModalVisible] = useState(false);
+  const [compareResult, setCompareResult] = useState<any>(null);
+  const [loadingCompare, setLoadingCompare] = useState(false);
+
   // Item statistics
   const [itemStats, setItemStats] = useState<any>(null);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -61,18 +100,73 @@ export default function StatsScreen() {
   const [itemBySupplier, setItemBySupplier] = useState<any>(null);
   const [loadingItemDetail, setLoadingItemDetail] = useState(false);
 
+  // Price inflation (overall spend-weighted price change across items over a period)
+  const [inflationPeriod, setInflationPeriod] = useState<'month' | 'quarter' | 'year'>('quarter');
+  const [inflationData, setInflationData] = useState<any>(null);
+  const [loadingInflation, setLoadingInflation] = useState(false);
+  const [inflationExpanded, setInflationExpanded] = useState(false);
+
+  // Overview enrichments: previous-month comparison, top-3 quick view,
+  // forecast and ROI trend
+  const [previousSummary, setPreviousSummary] = useState<Summary | null>(null);
+  const [topSuppliers, setTopSuppliers] = useState<SupplierStats[]>([]);
+  const [topItems, setTopItems] = useState<any[]>([]);
+  const [expenseForecast, setExpenseForecast] = useState<any>(null);
+  const [revenueForecast, setRevenueForecast] = useState<any>(null);
+  const [roiTrend, setRoiTrend] = useState<any[]>([]);
+
   const loadData = useCallback(async () => {
     try {
-      const [summaryData, chartDataResult] = await Promise.all([
+      const now = new Date();
+      const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevMonthStart = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), 1).toISOString();
+      const prevMonthEnd = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth() + 1, 0, 23, 59, 59).toISOString();
+
+      const [summaryData, chartDataResult, prevSummaryData] = await Promise.all([
         api.getSummary(),
         api.getChartData(period),
+        api.getSummary({ start_date: prevMonthStart, end_date: prevMonthEnd }),
       ]);
       setSummary(summaryData);
       setChartData(chartDataResult);
+      setPreviousSummary(prevSummaryData);
     } catch (error) {
       console.error('Error loading stats:', error);
     }
-  }, [period]);
+
+    if (hasPermission('view_statistics')) {
+      try {
+        const [supplierData, itemData] = await Promise.all([
+          api.getSupplierOverview(),
+          api.getItemStatistics({ top_n: 3 }),
+        ]);
+        setTopSuppliers((supplierData.top_by_amount || []).slice(0, 3));
+        setTopItems(itemData.top_by_value || []);
+      } catch (error) {
+        console.error('Error loading top suppliers/items:', error);
+      }
+
+      try {
+        const [expFc, revFc] = await Promise.all([
+          api.getExpenseForecast(1),
+          api.getRevenueForecast(1),
+        ]);
+        setExpenseForecast(expFc);
+        setRevenueForecast(revFc);
+      } catch (error) {
+        console.error('Error loading forecast:', error);
+      }
+    }
+
+    if (hasPermission('view_personal_investments')) {
+      try {
+        const roiTrendData = await api.getROITrend(6);
+        setRoiTrend(roiTrendData.trend || []);
+      } catch (error) {
+        console.error('Error loading ROI trend:', error);
+      }
+    }
+  }, [period, hasPermission, isOwner]);
 
   const loadSupplierStats = useCallback(async () => {
     setLoadingSuppliers(true);
@@ -97,7 +191,50 @@ export default function StatsScreen() {
       setLoadingDetail(false);
     }
   }, []);
-  
+
+  const toggleCompareSelection = (supplierName: string) => {
+    setSelectedForCompare((prev) => {
+      if (prev.includes(supplierName)) {
+        return prev.filter((s) => s !== supplierName);
+      }
+      if (prev.length >= 5) {
+        Alert.alert(t('common.error'), t('stats.compareMaxReached'));
+        return prev;
+      }
+      return [...prev, supplierName];
+    });
+  };
+
+  const runCompareSuppliers = async () => {
+    if (selectedForCompare.length < 2) {
+      Alert.alert(t('common.error'), t('stats.compareMinRequired'));
+      return;
+    }
+    setLoadingCompare(true);
+    setCompareModalVisible(true);
+    try {
+      const data = await api.compareSuppliers(selectedForCompare);
+      setCompareResult(data);
+    } catch (error) {
+      console.error('Error comparing suppliers:', error);
+    } finally {
+      setLoadingCompare(false);
+    }
+  };
+
+  const exitCompareMode = () => {
+    setCompareMode(false);
+    setSelectedForCompare([]);
+  };
+
+  const handleExportStatisticsPdf = async () => {
+    try {
+      await downloadAndShareFile('/api/export/statistics/pdf', `statistics_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (error) {
+      Alert.alert(t('common.error'), t('invoices.downloadError'));
+    }
+  };
+
   // Item statistics functions
   const loadItemStats = useCallback(async () => {
     setLoadingItems(true);
@@ -132,6 +269,29 @@ export default function StatsScreen() {
     }
   }, []);
   
+  const getInflationDateRange = (preset: 'month' | 'quarter' | 'year') => {
+    const end = new Date();
+    const start = new Date();
+    if (preset === 'month') start.setMonth(start.getMonth() - 1);
+    else if (preset === 'quarter') start.setMonth(start.getMonth() - 3);
+    else start.setFullYear(start.getFullYear() - 1);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    return { start_date: fmt(start), end_date: fmt(end) };
+  };
+
+  const loadInflation = useCallback(async (preset: 'month' | 'quarter' | 'year') => {
+    setLoadingInflation(true);
+    try {
+      const { start_date, end_date } = getInflationDateRange(preset);
+      const data = await api.getPriceInflation(start_date, end_date);
+      setInflationData(data);
+    } catch (error) {
+      console.error('Error loading price inflation:', error);
+    } finally {
+      setLoadingInflation(false);
+    }
+  }, []);
+
   const markAlertAsRead = async (alertId: string) => {
     try {
       await api.updatePriceAlert(alertId, 'read');
@@ -152,9 +312,14 @@ export default function StatsScreen() {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // Tab screens stay mounted, so returning here (e.g. after scanning and
+  // saving a new invoice) doesn't remount the screen - only re-fetching on
+  // focus picks up the change without needing a manual pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
   useEffect(() => {
     if (activeTab === 'suppliers' && !supplierOverview) {
@@ -167,6 +332,12 @@ export default function StatsScreen() {
       loadItemStats();
     }
   }, [activeTab, itemStats, loadItemStats]);
+
+  useEffect(() => {
+    if (activeTab === 'items') {
+      loadInflation(inflationPeriod);
+    }
+  }, [activeTab, inflationPeriod, loadInflation]);
 
   useEffect(() => {
     if (selectedSupplier) {
@@ -228,6 +399,41 @@ export default function StatsScreen() {
     ),
   }));
 
+  // Windows both bar charts into a fixed 7-day slice, paged with the
+  // chartPage state below - keeps every bar/label at the same comfortable
+  // width regardless of how many days the selected period actually spans,
+  // instead of squeezing a whole month/year into one cramped view.
+  const CHART_WINDOW_SIZE = 7;
+  const chartTotalPages = Math.max(1, Math.ceil(incomeBarData.length / CHART_WINDOW_SIZE));
+  const clampedChartPage = Math.min(chartPage, chartTotalPages - 1);
+  const chartWindowEnd = incomeBarData.length - clampedChartPage * CHART_WINDOW_SIZE;
+  const chartWindowStart = Math.max(0, chartWindowEnd - CHART_WINDOW_SIZE);
+  const windowedIncomeBarData = incomeBarData.slice(chartWindowStart, chartWindowEnd);
+  const windowedExpenseBarData = expenseBarData.slice(chartWindowStart, chartWindowEnd);
+  const chartRangeLabel = windowedIncomeBarData.length > 0
+    ? (windowedIncomeBarData.length === 1
+        ? windowedIncomeBarData[0].label
+        : `${windowedIncomeBarData[0].label} - ${windowedIncomeBarData[windowedIncomeBarData.length - 1].label}`)
+    : '';
+
+  // Small "+12% спрямо миналия месец" style badge for the summary cards
+  const renderTrendBadge = (current?: number | null, previous?: number | null, higherIsBetter: boolean = true) => {
+    if (current === undefined || current === null || previous === undefined || previous === null || !previous) return null;
+    const diff = current - previous;
+    const percent = (diff / Math.abs(previous)) * 100;
+    if (Math.abs(percent) < 1) return null;
+    const isUp = diff > 0;
+    const isGood = higherIsBetter ? isUp : !isUp;
+    return (
+      <View style={styles.trendBadge}>
+        <Ionicons name={isUp ? 'arrow-up' : 'arrow-down'} size={11} color={isGood ? '#10B981' : '#EF4444'} />
+        <Text style={[styles.trendBadgeText, { color: isGood ? '#10B981' : '#EF4444' }]}>
+          {Math.abs(percent).toFixed(0)}%
+        </Text>
+      </View>
+    );
+  };
+
   // Get current ranking data
   const getCurrentRanking = (): SupplierStats[] => {
     if (!supplierOverview) return [];
@@ -272,9 +478,12 @@ export default function StatsScreen() {
   const getSupplierBarData = () => {
     const ranking = getCurrentRanking().slice(0, 7);
     return ranking.map((supplier, index) => ({
-      value: supplierRankingType === 'frequency' ? supplier.invoice_count : 
+      value: supplierRankingType === 'frequency' ? supplier.invoice_count :
              supplierRankingType === 'avg' ? supplier.avg_invoice : supplier.total_amount,
-      label: supplier.supplier.substring(0, 6),
+      // Company names are often quoted (e.g. "Марс-1" ООД) - strip a
+      // leading quote before truncating so the label doesn't start with
+      // a stray punctuation mark instead of an actual letter.
+      label: supplier.supplier.replace(/^["'„”]+/, '').substring(0, 6),
       frontColor: CHART_COLORS[index % CHART_COLORS.length],
     }));
   };
@@ -470,6 +679,72 @@ export default function StatsScreen() {
     </Modal>
   );
 
+  // Render supplier comparison modal
+  const renderCompareModal = () => {
+    const maxAmount = compareResult?.suppliers?.length
+      ? Math.max(...compareResult.suppliers.map((s: any) => s.total_amount), 1)
+      : 1;
+    return (
+      <Modal
+        visible={compareModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => {
+          setCompareModalVisible(false);
+          setCompareResult(null);
+        }}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle} numberOfLines={1}>{t('stats.compareTitle')}</Text>
+            <TouchableOpacity onPress={() => { setCompareModalVisible(false); setCompareResult(null); }}>
+              <Ionicons name="close" size={28} color="#94A3B8" />
+            </TouchableOpacity>
+          </View>
+
+          {loadingCompare ? (
+            <View style={styles.modalLoading}>
+              <ActivityIndicator size="large" color="#8B5CF6" />
+            </View>
+          ) : compareResult?.suppliers?.length ? (
+            <ScrollView style={{ flex: 1, padding: 16 }}>
+              {compareResult.suppliers.map((s: any, idx: number) => (
+                <View key={s.supplier} style={styles.compareCard}>
+                  <Text style={styles.compareSupplierName} numberOfLines={1}>{s.supplier}</Text>
+
+                  <View style={styles.compareBarRow}>
+                    <Text style={styles.compareBarLabel}>{t('stats.compareTotalAmount')}</Text>
+                    <Text style={styles.compareBarValue}>{s.total_amount.toFixed(2)} €</Text>
+                  </View>
+                  <View style={styles.compareBarTrack}>
+                    <View style={[styles.compareBarFill, { width: `${(s.total_amount / maxAmount) * 100}%`, backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }]} />
+                  </View>
+
+                  <View style={styles.compareStatsRow}>
+                    <View style={styles.compareStatItem}>
+                      <Text style={styles.compareStatLabel}>{t('stats.compareInvoiceCount')}</Text>
+                      <Text style={styles.compareStatValue}>{s.invoice_count}</Text>
+                    </View>
+                    <View style={styles.compareStatItem}>
+                      <Text style={styles.compareStatLabel}>{t('stats.compareAvgInvoice')}</Text>
+                      <Text style={styles.compareStatValue}>{s.avg_invoice.toFixed(2)} €</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+              <View style={{ height: 40 }} />
+            </ScrollView>
+          ) : (
+            <View style={styles.modalLoading}>
+              <Ionicons name="alert-circle-outline" size={48} color="#64748B" />
+              <Text style={styles.noDataText}>{t('stats.noData')}</Text>
+            </View>
+          )}
+        </View>
+      </Modal>
+    );
+  };
+
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
@@ -479,8 +754,15 @@ export default function StatsScreen() {
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
           >
             <View style={styles.header}>
-              <Text style={styles.title}>{t('stats.title')}</Text>
-              <Text style={styles.subtitle}>{t('stats.subtitle')}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.title}>{t('stats.title')}</Text>
+                <Text style={styles.subtitle}>{t('stats.subtitle')}</Text>
+              </View>
+              {hasPermission('export_data') && (
+                <TouchableOpacity style={styles.exportButton} onPress={handleExportStatisticsPdf}>
+                  <Ionicons name="download" size={22} color="#8B5CF6" />
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Tab Selector */}
@@ -544,6 +826,24 @@ export default function StatsScreen() {
                   ))}
                 </View>
 
+                {/* Average Daily Turnover - reacts to the same period selector above,
+                    so it doubles as period-by-period business analysis rather than
+                    a single fixed number. Divided by calendar days in the rolling
+                    window (not just days with entries), matching the backend's
+                    week/month/year window definition in getChartData. */}
+                <View style={styles.avgTurnoverStatCard}>
+                  <View style={styles.avgTurnoverStatHeader}>
+                    <Ionicons name="speedometer" size={24} color="#3B82F6" />
+                    <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
+                  </View>
+                  <Text style={styles.avgTurnoverStatValue}>
+                    {(chartData.reduce((sum, d) => sum + d.income, 0) / PERIOD_DAY_COUNT[period]).toFixed(2)} €
+                  </Text>
+                  <Text style={styles.avgTurnoverStatSubtitle}>
+                    {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(PERIOD_DAY_COUNT[period]))}
+                  </Text>
+                </View>
+
                 {/* Summary Cards */}
                 <View style={styles.summaryGrid}>
                   <View style={[styles.summaryCard, { borderLeftColor: '#10B981' }]}>
@@ -552,6 +852,7 @@ export default function StatsScreen() {
                     <Text style={[styles.cardValue, { color: '#10B981' }]}>
                       {summary?.total_income.toFixed(2) || '0.00'} €
                     </Text>
+                    {renderTrendBadge(summary?.total_income, previousSummary?.total_income, true)}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: '#EF4444' }]}>
                     <Ionicons name="trending-down" size={24} color="#EF4444" />
@@ -559,6 +860,7 @@ export default function StatsScreen() {
                     <Text style={[styles.cardValue, { color: '#EF4444' }]}>
                       {summary?.total_expense.toFixed(2) || '0.00'} €
                     </Text>
+                    {renderTrendBadge(summary?.total_expense, previousSummary?.total_expense, false)}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: '#8B5CF6' }]}>
                     <Ionicons name="calculator" size={24} color="#8B5CF6" />
@@ -566,15 +868,59 @@ export default function StatsScreen() {
                     <Text style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
                       {summary?.vat_to_pay.toFixed(2) || '0.00'} €
                     </Text>
+                    {renderTrendBadge(summary?.vat_to_pay, previousSummary?.vat_to_pay, false)}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: '#F59E0B' }]}>
                     <Ionicons name="wallet" size={24} color="#F59E0B" />
                     <Text style={styles.cardLabel}>{t('stats.profitLabel')}</Text>
-                    <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
-                      {summary?.profit.toFixed(2) || '0.00'} €
-                    </Text>
+                    {summary && summary.profit === null ? (
+                      <Ionicons name="lock-closed" size={20} color="#64748B" style={{ marginVertical: 4 }} />
+                    ) : (
+                      <>
+                        <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+                          {summary?.profit?.toFixed(2) || '0.00'} €
+                        </Text>
+                        {renderTrendBadge(summary?.profit, previousSummary?.profit, true)}
+                      </>
+                    )}
                   </View>
                 </View>
+
+                {summary?.financial_visibility && (
+                  summary.financial_visibility.pocket_money === false ||
+                  summary.financial_visibility.off_book_expenses === false ||
+                  summary.financial_visibility.profit === false
+                ) && (
+                  <View style={styles.restrictedNote}>
+                    <Ionicons name="information-circle-outline" size={14} color="#94A3B8" />
+                    <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+                  </View>
+                )}
+
+                {/* Chart window navigation - only relevant once the period
+                    spans more than one 7-day window (month/year); a plain
+                    week never needs it. */}
+                {chartTotalPages > 1 && (
+                  <View style={styles.chartNavRow}>
+                    <TouchableOpacity
+                      accessibilityLabel={t('stats.chartNavPrev')}
+                      style={[styles.chartNavButton, clampedChartPage >= chartTotalPages - 1 && styles.chartNavButtonDisabled]}
+                      onPress={() => setChartPage((p) => Math.min(chartTotalPages - 1, p + 1))}
+                      disabled={clampedChartPage >= chartTotalPages - 1}
+                    >
+                      <Ionicons name="chevron-back" size={18} color={clampedChartPage >= chartTotalPages - 1 ? '#334155' : '#8B5CF6'} />
+                    </TouchableOpacity>
+                    <Text style={styles.chartNavLabel}>{chartRangeLabel}</Text>
+                    <TouchableOpacity
+                      accessibilityLabel={t('stats.chartNavNext')}
+                      style={[styles.chartNavButton, clampedChartPage === 0 && styles.chartNavButtonDisabled]}
+                      onPress={() => setChartPage((p) => Math.max(0, p - 1))}
+                      disabled={clampedChartPage === 0}
+                    >
+                      <Ionicons name="chevron-forward" size={18} color={clampedChartPage === 0 ? '#334155' : '#8B5CF6'} />
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 {/* Income Chart */}
                 <View style={styles.chartContainer}>
@@ -582,24 +928,39 @@ export default function StatsScreen() {
                     <Ionicons name="arrow-up-circle" size={24} color="#10B981" />
                     <Text style={styles.chartTitle}>{t('stats.income')}</Text>
                   </View>
-                  {incomeBarData.length > 0 ? (
-                    <BarChart
-                      data={incomeBarData}
-                      width={chartWidth}
-                      height={180}
-                      barWidth={20}
-                      spacing={16}
-                      noOfSections={4}
-                      barBorderRadius={4}
-                      frontColor="#10B981"
-                      yAxisColor="#334155"
-                      xAxisColor="#334155"
-                      yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                      xAxisLabelTextStyle={{ color: '#64748B', fontSize: 10 }}
-                      hideRules
-                      isAnimated
-                    />
-                  ) : (
+                  {windowedIncomeBarData.length > 0 ? (() => {
+                    // Size bars/spacing to the windowed (max 7) day count so
+                    // all of them fit within the chart's width comfortably -
+                    // a fixed barWidth/spacing overflowed past the visible
+                    // area with a full week's worth of days, clipping the
+                    // last bar's label instead of shrinking to fit (same fix
+                    // as the supplier chart below).
+                    const yAxisLabelWidth = 34;
+                    const spacing = 8;
+                    const plotWidth = chartWidth - yAxisLabelWidth;
+                    const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (windowedIncomeBarData.length + 1)) / windowedIncomeBarData.length)));
+                    return (
+                      <BarChart
+                        data={windowedIncomeBarData}
+                        width={plotWidth}
+                        height={180}
+                        barWidth={barWidth}
+                        spacing={spacing}
+                        initialSpacing={spacing}
+                        endSpacing={spacing}
+                        noOfSections={4}
+                        barBorderRadius={4}
+                        frontColor="#10B981"
+                        yAxisColor="#334155"
+                        xAxisColor="#334155"
+                        yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                        xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                        yAxisLabelWidth={yAxisLabelWidth}
+                        hideRules
+                        isAnimated
+                      />
+                    );
+                  })() : (
                     <View style={styles.noDataContainer}>
                       <Text style={styles.noDataText}>{t('stats.noData')}</Text>
                     </View>
@@ -612,24 +973,33 @@ export default function StatsScreen() {
                     <Ionicons name="arrow-down-circle" size={24} color="#EF4444" />
                     <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
                   </View>
-                  {expenseBarData.length > 0 ? (
-                    <BarChart
-                      data={expenseBarData}
-                      width={chartWidth}
-                      height={180}
-                      barWidth={20}
-                      spacing={16}
-                      noOfSections={4}
-                      barBorderRadius={4}
-                      frontColor="#EF4444"
-                      yAxisColor="#334155"
-                      xAxisColor="#334155"
-                      yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                      xAxisLabelTextStyle={{ color: '#64748B', fontSize: 10 }}
-                      hideRules
-                      isAnimated
-                    />
-                  ) : (
+                  {windowedExpenseBarData.length > 0 ? (() => {
+                    const yAxisLabelWidth = 34;
+                    const spacing = 8;
+                    const plotWidth = chartWidth - yAxisLabelWidth;
+                    const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (windowedExpenseBarData.length + 1)) / windowedExpenseBarData.length)));
+                    return (
+                      <BarChart
+                        data={windowedExpenseBarData}
+                        width={plotWidth}
+                        height={180}
+                        barWidth={barWidth}
+                        spacing={spacing}
+                        initialSpacing={spacing}
+                        endSpacing={spacing}
+                        noOfSections={4}
+                        barBorderRadius={4}
+                        frontColor="#EF4444"
+                        yAxisColor="#334155"
+                        xAxisColor="#334155"
+                        yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                        xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                        yAxisLabelWidth={yAxisLabelWidth}
+                        hideRules
+                        isAnimated
+                      />
+                    );
+                  })() : (
                     <View style={styles.noDataContainer}>
                       <Text style={styles.noDataText}>{t('stats.noData')}</Text>
                     </View>
@@ -684,15 +1054,145 @@ export default function StatsScreen() {
                     <View style={styles.statItem}>
                       <Ionicons name="wallet" size={20} color="#F59E0B" />
                       <Text style={styles.statLabel}>{t('home.pocket')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0} €</Text>
+                      {summary && summary.total_pocket_money === null ? (
+                        <Ionicons name="lock-closed" size={16} color="#64748B" />
+                      ) : (
+                        <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0} €</Text>
+                      )}
                     </View>
                     <View style={styles.statItem}>
                       <Ionicons name="remove-circle" size={20} color="#EF4444" />
                       <Text style={styles.statLabel}>{t('stats.expensesNoInvoice')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_non_invoice_expenses.toFixed(0) || 0} €</Text>
+                      {summary && summary.total_non_invoice_expenses === null ? (
+                        <Ionicons name="lock-closed" size={16} color="#64748B" />
+                      ) : (
+                        <Text style={styles.statValue}>{summary?.total_non_invoice_expenses?.toFixed(0) || 0} €</Text>
+                      )}
                     </View>
                   </View>
+
+                  {!!summary?.total_payroll_cost && (
+                    <View style={styles.statRow}>
+                      <View style={[styles.statItem, { flex: 1 }]}>
+                        <Ionicons name="people" size={20} color="#10B981" />
+                        <Text style={styles.statLabel}>{t('payroll.totalCostThisMonth')}</Text>
+                        <Text style={styles.statValue}>{summary.total_payroll_cost.toFixed(2)} €</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {!!summary?.total_depreciation_expense && (
+                    <View style={styles.statRow}>
+                      <View style={[styles.statItem, { flex: 1 }]}>
+                        <Ionicons name="business" size={20} color="#F59E0B" />
+                        <Text style={styles.statLabel}>{t('assets.depreciationThisMonth')}</Text>
+                        <Text style={styles.statValue}>{summary.total_depreciation_expense.toFixed(2)} €</Text>
+                      </View>
+                    </View>
+                  )}
                 </View>
+
+                {/* Top 3 quick view */}
+                {hasPermission('view_statistics') && (topSuppliers.length > 0 || topItems.length > 0) && (
+                  <View style={styles.top3Section}>
+                    <Text style={styles.sectionTitle}>{t('stats.top3Title')}</Text>
+                    <View style={styles.top3Row}>
+                      <View style={styles.top3Column}>
+                        <Text style={styles.top3ColumnTitle}>{t('stats.topSuppliers')}</Text>
+                        {topSuppliers.length > 0 ? (
+                          topSuppliers.map((s, idx) => (
+                            <View key={s.supplier} style={styles.top3Item}>
+                              <Text style={styles.top3Rank}>{idx + 1}</Text>
+                              <Text style={styles.top3Name} numberOfLines={1}>{s.supplier}</Text>
+                              <Text style={styles.top3Value}>{s.total_amount.toFixed(0)} €</Text>
+                            </View>
+                          ))
+                        ) : (
+                          <Text style={styles.noDataText}>{t('stats.noData')}</Text>
+                        )}
+                      </View>
+                      <View style={styles.top3Column}>
+                        <Text style={styles.top3ColumnTitle}>{t('stats.topItems')}</Text>
+                        {topItems.length > 0 ? (
+                          topItems.map((item, idx) => (
+                            <View key={item.item_name} style={styles.top3Item}>
+                              <Text style={styles.top3Rank}>{idx + 1}</Text>
+                              <Text style={styles.top3Name} numberOfLines={1}>{item.item_name}</Text>
+                              <Text style={styles.top3Value}>{item.total_value.toFixed(0)} €</Text>
+                            </View>
+                          ))
+                        ) : (
+                          <Text style={styles.noDataText}>{t('stats.noData')}</Text>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Forecast */}
+                {hasPermission('view_statistics') && (revenueForecast?.forecast?.length > 0 || expenseForecast?.forecast?.length > 0) && (
+                  <View style={styles.forecastSection}>
+                    <View style={styles.chartHeader}>
+                      <Ionicons name="analytics" size={22} color="#8B5CF6" />
+                      <Text style={styles.chartTitle}>{t('stats.forecastTitle')}</Text>
+                    </View>
+                    <Text style={styles.forecastHint}>{t('stats.forecastHint')}</Text>
+                    <View style={styles.forecastRow}>
+                      {revenueForecast?.forecast?.[0] && (
+                        <View style={styles.forecastCard}>
+                          <Ionicons name="trending-up" size={20} color="#10B981" />
+                          <Text style={styles.forecastLabel}>{t('stats.forecastRevenue')}</Text>
+                          <Text style={[styles.forecastValue, { color: '#10B981' }]}>
+                            {revenueForecast.forecast[0].predicted_amount.toFixed(0)} €
+                          </Text>
+                          <Text style={styles.forecastTrend}>
+                            {revenueForecast.trend === 'increasing' ? '📈' : revenueForecast.trend === 'decreasing' ? '📉' : '➖'}
+                            {' '}{revenueForecast.trend_percent > 0 ? '+' : ''}{revenueForecast.trend_percent}%
+                          </Text>
+                        </View>
+                      )}
+                      {expenseForecast?.forecast?.[0] && (
+                        <View style={styles.forecastCard}>
+                          <Ionicons name="trending-down" size={20} color="#EF4444" />
+                          <Text style={styles.forecastLabel}>{t('stats.forecastExpense')}</Text>
+                          <Text style={[styles.forecastValue, { color: '#EF4444' }]}>
+                            {expenseForecast.forecast[0].predicted_amount.toFixed(0)} €
+                          </Text>
+                          <Text style={styles.forecastTrend}>
+                            {expenseForecast.trend === 'increasing' ? '📈' : expenseForecast.trend === 'decreasing' ? '📉' : '➖'}
+                            {' '}{expenseForecast.trend_percent > 0 ? '+' : ''}{expenseForecast.trend_percent}%
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )}
+
+                {/* ROI Trend - owner or a delegated view_personal_investments viewer */}
+                {hasPermission('view_personal_investments') && roiTrend.length > 0 && (
+                  <View style={styles.chartContainer}>
+                    <View style={styles.chartHeader}>
+                      <Ionicons name="pulse" size={24} color="#8B5CF6" />
+                      <Text style={styles.chartTitle}>{t('stats.roiTrendTitle')}</Text>
+                    </View>
+                    <LineChart
+                      data={roiTrend.map((pt) => ({ value: pt.roi_percent, label: pt.label }))}
+                      width={chartWidth}
+                      height={180}
+                      color="#8B5CF6"
+                      thickness={3}
+                      dataPointsColor="#8B5CF6"
+                      yAxisColor="#334155"
+                      xAxisColor="#334155"
+                      yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                      xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                      noOfSections={4}
+                      hideRules
+                      isAnimated
+                      curved
+                    />
+                  </View>
+                )}
 
                 <View style={{ height: 40 }} />
               </>
@@ -867,23 +1367,39 @@ export default function StatsScreen() {
                         </View>
                       )}
                       
-                      {supplierChartType === 'bar' && getSupplierBarData().length > 0 && (
-                        <BarChart
-                          data={getSupplierBarData()}
-                          width={chartWidth}
-                          height={200}
-                          barWidth={28}
-                          spacing={12}
-                          noOfSections={4}
-                          barBorderRadius={4}
-                          yAxisColor="#334155"
-                          xAxisColor="#334155"
-                          yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                          xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
-                          hideRules
-                          isAnimated
-                        />
-                      )}
+                      {(() => {
+                        const barData = getSupplierBarData();
+                        if (barData.length === 0) return null;
+                        // Size bars/spacing to the actual item count so all
+                        // of them fit within the chart's width - a fixed
+                        // barWidth/spacing overflowed past the visible area
+                        // with 6-7 suppliers, clipping the last bar instead
+                        // of shrinking to fit.
+                        const yAxisLabelWidth = 34;
+                        const spacing = 8;
+                        const plotWidth = chartWidth - yAxisLabelWidth;
+                        const barWidth = Math.max(16, Math.min(30, Math.floor((plotWidth - spacing * (barData.length + 1)) / barData.length)));
+                        return (
+                          <BarChart
+                            data={barData}
+                            width={plotWidth}
+                            height={200}
+                            barWidth={barWidth}
+                            spacing={spacing}
+                            initialSpacing={spacing}
+                        endSpacing={spacing}
+                            noOfSections={4}
+                            barBorderRadius={4}
+                            yAxisColor="#334155"
+                            xAxisColor="#334155"
+                            yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
+                            xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                            yAxisLabelWidth={yAxisLabelWidth}
+                            hideRules
+                            isAnimated
+                          />
+                        );
+                      })()}
                       
                       {supplierChartType === 'line' && getSupplierBarData().length > 0 && (
                         <LineChart
@@ -908,55 +1424,88 @@ export default function StatsScreen() {
                     <View style={styles.topSuppliersCard}>
                       <View style={styles.topSuppliersHeader}>
                         <Ionicons name="list" size={24} color="#8B5CF6" />
-                        <Text style={styles.topSuppliersTitle}>
-                          {supplierRankingType === 'amount' ? t('stats.topByAmount') : 
+                        <Text style={[styles.topSuppliersTitle, { flex: 1 }]}>
+                          {supplierRankingType === 'amount' ? t('stats.topByAmount') :
                            supplierRankingType === 'frequency' ? t('stats.topByFrequency') : t('stats.topByAvg')}
                         </Text>
+                        <TouchableOpacity
+                          style={[styles.compareToggle, compareMode && styles.compareToggleActive]}
+                          onPress={() => (compareMode ? exitCompareMode() : setCompareMode(true))}
+                        >
+                          <Ionicons name="git-compare" size={14} color={compareMode ? 'white' : '#8B5CF6'} />
+                          <Text style={[styles.compareToggleText, compareMode && styles.compareToggleTextActive]}>
+                            {t('stats.compare')}
+                          </Text>
+                        </TouchableOpacity>
                       </View>
-                      
+
+                      {compareMode && (
+                        <Text style={styles.compareHint}>{t('stats.compareHint')}</Text>
+                      )}
+
                       {getCurrentRanking().length > 0 ? (
-                        getCurrentRanking().map((supplier, index) => (
-                          <TouchableOpacity 
-                            key={supplier.supplier} 
-                            style={styles.supplierItem}
-                            onPress={() => setSelectedSupplier(supplier.supplier)}
-                          >
-                            <View style={styles.supplierRank}>
-                              <Text style={[
-                                styles.supplierRankText,
-                                index < 3 && { color: index === 0 ? '#F59E0B' : index === 1 ? '#94A3B8' : '#CD7F32' }
-                              ]}>
-                                #{index + 1}
-                              </Text>
-                            </View>
-                            <View style={styles.supplierInfo}>
-                              <Text style={styles.supplierName} numberOfLines={1}>
-                                {supplier.supplier}
-                              </Text>
-                              <Text style={styles.supplierMeta}>
-                                {supplier.invoice_count} {t('stats.invoices')} • {t('stats.avgShort')} {supplier.avg_invoice.toFixed(0)}€
-                              </Text>
-                            </View>
-                            <View style={styles.supplierAmounts}>
-                              <Text style={styles.supplierAmount}>
-                                {supplier.total_amount.toFixed(2)} €
-                              </Text>
-                              <View style={styles.dependencyBadge}>
+                        getCurrentRanking().map((supplier, index) => {
+                          const isSelected = selectedForCompare.includes(supplier.supplier);
+                          return (
+                            <TouchableOpacity
+                              key={supplier.supplier}
+                              style={styles.supplierItem}
+                              onPress={() => compareMode ? toggleCompareSelection(supplier.supplier) : setSelectedSupplier(supplier.supplier)}
+                            >
+                              {compareMode && (
+                                <Ionicons
+                                  name={isSelected ? 'checkbox' : 'square-outline'}
+                                  size={20}
+                                  color={isSelected ? '#8B5CF6' : '#64748B'}
+                                  style={{ marginRight: 4 }}
+                                />
+                              )}
+                              <View style={styles.supplierRank}>
                                 <Text style={[
-                                  styles.dependencyText,
-                                  supplier.dependency_percent > 30 && { color: '#EF4444' }
+                                  styles.supplierRankText,
+                                  index < 3 && { color: index === 0 ? '#F59E0B' : index === 1 ? '#94A3B8' : '#CD7F32' }
                                 ]}>
-                                  {supplier.dependency_percent.toFixed(0)}%
+                                  #{index + 1}
                                 </Text>
                               </View>
-                            </View>
-                            <Ionicons name="chevron-forward" size={20} color="#64748B" />
-                          </TouchableOpacity>
-                        ))
+                              <View style={styles.supplierInfo}>
+                                <Text style={styles.supplierName} numberOfLines={1}>
+                                  {supplier.supplier}
+                                </Text>
+                                <Text style={styles.supplierMeta}>
+                                  {supplier.invoice_count} {t('stats.invoices')} • {t('stats.avgShort')} {supplier.avg_invoice.toFixed(0)}€
+                                </Text>
+                              </View>
+                              <View style={styles.supplierAmounts}>
+                                <Text style={styles.supplierAmount}>
+                                  {supplier.total_amount.toFixed(2)} €
+                                </Text>
+                                <View style={styles.dependencyBadge}>
+                                  <Text style={[
+                                    styles.dependencyText,
+                                    supplier.dependency_percent > 30 && { color: '#EF4444' }
+                                  ]}>
+                                    {supplier.dependency_percent.toFixed(0)}%
+                                  </Text>
+                                </View>
+                              </View>
+                              {!compareMode && <Ionicons name="chevron-forward" size={20} color="#64748B" />}
+                            </TouchableOpacity>
+                          );
+                        })
                       ) : (
                         <Text style={styles.noDataText}>{t('stats.noSupplierData')}</Text>
                       )}
                     </View>
+
+                    {compareMode && selectedForCompare.length >= 2 && (
+                      <TouchableOpacity style={styles.compareFloatingButton} onPress={runCompareSuppliers}>
+                        <Ionicons name="git-compare" size={20} color="white" />
+                        <Text style={styles.compareFloatingButtonText}>
+                          {t('stats.compareButtonWithCount')} ({selectedForCompare.length})
+                        </Text>
+                      </TouchableOpacity>
+                    )}
 
                     {/* Inactive Suppliers Warning */}
                     {supplierOverview.inactive_suppliers.length > 0 && (
@@ -1093,6 +1642,79 @@ export default function StatsScreen() {
                       </View>
                     )}
 
+                    {/* Price Inflation Card */}
+                    <View style={styles.inflationCard}>
+                      <View style={styles.priceAlertsHeader}>
+                        <Ionicons name="analytics" size={24} color="#F59E0B" />
+                        <Text style={styles.inflationTitle}>{t('stats.priceInflation')}</Text>
+                      </View>
+
+                      <View style={styles.rankingSelector}>
+                        {(['month', 'quarter', 'year'] as const).map((p) => (
+                          <TouchableOpacity
+                            key={p}
+                            style={[styles.rankingButton, inflationPeriod === p && styles.rankingButtonActive]}
+                            onPress={() => setInflationPeriod(p)}
+                          >
+                            <Text style={[styles.rankingButtonText, inflationPeriod === p && styles.rankingButtonTextActive]}>
+                              {t(`stats.inflationPeriod.${p}`)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      {loadingInflation ? (
+                        <ActivityIndicator size="small" color="#F59E0B" style={{ marginVertical: 16 }} />
+                      ) : inflationData && inflationData.items_compared > 0 ? (
+                        <>
+                          <View style={styles.inflationHeadline}>
+                            <Text style={[
+                              styles.inflationHeadlineValue,
+                              { color: inflationData.overall_change_percent > 0 ? '#EF4444' : inflationData.overall_change_percent < 0 ? '#10B981' : '#94A3B8' }
+                            ]}>
+                              {inflationData.overall_change_percent > 0 ? '+' : ''}{inflationData.overall_change_percent}%
+                            </Text>
+                            <Text style={styles.inflationHeadlineLabel}>
+                              {t('stats.inflationHeadline')} ({inflationData.items_compared} {t('stats.inflationItemsCompared')})
+                            </Text>
+                          </View>
+
+                          <TouchableOpacity
+                            style={styles.inflationToggle}
+                            onPress={() => setInflationExpanded(!inflationExpanded)}
+                          >
+                            <Text style={styles.inflationToggleText}>
+                              {inflationExpanded ? t('stats.inflationHideDetails') : t('stats.inflationShowDetails')}
+                            </Text>
+                            <Ionicons name={inflationExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#F59E0B" />
+                          </TouchableOpacity>
+
+                          {inflationExpanded && inflationData.items.map((item: any) => (
+                            <View key={item.item_name} style={styles.alertItem}>
+                              <View style={styles.alertInfo}>
+                                <Text style={styles.alertItemName} numberOfLines={1}>{item.item_name}</Text>
+                                <Text style={styles.alertSupplier}>{item.supplier} • {item.purchase_count}x</Text>
+                                <View style={styles.alertPrices}>
+                                  <Text style={styles.alertOldPrice}>{item.start_price.toFixed(2)}€</Text>
+                                  <Ionicons name="arrow-forward" size={14} color="#64748B" />
+                                  <Text style={[styles.alertNewPrice, { color: item.change_percent >= 0 ? '#EF4444' : '#10B981' }]}>
+                                    {item.end_price.toFixed(2)}€
+                                  </Text>
+                                  <View style={[styles.alertChangeBadge, { backgroundColor: item.change_percent >= 0 ? '#EF444420' : '#10B98120' }]}>
+                                    <Text style={[styles.alertChangeText, { color: item.change_percent >= 0 ? '#EF4444' : '#10B981' }]}>
+                                      {item.change_percent > 0 ? '+' : ''}{item.change_percent}%
+                                    </Text>
+                                  </View>
+                                </View>
+                              </View>
+                            </View>
+                          ))}
+                        </>
+                      ) : (
+                        <Text style={styles.inflationNoData}>{t('stats.inflationNoData')}</Text>
+                      )}
+                    </View>
+
                     {/* Ranking Type Selector */}
                     <View style={styles.rankingSelector}>
                       <TouchableOpacity
@@ -1226,7 +1848,10 @@ export default function StatsScreen() {
       
       {/* Supplier Detail Modal */}
       {renderSupplierDetailModal()}
-      
+
+      {/* Supplier Compare Modal */}
+      {renderCompareModal()}
+
       {/* Item Detail Modal */}
       <Modal
         visible={!!selectedItem}
@@ -1404,6 +2029,16 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  exportButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   title: {
     fontSize: 28,
@@ -1439,6 +2074,36 @@ const styles = StyleSheet.create({
   periodButtonTextActive: {
     color: 'white',
   },
+  avgTurnoverStatCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+  },
+  avgTurnoverStatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  avgTurnoverStatTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    flex: 1,
+  },
+  avgTurnoverStatValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#3B82F6',
+    marginBottom: 4,
+  },
+  avgTurnoverStatSubtitle: {
+    fontSize: 13,
+    color: '#94A3B8',
+  },
   summaryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1462,11 +2127,58 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 4,
   },
+  restrictedNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  restrictedNoteText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    flexShrink: 1,
+  },
+  trendBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginTop: 6,
+  },
+  trendBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
   chartContainer: {
     backgroundColor: '#1E293B',
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
+  },
+  chartNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 12,
+  },
+  chartNavButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#1E293B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chartNavButtonDisabled: {
+    opacity: 0.5,
+  },
+  chartNavLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#94A3B8',
+    minWidth: 90,
+    textAlign: 'center',
   },
   chartHeader: {
     flexDirection: 'row',
@@ -1567,6 +2279,91 @@ const styles = StyleSheet.create({
     color: 'white',
     marginTop: 4,
   },
+  top3Section: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+  },
+  top3Row: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  top3Column: {
+    flex: 1,
+  },
+  top3ColumnTitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  top3Item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginBottom: 6,
+    gap: 8,
+  },
+  top3Rank: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#8B5CF6',
+    width: 14,
+  },
+  top3Name: {
+    flex: 1,
+    fontSize: 12,
+    color: '#E2E8F0',
+  },
+  top3Value: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'white',
+  },
+  forecastSection: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+  },
+  forecastHint: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: -4,
+    marginBottom: 12,
+  },
+  forecastRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  forecastCard: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+  },
+  forecastLabel: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  forecastValue: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  forecastTrend: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 4,
+  },
   tabSelector: {
     flexDirection: 'row',
     backgroundColor: '#1E293B',
@@ -1576,12 +2373,13 @@ const styles = StyleSheet.create({
   },
   tabButton: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 4,
     borderRadius: 10,
-    gap: 8,
+    gap: 4,
   },
   tabButtonActive: {
     backgroundColor: '#8B5CF6',
@@ -1590,6 +2388,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748B',
     fontWeight: '500',
+    textAlign: 'center',
   },
   tabButtonTextActive: {
     color: 'white',
@@ -1722,12 +2521,12 @@ const styles = StyleSheet.create({
   
   // Chart Controls
   chartControlsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 10,
     marginBottom: 16,
   },
   chartTypeSelector: {
     flexDirection: 'row',
+    alignSelf: 'flex-start',
     backgroundColor: '#1E293B',
     borderRadius: 8,
     padding: 4,
@@ -1746,8 +2545,10 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   rankingButton: {
+    flex: 1,
+    alignItems: 'center',
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderRadius: 6,
   },
   rankingButtonActive: {
@@ -1820,6 +2621,100 @@ const styles = StyleSheet.create({
   topSuppliersTitle: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: 'white',
+  },
+  compareToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+  },
+  compareToggleActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  compareToggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8B5CF6',
+  },
+  compareToggleTextActive: {
+    color: 'white',
+  },
+  compareHint: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 12,
+  },
+  compareFloatingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
+    paddingVertical: 14,
+    marginTop: 12,
+  },
+  compareFloatingButtonText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  compareCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+  },
+  compareSupplierName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: 'white',
+    marginBottom: 10,
+  },
+  compareBarRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  compareBarLabel: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  compareBarValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'white',
+  },
+  compareBarTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#0F172A',
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  compareBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  compareStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  compareStatItem: {
+    alignItems: 'center',
+  },
+  compareStatLabel: {
+    fontSize: 11,
+    color: '#64748B',
+    marginBottom: 2,
+  },
+  compareStatValue: {
+    fontSize: 14,
+    fontWeight: '600',
     color: 'white',
   },
   supplierItem: {
@@ -2245,7 +3140,55 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E293B',
     borderRadius: 8,
   },
-  
+
+  // Price Inflation Card
+  inflationCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#F59E0B',
+  },
+  inflationTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#F59E0B',
+    flex: 1,
+  },
+  inflationHeadline: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  inflationHeadlineValue: {
+    fontSize: 36,
+    fontWeight: 'bold',
+  },
+  inflationHeadlineLabel: {
+    fontSize: 13,
+    color: '#94A3B8',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  inflationToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+  },
+  inflationToggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F59E0B',
+  },
+  inflationNoData: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
+
   // Item Trend Badge
   itemTrendBadge: {
     flexDirection: 'row',

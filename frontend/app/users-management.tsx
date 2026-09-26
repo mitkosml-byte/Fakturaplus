@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   TextInput,
   Modal,
   ImageBackground,
@@ -17,11 +16,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { User, Invitation } from '../src/types';
 import { useAuth } from '../src/contexts/AuthContext';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import * as Clipboard from 'expo-clipboard';
+import { getRoleName as sharedGetRoleName, getRoleColor } from '../src/utils/roles';
+import { ROLE_DEFAULT_PERMISSIONS, ConfigurableRole } from '../src/utils/permissions';
+import { PermissionsChecklist } from '../src/components';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -39,7 +42,8 @@ export default function UsersManagementScreen() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePhone, setInvitePhone] = useState('');
-  const [inviteRole, setInviteRole] = useState<'manager' | 'staff'>('staff');
+  const [inviteRole, setInviteRole] = useState<ConfigurableRole>('staff');
+  const [invitePermissions, setInvitePermissions] = useState<string[]>(ROLE_DEFAULT_PERMISSIONS.staff);
   const [inviting, setInviting] = useState(false);
   
   // Invitation code modal
@@ -72,6 +76,20 @@ export default function UsersManagementScreen() {
     setRefreshing(false);
   }, [loadData]);
 
+  // Switching role resets the checklist to that role's defaults - fine-tuning
+  // is meant to start from a sensible baseline each time, not carry over
+  // ticks that may not even apply to the newly-picked role.
+  const handleSelectInviteRole = (role: ConfigurableRole) => {
+    setInviteRole(role);
+    setInvitePermissions(ROLE_DEFAULT_PERMISSIONS[role]);
+  };
+
+  const toggleInvitePermission = (permission: string) => {
+    setInvitePermissions(prev =>
+      prev.includes(permission) ? prev.filter(p => p !== permission) : [...prev, permission]
+    );
+  };
+
   const handleInvite = async () => {
     if (!inviteEmail && !invitePhone) {
       Alert.alert(
@@ -87,15 +105,18 @@ export default function UsersManagementScreen() {
         email: inviteEmail || undefined,
         phone: invitePhone || undefined,
         role: inviteRole,
+        permissions: invitePermissions,
       });
-      
+
       setInvitationCode(result.invitation.code);
       setCompanyName(result.invitation.company_name);
       setShowInviteModal(false);
       setShowCodeModal(true);
       setInviteEmail('');
       setInvitePhone('');
-      
+      setInviteRole('staff');
+      setInvitePermissions(ROLE_DEFAULT_PERMISSIONS.staff);
+
       await loadData();
     } catch (error: any) {
       Alert.alert(
@@ -117,8 +138,8 @@ export default function UsersManagementScreen() {
 
   const handleShareCode = async () => {
     const message = language === 'bg'
-      ? `Поканен сте да се присъедините към ${companyName}!\n\nКод за достъп: ${invitationCode}\n\nОтворете приложението Invoice Manager и въведете кода в Профил → Присъединяване.`
-      : `You are invited to join ${companyName}!\n\nAccess code: ${invitationCode}\n\nOpen Invoice Manager app and enter the code in Profile → Join Company.`;
+      ? `Поканен сте да се присъедините към ${companyName}!\n\nКод за достъп: ${invitationCode}\n\nОтворете приложението Фактура+ и въведете кода в Профил → Фирма → Присъединяване по покана.`
+      : `You are invited to join ${companyName}!\n\nAccess code: ${invitationCode}\n\nOpen the Fakturaplus app and enter the code in Profile → Company → Join by Invitation.`;
     
     try {
       await Share.share({ message });
@@ -149,16 +170,48 @@ export default function UsersManagementScreen() {
     );
   };
 
-  const handleChangeRole = async (userId: string, newRole: string) => {
+  // Edit access modal (role + permissions checklist) for an existing member
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editRole, setEditRole] = useState<ConfigurableRole>('staff');
+  const [editPermissions, setEditPermissions] = useState<string[]>([]);
+  const [savingAccess, setSavingAccess] = useState(false);
+
+  const openEditAccess = (user: User) => {
+    const role = user.role as ConfigurableRole;
+    setEditingUser(user);
+    setEditRole(role);
+    setEditPermissions(user.permissions && user.permissions.length > 0 ? user.permissions : ROLE_DEFAULT_PERMISSIONS[role]);
+  };
+
+  // Same as at invite time - switching role starts the checklist over at
+  // that role's defaults, since a permission ticked for the old role may
+  // not even be offered for the new one.
+  const handleSelectEditRole = (role: ConfigurableRole) => {
+    setEditRole(role);
+    setEditPermissions(ROLE_DEFAULT_PERMISSIONS[role]);
+  };
+
+  const toggleEditPermission = (permission: string) => {
+    setEditPermissions(prev =>
+      prev.includes(permission) ? prev.filter(p => p !== permission) : [...prev, permission]
+    );
+  };
+
+  const handleSaveAccess = async () => {
+    if (!editingUser) return;
+    setSavingAccess(true);
     try {
-      await api.updateUserRole(userId, newRole);
+      await api.updateUserRole(editingUser.user_id, editRole, editPermissions);
       await loadData();
+      setEditingUser(null);
       Alert.alert(
         language === 'bg' ? 'Успех' : 'Success',
-        language === 'bg' ? 'Ролята е променена' : 'Role updated'
+        language === 'bg' ? 'Достъпът е обновен' : 'Access updated'
       );
     } catch (error: any) {
       Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+    } finally {
+      setSavingAccess(false);
     }
   };
 
@@ -186,23 +239,7 @@ export default function UsersManagementScreen() {
     );
   };
 
-  const getRoleName = (role: string) => {
-    const roles: Record<string, { bg: string; en: string }> = {
-      owner: { bg: 'Титуляр', en: 'Owner' },
-      manager: { bg: 'Мениджър', en: 'Manager' },
-      staff: { bg: 'Служител', en: 'Staff' },
-    };
-    return roles[role]?.[language] || role;
-  };
-
-  const getRoleColor = (role: string) => {
-    const colors: Record<string, string> = {
-      owner: '#8B5CF6',
-      manager: '#3B82F6',
-      staff: '#64748B',
-    };
-    return colors[role] || '#64748B';
-  };
+  const getRoleName = (role: string) => sharedGetRoleName(role, language);
 
   if (loading) {
     return (
@@ -314,17 +351,7 @@ export default function UsersManagementScreen() {
                       <View style={styles.actionButtons}>
                         <TouchableOpacity
                           style={styles.actionButton}
-                          onPress={() => {
-                            Alert.alert(
-                              language === 'bg' ? 'Промяна на роля' : 'Change Role',
-                              language === 'bg' ? 'Изберете нова роля' : 'Select new role',
-                              [
-                                { text: language === 'bg' ? 'Отказ' : 'Cancel', style: 'cancel' },
-                                { text: getRoleName('manager'), onPress: () => handleChangeRole(user.user_id, 'manager') },
-                                { text: getRoleName('staff'), onPress: () => handleChangeRole(user.user_id, 'staff') },
-                              ]
-                            );
-                          }}
+                          onPress={() => openEditAccess(user)}
                         >
                           <Ionicons name="create" size={18} color="#8B5CF6" />
                         </TouchableOpacity>
@@ -385,7 +412,7 @@ export default function UsersManagementScreen() {
           {/* Invite Modal */}
           <Modal visible={showInviteModal} animationType="slide" transparent>
             <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
+              <View style={[styles.modalContent, styles.modalContentScrollable]}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>
                     {language === 'bg' ? 'Покани потребител' : 'Invite User'}
@@ -394,6 +421,8 @@ export default function UsersManagementScreen() {
                     <Ionicons name="close" size={28} color="#94A3B8" />
                   </TouchableOpacity>
                 </View>
+
+                <ScrollView showsVerticalScrollIndicator={false}>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>
@@ -435,7 +464,7 @@ export default function UsersManagementScreen() {
                   <View style={styles.roleSelector}>
                     <TouchableOpacity
                       style={[styles.roleOption, inviteRole === 'staff' && styles.roleOptionActive]}
-                      onPress={() => setInviteRole('staff')}
+                      onPress={() => handleSelectInviteRole('staff')}
                     >
                       <Text style={[styles.roleOptionText, inviteRole === 'staff' && styles.roleOptionTextActive]}>
                         {getRoleName('staff')}
@@ -443,13 +472,34 @@ export default function UsersManagementScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.roleOption, inviteRole === 'manager' && styles.roleOptionActive]}
-                      onPress={() => setInviteRole('manager')}
+                      onPress={() => handleSelectInviteRole('manager')}
                     >
                       <Text style={[styles.roleOptionText, inviteRole === 'manager' && styles.roleOptionTextActive]}>
                         {getRoleName('manager')}
                       </Text>
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.roleOption, inviteRole === 'accountant' && styles.roleOptionActive]}
+                      onPress={() => handleSelectInviteRole('accountant')}
+                    >
+                      <Text style={[styles.roleOptionText, inviteRole === 'accountant' && styles.roleOptionTextActive]}>
+                        {getRoleName('accountant')}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
+                  {inviteRole === 'accountant' && (
+                    <Text style={styles.accountantHint}>{t('invitations.accountantHint')}</Text>
+                  )}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('invitations.permissionsTitle')}</Text>
+                  <Text style={styles.permissionsHint}>{t('invitations.permissionsHint')}</Text>
+                  <PermissionsChecklist
+                    role={inviteRole}
+                    selected={invitePermissions}
+                    onToggle={toggleInvitePermission}
+                  />
                 </View>
 
                 <TouchableOpacity
@@ -468,6 +518,85 @@ export default function UsersManagementScreen() {
                     </>
                   )}
                 </TouchableOpacity>
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Edit Access Modal - role + permissions checklist for an existing member */}
+          <Modal visible={!!editingUser} animationType="slide" transparent>
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalContent, styles.modalContentScrollable]}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>{t('users.editAccess')}</Text>
+                  <TouchableOpacity onPress={() => setEditingUser(null)}>
+                    <Ionicons name="close" size={28} color="#94A3B8" />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  {editingUser && (
+                    <>
+                      <Text style={styles.editingUserName}>{editingUser.name}</Text>
+                      <Text style={styles.editingUserEmail}>{editingUser.email}</Text>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('users.role')}</Text>
+                        <View style={styles.roleSelector}>
+                          <TouchableOpacity
+                            style={[styles.roleOption, editRole === 'staff' && styles.roleOptionActive]}
+                            onPress={() => handleSelectEditRole('staff')}
+                          >
+                            <Text style={[styles.roleOptionText, editRole === 'staff' && styles.roleOptionTextActive]}>
+                              {getRoleName('staff')}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.roleOption, editRole === 'manager' && styles.roleOptionActive]}
+                            onPress={() => handleSelectEditRole('manager')}
+                          >
+                            <Text style={[styles.roleOptionText, editRole === 'manager' && styles.roleOptionTextActive]}>
+                              {getRoleName('manager')}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.roleOption, editRole === 'accountant' && styles.roleOptionActive]}
+                            onPress={() => handleSelectEditRole('accountant')}
+                          >
+                            <Text style={[styles.roleOptionText, editRole === 'accountant' && styles.roleOptionTextActive]}>
+                              {getRoleName('accountant')}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        {editRole === 'accountant' && (
+                          <Text style={styles.accountantHint}>{t('invitations.accountantHint')}</Text>
+                        )}
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('invitations.permissionsTitle')}</Text>
+                        <Text style={styles.permissionsHint}>{t('invitations.permissionsHint')}</Text>
+                        <PermissionsChecklist
+                          role={editRole}
+                          selected={editPermissions}
+                          onToggle={toggleEditPermission}
+                        />
+                      </View>
+
+                      <TouchableOpacity
+                        style={[styles.inviteButton, savingAccess && styles.buttonDisabled]}
+                        onPress={handleSaveAccess}
+                        disabled={savingAccess}
+                      >
+                        {savingAccess ? (
+                          <ActivityIndicator color="white" />
+                        ) : (
+                          <Text style={styles.inviteButtonText}>{t('users.saveChanges')}</Text>
+                        )}
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </ScrollView>
               </View>
             </View>
           </Modal>
@@ -701,6 +830,24 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingBottom: 40,
   },
+  modalContentScrollable: {
+    maxHeight: '85%',
+  },
+  permissionsHint: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 10,
+  },
+  editingUserName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+  },
+  editingUserEmail: {
+    fontSize: 13,
+    color: '#94A3B8',
+    marginBottom: 20,
+  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -758,6 +905,12 @@ const styles = StyleSheet.create({
   },
   roleOptionTextActive: {
     color: '#8B5CF6',
+  },
+  accountantHint: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 10,
+    lineHeight: 17,
   },
   inviteButton: {
     flexDirection: 'row',

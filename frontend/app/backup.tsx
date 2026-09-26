@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   ImageBackground,
   RefreshControl,
   Share,
@@ -15,20 +14,20 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
+import { Alert } from '../src/utils/alert';
 import * as DocumentPicker from 'expo-document-picker';
 import { api } from '../src/services/api';
 import { format } from 'date-fns';
-import { bg, enUS } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../src/i18n';
+import { useAuth } from '../src/contexts/AuthContext';
+import { AccessDenied } from '../src/components';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function BackupScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
+  const { isOwner } = useAuth();
   const { language } = useLanguageStore();
-  const dateLocale = language === 'bg' ? bg : enUS;
   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -70,34 +69,58 @@ export default function BackupScreen() {
       
       // Convert to JSON string
       const jsonString = JSON.stringify(backupData, null, 2);
-      
-      // Create file
       const fileName = `invoice_backup_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.json`;
-      const docDir = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory || '';
-      const fileUri = `${docDir}${fileName}`;
-      
-      await FileSystem.writeAsStringAsync(fileUri, jsonString);
-      
-      // Check if sharing is available
-      const isSharingAvailable = await Sharing.isAvailableAsync();
-      
-      if (isSharingAvailable) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'application/json',
-          dialogTitle: t('backup.saveFile'),
-        });
-        
+
+      if (Platform.OS === 'web') {
+        // expo-file-system/expo-sharing have no real backing on web; save
+        // the JSON via a temporary <a download> link instead (same
+        // approach as src/utils/downloadFile.ts).
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(objectUrl);
+
         Alert.alert(
           t('backup.successTitle'),
-          `${t('backup.backupCreated')}\n\n📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${backupData.statistics.invoice_count}\n• ${t('backup.revenues')}: ${backupData.statistics.revenue_count}\n• ${t('backup.expenses')}: ${backupData.statistics.expense_count}\n\n${t('backup.saveFile')}`
+          `${t('backup.backupCreated')}\n\n📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${backupData.statistics.invoice_count}\n• ${t('backup.revenues')}: ${backupData.statistics.revenue_count}\n• ${t('backup.expenses')}: ${backupData.statistics.expense_count}`
         );
       } else {
-        Alert.alert(
-          t('backup.backupCreated'),
-          `${t('backup.sharingNotAvailable')}\n\n${t('backup.file')}: ${fileName}`
-        );
+        // The top-level "expo-file-system" export is SDK 54's new
+        // File/Directory API, which no longer includes documentDirectory/
+        // writeAsStringAsync - those now live under the legacy subpath.
+        const FileSystem = require('expo-file-system/legacy');
+        const Sharing = require('expo-sharing');
+
+        const docDir = FileSystem.documentDirectory || FileSystem.cacheDirectory || '';
+        const fileUri = `${docDir}${fileName}`;
+
+        await FileSystem.writeAsStringAsync(fileUri, jsonString);
+
+        const isSharingAvailable = await Sharing.isAvailableAsync();
+
+        if (isSharingAvailable) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'application/json',
+            dialogTitle: t('backup.saveFile'),
+          });
+
+          Alert.alert(
+            t('backup.successTitle'),
+            `${t('backup.backupCreated')}\n\n📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${backupData.statistics.invoice_count}\n• ${t('backup.revenues')}: ${backupData.statistics.revenue_count}\n• ${t('backup.expenses')}: ${backupData.statistics.expense_count}\n\n${t('backup.saveFile')}`
+          );
+        } else {
+          Alert.alert(
+            t('backup.backupCreated'),
+            `${t('backup.sharingNotAvailable')}\n\n${t('backup.file')}: ${fileName}`
+          );
+        }
       }
-      
+
       // Update status
       await loadBackupStatus();
       
@@ -134,16 +157,27 @@ export default function BackupScreen() {
             onPress: async () => {
               setIsRestoring(true);
               try {
-                // Read file
-                const content = await FileSystem.readAsStringAsync(file.uri);
+                // Read file. On web, expo-document-picker hands back the
+                // actual browser File object (readable directly); on
+                // native, its uri needs expo-file-system/legacy, since
+                // the top-level "expo-file-system" export no longer
+                // implements readAsStringAsync (see handleCreateBackup).
+                const content = Platform.OS === 'web'
+                  ? await file.file!.text()
+                  : await require('expo-file-system/legacy').readAsStringAsync(file.uri);
                 const backupData = JSON.parse(content);
                 
                 // Send to server for restoration
                 const restoreResult = await api.restoreBackup(backupData);
-                
+
+                const skippedTotal = restoreResult.skipped
+                  ? restoreResult.skipped.invoices + restoreResult.skipped.revenues + restoreResult.skipped.expenses
+                  : 0;
+                const skippedNote = skippedTotal > 0 ? `\n\n⚠️ ${t('backup.skippedRecords')}: ${skippedTotal}` : '';
+
                 Alert.alert(
                   t('backup.successTitle'),
-                  `${t('backup.restored')}\n\n📊 ${t('backup.restoredRecords')}:\n• ${t('backup.invoices')}: ${restoreResult.restored.invoices}\n• ${t('backup.revenues')}: ${restoreResult.restored.revenues}\n• ${t('backup.expenses')}: ${restoreResult.restored.expenses}`
+                  `${t('backup.restored')}\n\n📊 ${t('backup.restoredRecords')}:\n• ${t('backup.invoices')}: ${restoreResult.restored.invoices}\n• ${t('backup.revenues')}: ${restoreResult.restored.revenues}\n• ${t('backup.expenses')}: ${restoreResult.restored.expenses}${skippedNote}`
                 );
                 
                 await loadBackupStatus();
@@ -165,6 +199,10 @@ export default function BackupScreen() {
       );
     }
   };
+
+  if (!isOwner) {
+    return <AccessDenied />;
+  }
 
   if (loading) {
     return (

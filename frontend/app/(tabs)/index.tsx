@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   RefreshControl,
   TextInput,
   Modal,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ImageBackground,
@@ -16,26 +15,32 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
 import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
 import { format, addDays, subDays } from 'date-fns';
-import { bg, enUS } from 'date-fns/locale';
+import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
+import ExcelImportModal from '../../src/components/ExcelImportModal';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function HomeScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
-  const { isOwner } = useAuth();
-  const dateLocale = language === 'bg' ? bg : enUS;
-  
+  const { isOwner, hasPermission } = useAuth();
+  const router = useRouter();
+  const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string }>();
+
   const [summary, setSummary] = useState<Summary | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [revenueModalVisible, setRevenueModalVisible] = useState(false);
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
+  const [importRevenueModalVisible, setImportRevenueModalVisible] = useState(false);
+  const [importExpenseModalVisible, setImportExpenseModalVisible] = useState(false);
   const [personalExpenseModalVisible, setPersonalExpenseModalVisible] = useState(false);
   
   // ROI state (owner only)
@@ -51,9 +56,14 @@ export default function HomeScreen() {
   // Revenue form
   const [fiscalRevenue, setFiscalRevenue] = useState('');
   const [pocketMoney, setPocketMoney] = useState('');
+  const [cardRevenue, setCardRevenue] = useState('');
+  const [revenueVatRate, setRevenueVatRate] = useState(20);
   const [revenueDate, setRevenueDate] = useState(new Date());
-  const [currentDayRevenue, setCurrentDayRevenue] = useState({ fiscal_revenue: 0, pocket_money: 0 });
-  
+  // Shared across the revenue/expense/personal-expense modals below - only
+  // one is ever open at a time, and this guards against a rapid double-tap
+  // on Save creating a duplicate record.
+  const [isSubmittingForm, setIsSubmittingForm] = useState(false);
+
   // Expense form
   const [expenseDescription, setExpenseDescription] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
@@ -74,26 +84,96 @@ export default function HomeScreen() {
     }
   }, []);
 
+  // Pre-fills the form with whatever is already logged for this date, so
+  // saving corrects that value directly instead of adding a delta to it -
+  // opening the form for a date with nothing logged yet leaves it at 0.
+  // Returns what it found (or null) so callers - like the OCR hand-off
+  // below - can react to whether the day already had something logged.
   const loadCurrentDayRevenue = useCallback(async (date: Date) => {
     try {
       const dateStr = format(date, 'yyyy-MM-dd');
       const data = await api.getRevenueByDate(dateStr);
-      setCurrentDayRevenue(data);
+      setFiscalRevenue(data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
+      setPocketMoney(data.pocket_money > 0 ? data.pocket_money.toString() : '');
+      setCardRevenue(data.card_revenue > 0 ? data.card_revenue.toString() : '');
+      setRevenueVatRate(data.vat_rate_percent || 20);
+      return data;
     } catch (error) {
-      setCurrentDayRevenue({ fiscal_revenue: 0, pocket_money: 0 });
+      setFiscalRevenue('');
+      setPocketMoney('');
+      setCardRevenue('');
+      setRevenueVatRate(20);
+      return null;
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // Tab screens stay mounted, so returning here (e.g. after scanning and
+  // saving a new invoice) doesn't remount the screen - only re-fetching on
+  // focus picks up the change without needing a manual pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
-  // Load current day revenue when revenue modal opens or date changes
+  // Set by the scan screen's "sales" mode hand-off (see the effect below) -
+  // a ref, not state, so consuming it doesn't itself retrigger the load
+  // effect it's read from.
+  const pendingOcrRevenueRef = useRef<{ amount: number; vatRate: 20 | 9 | 0 } | null>(null);
+  const [ocrAdditionNote, setOcrAdditionNote] = useState<string | null>(null);
+
+  // Load current day revenue when revenue modal opens or date changes, then
+  // fold in a pending OCR-scanned sale on top of whatever was already
+  // there - never replacing it - so scanning a receipt for a day that
+  // already has manually-logged sales adds to the total instead of erasing it.
   useEffect(() => {
-    if (revenueModalVisible) {
-      loadCurrentDayRevenue(revenueDate);
-    }
+    if (!revenueModalVisible) return;
+    (async () => {
+      const existing = await loadCurrentDayRevenue(revenueDate);
+      const pending = pendingOcrRevenueRef.current;
+      if (pending) {
+        const existingFiscal = existing?.fiscal_revenue || 0;
+        setFiscalRevenue((existingFiscal + pending.amount).toFixed(2));
+        if (!existing || existingFiscal === 0) {
+          setRevenueVatRate(pending.vatRate);
+        }
+        setOcrAdditionNote(
+          t('home.ocrAdditionNote').replace('{amount}', pending.amount.toFixed(2))
+        );
+        pendingOcrRevenueRef.current = null;
+      } else {
+        setOcrAdditionNote(null);
+      }
+    })();
+    // t() is a plain function from useTranslation(), recreated on every
+    // render (not memoized) - listing it here would refire this effect on
+    // every render and re-fetch/overwrite the addition it just applied.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revenueModalVisible, revenueDate, loadCurrentDayRevenue]);
+
+  // Hand-off from the scan screen's "sales" mode: a receipt/invoice the
+  // business itself issued was recognized there, and its amount/date/VAT
+  // rate arrive as router params so this reuses the SAME modal (and its
+  // existing-value loading above) rather than a separate save path that
+  // could silently overwrite the day's other sales.
+  useEffect(() => {
+    if (!ocrParams.ocrDate || !ocrParams.ocrFiscalRevenue) return;
+    const amount = parseFloat(ocrParams.ocrFiscalRevenue) || 0;
+    const vatRateNum = parseInt(ocrParams.ocrVatRate || '20', 10);
+    const vatRate: 20 | 9 | 0 = vatRateNum === 9 ? 9 : vatRateNum === 0 ? 0 : 20;
+    pendingOcrRevenueRef.current = { amount, vatRate };
+    setRevenueDate(new Date(`${ocrParams.ocrDate}T00:00:00`));
+    setRevenueModalVisible(true);
+    // Deferred to the next tick - calling this in the same pass as a
+    // fresh navigation (e.g. this screen just mounted from the hand-off
+    // itself) can fire before Expo Router's root layout has finished
+    // mounting, which throws.
+    const clearParamsTimeout = setTimeout(() => {
+      router.setParams({ ocrDate: undefined, ocrFiscalRevenue: undefined, ocrVatRate: undefined });
+    }, 0);
+    return () => clearTimeout(clearParamsTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ocrParams.ocrDate, ocrParams.ocrFiscalRevenue, ocrParams.ocrVatRate]);
 
   // Load expenses for selected date when expense modal opens or date changes
   const loadDayExpenses = useCallback(async (date: Date) => {
@@ -118,10 +198,12 @@ export default function HomeScreen() {
     }
   }, [expenseModalVisible, expenseDate, loadDayExpenses]);
 
-  // Load ROI data for owner
+  // Load ROI/personal-investments data - visible to the owner and to any
+  // delegated member the owner has granted view_personal_investments.
+  const canViewPersonalInvestments = hasPermission('view_personal_investments');
   const loadRoiData = useCallback(async () => {
-    if (!isOwner) return;
-    
+    if (!canViewPersonalInvestments) return;
+
     setLoadingRoi(true);
     try {
       const data = await api.getROIAnalysis();
@@ -132,13 +214,15 @@ export default function HomeScreen() {
     } finally {
       setLoadingRoi(false);
     }
-  }, [isOwner]);
+  }, [canViewPersonalInvestments]);
 
-  useEffect(() => {
-    if (isOwner) {
-      loadRoiData();
-    }
-  }, [isOwner, loadRoiData]);
+  useFocusEffect(
+    useCallback(() => {
+      if (canViewPersonalInvestments) {
+        loadRoiData();
+      }
+    }, [canViewPersonalInvestments, loadRoiData])
+  );
 
   // Create personal expense
   const handleCreatePersonalExpense = async () => {
@@ -151,8 +235,10 @@ export default function HomeScreen() {
       Alert.alert(t('common.error'), t('common.fillAllFields'));
       return;
     }
+    if (isSubmittingForm) return;
 
     const now = new Date();
+    setIsSubmittingForm(true);
     try {
       await api.createPersonalExpense({
         amount,
@@ -162,7 +248,7 @@ export default function HomeScreen() {
         period_month: now.getMonth() + 1,
         period_year: now.getFullYear(),
       });
-      
+
       Alert.alert(t('common.success'), t('personal.created'));
       setPersonalAmount('');
       setPersonalDescription('');
@@ -172,6 +258,8 @@ export default function HomeScreen() {
       loadRoiData();
     } catch (error) {
       Alert.alert(t('common.error'), t('common.operationFailed'));
+    } finally {
+      setIsSubmittingForm(false);
     }
   };
 
@@ -209,21 +297,29 @@ export default function HomeScreen() {
       Alert.alert(t('common.error'), t('msg.enterAtLeastOne'));
       return;
     }
+    if (isSubmittingForm) return;
 
+    setIsSubmittingForm(true);
     try {
       await api.createDailyRevenue({
         date: format(revenueDate, 'yyyy-MM-dd'),
         fiscal_revenue: parseFloat(fiscalRevenue) || 0,
         pocket_money: parseFloat(pocketMoney) || 0,
+        card_revenue: parseFloat(cardRevenue) || 0,
+        vat_rate_percent: revenueVatRate,
       });
       setRevenueModalVisible(false);
       setFiscalRevenue('');
       setPocketMoney('');
+      setCardRevenue('');
+      setRevenueVatRate(20);
       setRevenueDate(new Date());
       loadData();
       Alert.alert(t('common.success'), t('msg.revenueSaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
+    } finally {
+      setIsSubmittingForm(false);
     }
   };
 
@@ -232,7 +328,9 @@ export default function HomeScreen() {
       Alert.alert(t('common.error'), t('msg.fillAllFields'));
       return;
     }
+    if (isSubmittingForm) return;
 
+    setIsSubmittingForm(true);
     try {
       await api.createExpense({
         description: expenseDescription,
@@ -247,6 +345,8 @@ export default function HomeScreen() {
       Alert.alert(t('common.success'), t('msg.expenseSaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
+    } finally {
+      setIsSubmittingForm(false);
     }
   };
 
@@ -294,6 +394,29 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Cash vs Card breakdown of the fiscalized revenue */}
+        <View style={styles.summaryContainer}>
+          <View style={[styles.summaryCard, styles.cashCard]}>
+            <View style={styles.cardIcon}>
+              <Ionicons name="cash-outline" size={24} color="#10B981" />
+            </View>
+            <Text style={styles.cardLabel}>{t('home.cashRevenue')}</Text>
+            <Text style={[styles.cardValue, { color: '#10B981' }]}>
+              {(summary?.total_cash_revenue || 0).toFixed(2)} €
+            </Text>
+          </View>
+
+          <View style={[styles.summaryCard, styles.cardCard]}>
+            <View style={styles.cardIcon}>
+              <Ionicons name="card-outline" size={24} color="#3B82F6" />
+            </View>
+            <Text style={styles.cardLabel}>{t('home.cardRevenue')}</Text>
+            <Text style={[styles.cardValue, { color: '#3B82F6' }]}>
+              {(summary?.total_card_revenue || 0).toFixed(2)} €
+            </Text>
+          </View>
+        </View>
+
         {/* VAT Card */}
         <View style={styles.vatCard}>
           <View style={styles.vatHeader}>
@@ -315,6 +438,55 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Unpaid supplier invoices reminder - company-wide, not scoped to
+            this month, since money owed from any past period is still owed */}
+        {(summary?.unpaid_invoice_count || 0) > 0 && (
+          <TouchableOpacity
+            style={[styles.unpaidCard, (summary?.overdue_invoice_count || 0) > 0 && styles.unpaidCardOverdue]}
+            onPress={() => router.push({ pathname: '/(tabs)/invoices', params: { paymentFilter: 'unpaid' } })}
+            activeOpacity={0.8}
+          >
+            <View style={styles.unpaidHeader}>
+              <Ionicons
+                name={(summary?.overdue_invoice_count || 0) > 0 ? 'alert-circle' : 'time-outline'}
+                size={24}
+                color={(summary?.overdue_invoice_count || 0) > 0 ? '#EF4444' : '#F59E0B'}
+              />
+              <Text style={styles.unpaidTitle}>{t('home.unpaidInvoices')}</Text>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </View>
+            <Text style={[styles.unpaidValue, { color: (summary?.overdue_invoice_count || 0) > 0 ? '#EF4444' : '#F59E0B' }]}>
+              {(summary?.total_unpaid_amount || 0).toFixed(2)} €
+            </Text>
+            <Text style={styles.unpaidSubtitle}>
+              {summary?.unpaid_invoice_count} {t('home.unpaidInvoicesCount')}
+              {(summary?.overdue_invoice_count || 0) > 0
+                ? ` · ${summary?.overdue_invoice_count} ${t('home.overdueInvoicesCount')}`
+                : ''}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Average Daily Turnover - taps through to the same stat in Statistics,
+            broken down by period, for deeper business analysis */}
+        <TouchableOpacity
+          style={styles.avgTurnoverCard}
+          onPress={() => router.push({ pathname: '/(tabs)/stats', params: { period: 'month' } })}
+          activeOpacity={0.8}
+        >
+          <View style={styles.avgTurnoverHeader}>
+            <Ionicons name="speedometer" size={24} color="#3B82F6" />
+            <Text style={styles.avgTurnoverTitle}>{t('home.avgDailyTurnover')}</Text>
+            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+          </View>
+          <Text style={styles.avgTurnoverValue}>
+            {(((summary?.total_income || 0)) / new Date().getDate()).toFixed(2)} €
+          </Text>
+          <Text style={styles.avgTurnoverSubtitle}>
+            {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(new Date().getDate()))}
+          </Text>
+        </TouchableOpacity>
+
         {/* Stats Overview */}
         <View style={styles.statsGrid}>
           <View style={styles.statItem}>
@@ -326,51 +498,100 @@ export default function HomeScreen() {
             <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0}</Text>
+            {summary && summary.total_pocket_money === null ? (
+              <Ionicons name="lock-closed" size={18} color="#64748B" style={{ marginBottom: 4 }} />
+            ) : (
+              <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0}</Text>
+            )}
             <Text style={styles.statLabel}>{t('home.pocket')}</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
-              {summary?.profit.toFixed(0) || 0}
-            </Text>
+            {summary && summary.profit === null ? (
+              <Ionicons name="lock-closed" size={18} color="#64748B" style={{ marginBottom: 4 }} />
+            ) : (
+              <Text style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+                {summary?.profit?.toFixed(0) || 0}
+              </Text>
+            )}
             <Text style={styles.statLabel}>{t('home.profit')}</Text>
           </View>
         </View>
 
-        {/* Action Buttons */}
-        <View style={styles.actionsContainer}>
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#10B981' }]}
-            onPress={() => setRevenueModalVisible(true)}
-          >
-            <Ionicons name="cash" size={24} color="white" />
-            <Text style={styles.actionButtonText}>{t('home.dailyRevenue')}</Text>
-          </TouchableOpacity>
+        {summary?.financial_visibility && (
+          summary.financial_visibility.pocket_money === false ||
+          summary.financial_visibility.off_book_expenses === false ||
+          summary.financial_visibility.profit === false
+        ) && (
+          <View style={styles.restrictedNote}>
+            <Ionicons name="information-circle-outline" size={14} color="#94A3B8" />
+            <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+          </View>
+        )}
 
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#F59E0B' }]}
-            onPress={() => setExpenseModalVisible(true)}
-          >
-            <Ionicons name="remove-circle" size={24} color="white" />
-            <Text style={styles.actionButtonText}>{t('home.expenses')}</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Action Buttons - each gated on its own permission (an owner can
+            fine-tune these independently per member via the permissions
+            checklist), rather than showing a button whose only possible
+            outcome is a permission-denied error from the backend. */}
+        {(hasPermission('add_revenue') || hasPermission('add_expenses')) && (
+          <View style={styles.actionsContainer}>
+            {hasPermission('add_revenue') && (
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+                onPress={() => setRevenueModalVisible(true)}
+              >
+                <Ionicons name="cash" size={24} color="white" />
+                <Text style={styles.actionButtonText}>{t('home.dailyRevenue')}</Text>
+              </TouchableOpacity>
+            )}
 
-        {/* Personal Expenses & ROI Section (Owner Only) */}
-        {isOwner && (
+            {hasPermission('add_expenses') && (
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#F59E0B' }]}
+                onPress={() => setExpenseModalVisible(true)}
+              >
+                <Ionicons name="remove-circle" size={24} color="white" />
+                <Text style={styles.actionButtonText}>{t('home.expenses')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {(hasPermission('add_revenue') || hasPermission('add_expenses')) && (
+          <View style={styles.importLinksRow}>
+            {hasPermission('add_revenue') && (
+              <TouchableOpacity style={styles.importLink} onPress={() => setImportRevenueModalVisible(true)}>
+                <Ionicons name="cloud-upload-outline" size={14} color="#8B5CF6" />
+                <Text style={styles.importLinkText}>{t('home.importRevenueHistory')}</Text>
+              </TouchableOpacity>
+            )}
+            {hasPermission('add_expenses') && (
+              <TouchableOpacity style={styles.importLink} onPress={() => setImportExpenseModalVisible(true)}>
+                <Ionicons name="cloud-upload-outline" size={14} color="#8B5CF6" />
+                <Text style={styles.importLinkText}>{t('home.importExpensesHistory')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* Personal Expenses & ROI Section - visible to anyone with
+            view_personal_investments; adding a personal expense stays an
+            owner-only write action regardless. */}
+        {canViewPersonalInvestments && (
           <View style={styles.roiSection}>
             <View style={styles.roiHeader}>
               <View style={styles.roiTitleRow}>
                 <Ionicons name="person-circle" size={24} color="#8B5CF6" />
                 <Text style={styles.roiTitle}>{t('personal.title')}</Text>
               </View>
-              <TouchableOpacity
-                style={styles.addPersonalButton}
-                onPress={() => setPersonalExpenseModalVisible(true)}
-              >
-                <Ionicons name="add-circle" size={20} color="#8B5CF6" />
-                <Text style={styles.addPersonalText}>{t('personal.addExpense')}</Text>
-              </TouchableOpacity>
+              {isOwner && (
+                <TouchableOpacity
+                  style={styles.addPersonalButton}
+                  onPress={() => setPersonalExpenseModalVisible(true)}
+                >
+                  <Ionicons name="add-circle" size={20} color="#8B5CF6" />
+                  <Text style={styles.addPersonalText}>{t('personal.addExpense')}</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {loadingRoi ? (
@@ -382,13 +603,13 @@ export default function HomeScreen() {
                   <View style={styles.roiStatItem}>
                     <Text style={styles.roiStatLabel}>{t('roi.totalInvestment')}</Text>
                     <Text style={[styles.roiStatValue, { color: '#EF4444' }]}>
-                      {roiData.total_personal_investment.toFixed(2)} лв
+                      {roiData.total_personal_investment.toFixed(2)} €
                     </Text>
                   </View>
                   <View style={styles.roiStatItem}>
                     <Text style={styles.roiStatLabel}>{t('roi.totalProfit')}</Text>
                     <Text style={[styles.roiStatValue, { color: roiData.total_profit >= 0 ? '#10B981' : '#EF4444' }]}>
-                      {roiData.total_profit.toFixed(2)} лв
+                      {roiData.total_profit.toFixed(2)} €
                     </Text>
                   </View>
                   <View style={styles.roiStatItem}>
@@ -441,7 +662,7 @@ export default function HomeScreen() {
       {isOwner && (
         <Modal visible={personalExpenseModalVisible} animationType="slide" transparent>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
+            <View style={[styles.modalContent, { maxHeight: '90%' }]}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{t('personal.addExpense')}</Text>
                 <TouchableOpacity onPress={() => setPersonalExpenseModalVisible(false)}>
@@ -449,6 +670,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
 
+              <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('personal.amount')}</Text>
                 <TextInput
@@ -528,9 +750,10 @@ export default function HomeScreen() {
                 </ScrollView>
               </View>
 
-              <TouchableOpacity style={styles.submitButton} onPress={handleCreatePersonalExpense}>
-                <Text style={styles.submitButtonText}>{t('common.save')}</Text>
+              <TouchableOpacity style={styles.submitButton} onPress={handleCreatePersonalExpense} disabled={isSubmittingForm}>
+                {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
               </TouchableOpacity>
+              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -539,7 +762,7 @@ export default function HomeScreen() {
       {/* Revenue Modal */}
       <Modal visible={revenueModalVisible} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('home.dailyRevenue')}</Text>
               <TouchableOpacity onPress={() => setRevenueModalVisible(false)}>
@@ -547,6 +770,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
+            <ScrollView showsVerticalScrollIndicator={false}>
             {/* Date Picker */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>{t('home.date')}</Text>
@@ -590,25 +814,22 @@ export default function HomeScreen() {
               locale={language}
             />
 
-            {/* Current totals display */}
-            {(currentDayRevenue.fiscal_revenue > 0 || currentDayRevenue.pocket_money > 0) && (
-              <View style={styles.currentTotalsCard}>
-                <Text style={styles.currentTotalsTitle}>{t('home.accumulatedFor')} {format(revenueDate, 'd MMM', { locale: dateLocale })}:</Text>
-                <View style={styles.currentTotalsRow}>
-                  <View style={styles.currentTotalItem}>
-                    <Text style={styles.currentTotalValue}>{currentDayRevenue.fiscal_revenue.toFixed(2)} €</Text>
-                    <Text style={styles.currentTotalLabel}>{t('home.fiscal')}</Text>
-                  </View>
-                  <View style={styles.currentTotalItem}>
-                    <Text style={styles.currentTotalValue}>{currentDayRevenue.pocket_money.toFixed(2)} €</Text>
-                    <Text style={styles.currentTotalLabel}>{t('home.pocket')}</Text>
-                  </View>
-                </View>
+            {/* Explains the edit-in-place semantics up front, since it's not
+                the obvious default for a "add revenue" form. */}
+            <View style={styles.editNoticeBanner}>
+              <Ionicons name="information-circle" size={18} color="#8B5CF6" />
+              <Text style={styles.editNoticeText}>{t('home.editInPlaceNotice')}</Text>
+            </View>
+
+            {ocrAdditionNote && (
+              <View style={[styles.editNoticeBanner, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
+                <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                <Text style={[styles.editNoticeText, { color: '#6EE7B7' }]}>{ocrAdditionNote}</Text>
               </View>
             )}
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('home.addFiscalRevenue')} (€)</Text>
+              <Text style={styles.inputLabel}>{t('home.fiscalRevenueLabel')} (€)</Text>
               <TextInput
                 style={styles.input}
                 value={fiscalRevenue}
@@ -617,11 +838,42 @@ export default function HomeScreen() {
                 placeholder="0.00"
                 placeholderTextColor="#64748B"
               />
-              <Text style={styles.inputHint}>{t('home.willBeAdded')} • {t('home.includesVAT')}</Text>
+              <Text style={styles.inputHint}>{t('home.includesVAT')}</Text>
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('home.addToPocket')} (€)</Text>
+              <Text style={styles.inputLabel}>{t('home.cardRevenueLabel')} (€)</Text>
+              <TextInput
+                style={styles.input}
+                value={cardRevenue}
+                onChangeText={setCardRevenue}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor="#64748B"
+              />
+              <Text style={styles.inputHint}>{t('home.cardRevenueHint')}</Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>{t('home.vatRate')}</Text>
+              <View style={styles.vatRateRow}>
+                {[20, 9, 0].map((rate) => (
+                  <TouchableOpacity
+                    key={rate}
+                    style={[styles.vatRateChip, revenueVatRate === rate && styles.vatRateChipActive]}
+                    onPress={() => setRevenueVatRate(rate)}
+                  >
+                    <Text style={[styles.vatRateChipText, revenueVatRate === rate && styles.vatRateChipTextActive]}>
+                      {rate}%
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.inputHint}>{t('home.vatRateHint')}</Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>{t('home.pocketLabel')} (€)</Text>
               <TextInput
                 style={styles.input}
                 value={pocketMoney}
@@ -630,12 +882,13 @@ export default function HomeScreen() {
                 placeholder="0.00"
                 placeholderTextColor="#64748B"
               />
-              <Text style={styles.inputHint}>{t('home.willBeAdded')} • {t('home.excludesVAT')}</Text>
+              <Text style={styles.inputHint}>{t('home.excludesVAT')}</Text>
             </View>
 
-            <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue}>
-              <Text style={styles.submitButtonText}>{t('home.save')}</Text>
+            <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue} disabled={isSubmittingForm}>
+              {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('home.save')}</Text>}
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -766,15 +1019,44 @@ export default function HomeScreen() {
                   />
                 </View>
 
-                <TouchableOpacity style={[styles.submitButton, { backgroundColor: '#F59E0B' }]} onPress={handleAddExpense}>
-                  <Ionicons name="add-circle" size={20} color="white" />
-                  <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
+                <TouchableOpacity style={[styles.submitButton, { backgroundColor: '#F59E0B' }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
+                  {isSubmittingForm ? <ActivityIndicator color="white" /> : (
+                    <>
+                      <Ionicons name="add-circle" size={20} color="white" />
+                      <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
               </View>
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <ExcelImportModal
+        visible={importRevenueModalVisible}
+        onClose={() => setImportRevenueModalVisible(false)}
+        entity="daily_revenue"
+        title={t('home.importRevenueHistory')}
+        fields={[
+          { key: 'date', label: t('home.date') },
+          { key: 'fiscal_revenue', label: t('home.fiscalRevenue'), format: (v) => `${Number(v).toFixed(2)} €` },
+        ]}
+        onImported={loadData}
+      />
+
+      <ExcelImportModal
+        visible={importExpenseModalVisible}
+        onClose={() => setImportExpenseModalVisible(false)}
+        entity="expenses"
+        title={t('home.importExpensesHistory')}
+        fields={[
+          { key: 'date', label: t('home.date') },
+          { key: 'description', label: t('expenses.description') },
+          { key: 'amount', label: t('invoices.total'), format: (v) => `${Number(v).toFixed(2)} €` },
+        ]}
+        onImported={loadData}
+      />
         </SafeAreaView>
       </View>
     </ImageBackground>
@@ -839,6 +1121,46 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#EF4444',
   },
+  cashCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#10B981',
+  },
+  cardCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#3B82F6',
+  },
+  unpaidCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  unpaidCardOverdue: {
+    borderColor: '#EF4444',
+  },
+  unpaidHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  unpaidTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    marginLeft: 12,
+    flex: 1,
+  },
+  unpaidValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  unpaidSubtitle: {
+    fontSize: 13,
+    color: '#94A3B8',
+  },
   cardIcon: {
     width: 40,
     height: 40,
@@ -900,6 +1222,36 @@ const styles = StyleSheet.create({
     color: '#E2E8F0',
     fontWeight: '500',
   },
+  avgTurnoverCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+  },
+  avgTurnoverHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  avgTurnoverTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    marginLeft: 12,
+    flex: 1,
+  },
+  avgTurnoverValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#3B82F6',
+    marginBottom: 4,
+  },
+  avgTurnoverSubtitle: {
+    fontSize: 13,
+    color: '#94A3B8',
+  },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -923,10 +1275,40 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     marginTop: 4,
   },
+  restrictedNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: -12,
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  restrictedNoteText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    flexShrink: 1,
+  },
   actionsContainer: {
     flexDirection: 'row',
     gap: 12,
     marginBottom: 32,
+  },
+  importLinksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 16,
+    marginTop: -20,
+    marginBottom: 24,
+  },
+  importLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  importLinkText: {
+    fontSize: 12,
+    color: '#8B5CF6',
+    fontWeight: '500',
   },
   actionButton: {
     flex: 1,
@@ -986,36 +1368,47 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginTop: 6,
   },
-  currentTotalsCard: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+  vatRateRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  vatRateChip: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  vatRateChipActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+  },
+  vatRateChipText: {
+    fontSize: 14,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  vatRateChipTextActive: {
+    color: 'white',
+  },
+  editNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderColor: 'rgba(139, 92, 246, 0.3)',
   },
-  currentTotalsTitle: {
-    fontSize: 14,
-    color: '#10B981',
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  currentTotalsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  currentTotalItem: {
-    alignItems: 'center',
-  },
-  currentTotalValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#10B981',
-  },
-  currentTotalLabel: {
+  editNoticeText: {
+    flex: 1,
     fontSize: 12,
-    color: '#94A3B8',
-    marginTop: 4,
+    color: '#C4B5FD',
+    lineHeight: 17,
   },
   submitButton: {
     backgroundColor: '#8B5CF6',

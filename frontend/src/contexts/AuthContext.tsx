@@ -1,49 +1,16 @@
 import React, { createContext, useContext, useEffect, ReactNode, useMemo } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { User } from '../types';
+import type { Permission } from '../utils/permissions';
 
-// Role hierarchy: owner > manager > staff
-export type UserRole = 'owner' | 'manager' | 'staff';
+// Role hierarchy: owner > manager > staff. "accountant" sits outside this
+// hierarchy - an external, cross-company role rather than a rung on it.
+export type UserRole = 'owner' | 'manager' | 'staff' | 'accountant';
 
-// Permission types
-export type Permission = 
-  | 'manage_users'      // Invite, remove users, change roles
-  | 'manage_company'    // Edit company settings
-  | 'view_audit_log'    // View audit logs
-  | 'manage_budget'     // Create/edit budgets
-  | 'export_data'       // Export to Excel/PDF
-  | 'view_statistics'   // View advanced statistics
-  | 'manage_invoices'   // Create/edit/delete invoices
-  | 'add_revenue'       // Add daily revenue
-  | 'add_expenses';     // Add expenses
-
-// Role-permission matrix
-const rolePermissions: Record<UserRole, Permission[]> = {
-  owner: [
-    'manage_users',
-    'manage_company', 
-    'view_audit_log',
-    'manage_budget',
-    'export_data',
-    'view_statistics',
-    'manage_invoices',
-    'add_revenue',
-    'add_expenses',
-  ],
-  manager: [
-    'manage_budget',
-    'export_data',
-    'view_statistics',
-    'manage_invoices',
-    'add_revenue',
-    'add_expenses',
-  ],
-  staff: [
-    'manage_invoices',
-    'add_revenue',
-    'add_expenses',
-  ],
-};
+// Permission types - re-exported from utils/permissions.ts, which also
+// holds the role defaults/ceilings used by the owner's permissions
+// checklist (invite screen, Users Management).
+export type { Permission } from '../utils/permissions';
 
 interface AuthContextType {
   user: User | null;
@@ -59,6 +26,7 @@ interface AuthContextType {
   isOwner: boolean;
   isManager: boolean;
   isStaff: boolean;
+  isAccountant: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -74,26 +42,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const roleHelpers = useMemo(() => {
     const userRole = (user?.role || 'staff') as UserRole;
     
+    // Sourced from the backend (user.permissions), not derived from role
+    // here - the owner can fine-tune an individual member's permissions
+    // beyond their role's defaults via the permissions checklist, and this
+    // must reflect exactly what the server will actually enforce.
     const hasPermission = (permission: Permission): boolean => {
       if (!user) return false;
-      const permissions = rolePermissions[userRole] || [];
-      return permissions.includes(permission);
+      return (user.permissions || []).includes(permission);
     };
     
     const hasRole = (role: UserRole): boolean => {
       if (!user) return false;
+      // "accountant" is a lateral role outside the owner > manager > staff
+      // ladder, not a rung on it - only an exact match counts.
+      if (userRole === 'accountant' || role === 'accountant') {
+        return userRole === role;
+      }
       const roleHierarchy: UserRole[] = ['owner', 'manager', 'staff'];
       const userRoleIndex = roleHierarchy.indexOf(userRole);
       const requiredRoleIndex = roleHierarchy.indexOf(role);
       return userRoleIndex <= requiredRoleIndex;
     };
-    
+
     return {
       hasPermission,
       hasRole,
       isOwner: userRole === 'owner',
       isManager: userRole === 'manager',
       isStaff: userRole === 'staff',
+      isAccountant: userRole === 'accountant',
     };
   }, [user]);
 

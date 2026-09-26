@@ -1,4 +1,5 @@
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation } from '../types';
+import { Platform } from 'react-native';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -7,6 +8,10 @@ class ApiService {
 
   setToken(token: string | null) {
     this.token = token;
+  }
+
+  getToken(): string | null {
+    return this.token;
   }
 
   private async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -41,10 +46,10 @@ class ApiService {
     });
   }
 
-  async register(email: string, password: string, name: string): Promise<{ user: User; session_token: string }> {
+  async register(email: string, password: string, name: string, invitationCode?: string): Promise<{ user: User; session_token: string; invite_error?: string | null }> {
     return this.fetch('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify({ email, password, name, invitation_code: invitationCode || undefined }),
     });
   }
 
@@ -59,6 +64,27 @@ class ApiService {
     return this.fetch('/auth/me');
   }
 
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    return this.fetch('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword(email: string, code: string, newPassword: string): Promise<{ message: string }> {
+    return this.fetch('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, new_password: newPassword }),
+    });
+  }
+
+  async changePassword(newPassword: string, currentPassword?: string): Promise<{ message: string }> {
+    return this.fetch('/auth/change-password', {
+      method: 'PUT',
+      body: JSON.stringify({ new_password: newPassword, current_password: currentPassword }),
+    });
+  }
+
   async logout(): Promise<void> {
     await this.fetch('/auth/logout', { method: 'POST' });
   }
@@ -68,10 +94,10 @@ class ApiService {
     return this.fetch('/auth/users');
   }
   
-  async updateUserRole(userId: string, role: string): Promise<{ message: string }> {
+  async updateUserRole(userId: string, role: string, permissions?: string[]): Promise<{ message: string }> {
     return this.fetch(`/auth/role/${userId}`, {
       method: 'PUT',
-      body: JSON.stringify({ role }),
+      body: JSON.stringify({ role, permissions }),
     });
   }
   
@@ -80,7 +106,7 @@ class ApiService {
   }
   
   // Invitations
-  async createInvitation(data: { email?: string; phone?: string; role: string }): Promise<{
+  async createInvitation(data: { email?: string; phone?: string; role: string; permissions?: string[] }): Promise<{
     message: string;
     invitation: { id: string; code: string; expires_at: string; company_name: string };
   }> {
@@ -109,6 +135,18 @@ class ApiService {
     return this.fetch('/company/leave', { method: 'POST' });
   }
 
+  // Multi-company access (accountant switcher)
+  async getCompanyMemberships(): Promise<CompanyMembership[]> {
+    return this.fetch('/companies/memberships');
+  }
+
+  async switchCompany(companyId: string): Promise<User> {
+    return this.fetch('/companies/switch', {
+      method: 'POST',
+      body: JSON.stringify({ company_id: companyId }),
+    });
+  }
+
   // OCR
   async scanInvoice(imageBase64: string): Promise<OCRResult> {
     return this.fetch('/ocr/scan', {
@@ -117,23 +155,66 @@ class ApiService {
     });
   }
 
+  // Bulk import (CSV/Excel) - template download URL is a plain GET, handed
+  // to downloadAndShareFile by the caller like every other export link.
+  getImportTemplateUrl(entity: ImportEntity): string {
+    return `/api/import/template/${entity}`;
+  }
+
+  async previewImport(entity: ImportEntity, asset: { uri: string; name: string; mimeType?: string; file?: any }): Promise<ImportPreviewResult> {
+    const formData = new FormData();
+    if (Platform.OS === 'web' && asset.file) {
+      formData.append('file', asset.file, asset.name);
+    } else {
+      // React Native's fetch recognizes this {uri, name, type} shape and
+      // streams the file from disk - there is no Blob to construct here.
+      formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || 'application/octet-stream' } as any);
+    }
+
+    const headers: Record<string, string> = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+
+    const response = await fetch(`${API_URL}/api/import/${entity}/preview`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
+      throw new Error(error.detail || 'Грешка в заявката');
+    }
+    return response.json();
+  }
+
+  async commitImport(entity: ImportEntity, rows: Record<string, any>[]): Promise<ImportCommitResult> {
+    return this.fetch(`/import/${entity}/commit`, {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  }
+
   // Invoices
   async getInvoices(params?: {
     supplier?: string;
     invoice_number?: string;
+    search?: string;
     start_date?: string;
     end_date?: string;
+    payment_status?: 'paid' | 'unpaid' | 'partial' | 'overdue';
   }): Promise<Invoice[]> {
     const queryParams = new URLSearchParams();
     if (params?.supplier) queryParams.set('supplier', params.supplier);
     if (params?.invoice_number) queryParams.set('invoice_number', params.invoice_number);
+    if (params?.search) queryParams.set('search', params.search);
     if (params?.start_date) queryParams.set('start_date', params.start_date);
     if (params?.end_date) queryParams.set('end_date', params.end_date);
+    if (params?.payment_status) queryParams.set('payment_status', params.payment_status);
     const query = queryParams.toString();
     return this.fetch(`/invoices${query ? `?${query}` : ''}`);
   }
 
-  async createInvoice(invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at'>): Promise<Invoice> {
+  async createInvoice(invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at' | 'is_paid' | 'paid_amount' | 'paid_at'>): Promise<Invoice> {
     return this.fetch('/invoices', {
       method: 'POST',
       body: JSON.stringify(invoice),
@@ -145,6 +226,14 @@ class ApiService {
       method: 'PUT',
       body: JSON.stringify(invoice),
     });
+  }
+
+  async validateEik(eik: string): Promise<{ valid: boolean; normalized: string; reason: string | null }> {
+    return this.fetch(`/utils/validate-eik?eik=${encodeURIComponent(eik)}`);
+  }
+
+  async getReverseChargeProtocols(): Promise<Invoice[]> {
+    return this.fetch('/invoices/protocols/reverse-charge');
   }
 
   async deleteInvoice(id: string): Promise<void> {
@@ -160,7 +249,7 @@ class ApiService {
     return this.fetch(`/daily-revenue${query ? `?${query}` : ''}`);
   }
 
-  async createDailyRevenue(revenue: { date: string; fiscal_revenue: number; pocket_money: number }): Promise<DailyRevenue> {
+  async createDailyRevenue(revenue: { date: string; fiscal_revenue: number; pocket_money: number; card_revenue?: number; vat_rate_percent?: number }): Promise<DailyRevenue> {
     return this.fetch('/daily-revenue', {
       method: 'POST',
       body: JSON.stringify(revenue),
@@ -198,23 +287,6 @@ class ApiService {
 
   async getChartData(period: 'week' | 'month' | 'year' = 'week'): Promise<ChartDataPoint[]> {
     return this.fetch(`/statistics/chart-data?period=${period}`);
-  }
-
-  // Export
-  getExportExcelUrl(params?: { start_date?: string; end_date?: string }): string {
-    const queryParams = new URLSearchParams();
-    if (params?.start_date) queryParams.set('start_date', params.start_date);
-    if (params?.end_date) queryParams.set('end_date', params.end_date);
-    const query = queryParams.toString();
-    return `${API_URL}/api/export/excel${query ? `?${query}` : ''}`;
-  }
-
-  getExportPdfUrl(params?: { start_date?: string; end_date?: string }): string {
-    const queryParams = new URLSearchParams();
-    if (params?.start_date) queryParams.set('start_date', params.start_date);
-    if (params?.end_date) queryParams.set('end_date', params.end_date);
-    const query = queryParams.toString();
-    return `${API_URL}/api/export/pdf${query ? `?${query}` : ''}`;
   }
 
   // Notification Settings
@@ -264,12 +336,6 @@ class ApiService {
     });
   }
 
-  async joinCompanyByEik(eik: string): Promise<{ message: string; company: Company }> {
-    return this.fetch(`/company/join/${eik}`, {
-      method: 'POST',
-    });
-  }
-
   // Backup
   async createBackup(): Promise<any> {
     return this.fetch('/backup/create', {
@@ -294,6 +360,7 @@ class ApiService {
     success: boolean;
     message: string;
     restored: { invoices: number; revenues: number; expenses: number };
+    skipped?: { invoices: number; revenues: number; expenses: number };
   }> {
     return this.fetch('/backup/restore', {
       method: 'POST',
@@ -306,6 +373,8 @@ class ApiService {
     date: string;
     fiscal_revenue: number;
     pocket_money: number;
+    card_revenue: number;
+    vat_rate_percent: number;
   }> {
     return this.fetch(`/daily-revenue/by-date/${date}`);
   }
@@ -369,13 +438,16 @@ class ApiService {
   }
 
   // Item Price Tracking
-  async getPriceAlerts(status?: string): Promise<{
+  async getPriceAlerts(status?: string, invoiceId?: string): Promise<{
     alerts: any[];
     total: number;
     unread_count: number;
   }> {
-    const query = status ? `?status=${status}` : '';
-    return this.fetch(`/items/price-alerts${query}`);
+    const queryParams = new URLSearchParams();
+    if (status) queryParams.set('status', status);
+    if (invoiceId) queryParams.set('invoice_id', invoiceId);
+    const query = queryParams.toString();
+    return this.fetch(`/items/price-alerts${query ? `?${query}` : ''}`);
   }
 
   async updatePriceAlert(alertId: string, status: 'read' | 'dismissed'): Promise<{ message: string }> {
@@ -394,6 +466,17 @@ class ApiService {
       method: 'PUT',
       body: JSON.stringify(settings),
     });
+  }
+
+  async getPriceInflation(startDate: string, endDate: string): Promise<{
+    period: { start_date: string; end_date: string };
+    overall_change_percent: number;
+    items_compared: number;
+    total_weighted_spend: number;
+    items: any[];
+  }> {
+    const queryParams = new URLSearchParams({ start_date: startDate, end_date: endDate });
+    return this.fetch(`/items/price-inflation?${queryParams.toString()}`);
   }
 
   async getItemPriceHistory(itemName: string, supplier?: string): Promise<{
@@ -574,6 +657,141 @@ class ApiService {
 
   async getROITrend(months: number = 6): Promise<{ trend: any[]; months: number }> {
     return this.fetch(`/roi/trend?months=${months}`);
+  }
+
+  // Payroll / Ведомост за заплати
+  async getEmployees(activeOnly?: boolean): Promise<Employee[]> {
+    const query = activeOnly ? '?active_only=true' : '';
+    return this.fetch(`/employees${query}`);
+  }
+
+  async createEmployee(employee: EmployeeCreate): Promise<Employee> {
+    return this.fetch('/employees', { method: 'POST', body: JSON.stringify(employee) });
+  }
+
+  async updateEmployee(id: string, update: Partial<EmployeeCreate & { active: boolean }>): Promise<Employee> {
+    return this.fetch(`/employees/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteEmployee(id: string): Promise<void> {
+    await this.fetch(`/employees/${id}`, { method: 'DELETE' });
+  }
+
+  async getPayrollRates(): Promise<PayrollRates> {
+    return this.fetch('/payroll/rates');
+  }
+
+  async updatePayrollRates(rates: Partial<PayrollRates>): Promise<PayrollRates> {
+    return this.fetch('/payroll/rates', { method: 'PUT', body: JSON.stringify(rates) });
+  }
+
+  async previewPayroll(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number }): Promise<PayrollBreakdown> {
+    return this.fetch('/payroll/preview', { method: 'POST', body: JSON.stringify(params) });
+  }
+
+  async createPayrollEntry(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number; notes?: string; image_base64?: string }): Promise<PayrollEntry> {
+    return this.fetch('/payroll', { method: 'POST', body: JSON.stringify(params) });
+  }
+
+  async getPayrollEntries(params?: { year?: number; month?: number }): Promise<PayrollEntry[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.year) queryParams.set('year', params.year.toString());
+    if (params?.month) queryParams.set('month', params.month.toString());
+    const query = queryParams.toString();
+    return this.fetch(`/payroll${query ? `?${query}` : ''}`);
+  }
+
+  async deletePayrollEntry(id: string): Promise<void> {
+    await this.fetch(`/payroll/${id}`, { method: 'DELETE' });
+  }
+
+  // Fixed Assets / Дълготрайни активи (ДМА)
+  async getAssetCategories(): Promise<AssetCategoriesResponse> {
+    return this.fetch('/assets/categories');
+  }
+
+  async getAssets(status?: string): Promise<FixedAsset[]> {
+    const query = status ? `?status=${status}` : '';
+    return this.fetch(`/assets${query}`);
+  }
+
+  async createAsset(asset: FixedAssetCreate): Promise<FixedAsset> {
+    return this.fetch('/assets', { method: 'POST', body: JSON.stringify(asset) });
+  }
+
+  async updateAsset(id: string, update: Partial<FixedAssetCreate>): Promise<FixedAsset> {
+    return this.fetch(`/assets/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async disposeAsset(id: string, params: { disposal_date: string; disposal_reason?: string }): Promise<FixedAsset> {
+    return this.fetch(`/assets/${id}/dispose`, { method: 'POST', body: JSON.stringify(params) });
+  }
+
+  async deleteAsset(id: string): Promise<void> {
+    await this.fetch(`/assets/${id}`, { method: 'DELETE' });
+  }
+
+  async getAssetsSummary(): Promise<AssetsSummary> {
+    return this.fetch('/assets/summary');
+  }
+
+  // Team collaboration: calendar
+  async getCalendarEvents(start?: string, end?: string): Promise<CalendarEvent[]> {
+    const params = new URLSearchParams();
+    if (start) params.set('start', start);
+    if (end) params.set('end', end);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.fetch(`/calendar/events${query}`);
+  }
+
+  async createCalendarEvent(event: CalendarEventInput): Promise<CalendarEvent> {
+    return this.fetch('/calendar/events', { method: 'POST', body: JSON.stringify(event) });
+  }
+
+  async updateCalendarEvent(id: string, update: Partial<CalendarEventInput>): Promise<CalendarEvent> {
+    return this.fetch(`/calendar/events/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteCalendarEvent(id: string): Promise<void> {
+    await this.fetch(`/calendar/events/${id}`, { method: 'DELETE' });
+  }
+
+  // Team collaboration: messages
+  async getCollabMembers(): Promise<CollabMember[]> {
+    return this.fetch('/collab/members');
+  }
+
+  async getConversations(): Promise<ConversationSummary[]> {
+    return this.fetch('/messages/conversations');
+  }
+
+  async startDirectMessage(userId: string): Promise<{ conversation_id: string }> {
+    return this.fetch('/messages/dm/start', { method: 'POST', body: JSON.stringify({ user_id: userId }) });
+  }
+
+  async getMessages(conversationId: string, before?: string): Promise<Message[]> {
+    const query = before ? `?before=${encodeURIComponent(before)}` : '';
+    return this.fetch(`/messages/${encodeURIComponent(conversationId)}${query}`);
+  }
+
+  async sendMessage(conversationId: string, text: string): Promise<Message> {
+    return this.fetch(`/messages/${encodeURIComponent(conversationId)}`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+  }
+
+  async markConversationRead(conversationId: string): Promise<void> {
+    await this.fetch(`/messages/${encodeURIComponent(conversationId)}/read`, { method: 'POST' });
+  }
+
+  // Web Push
+  async subscribePush(subscription: { endpoint: string; keys: { p256dh: string; auth: string } }): Promise<void> {
+    await this.fetch('/push/subscribe', { method: 'POST', body: JSON.stringify(subscription) });
+  }
+
+  async unsubscribePush(endpoint: string): Promise<void> {
+    await this.fetch('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) });
   }
 }
 

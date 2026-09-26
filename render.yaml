@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: fakturaplus-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        value: fakturaplus

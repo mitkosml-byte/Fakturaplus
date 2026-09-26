@@ -1,6 +1,7 @@
 // Localization system for the app
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
+import { bg as dateFnsBg, enUS as dateFnsEnUS } from 'date-fns/locale';
 
 export type Language = 'bg' | 'en';
 
@@ -77,17 +78,37 @@ export const translations: Translations = {
     bg: 'Печалба',
     en: 'Profit',
   },
+  'home.importRevenueHistory': {
+    bg: 'Импортирай оборот назад във времето',
+    en: 'Import past revenue history',
+  },
+  'home.importExpensesHistory': {
+    bg: 'Импортирай разходи назад във времето',
+    en: 'Import past expenses history',
+  },
+  'home.ocrAdditionNote': {
+    bg: 'Добавени {amount} € от сканирана издадена фактура към сумата за деня.',
+    en: 'Added {amount} € from a scanned issued invoice to the day\'s total.',
+  },
+  'home.restrictedDataNote': {
+    bg: 'Част от данните са скрити за вашия достъп - показаните суми са изчислени без тях.',
+    en: 'Some data is hidden for your access level - the figures shown are calculated without it.',
+  },
   'home.dailyRevenue': {
     bg: 'Дневен оборот',
     en: 'Daily Revenue',
   },
+  'home.avgDailyTurnover': {
+    bg: 'Среден оборот на ден',
+    en: 'Average Daily Turnover',
+  },
+  'home.avgDailyTurnoverSubtitle': {
+    bg: 'този месец, за {days} дни · виж по периоди',
+    en: 'this month, over {days} days · view by period',
+  },
   'home.expenses': {
     bg: 'В канала',
     en: 'Expenses',
-  },
-  'home.accumulatedFor': {
-    bg: 'Натрупано за',
-    en: 'Accumulated for',
   },
   'home.fiscal': {
     bg: 'Фискален',
@@ -97,17 +118,45 @@ export const translations: Translations = {
     bg: 'Джобче',
     en: 'Pocket',
   },
-  'home.addFiscalRevenue': {
-    bg: 'Добави фискализиран оборот',
-    en: 'Add fiscal revenue',
+  'home.fiscalRevenueLabel': {
+    bg: 'Фискализиран оборот',
+    en: 'Fiscal revenue',
   },
-  'home.addToPocket': {
-    bg: 'Добави към джобче',
-    en: 'Add to pocket',
+  'home.pocketLabel': {
+    bg: 'Джобче',
+    en: 'Pocket',
   },
-  'home.willBeAdded': {
-    bg: 'Ще се добави към съществуващото',
-    en: 'Will be added to existing',
+  'home.cardRevenueLabel': {
+    bg: 'От тях – платено с карта',
+    en: 'Of which - paid by card',
+  },
+  'home.cardRevenueHint': {
+    bg: 'Остатъкът от фискализирания оборот се приема за в брой',
+    en: 'The rest of the fiscal revenue is treated as cash',
+  },
+  'home.cashRevenue': {
+    bg: 'Оборот в брой',
+    en: 'Cash Turnover',
+  },
+  'home.cardRevenue': {
+    bg: 'Оборот с карта',
+    en: 'Card Turnover',
+  },
+  'home.unpaidInvoices': {
+    bg: 'Неплатени фактури',
+    en: 'Unpaid Invoices',
+  },
+  'home.unpaidInvoicesCount': {
+    bg: 'неплатени',
+    en: 'unpaid',
+  },
+  'home.overdueInvoicesCount': {
+    bg: 'просрочени',
+    en: 'overdue',
+  },
+  'home.editInPlaceNotice': {
+    bg: 'Полетата по-долу показват вече записаното за тази дата. Промяна на стойност я замества с новата — не се добавя към старата.',
+    en: "These fields show what's already logged for this date. Changing a value replaces it — it doesn't add to the old one.",
   },
   'home.includesVAT': {
     bg: 'Влиза в ДДС',
@@ -116,6 +165,14 @@ export const translations: Translations = {
   'home.excludesVAT': {
     bg: 'НЕ влиза в ДДС',
     en: 'Excludes VAT',
+  },
+  'home.vatRate': {
+    bg: 'ДДС ставка на оборота',
+    en: 'VAT rate on this revenue',
+  },
+  'home.vatRateHint': {
+    bg: 'Изберете 9% за намалена ставка (хотели, ресторанти...) или 0% за нулева/освободена. По подразбиране 20%.',
+    en: 'Choose 9% for the reduced rate (hotels, restaurants...) or 0% for zero-rate/exempt. Defaults to 20%.',
   },
   'home.save': {
     bg: 'Запиши',
@@ -177,6 +234,70 @@ export const translations: Translations = {
     bg: 'От галерия',
     en: 'From Gallery',
   },
+  'scan.modePurchase': {
+    bg: 'Фактура от доставчик',
+    en: 'Invoice from a supplier',
+  },
+  'scan.modeSales': {
+    bg: 'Издадена фактура',
+    en: 'Issued invoice',
+  },
+  'scan.salesFormTitle': {
+    bg: 'Обобщение на продажбата',
+    en: 'Sale summary',
+  },
+  'scan.salesFormHint': {
+    bg: 'Проверете сумата и датата преди да добавите към оборота',
+    en: 'Check the amount and date before adding to revenue',
+  },
+  'scan.salesNote': {
+    bg: 'Това е фактура, издадена от вас към клиент - няма да се запази като отделна фактура, а сумата ще се добави към дневния оборот за тази дата.',
+    en: "This is an invoice you issued to a customer - it won't be saved as a separate invoice; the amount will be added to that date's daily revenue instead.",
+  },
+  'scan.addToRevenue': {
+    bg: 'Добави към дневния оборот',
+    en: 'Add to daily revenue',
+  },
+  'scan.salesTipsTitle': {
+    bg: 'Какво прави сканирането тук',
+    en: 'What scanning does here',
+  },
+  'scan.salesTip1': {
+    bg: 'Разпознава общата сума и ДДС ставката от издадената фактура',
+    en: 'Recognizes the total amount and VAT rate from the issued invoice',
+  },
+  'scan.salesTip2': {
+    bg: 'Отваря дневния оборот за тази дата, за да прегледате и добавите сумата',
+    en: "Opens that date's daily revenue so you can review and add the amount",
+  },
+  'scan.salesTipsFooter': {
+    bg: 'Само за фактури, издадени от вас към клиенти - не се запазва отделен документ.',
+    en: "For invoices you issue to customers only - no separate document is kept.",
+  },
+  'scan.tipsTitle': {
+    bg: 'Какво разпознава сканирането',
+    en: 'What the scan recognizes',
+  },
+  'scan.tipSupplier': {
+    bg: 'Доставчик, ЕИК и номер на фактурата',
+    en: 'Supplier, VAT ID and invoice number',
+  },
+  'scan.tipAmounts': {
+    bg: 'Обща сума, ДДС и данъчно третиране (стандартна ставка, намалена, обратно начисляване...)',
+    en: 'Total amount, VAT and tax treatment (standard rate, reduced, reverse charge...)',
+  },
+  'scan.tipItems': {
+    bg: 'Отделните артикули - и те се сверяват автоматично с предходна цена от същия доставчик',
+    en: 'Individual line items - automatically checked against the last price from the same supplier',
+  },
+  'scan.tipPayment': {
+    bg: 'Начин на плащане и срок, ако е отпечатан на фактурата',
+    en: 'Payment method and due date, if printed on the invoice',
+  },
+  'scan.tipsFooter': {
+    bg: 'Само за фактури от доставчици - работи най-добре със снимка на цяла, ясно осветена фактура.',
+    en: 'For supplier invoices only - works best with a full, well-lit photo of the invoice.',
+  },
   'scan.processing': {
     bg: 'Обработка...',
     en: 'Processing...',
@@ -200,6 +321,114 @@ export const translations: Translations = {
   'scan.vatAmount': {
     bg: 'ДДС',
     en: 'VAT',
+  },
+  'scan.supplierEik': {
+    bg: 'ЕИК/Булстат на доставчика',
+    en: "Supplier's EIK/Bulstat",
+  },
+  'scan.eikInvalidFormat': {
+    bg: 'Невалиден формат (9 или 13 цифри)',
+    en: 'Invalid format (9 or 13 digits)',
+  },
+  'scan.eikInvalidChecksum': {
+    bg: 'Контролната цифра не съвпада - проверете номера',
+    en: "Check digit doesn't match - please verify the number",
+  },
+  'scan.eikValid': {
+    bg: 'Коректен ЕИК',
+    en: 'Valid EIK',
+  },
+  'scan.vatTreatment': {
+    bg: 'ДДС третиране',
+    en: 'VAT treatment',
+  },
+  'scan.reverseChargeNote': {
+    bg: 'При запис ще се генерира автоматично номер на протокол по чл.117 ЗДДС, който трябва да се издаде до 15 дни от датата на доставката.',
+    en: 'Saving will auto-assign a чл.117 self-billing protocol number, due within 15 days of the supply date.',
+  },
+  'scan.protocolAssigned': {
+    bg: 'Издаден протокол по чл.117 №',
+    en: 'Issued чл.117 protocol №',
+  },
+  'scan.paymentMethod': {
+    bg: 'Начин на плащане',
+    en: 'Payment method',
+  },
+  'scan.paymentMethod.cash': {
+    bg: 'В брой',
+    en: 'Cash',
+  },
+  'scan.paymentMethod.bank_transfer': {
+    bg: 'Банков превод',
+    en: 'Bank transfer',
+  },
+  'scan.cashAutoPaidNote': {
+    bg: 'Плащанията в брой се маркират автоматично като платени.',
+    en: 'Cash payments are automatically marked as paid.',
+  },
+  'scan.paymentDueDateDefault': {
+    bg: 'Срок за плащане (по подразбиране 14 дни)',
+    en: 'Payment due date (defaults to 14 days)',
+  },
+  'invoices.protocolDeadline': {
+    bg: 'Краен срок за протокола',
+    en: 'Protocol deadline',
+  },
+  'invoices.protocolOverdue': {
+    bg: 'просрочен',
+    en: 'overdue',
+  },
+  'profile.protocols': {
+    bg: 'Протоколи по чл.117',
+    en: 'чл.117 protocols',
+  },
+  'profile.protocolsDesc': {
+    bg: 'Самоначислен ДДС и срокове за подаване',
+    en: 'Self-charged VAT and filing deadlines',
+  },
+  'protocols.title': {
+    bg: 'Протоколи по чл.117',
+    en: 'чл.117 protocols',
+  },
+  'protocols.overdueSingular': {
+    bg: 'протокол е просрочен',
+    en: 'protocol is overdue',
+  },
+  'protocols.overduePlural': {
+    bg: 'протокола са просрочени',
+    en: 'protocols are overdue',
+  },
+  'protocols.empty': {
+    bg: 'Няма протоколи по чл.117',
+    en: 'No чл.117 protocols',
+  },
+  'protocols.emptyHint': {
+    bg: 'Появяват се тук, когато маркирате фактура с ДДС третиране "Обратно начисляване"',
+    en: 'Appear here when you mark an invoice with VAT treatment "Reverse charge"',
+  },
+  'vat.standard_20': {
+    bg: 'Стандартна 20%',
+    en: 'Standard 20%',
+  },
+  'vat.reduced_9': {
+    bg: 'Намалена 9%',
+    en: 'Reduced 9%',
+  },
+  'vat.zero_rate': {
+    bg: 'Нулева ставка',
+    en: 'Zero rate',
+  },
+  'vat.exempt': {
+    bg: 'Освободена доставка',
+    en: 'Exempt supply',
+  },
+  'vat.reverse_charge': {
+    bg: 'Обратно начисляване',
+    en: 'Reverse charge',
+  },
+  'vat.outside_scope': {
+    bg: 'Извън обхвата на ЗДДС',
+    en: 'Outside VAT scope',
   },
   'scan.totalAmount': {
     bg: 'Обща сума',
@@ -268,6 +497,14 @@ export const translations: Translations = {
   'stats.suppliers': {
     bg: 'Доставчици',
     en: 'Suppliers',
+  },
+  'stats.chartNavPrev': {
+    bg: 'Предишни 7 дни',
+    en: 'Previous 7 days',
+  },
+  'stats.chartNavNext': {
+    bg: 'Следващи 7 дни',
+    en: 'Next 7 days',
   },
   'stats.week': {
     bg: 'Седмица',
@@ -355,6 +592,22 @@ export const translations: Translations = {
     bg: 'ДДС напомняния',
     en: 'VAT reminders',
   },
+  'profile.calendar': {
+    bg: 'Календар',
+    en: 'Calendar',
+  },
+  'profile.calendarDesc': {
+    bg: 'Събития и напомняния за екипа',
+    en: 'Events and reminders for the team',
+  },
+  'profile.messages': {
+    bg: 'Съобщения',
+    en: 'Messages',
+  },
+  'profile.messagesDesc': {
+    bg: 'Екипен чат и лични съобщения',
+    en: 'Team chat and direct messages',
+  },
   'profile.backup': {
     bg: 'Google Drive бекъп',
     en: 'Google Drive Backup',
@@ -378,14 +631,6 @@ export const translations: Translations = {
   'profile.howToUse': {
     bg: 'Как да използвате приложението',
     en: 'How to use the app',
-  },
-  'profile.about': {
-    bg: 'За приложението',
-    en: 'About',
-  },
-  'profile.version': {
-    bg: 'Версия',
-    en: 'Version',
   },
   'profile.logout': {
     bg: 'Изход',
@@ -416,6 +661,70 @@ export const translations: Translations = {
   'common.close': {
     bg: 'Затвори',
     en: 'Close',
+  },
+  'msg.downloadFailed': {
+    bg: 'Не можах да изтегля файла',
+    en: 'Could not download the file',
+  },
+  'import.button': {
+    bg: 'Импортирай от Excel',
+    en: 'Import from Excel',
+  },
+  'import.downloadTemplate': {
+    bg: 'Изтегли шаблон',
+    en: 'Download template',
+  },
+  'import.downloadTemplateHint': {
+    bg: 'Шаблонът съдържа заглавен ред, пример и кратки указания - попълнете го и го качете обратно.',
+    en: 'The template has a header row, an example row and short instructions - fill it in and upload it back.',
+  },
+  'import.pickFile': {
+    bg: 'Избери файл (.xlsx / .csv)',
+    en: 'Choose file (.xlsx / .csv)',
+  },
+  'import.analyzing': {
+    bg: 'Анализирам файла...',
+    en: 'Analyzing the file...',
+  },
+  'import.totalRows': {
+    bg: 'Общо редове',
+    en: 'Total rows',
+  },
+  'import.validRows': {
+    bg: 'Валидни',
+    en: 'Valid',
+  },
+  'import.errorRows': {
+    bg: 'С грешки',
+    en: 'With errors',
+  },
+  'import.row': {
+    bg: 'Ред',
+    en: 'Row',
+  },
+  'import.importRows': {
+    bg: 'Импортирай {count} реда',
+    en: 'Import {count} rows',
+  },
+  'import.noValidRows': {
+    bg: 'Няма валидни редове за импортиране - поправете файла и опитайте отново.',
+    en: 'No valid rows to import - fix the file and try again.',
+  },
+  'import.pickDifferentFile': {
+    bg: 'Избери друг файл',
+    en: 'Choose a different file',
+  },
+  'import.importing': {
+    bg: 'Импортирам...',
+    en: 'Importing...',
+  },
+  'import.doneSummary': {
+    bg: 'Успешно импортирани {imported} реда.',
+    en: 'Successfully imported {imported} rows.',
+  },
+  'import.doneFailedSummary': {
+    bg: '{failed} реда не бяха импортирани (напр. вече съществуват) - виж детайлите по-горе.',
+    en: '{failed} rows were not imported (e.g. already exist) - see details above.',
   },
   'common.success': {
     bg: 'Успех',
@@ -525,6 +834,38 @@ export const translations: Translations = {
     bg: 'Бележки',
     en: 'Notes',
   },
+  'invoices.items': {
+    bg: 'Артикули',
+    en: 'Items',
+  },
+  'invoices.itemName': {
+    bg: 'Артикул',
+    en: 'Item',
+  },
+  'invoices.itemQty': {
+    bg: 'Кол-во',
+    en: 'Qty',
+  },
+  'invoices.itemUnitPrice': {
+    bg: 'Ед. цена',
+    en: 'Unit price',
+  },
+  'invoices.itemTotal': {
+    bg: 'Общо',
+    en: 'Total',
+  },
+  'invoices.itemsSum': {
+    bg: 'Сбор на артикулите',
+    en: 'Items sum',
+  },
+  'invoices.itemsMismatch': {
+    bg: 'Сборът на артикулите се различава от стойността без ДДС на фактурата - възможна грешка при въвеждането.',
+    en: "The items' sum differs from the invoice's amount without VAT - possible entry error.",
+  },
+  'invoices.vsLastPurchase': {
+    bg: 'спрямо предишна доставка',
+    en: 'vs. last purchase',
+  },
   'invoices.deleteInvoice': {
     bg: 'Изтрий фактурата',
     en: 'Delete Invoice',
@@ -534,14 +875,170 @@ export const translations: Translations = {
     en: 'Scan your first invoice',
   },
   'invoices.searchPlaceholder': {
-    bg: 'Търси по доставчик...',
-    en: 'Search by supplier...',
+    bg: 'Търси по доставчик или номер...',
+    en: 'Search by supplier or number...',
+  },
+  'invoices.paymentFilterAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'invoices.paymentFilterUnpaid': {
+    bg: 'Неплатени',
+    en: 'Unpaid',
+  },
+  'invoices.paymentFilterOverdue': {
+    bg: 'Просрочени',
+    en: 'Overdue',
+  },
+  'invoices.paymentFilterPaid': {
+    bg: 'Платени',
+    en: 'Paid',
+  },
+  'invoices.unpaid': {
+    bg: 'Неплатена',
+    en: 'Unpaid',
+  },
+  'invoices.overdue': {
+    bg: 'Просрочена',
+    en: 'Overdue',
+  },
+  'invoices.paymentSection': {
+    bg: 'Плащане',
+    en: 'Payment',
+  },
+  'invoices.paymentMethodCash': {
+    bg: 'В брой',
+    en: 'Cash',
+  },
+  'invoices.paymentMethodBankTransfer': {
+    bg: 'Банков превод',
+    en: 'Bank transfer',
+  },
+  'invoices.paymentDueDate': {
+    bg: 'Срок за плащане',
+    en: 'Payment due date',
+  },
+  'invoices.markAsPaid': {
+    bg: 'Маркирай като платена',
+    en: 'Mark as paid',
+  },
+  'invoices.paidOn': {
+    bg: 'Платена на',
+    en: 'Paid on',
+  },
+  'invoices.overdueSince': {
+    bg: 'Просрочена от',
+    en: 'Overdue since',
+  },
+  'invoices.partiallyPaid': {
+    bg: 'Частично платена',
+    en: 'Partially paid',
+  },
+  'invoices.paidOfTotal': {
+    bg: 'Платено {paid} от {total} €',
+    en: 'Paid {paid} of {total} €',
+  },
+  'invoices.remainingAmount': {
+    bg: 'Остатък',
+    en: 'Remaining',
+  },
+  'invoices.recordPayment': {
+    bg: 'Регистрирай плащане',
+    en: 'Record payment',
+  },
+  'invoices.editPayment': {
+    bg: 'Промени плащането',
+    en: 'Edit payment',
+  },
+  'invoices.markFullyPaid': {
+    bg: 'Маркирай като напълно платена',
+    en: 'Mark as fully paid',
+  },
+  'invoices.paidAmountLabel': {
+    bg: 'Платена сума до момента (€)',
+    en: 'Amount paid so far (€)',
+  },
+  'invoices.paidAmountEditNotice': {
+    bg: 'Полето показва вече платената сума до момента. Промяна го заменя изцяло - не се добавя към старата.',
+    en: 'This field shows the total paid so far. Changing it replaces that value - it does not add to it.',
+  },
+  'invoices.paidAmountExceedsTotal': {
+    bg: 'Платената сума не може да надвишава общата сума на фактурата',
+    en: 'The paid amount cannot exceed the invoice total',
+  },
+  'invoices.fullyPaid': {
+    bg: 'Напълно платена',
+    en: 'Fully paid',
   },
   'invoices.downloadError': {
     bg: 'Не можах да изтегля файла',
     en: 'Could not download file',
   },
-  
+  'invoices.periodAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'invoices.periodThisMonth': {
+    bg: 'Този месец',
+    en: 'This month',
+  },
+  'invoices.periodLastMonth': {
+    bg: 'Миналия месец',
+    en: 'Last month',
+  },
+  'invoices.periodLast3Months': {
+    bg: 'Последните 3 месеца',
+    en: 'Last 3 months',
+  },
+  'invoices.periodThisYear': {
+    bg: 'Тази година',
+    en: 'This year',
+  },
+  'invoices.periodCustom': {
+    bg: 'Период',
+    en: 'Custom',
+  },
+  'invoices.periodFrom': {
+    bg: 'От',
+    en: 'From',
+  },
+  'invoices.periodTo': {
+    bg: 'До',
+    en: 'To',
+  },
+  'invoices.monthlyTotal': {
+    bg: 'Общо',
+    en: 'Total',
+  },
+  'invoices.missingEik': {
+    bg: 'Без ЕИК',
+    en: 'No EIK',
+  },
+  'invoices.missingEikSingular': {
+    bg: 'фактура без валиден ЕИК на доставчика',
+    en: "invoice with no valid supplier EIK",
+  },
+  'invoices.missingEikPlural': {
+    bg: 'фактури без валиден ЕИК на доставчика',
+    en: "invoices with no valid supplier EIK",
+  },
+  'invoices.showAll': {
+    bg: 'Покажи всички',
+    en: 'Show all',
+  },
+  'invoices.showOnlyThese': {
+    bg: 'Покажи само тях',
+    en: 'Show only these',
+  },
+  'invoices.filtersButton': {
+    bg: 'Филтри',
+    en: 'Filters',
+  },
+  'invoices.filtersActive': {
+    bg: 'активни',
+    en: 'active',
+  },
+
   // Company Settings
   'company.title': {
     bg: 'Настройки на фирма',
@@ -552,20 +1049,12 @@ export const translations: Translations = {
     en: 'Company data is shared between all users in a company. Duplicate invoices are checked company-wide.',
   },
   'company.joinExisting': {
-    bg: 'Присъединяване към съществуваща фирма',
-    en: 'Join existing company',
+    bg: 'Присъединяване по покана',
+    en: 'Join by invitation',
   },
   'company.joinHint': {
-    bg: 'Въведете ЕИК на фирмата, към която искате да се присъедините',
-    en: 'Enter the EIK of the company you want to join',
-  },
-  'company.enterEik': {
-    bg: 'Въведете ЕИК',
-    en: 'Enter EIK',
-  },
-  'company.join': {
-    bg: 'Присъедини се',
-    en: 'Join',
+    bg: 'Имате код за покана от вашия работодател? Въведете го тук.',
+    en: 'Have an invitation code from your employer? Enter it here.',
   },
   'company.editCompany': {
     bg: 'Редактиране на фирма',
@@ -753,6 +1242,10 @@ export const translations: Translations = {
     bg: 'Възстановени записи',
     en: 'Restored records',
   },
+  'backup.skippedRecords': {
+    bg: 'Пропуснати (вече съществуващи или невалидни) записи',
+    en: 'Skipped (already existing or invalid) records',
+  },
   'backup.restoreError': {
     bg: 'Неуспешно възстановяване',
     en: 'Failed to restore',
@@ -873,6 +1366,74 @@ export const translations: Translations = {
     bg: 'Допълнителна информация',
     en: 'Additional Information',
   },
+  'stats.top3Title': {
+    bg: 'Топ 3',
+    en: 'Top 3',
+  },
+  'stats.topSuppliers': {
+    bg: 'Доставчици',
+    en: 'Suppliers',
+  },
+  'stats.topItems': {
+    bg: 'Артикули',
+    en: 'Items',
+  },
+  'stats.forecastTitle': {
+    bg: 'Прогноза за следващия месец',
+    en: 'Forecast for next month',
+  },
+  'stats.forecastHint': {
+    bg: 'На база последните 6 месеца',
+    en: 'Based on the last 6 months',
+  },
+  'stats.forecastRevenue': {
+    bg: 'Очакван оборот',
+    en: 'Expected revenue',
+  },
+  'stats.forecastExpense': {
+    bg: 'Очакван разход',
+    en: 'Expected expense',
+  },
+  'stats.roiTrendTitle': {
+    bg: 'ROI тренд (последните 6 месеца)',
+    en: 'ROI trend (last 6 months)',
+  },
+  'stats.compare': {
+    bg: 'Сравни',
+    en: 'Compare',
+  },
+  'stats.compareHint': {
+    bg: 'Изберете 2-5 доставчика за сравнение',
+    en: 'Select 2-5 suppliers to compare',
+  },
+  'stats.compareMinRequired': {
+    bg: 'Изберете поне 2 доставчика',
+    en: 'Select at least 2 suppliers',
+  },
+  'stats.compareMaxReached': {
+    bg: 'Може да сравните най-много 5 доставчика',
+    en: 'You can compare at most 5 suppliers',
+  },
+  'stats.compareButtonWithCount': {
+    bg: 'Сравни',
+    en: 'Compare',
+  },
+  'stats.compareTitle': {
+    bg: 'Сравнение на доставчици',
+    en: 'Supplier comparison',
+  },
+  'stats.compareTotalAmount': {
+    bg: 'Обща сума',
+    en: 'Total amount',
+  },
+  'stats.compareInvoiceCount': {
+    bg: 'Брой фактури',
+    en: 'Invoice count',
+  },
+  'stats.compareAvgInvoice': {
+    bg: 'Средна фактура',
+    en: 'Average invoice',
+  },
   'stats.loadingData': {
     bg: 'Зареждане на данни...',
     en: 'Loading data...',
@@ -988,6 +1549,32 @@ export const translations: Translations = {
     en: 'Recent Invoices',
   },
   
+  // Loud price-alert popup
+  'priceAlertPopup.title': {
+    bg: 'Промяна в цените!',
+    en: 'Price change!',
+  },
+  'priceAlertPopup.subtitleSingle': {
+    bg: 'Забелязахме повишение на цената на артикул от последна фактура.',
+    en: 'We noticed a price increase on an item from a recent invoice.',
+  },
+  'priceAlertPopup.subtitleMultiple': {
+    bg: 'Забелязахме повишение на цените на {count} артикула от последни фактури.',
+    en: 'We noticed price increases on {count} items from recent invoices.',
+  },
+  'priceAlertPopup.more': {
+    bg: '+ още {count}',
+    en: '+ {count} more',
+  },
+  'priceAlertPopup.dismiss': {
+    bg: 'Затвори',
+    en: 'Dismiss',
+  },
+  'priceAlertPopup.viewDetails': {
+    bg: 'Виж в статистиката',
+    en: 'View in statistics',
+  },
+
   // Items & Price Tracking
   'stats.items': {
     bg: 'Артикули',
@@ -1004,6 +1591,50 @@ export const translations: Translations = {
   'stats.priceChange': {
     bg: 'Промяна в цена',
     en: 'Price Change',
+  },
+  'stats.avgDailyTurnover': {
+    bg: 'Среден оборот на ден',
+    en: 'Average Daily Turnover',
+  },
+  'stats.avgDailyTurnoverSubtitle': {
+    bg: 'средно за избрания период ({days} дни)',
+    en: 'averaged over the selected period ({days} days)',
+  },
+  'stats.priceInflation': {
+    bg: 'Обща инфлация на цените',
+    en: 'Overall Price Inflation',
+  },
+  'stats.inflationPeriod.month': {
+    bg: 'Месец',
+    en: 'Month',
+  },
+  'stats.inflationPeriod.quarter': {
+    bg: 'Тримесечие',
+    en: 'Quarter',
+  },
+  'stats.inflationPeriod.year': {
+    bg: 'Година',
+    en: 'Year',
+  },
+  'stats.inflationHeadline': {
+    bg: 'средно претеглена промяна на покупните цени',
+    en: 'weighted average change in purchase prices',
+  },
+  'stats.inflationItemsCompared': {
+    bg: 'артикула',
+    en: 'items',
+  },
+  'stats.inflationShowDetails': {
+    bg: 'Покажи по артикули',
+    en: 'Show by item',
+  },
+  'stats.inflationHideDetails': {
+    bg: 'Скрий детайлите',
+    en: 'Hide details',
+  },
+  'stats.inflationNoData': {
+    bg: 'Няма достатъчно данни за избрания период (нужни са поне 2 покупки на артикул).',
+    en: 'Not enough data for the selected period (at least 2 purchases per item are needed).',
   },
   'stats.oldPrice': {
     bg: 'Стара цена',
@@ -1383,6 +2014,10 @@ export const translations: Translations = {
     bg: 'Остават',
     en: 'Remaining',
   },
+  'budget.month': {
+    bg: 'Месец',
+    en: 'Month',
+  },
   'budget.limit': {
     bg: 'Лимит',
     en: 'Limit',
@@ -1485,6 +2120,26 @@ export const translations: Translations = {
     bg: 'Експортирайте вашите данни',
     en: 'Export your data',
   },
+  'export.vatLedger': {
+    bg: 'Дневник на покупки/продажби',
+    en: 'Purchases/sales VAT ledger',
+  },
+  'export.vatLedgerDesc': {
+    bg: 'Работен дневник по ЗДДС за счетоводителя, групиран по ставки — основа за справка-декларацията',
+    en: "Working ЗДДС ledger for the accountant, grouped by VAT rate — the base for the monthly return",
+  },
+  'export.lastMonth': {
+    bg: 'Миналия месец',
+    en: 'Last month',
+  },
+  'export.thisMonth': {
+    bg: 'Този месец',
+    en: 'This month',
+  },
+  'export.download': {
+    bg: 'Изтегли',
+    en: 'Download',
+  },
   'export.excel': {
     bg: 'Excel файл (.xlsx)',
     en: 'Excel File (.xlsx)',
@@ -1504,6 +2159,10 @@ export const translations: Translations = {
   'export.info': {
     bg: 'Експортът включва всички ваши фактури, приходи и разходи за текущия период.',
     en: 'Export includes all your invoices, revenues and expenses for the current period.',
+  },
+  'export.statsExportHint': {
+    bg: 'Търсите PDF с обобщена статистика и графики? Той е в раздел Статистики.',
+    en: 'Looking for a summary PDF with charts? That one lives in the Statistics tab.',
   },
   'export.notLoggedIn': {
     bg: 'Не сте влезли в системата',
@@ -1526,6 +2185,50 @@ export const translations: Translations = {
   'profile.budgetDesc': {
     bg: 'Управление на месечен бюджет',
     en: 'Manage monthly budget',
+  },
+  'profile.auditLog': {
+    bg: 'Дневник на действията',
+    en: 'Audit log',
+  },
+  'profile.auditLogDesc': {
+    bg: 'Кой какво е добавил, променил или изтрил',
+    en: 'Who added, changed or deleted what',
+  },
+  'auditLog.title': {
+    bg: 'Дневник на действията',
+    en: 'Audit log',
+  },
+  'auditLog.empty': {
+    bg: 'Няма записани действия',
+    en: 'No recorded actions',
+  },
+  'auditLog.filterAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'auditLog.actionCreate': {
+    bg: 'Създадена',
+    en: 'Created',
+  },
+  'auditLog.actionUpdate': {
+    bg: 'Редактирана',
+    en: 'Updated',
+  },
+  'auditLog.actionDelete': {
+    bg: 'Изтрита',
+    en: 'Deleted',
+  },
+  'auditLog.actionExport': {
+    bg: 'Експорт',
+    en: 'Export',
+  },
+  'auditLog.entityInvoice': {
+    bg: 'фактура',
+    en: 'invoice',
+  },
+  'auditLog.entityInvoices': {
+    bg: 'фактури',
+    en: 'invoices',
   },
   'profile.export': {
     bg: 'Експорт',
@@ -1569,6 +2272,151 @@ export const translations: Translations = {
     bg: 'Сигурни ли сте, че искате да премахнете този потребител?',
     en: 'Are you sure you want to remove this user?',
   },
+
+  'profile.payrollDesc': { bg: 'Служители и месечни ведомости', en: 'Employees and monthly payroll' },
+  'payroll.title': { bg: 'Ведомост за заплати', en: 'Payroll' },
+  'payroll.employees': { bg: 'Служители', en: 'Employees' },
+  'payroll.noEmployees': { bg: 'Няма добавени служители', en: 'No employees yet' },
+  'payroll.noEmployeesHint': { bg: 'Добавете служител, за да започнете да начислявате заплати', en: 'Add an employee to start processing payroll' },
+  'payroll.newEmployee': { bg: 'Нов служител', en: 'New employee' },
+  'payroll.editEmployee': { bg: 'Редактиране на служител', en: 'Edit employee' },
+  'payroll.name': { bg: 'Име', en: 'Name' },
+  'payroll.namePlaceholder': { bg: 'Име на служителя', en: "Employee's name" },
+  'payroll.position': { bg: 'Длъжност', en: 'Position' },
+  'payroll.positionPlaceholder': { bg: 'напр. Продавач-консултант', en: 'e.g. Sales assistant' },
+  'payroll.agreementType': { bg: 'Начин на договаряне', en: 'Agreement type' },
+  'payroll.grossAgreement': { bg: 'Бруто (стандартно)', en: 'Gross (standard)' },
+  'payroll.netAgreement': { bg: 'Нето "на ръка"', en: 'Net take-home' },
+  'payroll.grossSalary': { bg: 'Брутна заплата', en: 'Gross salary' },
+  'payroll.netSalary': { bg: 'Нетна заплата ("на ръка")', en: 'Net salary (take-home)' },
+  'payroll.foodVouchers': { bg: 'Ваучери за храна', en: 'Food vouchers' },
+  'payroll.additionalInsurance': { bg: 'Допълнително осигуряване', en: 'Additional insurance' },
+  'payroll.noPosition': { bg: 'Без длъжност', en: 'No position' },
+  'payroll.netShort': { bg: '· нето', en: '· net' },
+  'payroll.grossShort': { bg: '· бруто', en: '· gross' },
+  'payroll.process': { bg: 'Начисли за месеца', en: 'Process for this month' },
+  'payroll.netAmount': { bg: 'Нетно за получаване', en: 'Net take-home' },
+  'payroll.totalEmployerCost': { bg: 'Общ разход за работодателя', en: 'Total employer cost' },
+  'payroll.removeEntry': { bg: 'Премахни начислението', en: 'Remove this entry' },
+  'payroll.deleteEmployee': { bg: 'Изтрий служителя', en: 'Delete employee' },
+  'payroll.deleteEmployeeConfirm': { bg: 'Служителят ще бъде изтрит, но вече начислените заплати остават в историята.', en: "The employee will be deleted, but past payroll entries stay in the history." },
+  'payroll.deleteEntryConfirm': { bg: 'Сигурни ли сте, че искате да премахнете това начисление?', en: 'Remove this payroll entry?' },
+  'payroll.bonus': { bg: 'Бонус за месеца', en: 'Bonus this month' },
+  'payroll.attachPhoto': { bg: 'Прикачи снимка на ведомостта', en: 'Attach a photo of the payslip' },
+  'payroll.photoAttached': { bg: 'Снимката е прикачена ✓', en: 'Photo attached ✓' },
+  'payroll.period': { bg: 'Период', en: 'Period' },
+  'payroll.grossAmount': { bg: 'Брутно възнаграждение', en: 'Gross amount' },
+  'payroll.employeeContributions': { bg: 'Осигуровки (за сметка на служителя)', en: "Contributions (employee's share)" },
+  'payroll.incomeTax': { bg: 'Данък общ доход', en: 'Income tax' },
+  'payroll.employerContributions': { bg: 'Осигуровки за сметка на работодателя', en: "Employer's contributions" },
+  'payroll.rates': { bg: 'Осигурителни ставки', en: 'Contribution rates' },
+  'payroll.ratesDisclaimer': { bg: 'Тези проценти се сменят всяка година от НАП/НОИ — проверявайте ги с вашия счетоводител.', en: 'These percentages change every year — verify them with your accountant.' },
+  'payroll.employeeRate': { bg: 'Осигуровки за сметка на осигурения (%)', en: "Employee's contribution rate (%)" },
+  'payroll.employerRate': { bg: 'Осигуровки за сметка на работодателя (%)', en: "Employer's contribution rate (%)" },
+  'payroll.incomeTaxRate': { bg: 'Данък общ доход (%)', en: 'Income tax rate (%)' },
+  'payroll.minInsuranceIncome': { bg: 'Минимален осигурителен доход (€)', en: 'Minimum insurance income (€)' },
+  'payroll.maxInsuranceIncome': { bg: 'Максимален осигурителен доход (€)', en: 'Maximum insurance income (€)' },
+  'payroll.totalCostThisMonth': { bg: 'Общ разход за персонал този месец', en: 'Total staff cost this month' },
+
+  'profile.assetsDesc': { bg: 'Регистър на дълготрайните активи и амортизации', en: 'Fixed assets register and depreciation' },
+  'assets.title': { bg: 'Дълготрайни активи (ДМА)', en: 'Fixed assets' },
+  'assets.depreciationThisMonth': { bg: 'Амортизации за месеца', en: 'Depreciation this month' },
+  'assets.netBookValue': { bg: 'Балансова стойност', en: 'Net book value' },
+  'assets.acquisitionValue': { bg: 'Доставна стойност', en: 'Acquisition value' },
+  'assets.accumulatedDepreciation': { bg: 'Начислена амортизация', en: 'Accumulated depreciation' },
+  'assets.monthlyDepreciation': { bg: 'Месечна амортизация', en: 'Monthly depreciation' },
+  'assets.noAssets': { bg: 'Няма добавени активи', en: 'No assets yet' },
+  'assets.noAssetsHint': { bg: 'Добавете сграда, оборудване, автомобил или друг дълготраен актив, за да следите амортизацията му автоматично', en: 'Add a building, equipment, vehicle or other fixed asset to track its depreciation automatically' },
+  'assets.newAsset': { bg: 'Нов актив', en: 'New asset' },
+  'assets.editAsset': { bg: 'Редактиране на актив', en: 'Edit asset' },
+  'assets.name': { bg: 'Наименование', en: 'Name' },
+  'assets.namePlaceholder': { bg: 'напр. Лек автомобил Skoda Octavia', en: 'e.g. Company car' },
+  'assets.category': { bg: 'Данъчна категория', en: 'Tax category' },
+  'assets.acquisitionDate': { bg: 'Дата на придобиване', en: 'Acquisition date' },
+  'assets.inServiceDate': { bg: 'Дата на въвеждане в експлоатация', en: 'Date put into service' },
+  'assets.depreciationRate': { bg: 'Годишна норма на амортизация (%)', en: 'Annual depreciation rate (%)' },
+  'assets.depreciationRateHint': { bg: 'Това е данъчната норма по чл. 55 ЗКПО (максимална за категорията). Счетоводната Ви амортизация може да е различна, според собствената Ви амортизационна политика — коригирайте, ако е така.', en: 'This is the tax depreciation rate under Art. 55 CITA (the category maximum). Your real accounting depreciation may differ per your own policy — adjust if so.' },
+  'assets.responsiblePerson': { bg: 'Материално отговорно лице', en: 'Responsible person' },
+  'assets.responsiblePersonPlaceholder': { bg: 'напр. Иван Иванов', en: "e.g. the employee's name" },
+  'assets.notes': { bg: 'Бележки', en: 'Notes' },
+  'assets.lowValueHint': { bg: 'Активи под 357.93 € обикновено могат да се отчитат директно като разход вместо ДМА, според счетоводната политика на фирмата.', en: 'Assets below €357.93 can usually be expensed directly instead of capitalized, per the company\'s accounting policy.' },
+  'assets.attachPhoto': { bg: 'Прикачи снимка/документ', en: 'Attach a photo/document' },
+  'assets.photoAttached': { bg: 'Снимката е прикачена ✓', en: 'Photo attached ✓' },
+  'assets.statusActive': { bg: 'Активен', en: 'Active' },
+  'assets.statusFullyDepreciated': { bg: 'Напълно амортизиран', en: 'Fully depreciated' },
+  'assets.statusDisposed': { bg: 'Бракуван/продаден', en: 'Disposed' },
+  'assets.dispose': { bg: 'Бракувай / продай', en: 'Dispose' },
+  'assets.disposeConfirmTitle': { bg: 'Бракуване на актив', en: 'Dispose asset' },
+  'assets.disposalDate': { bg: 'Дата на бракуване/продажба', en: 'Disposal date' },
+  'assets.disposalReason': { bg: 'Причина (по избор)', en: 'Reason (optional)' },
+  'assets.disposalReasonPlaceholder': { bg: 'напр. Продаден, бракуван поради износване', en: 'e.g. Sold, scrapped due to wear' },
+  'assets.deleteAsset': { bg: 'Изтрий актива', en: 'Delete asset' },
+  'assets.deleteAssetConfirm': { bg: 'Активът и историята на амортизацията му ще бъдат изтрити безвъзвратно.', en: 'The asset and its depreciation history will be permanently deleted.' },
+  'assets.summaryTitle': { bg: 'Активни активи', en: 'Active assets' },
+
+  'companySwitcher.switchCompany': { bg: 'Смяна на фирма', en: 'Switch company' },
+  'companySwitcher.yourCompanies': { bg: 'Вашите фирми', en: 'Your companies' },
+  'companySwitcher.viewingAs': { bg: 'Преглеждате като', en: 'Viewing as' },
+  'companySwitcher.switched': { bg: 'Превключено', en: 'Switched' },
+  'companySwitcher.switchedTo': { bg: 'Вече преглеждате', en: 'You are now viewing' },
+  'invitations.roleAccountant': { bg: 'Счетоводител', en: 'Accountant' },
+  'invitations.accountantHint': { bg: 'Достъп до статистики, фактури, ведомости и ДМА на тази фирма, без право да управлява потребители или данните на фирмата. Може да работи с няколко фирми клиенти от един акаунт.', en: "Access to this company's statistics, invoices, payroll and fixed assets, without managing users or company settings. Can work across several client companies from one account." },
+  'invitations.permissionsTitle': { bg: 'Права на достъп', en: 'Access permissions' },
+  'invitations.permissionsHint': { bg: 'Отметнати са правата по подразбиране за тази роля. Може да ги коригирате.', en: "The role's default permissions are pre-checked. You can adjust them." },
+  'users.editAccess': { bg: 'Редакция на достъп', en: 'Edit access' },
+  'users.role': { bg: 'Роля', en: 'Role' },
+  'users.saveChanges': { bg: 'Запази промените', en: 'Save changes' },
+
+  'notifications.title': { bg: 'Известия за ДДС', en: 'VAT notifications' },
+  'notifications.thresholdTitle': { bg: 'Известие при надхвърляне', en: 'Threshold alert' },
+  'notifications.thresholdSubtitle': { bg: 'Известие когато ДДС надхвърли сума', en: 'Alert when VAT exceeds an amount' },
+  'notifications.thresholdAmountLabel': { bg: 'Сума на ДДС (€)', en: 'VAT amount (€)' },
+  'notifications.thresholdAmountPlaceholder': { bg: 'Напр. 5000', en: 'e.g. 5000' },
+  'notifications.thresholdHint': { bg: 'Известие когато ДДС за плащане надхвърли тази сума', en: 'Notifies you when the VAT due exceeds this amount' },
+  'notifications.periodicTitle': { bg: 'Периодични известия', en: 'Periodic reminders' },
+  'notifications.periodicSubtitle': { bg: 'Напомняне на избрани дати', en: 'Reminders on chosen dates' },
+  'notifications.selectDatesLabel': { bg: 'Изберете дати от месеца', en: 'Choose dates of the month' },
+  'notifications.selectedDatesLabel': { bg: 'Избрани', en: 'Selected' },
+  'notifications.pushInfo': { bg: 'Известията се изпращат като push нотификации. Уверете се, че сте ги разрешили.', en: 'Notifications are sent as push notifications. Make sure you have allowed them.' },
+  'notifications.save': { bg: 'Запази настройки', en: 'Save settings' },
+  'notifications.saved': { bg: 'Настройките са запазени', en: 'Settings saved' },
+  'notifications.pushTitle': { bg: 'Push известия', en: 'Push notifications' },
+  'notifications.pushSubtitle': { bg: 'Ново съобщение или напомняне се показва в известията на телефона', en: 'A new message or reminder shows up in your phone\'s notifications' },
+  'notifications.pushDenied': { bg: 'Известията са блокирани за този сайт. Разрешете ги от настройките на браузъра.', en: 'Notifications are blocked for this site. Allow them in your browser settings.' },
+  'notifications.pushError': { bg: 'Неуспешно включване на известията. Опитайте отново.', en: 'Could not enable notifications. Please try again.' },
+
+  // Calendar (shared team calendar - owner/manager/accountant)
+  'calendar.title': { bg: 'Календар', en: 'Calendar' },
+  'calendar.noEvents': { bg: 'Няма събития в този период', en: 'No events in this period' },
+  'calendar.personal': { bg: 'Лично', en: 'Personal' },
+  'calendar.shared': { bg: 'Споделено', en: 'Shared' },
+  'calendar.sharedBy': { bg: 'Споделено от', en: 'Shared by' },
+  'calendar.newEvent': { bg: 'Ново събитие', en: 'New event' },
+  'calendar.editEvent': { bg: 'Редактиране на събитие', en: 'Edit event' },
+  'calendar.eventTitle': { bg: 'Заглавие', en: 'Title' },
+  'calendar.eventTitlePlaceholder': { bg: 'Напр. Среща с ДДС консултант', en: 'e.g. Meeting with VAT consultant' },
+  'calendar.eventDescription': { bg: 'Описание (по избор)', en: 'Description (optional)' },
+  'calendar.eventDescriptionPlaceholder': { bg: 'Допълнителни детайли...', en: 'Additional details...' },
+  'calendar.eventDate': { bg: 'Дата', en: 'Date' },
+  'calendar.specificTime': { bg: 'Конкретен час', en: 'Specific time' },
+  'calendar.visibility': { bg: 'Видимост', en: 'Visibility' },
+  'calendar.reminder': { bg: 'Напомняне', en: 'Reminder' },
+  'calendar.reminder_none': { bg: 'Без', en: 'None' },
+  'calendar.reminder_min15': { bg: '15 мин. преди', en: '15 min before' },
+  'calendar.reminder_hour1': { bg: '1 час преди', en: '1 hour before' },
+  'calendar.reminder_day1': { bg: '1 ден преди', en: '1 day before' },
+  'calendar.titleRequired': { bg: 'Моля, въведете заглавие', en: 'Please enter a title' },
+  'calendar.deleteTitle': { bg: 'Изтриване на събитие', en: 'Delete event' },
+  'calendar.deleteConfirm': { bg: 'Сигурни ли сте, че искате да изтриете това събитие?', en: 'Are you sure you want to delete this event?' },
+
+  // Messages (team channel + direct messages)
+  'messages.title': { bg: 'Съобщения', en: 'Messages' },
+  'messages.noConversations': { bg: 'Все още няма разговори', en: 'No conversations yet' },
+  'messages.noMessagesYet': { bg: 'Все още няма съобщения', en: 'No messages yet' },
+  'messages.typeMessage': { bg: 'Напишете съобщение...', en: 'Type a message...' },
+  'messages.newDm': { bg: 'Ново лично съобщение', en: 'New direct message' },
+  'messages.noMembers': { bg: 'Няма колеги с достъп до тази функция', en: 'No teammates with access to this feature' },
+  'messages.enablePushHint': { bg: 'Включете известията, за да не пропускате съобщения', en: 'Enable notifications so you don\'t miss messages' },
 };
 
 // Zustand store for language
@@ -1610,6 +2458,8 @@ export function useTranslation() {
     }
     return translation[language] || translation['bg'] || key;
   };
-  
-  return { t, language };
+
+  const dateLocale = language === 'bg' ? dateFnsBg : dateFnsEnUS;
+
+  return { t, language, dateLocale };
 }

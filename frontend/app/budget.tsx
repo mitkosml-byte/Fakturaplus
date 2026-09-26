@@ -6,24 +6,29 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Alert,
   RefreshControl,
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
+import { useAuth } from '../src/contexts/AuthContext';
+import { AccessDenied } from '../src/components';
+import ExcelImportModal from '../src/components/ExcelImportModal';
 
 export default function BudgetScreen() {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const router = useRouter();
   const [budgetStatus, setBudgetStatus] = useState<any>(null);
   const [recurringExpenses, setRecurringExpenses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [importModalVisible, setImportModalVisible] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
   
   // Budget form
@@ -58,6 +63,21 @@ export default function BudgetScreen() {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
+  };
+
+  // Pre-fills the form with the current month's already-saved budget (if
+  // any) before opening it, so adjusting just the alert threshold - or
+  // anything else - doesn't require re-typing the limit from memory, and
+  // doesn't risk overwriting it with a blank/wrong value.
+  const openBudgetModal = () => {
+    if (budgetStatus?.has_budget) {
+      setBudgetLimit(budgetStatus.expense_limit.toString());
+      setAlertThreshold(budgetStatus.alert_threshold.toString());
+    } else {
+      setBudgetLimit('');
+      setAlertThreshold('80');
+    }
+    setShowBudgetModal(true);
   };
 
   const saveBudget = async () => {
@@ -132,6 +152,10 @@ export default function BudgetScreen() {
     return '#10B981';
   };
 
+  if (!hasPermission('manage_budget')) {
+    return <AccessDenied />;
+  }
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -149,7 +173,9 @@ export default function BudgetScreen() {
             <Ionicons name="arrow-back" size={24} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('budget.title')}</Text>
-          <View style={{ width: 40 }} />
+          <TouchableOpacity onPress={() => setImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('import.button')}>
+            <Ionicons name="cloud-upload-outline" size={22} color="white" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -169,7 +195,7 @@ export default function BudgetScreen() {
                   <Text style={styles.budgetMonth}>
                     {new Date().toLocaleDateString('bg-BG', { month: 'long', year: 'numeric' })}
                   </Text>
-                  <TouchableOpacity onPress={() => setShowBudgetModal(true)}>
+                  <TouchableOpacity onPress={openBudgetModal}>
                     <Ionicons name="settings-outline" size={20} color="#64748B" />
                   </TouchableOpacity>
                 </View>
@@ -195,19 +221,19 @@ export default function BudgetScreen() {
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.spent')}</Text>
                     <Text style={[styles.budgetStatValue, { color: '#EF4444' }]}>
-                      {budgetStatus.total_spent.toFixed(2)} лв
+                      {budgetStatus.total_spent.toFixed(2)} €
                     </Text>
                   </View>
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.remaining')}</Text>
                     <Text style={[styles.budgetStatValue, { color: '#10B981' }]}>
-                      {budgetStatus.remaining.toFixed(2)} лв
+                      {budgetStatus.remaining.toFixed(2)} €
                     </Text>
                   </View>
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.limit')}</Text>
                     <Text style={styles.budgetStatValue}>
-                      {budgetStatus.expense_limit.toFixed(2)} лв
+                      {budgetStatus.expense_limit.toFixed(2)} €
                     </Text>
                   </View>
                 </View>
@@ -227,7 +253,7 @@ export default function BudgetScreen() {
                 )}
               </View>
             ) : (
-              <TouchableOpacity style={styles.noBudgetCard} onPress={() => setShowBudgetModal(true)}>
+              <TouchableOpacity style={styles.noBudgetCard} onPress={openBudgetModal}>
                 <Ionicons name="add-circle-outline" size={48} color="#64748B" />
                 <Text style={styles.noBudgetText}>{t('budget.noBudget')}</Text>
                 <Text style={styles.noBudgetHint}>{t('budget.tapToCreate')}</Text>
@@ -257,7 +283,7 @@ export default function BudgetScreen() {
                       {t('budget.everyMonth')} {expense.day_of_month}
                     </Text>
                   </View>
-                  <Text style={styles.recurringAmount}>{expense.amount.toFixed(2)} лв</Text>
+                  <Text style={styles.recurringAmount}>{expense.amount.toFixed(2)} €</Text>
                   <TouchableOpacity onPress={() => deleteRecurring(expense.id)}>
                     <Ionicons name="trash-outline" size={20} color="#EF4444" />
                   </TouchableOpacity>
@@ -364,6 +390,18 @@ export default function BudgetScreen() {
           </View>
         </View>
       </Modal>
+
+      <ExcelImportModal
+        visible={importModalVisible}
+        onClose={() => setImportModalVisible(false)}
+        entity="budget"
+        title={t('import.button')}
+        fields={[
+          { key: 'month', label: t('budget.month') },
+          { key: 'expense_limit', label: t('budget.limit'), format: (v) => `${Number(v).toFixed(2)} €` },
+        ]}
+        onImported={loadData}
+      />
     </View>
   );
 }
