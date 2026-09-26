@@ -138,10 +138,12 @@ export default function HomeScreen() {
     }
   }, [expenseModalVisible, expenseDate, loadDayExpenses]);
 
-  // Load ROI data for owner
+  // Load ROI/personal-investments data - visible to the owner and to any
+  // delegated member the owner has granted view_personal_investments.
+  const canViewPersonalInvestments = hasPermission('view_personal_investments');
   const loadRoiData = useCallback(async () => {
-    if (!isOwner) return;
-    
+    if (!canViewPersonalInvestments) return;
+
     setLoadingRoi(true);
     try {
       const data = await api.getROIAnalysis();
@@ -152,14 +154,14 @@ export default function HomeScreen() {
     } finally {
       setLoadingRoi(false);
     }
-  }, [isOwner]);
+  }, [canViewPersonalInvestments]);
 
   useFocusEffect(
     useCallback(() => {
-      if (isOwner) {
+      if (canViewPersonalInvestments) {
         loadRoiData();
       }
-    }, [isOwner, loadRoiData])
+    }, [canViewPersonalInvestments, loadRoiData])
   );
 
   // Create personal expense
@@ -436,16 +438,35 @@ export default function HomeScreen() {
             <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0}</Text>
+            {summary && summary.total_pocket_money === null ? (
+              <Ionicons name="lock-closed" size={18} color="#64748B" style={{ marginBottom: 4 }} />
+            ) : (
+              <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0}</Text>
+            )}
             <Text style={styles.statLabel}>{t('home.pocket')}</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
-              {summary?.profit.toFixed(0) || 0}
-            </Text>
+            {summary && summary.profit === null ? (
+              <Ionicons name="lock-closed" size={18} color="#64748B" style={{ marginBottom: 4 }} />
+            ) : (
+              <Text style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+                {summary?.profit?.toFixed(0) || 0}
+              </Text>
+            )}
             <Text style={styles.statLabel}>{t('home.profit')}</Text>
           </View>
         </View>
+
+        {summary?.financial_visibility && (
+          summary.financial_visibility.pocket_money === false ||
+          summary.financial_visibility.off_book_expenses === false ||
+          summary.financial_visibility.profit === false
+        ) && (
+          <View style={styles.restrictedNote}>
+            <Ionicons name="information-circle-outline" size={14} color="#94A3B8" />
+            <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+          </View>
+        )}
 
         {/* Action Buttons - each gated on its own permission (an owner can
             fine-tune these independently per member via the permissions
@@ -475,21 +496,25 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Personal Expenses & ROI Section (Owner Only) */}
-        {isOwner && (
+        {/* Personal Expenses & ROI Section - visible to anyone with
+            view_personal_investments; adding a personal expense stays an
+            owner-only write action regardless. */}
+        {canViewPersonalInvestments && (
           <View style={styles.roiSection}>
             <View style={styles.roiHeader}>
               <View style={styles.roiTitleRow}>
                 <Ionicons name="person-circle" size={24} color="#8B5CF6" />
                 <Text style={styles.roiTitle}>{t('personal.title')}</Text>
               </View>
-              <TouchableOpacity
-                style={styles.addPersonalButton}
-                onPress={() => setPersonalExpenseModalVisible(true)}
-              >
-                <Ionicons name="add-circle" size={20} color="#8B5CF6" />
-                <Text style={styles.addPersonalText}>{t('personal.addExpense')}</Text>
-              </TouchableOpacity>
+              {isOwner && (
+                <TouchableOpacity
+                  style={styles.addPersonalButton}
+                  onPress={() => setPersonalExpenseModalVisible(true)}
+                >
+                  <Ionicons name="add-circle" size={20} color="#8B5CF6" />
+                  <Text style={styles.addPersonalText}>{t('personal.addExpense')}</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {loadingRoi ? (
@@ -1136,6 +1161,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#94A3B8',
     marginTop: 4,
+  },
+  restrictedNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: -12,
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  restrictedNoteText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    flexShrink: 1,
   },
   actionsContainer: {
     flexDirection: 'row',

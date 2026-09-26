@@ -123,19 +123,28 @@ export interface OCRResult {
   confidence?: number;  // Увереност в резултата
 }
 
+export interface FinancialVisibility {
+  pocket_money: boolean;
+  off_book_expenses: boolean;
+  profit: boolean;
+  personal_investments: boolean;
+}
+
 export interface Summary {
   total_invoice_amount: number;
   total_invoice_vat: number;
   total_fiscal_revenue: number;
-  total_pocket_money: number;
+  // null (not 0) when this viewer's permissions hide the field - every
+  // total below is already recomputed as if it were zero in that case.
+  total_pocket_money: number | null;
   fiscal_vat: number;
   vat_to_pay: number;
-  total_non_invoice_expenses: number;
+  total_non_invoice_expenses: number | null;
   total_payroll_cost: number;
   total_depreciation_expense: number;
   total_income: number;
   total_expense: number;
-  profit: number;
+  profit: number | null;
   invoice_count: number;
   total_cash_revenue: number;
   total_card_revenue: number;
@@ -143,6 +152,7 @@ export interface Summary {
   unpaid_invoice_count: number;
   total_overdue_amount: number;
   overdue_invoice_count: number;
+  financial_visibility: FinancialVisibility;
 }
 
 export interface ChartDataPoint {

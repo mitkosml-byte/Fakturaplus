@@ -78,6 +78,10 @@ export const translations: Translations = {
     bg: 'Печалба',
     en: 'Profit',
   },
+  'home.restrictedDataNote': {
+    bg: 'Част от данните са скрити за вашия достъп - показаните суми са изчислени без тях.',
+    en: 'Some data is hidden for your access level - the figures shown are calculated without it.',
+  },
   'home.dailyRevenue': {
     bg: 'Дневен оборот',
     en: 'Daily Revenue',

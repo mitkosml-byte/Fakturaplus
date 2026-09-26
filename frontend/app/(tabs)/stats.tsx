@@ -158,7 +158,7 @@ export default function StatsScreen() {
       }
     }
 
-    if (isOwner) {
+    if (hasPermission('view_personal_investments')) {
       try {
         const roiTrendData = await api.getROITrend(6);
         setRoiTrend(roiTrendData.trend || []);
@@ -417,8 +417,8 @@ export default function StatsScreen() {
     : '';
 
   // Small "+12% спрямо миналия месец" style badge for the summary cards
-  const renderTrendBadge = (current?: number, previous?: number, higherIsBetter: boolean = true) => {
-    if (current === undefined || previous === undefined || !previous) return null;
+  const renderTrendBadge = (current?: number | null, previous?: number | null, higherIsBetter: boolean = true) => {
+    if (current === undefined || current === null || previous === undefined || previous === null || !previous) return null;
     const diff = current - previous;
     const percent = (diff / Math.abs(previous)) * 100;
     if (Math.abs(percent) < 1) return null;
@@ -873,12 +873,29 @@ export default function StatsScreen() {
                   <View style={[styles.summaryCard, { borderLeftColor: '#F59E0B' }]}>
                     <Ionicons name="wallet" size={24} color="#F59E0B" />
                     <Text style={styles.cardLabel}>{t('stats.profitLabel')}</Text>
-                    <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
-                      {summary?.profit.toFixed(2) || '0.00'} €
-                    </Text>
-                    {renderTrendBadge(summary?.profit, previousSummary?.profit, true)}
+                    {summary && summary.profit === null ? (
+                      <Ionicons name="lock-closed" size={20} color="#64748B" style={{ marginVertical: 4 }} />
+                    ) : (
+                      <>
+                        <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+                          {summary?.profit?.toFixed(2) || '0.00'} €
+                        </Text>
+                        {renderTrendBadge(summary?.profit, previousSummary?.profit, true)}
+                      </>
+                    )}
                   </View>
                 </View>
+
+                {summary?.financial_visibility && (
+                  summary.financial_visibility.pocket_money === false ||
+                  summary.financial_visibility.off_book_expenses === false ||
+                  summary.financial_visibility.profit === false
+                ) && (
+                  <View style={styles.restrictedNote}>
+                    <Ionicons name="information-circle-outline" size={14} color="#94A3B8" />
+                    <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+                  </View>
+                )}
 
                 {/* Chart window navigation - only relevant once the period
                     spans more than one 7-day window (month/year); a plain
@@ -1037,12 +1054,20 @@ export default function StatsScreen() {
                     <View style={styles.statItem}>
                       <Ionicons name="wallet" size={20} color="#F59E0B" />
                       <Text style={styles.statLabel}>{t('home.pocket')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_pocket_money.toFixed(0) || 0} €</Text>
+                      {summary && summary.total_pocket_money === null ? (
+                        <Ionicons name="lock-closed" size={16} color="#64748B" />
+                      ) : (
+                        <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0} €</Text>
+                      )}
                     </View>
                     <View style={styles.statItem}>
                       <Ionicons name="remove-circle" size={20} color="#EF4444" />
                       <Text style={styles.statLabel}>{t('stats.expensesNoInvoice')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_non_invoice_expenses.toFixed(0) || 0} €</Text>
+                      {summary && summary.total_non_invoice_expenses === null ? (
+                        <Ionicons name="lock-closed" size={16} color="#64748B" />
+                      ) : (
+                        <Text style={styles.statValue}>{summary?.total_non_invoice_expenses?.toFixed(0) || 0} €</Text>
+                      )}
                     </View>
                   </View>
 
@@ -1143,8 +1168,8 @@ export default function StatsScreen() {
                   </View>
                 )}
 
-                {/* ROI Trend (Owner only) */}
-                {isOwner && roiTrend.length > 0 && (
+                {/* ROI Trend - owner or a delegated view_personal_investments viewer */}
+                {hasPermission('view_personal_investments') && roiTrend.length > 0 && (
                   <View style={styles.chartContainer}>
                     <View style={styles.chartHeader}>
                       <Ionicons name="pulse" size={24} color="#8B5CF6" />
@@ -2101,6 +2126,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginTop: 4,
+  },
+  restrictedNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  restrictedNoteText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    flexShrink: 1,
   },
   trendBadge: {
     flexDirection: 'row',

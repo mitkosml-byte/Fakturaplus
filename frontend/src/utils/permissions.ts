@@ -9,17 +9,36 @@ export type Permission =
   | 'view_statistics'
   | 'manage_invoices'
   | 'add_revenue'
-  | 'add_expenses';
+  | 'add_expenses'
+  | 'view_pocket_money'
+  | 'view_off_book_expenses'
+  | 'view_profit'
+  | 'view_personal_investments';
 
 export type ConfigurableRole = 'manager' | 'staff' | 'accountant';
 
 // Mirrors backend/server.py's ROLE_PERMISSIONS - the set a role starts with
 // the moment someone is invited or switched to it, before any fine-tuning
 // via the permissions checklist.
+//
+// The four view_* entries are a second, orthogonal layer: they don't gate a
+// feature/screen, they gate individual sensitive data FIELDS inside the
+// statistics a role already sees (pocket money, off-book/"в канала"
+// expenses, profit, personal investments/ROI). See financial_visibility on
+// the Summary type and how Home/stats.tsx use it.
 export const ROLE_DEFAULT_PERMISSIONS: Record<ConfigurableRole, Permission[]> = {
-  manager: ['manage_budget', 'export_data', 'view_statistics', 'manage_invoices', 'add_revenue', 'add_expenses'],
-  staff: ['manage_invoices', 'add_revenue', 'add_expenses'],
-  accountant: ['view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices'],
+  manager: [
+    'manage_budget', 'export_data', 'view_statistics', 'manage_invoices', 'add_revenue', 'add_expenses',
+    'view_pocket_money', 'view_off_book_expenses', 'view_profit',
+  ],
+  staff: [
+    'manage_invoices', 'add_revenue', 'add_expenses',
+    'view_pocket_money', 'view_off_book_expenses',
+  ],
+  accountant: [
+    'view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices',
+    'view_profit',
+  ],
 };
 
 // Mirrors backend/server.py's ROLE_CONFIGURABLE_PERMISSIONS - the checkboxes
@@ -28,6 +47,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<ConfigurableRole, Permission[]> = 
 const STAFF_LIKE_CONFIGURABLE: Permission[] = [
   'view_audit_log', 'manage_budget', 'export_data', 'view_statistics',
   'manage_invoices', 'add_revenue', 'add_expenses',
+  'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
 ];
 
 export const ROLE_CONFIGURABLE_PERMISSIONS: Record<ConfigurableRole, Permission[]> = {
@@ -38,7 +58,10 @@ export const ROLE_CONFIGURABLE_PERMISSIONS: Record<ConfigurableRole, Permission[
   // (add_revenue/add_expenses) or organizational (manage_users/manage_company)
   // permissions on offer, so the owner is never asked to think about those
   // for this role.
-  accountant: ['view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices'],
+  accountant: [
+    'view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices',
+    'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
+  ],
 };
 
 export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> = {
@@ -51,6 +74,10 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   manage_invoices: { bg: 'Фактури', en: 'Invoices' },
   add_revenue: { bg: 'Въвеждане на оборот', en: 'Enter revenue' },
   add_expenses: { bg: 'Въвеждане на разходи', en: 'Enter expenses' },
+  view_pocket_money: { bg: 'Вижда "джобче"', en: 'Sees pocket money' },
+  view_off_book_expenses: { bg: 'Вижда разходи "в канала"', en: 'Sees off-book expenses' },
+  view_profit: { bg: 'Вижда печалба', en: 'Sees profit' },
+  view_personal_investments: { bg: 'Вижда лични инвестиции/ROI', en: 'Sees personal investments/ROI' },
 };
 
 export function getPermissionLabel(permission: Permission, language: Language): string {

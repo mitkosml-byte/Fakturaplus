@@ -509,12 +509,37 @@ def sanitize_user(user_doc: dict) -> dict:
     Also backfills permissions for any account from before per-user
     permissions existed, so every response that returns a user (login,
     register, /auth/me, company switch...) always carries a real list -
-    never an empty one that would silently strip a legacy owner's access."""
+    never an empty one that would silently strip a legacy owner's access.
+
+    Two backfill rules on top of the "empty -> role default" one above:
+    - The owner's permission set is never partially configurable (see
+      ROLE_PERMISSIONS/ROLE_CONFIGURABLE_PERMISSIONS above), so an owner
+      document always gets the FULL current owner set force-unioned in -
+      this is what makes newly added permission strings (like the four
+      view_* sensitive-data ones) reach every owner account automatically,
+      including ones created long before those strings existed.
+    - A non-owner's stored permissions are trusted completely once their
+      permissions_schema_version reaches PERMISSIONS_SCHEMA_VERSION - which
+      update_user_role stamps on every explicit checklist save. Below that
+      version, this account's permissions predate the four new view_*
+      strings, so this role's default view_* set is unioned in (read-time
+      only, never persisted) until the owner's next real edit stamps the
+      current version. This can't be told apart from "an explicit save
+      that deliberately unticked all four" by inspecting the stored list
+      alone - a save that left all four off looks identical to one that
+      never mentioned them - so the version stamp, not the list's content,
+      is what carries that distinction."""
     user_doc = dict(user_doc)
     user_doc["has_password"] = bool(user_doc.get("password_hash"))
     user_doc.pop("password_hash", None)
+    role = user_doc.get("role", "staff")
     if not user_doc.get("permissions"):
-        user_doc["permissions"] = resolve_permissions(user_doc.get("role", "staff"), None)
+        user_doc["permissions"] = resolve_permissions(role, None)
+    elif role == "owner":
+        user_doc["permissions"] = sorted(set(user_doc["permissions"]) | ROLE_PERMISSIONS.get("owner", set()))
+    elif user_doc.get("permissions_schema_version", 1) < PERMISSIONS_SCHEMA_VERSION:
+        defaults = ROLE_PERMISSIONS.get(role, set()) & _SENSITIVE_FIELD_PERMISSIONS
+        user_doc["permissions"] = sorted(set(user_doc["permissions"]) | defaults)
     return user_doc
 
 async def get_company_scope(current_user: User) -> tuple:
@@ -554,31 +579,71 @@ async def get_company_scope(current_user: User) -> tuple:
 # manage_company never appear there for anyone but the owner, since those
 # concern the company's legal data and who else gets access to it, not a
 # day-to-day work permission.
+# The four view_* entries below are a second, orthogonal layer: they don't
+# gate a feature/screen, they gate individual SENSITIVE DATA FIELDS inside
+# the statistics a role already has view_statistics for (pocket money,
+# no-invoice/off-book expenses, profit, personal investments/ROI). Hiding
+# one of these from a member doesn't just blank a line in the UI - every
+# aggregate that would otherwise include it (total income, total expense,
+# profit, the daily charts...) is recomputed server-side as if that field
+# were zero, so the member sees a fully coherent analytical picture that
+# matches exactly what they're allowed to see. See get_financial_visibility.
 ROLE_PERMISSIONS = {
     "owner": {
         "manage_users", "manage_company", "view_audit_log", "manage_budget",
         "export_data", "view_statistics", "manage_invoices", "add_revenue", "add_expenses",
+        "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
     },
     "manager": {
         "manage_budget", "export_data", "view_statistics", "manage_invoices",
         "add_revenue", "add_expenses",
+        # Not view_personal_investments - a manager enters revenue/expenses
+        # themselves but has no stake in the owner's personal investments.
+        "view_pocket_money", "view_off_book_expenses", "view_profit",
     },
-    "staff": {"manage_invoices", "add_revenue", "add_expenses"},
+    "staff": {
+        "manage_invoices", "add_revenue", "add_expenses",
+        "view_pocket_money", "view_off_book_expenses",
+    },
     "accountant": {
         "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
+        # Profit only: an accountant's typical job is exactly this figure,
+        # computed correctly, without needing the pocket-money/off-book
+        # line items themselves or the owner's personal investments.
+        "view_profit",
     },
 }
 
 _STAFF_LIKE_CONFIGURABLE = {
     "view_audit_log", "manage_budget", "export_data", "view_statistics",
     "manage_invoices", "add_revenue", "add_expenses",
+    "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
 }
+
+# The four sensitive-data-field permissions, used by sanitize_user's
+# migration heuristic (see its docstring) to compute a legacy account's
+# read-time backfill defaults.
+_SENSITIVE_FIELD_PERMISSIONS = {
+    "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
+}
+
+# Bumped whenever ROLE_PERMISSIONS gains a new configurable entry that needs
+# a read-time migration for pre-existing accounts. A user doc's own
+# permissions_schema_version (stamped by update_user_role on every explicit
+# checklist save, see sanitize_user's docstring for why a stamp - not just
+# inspecting the stored list - is the only way to tell "never touched since
+# this version" apart from "deliberately configured to have none of the new
+# permissions").
+PERMISSIONS_SCHEMA_VERSION = 2
 
 ROLE_CONFIGURABLE_PERMISSIONS = {
     "manager": _STAFF_LIKE_CONFIGURABLE,
     "staff": _STAFF_LIKE_CONFIGURABLE,
     # Deliberately narrow - see the accountant note in ROLE_PERMISSIONS above.
-    "accountant": {"view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices"},
+    "accountant": {
+        "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
+        "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
+    },
 }
 
 def resolve_permissions(role: str, requested: Optional[List[str]]) -> List[str]:
@@ -597,6 +662,22 @@ def resolve_permissions(role: str, requested: Optional[List[str]]) -> List[str]:
 def require_permission(current_user: User, permission: str):
     if permission not in set(current_user.permissions or []):
         raise HTTPException(status_code=403, detail="Нямате права за тази операция")
+
+def get_financial_visibility(current_user: User) -> dict:
+    """Which of the four sensitive financial data fields this viewer may
+    see. Used both to decide what get_summary/get_chart_data return raw AND
+    to decide what to fold into their derived totals (income, expense,
+    profit, the daily charts) - a hidden field is zeroed out of every
+    aggregate that would otherwise include it, not just blanked in the UI,
+    so the viewer gets a fully coherent analytical picture for the data
+    they're actually allowed to see."""
+    granted = set(current_user.permissions or [])
+    return {
+        "pocket_money": "view_pocket_money" in granted,
+        "off_book_expenses": "view_off_book_expenses" in granted,
+        "profit": "view_profit" in granted,
+        "personal_investments": "view_personal_investments" in granted,
+    }
 
 async def ensure_membership(user_id: str, company_id: str, role: str, permissions: Optional[List[str]] = None):
     """Записва (или обновява) връзката потребител-фирма в company_memberships.
@@ -1118,9 +1199,14 @@ async def update_user_role(user_id: str, request: Request, current_user: User = 
 
     permissions = resolve_permissions(role, requested_permissions)
 
+    # Stamps this account as having gone through a real checklist save on
+    # the current permissions schema - see sanitize_user's docstring for
+    # why this stamp (not the resulting permission list) is what tells a
+    # never-migrated legacy account apart from one that deliberately
+    # unticked every sensitive-data toggle.
     result = await db.users.update_one(
         {"user_id": user_id},
-        {"$set": {"role": role, "permissions": permissions}}
+        {"$set": {"role": role, "permissions": permissions, "permissions_schema_version": PERMISSIONS_SCHEMA_VERSION}}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Потребителят не е намерен")
@@ -2772,12 +2858,14 @@ async def get_personal_expenses(
     category: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    """Връща личните разходи (само за собственик)"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярът може да вижда лични разходи")
-    
-    query = {"user_id": current_user.user_id}
-    
+    """Връща личните разходи на собственика (изисква view_personal_investments)"""
+    require_permission(current_user, "view_personal_investments")
+
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"personal_expenses": []}
+    query = {"company_id": company_id}
+
     if month:
         query["period_month"] = month
     if year:
@@ -2819,36 +2907,35 @@ async def get_roi_analysis(
 ):
     """
     ROI анализ - изчислява възвръщаемост на личната инвестиция.
-    Само за собственик.
+    Изисква view_personal_investments.
     """
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярът има достъп до ROI анализ")
-    
+    require_permission(current_user, "view_personal_investments")
+
     # Default to current month/year
     now = datetime.now(timezone.utc)
     target_month = month or now.month
     target_year = year or now.year
-    
+
     # Build period dates
     period_start = f"{target_year}-{target_month:02d}-01"
     if target_month == 12:
         period_end = f"{target_year + 1}-01-01"
     else:
         period_end = f"{target_year}-{target_month + 1:02d}-01"
-    
-    # Get personal expenses for period
+
+    # Personal expenses are scoped to the whole company (not
+    # current_user.user_id) so a delegated viewer with the permission above
+    # sees the OWNER's personal ledger, not an always-empty query for
+    # themselves - personal expenses are always entered by the owner.
+    company_id, scope = await get_company_scope(current_user)
     personal_expenses = await db.personal_expenses.find({
-        "user_id": current_user.user_id,
+        "company_id": company_id,
         "period_month": target_month,
         "period_year": target_year
-    }, {"_id": 0, "amount": 1, "expense_type": 1}).to_list(1000)
-    
+    }, {"_id": 0, "amount": 1, "expense_type": 1}).to_list(1000) if company_id else []
+
     total_personal = sum(e.get("amount", 0) for e in personal_expenses)
     total_investment = sum(e.get("amount", 0) for e in personal_expenses if e.get("expense_type") == "investment")
-
-    # Business performance is company-wide (the whole team's entries), even
-    # though the ROI/investment side above is the owner's personal ledger.
-    _, scope = await get_company_scope(current_user)
 
     # Get business revenue for period
     revenues = await db.daily_revenue.find({
@@ -2988,11 +3075,10 @@ async def get_roi_trend(
     months: int = 6,
     current_user: User = Depends(get_current_user)
 ):
-    """Връща ROI тренд за последните N месеца (само за собственик)"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярът има достъп до ROI тренд")
+    """Връща ROI тренд за последните N месеца (изисква view_personal_investments)"""
+    require_permission(current_user, "view_personal_investments")
 
-    _, scope = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
     now = datetime.now(timezone.utc)
     trend_data = []
     
@@ -3012,12 +3098,12 @@ async def get_roi_trend(
         else:
             period_end = f"{target_year}-{target_month + 1:02d}-01"
         
-        # Personal expenses
+        # Personal expenses - company-scoped, see get_roi_analysis for why.
         personal = await db.personal_expenses.find({
-            "user_id": current_user.user_id,
+            "company_id": company_id,
             "period_month": target_month,
             "period_year": target_year
-        }, {"_id": 0, "amount": 1}).to_list(1000)
+        }, {"_id": 0, "amount": 1}).to_list(1000) if company_id else []
         total_personal = sum(p.get("amount", 0) for p in personal)
         
         # Revenue
@@ -3137,17 +3223,27 @@ async def get_summary(
     total_depreciation_expense = await get_depreciation_cost_for_period(company_id, current_user.user_id, start_date, end_date)
 
     # Calculate totals
+    visibility = get_financial_visibility(current_user)
     total_invoice_amount = sum(inv.get("total_amount", 0) for inv in invoices)
     total_invoice_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
     total_fiscal_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues)
     total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues)
     total_expenses = sum(e.get("amount", 0) for e in expenses)
 
+    # Every aggregate below folds in the RAW pocket-money/off-book-expense
+    # totals only when this viewer may see them - otherwise the "effective"
+    # value used in every downstream sum is zero, so income/expense/profit/
+    # the cash-card split all come out as a fully coherent analytical
+    # picture for exactly the data this viewer's access includes, not the
+    # real numbers with one line item merely blanked in the UI.
+    effective_pocket_money = total_pocket_money if visibility["pocket_money"] else 0
+    effective_off_book_expenses = total_expenses if visibility["off_book_expenses"] else 0
+
     # Card portion of the fiscalized revenue; everything else (the rest of
     # fiscal_revenue plus all of pocket_money, which is cash by definition)
     # counts as cash.
     total_card_revenue = sum(r.get("card_revenue", 0) for r in revenues)
-    total_cash_revenue = total_fiscal_revenue - total_card_revenue + total_pocket_money
+    total_cash_revenue = total_fiscal_revenue - total_card_revenue + effective_pocket_money
 
     total_unpaid_amount = sum(inv.get("total_amount", 0) for inv in unpaid_invoices)
     total_overdue_amount = sum(inv.get("total_amount", 0) for inv in overdue_invoices)
@@ -3155,6 +3251,8 @@ async def get_summary(
     # ДДС от фискализиран оборот - изчислено по действителната ставка на
     # всеки запис (20% стандартна, 9% намалена, 0% и т.н.), а не с фиксирано
     # предположение за 20% - важно за хотели/ресторанти/хлебарници и др.
+    # Нито джобчето, нито разходите "в канала" влизат в ДДС, така че тази
+    # сметка е еднаква за всеки зрител независимо от финансовата видимост.
     fiscal_vat = sum(
         r.get("fiscal_revenue", 0) * r.get("vat_rate_percent", 20.0) / (100 + r.get("vat_rate_percent", 20.0))
         for r in revenues
@@ -3164,25 +3262,32 @@ async def get_summary(
     # Общ ДДС за плащане = ДДС от продажби - ДДС от покупки (фактури)
     vat_to_pay = fiscal_vat - total_invoice_vat
 
-    # Общ приход (фискализиран + джобче)
-    total_income = total_fiscal_revenue + total_pocket_money
+    # Общ приход (фискализиран + джобче, ако е видимо)
+    total_income = total_fiscal_revenue + effective_pocket_money
 
-    # Общ разход (фактури + разходи без фактури + разход за персонал + амортизации)
-    total_expense = total_invoice_amount + total_expenses + total_payroll_cost + total_depreciation_expense
+    # Общ разход (фактури + разходи без фактури, ако са видими + персонал + амортизации)
+    total_expense = total_invoice_amount + effective_off_book_expenses + total_payroll_cost + total_depreciation_expense
+
+    # Печалбата е независимо скриваема от съставните ѝ части - тя влиза или
+    # излиза от отговора само по view_profit, макар вече да е изчислена
+    # спрямо ефективните (не суровите) приход/разход по-горе.
+    profit = round(total_income - total_expense, 2) if visibility["profit"] else None
 
     return {
         "total_invoice_amount": round(total_invoice_amount, 2),
         "total_invoice_vat": round(total_invoice_vat, 2),
         "total_fiscal_revenue": round(total_fiscal_revenue, 2),
-        "total_pocket_money": round(total_pocket_money, 2),
+        # None (not 0) when hidden, so the frontend can tell "genuinely
+        # zero" apart from "you don't have access to this field".
+        "total_pocket_money": round(total_pocket_money, 2) if visibility["pocket_money"] else None,
         "fiscal_vat": round(fiscal_vat, 2),
         "vat_to_pay": round(vat_to_pay, 2),
-        "total_non_invoice_expenses": round(total_expenses, 2),
+        "total_non_invoice_expenses": round(total_expenses, 2) if visibility["off_book_expenses"] else None,
         "total_payroll_cost": round(total_payroll_cost, 2),
         "total_depreciation_expense": round(total_depreciation_expense, 2),
         "total_income": round(total_income, 2),
         "total_expense": round(total_expense, 2),
-        "profit": round(total_income - total_expense, 2),
+        "profit": profit,
         "invoice_count": len(invoices),
         "total_cash_revenue": round(total_cash_revenue, 2),
         "total_card_revenue": round(total_card_revenue, 2),
@@ -3190,6 +3295,7 @@ async def get_summary(
         "unpaid_invoice_count": len(unpaid_invoices),
         "total_overdue_amount": round(total_overdue_amount, 2),
         "overdue_invoice_count": len(overdue_invoices),
+        "financial_visibility": visibility,
     }
 
 @api_router.get("/statistics/chart-data")
@@ -3219,27 +3325,34 @@ async def get_chart_data(
 
     exp_query = {**scope, "date": {"$gte": start_str}}
     expenses = await db.expenses.find(exp_query, {"_id": 0, "date": 1, "amount": 1}).to_list(1000)
-    
+
+    # Same cascade as get_summary: a hidden field's contribution is zeroed
+    # out of the daily bars, not just omitted from a separate total, so the
+    # chart itself stays a coherent picture for this viewer.
+    visibility = get_financial_visibility(current_user)
+
     # Group by date
     from collections import defaultdict
-    
+
     daily_data = defaultdict(lambda: {"income": 0, "expense": 0, "vat": 0})
-    
+
     for inv in invoices:
         date_str = inv["date"].strftime("%Y-%m-%d") if isinstance(inv["date"], datetime) else inv["date"][:10]
         daily_data[date_str]["expense"] += inv.get("total_amount", 0)
         daily_data[date_str]["vat"] -= inv.get("vat_amount", 0)  # ДДС кредит
-    
+
     for rev in revenues:
         date_str = rev["date"][:10] if isinstance(rev["date"], str) else rev["date"].strftime("%Y-%m-%d")
-        daily_data[date_str]["income"] += rev.get("fiscal_revenue", 0) + rev.get("pocket_money", 0)
+        pocket_money = rev.get("pocket_money", 0) if visibility["pocket_money"] else 0
+        daily_data[date_str]["income"] += rev.get("fiscal_revenue", 0) + pocket_money
         rate = rev.get("vat_rate_percent", 20.0)
         if rate > 0:
             daily_data[date_str]["vat"] += rev.get("fiscal_revenue", 0) * rate / (100 + rate)  # ДДС от продажби
-    
-    for exp in expenses:
-        date_str = exp["date"][:10] if isinstance(exp["date"], str) else exp["date"].strftime("%Y-%m-%d")
-        daily_data[date_str]["expense"] += exp.get("amount", 0)
+
+    if visibility["off_book_expenses"]:
+        for exp in expenses:
+            date_str = exp["date"][:10] if isinstance(exp["date"], str) else exp["date"].strftime("%Y-%m-%d")
+            daily_data[date_str]["expense"] += exp.get("amount", 0)
     
     # Convert to list sorted by date
     chart_data = []
