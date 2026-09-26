@@ -774,6 +774,46 @@ export const translations: Translations = {
     bg: 'Просрочена от',
     en: 'Overdue since',
   },
+  'invoices.partiallyPaid': {
+    bg: 'Частично платена',
+    en: 'Partially paid',
+  },
+  'invoices.paidOfTotal': {
+    bg: 'Платено {paid} от {total} €',
+    en: 'Paid {paid} of {total} €',
+  },
+  'invoices.remainingAmount': {
+    bg: 'Остатък',
+    en: 'Remaining',
+  },
+  'invoices.recordPayment': {
+    bg: 'Регистрирай плащане',
+    en: 'Record payment',
+  },
+  'invoices.editPayment': {
+    bg: 'Промени плащането',
+    en: 'Edit payment',
+  },
+  'invoices.markFullyPaid': {
+    bg: 'Маркирай като напълно платена',
+    en: 'Mark as fully paid',
+  },
+  'invoices.paidAmountLabel': {
+    bg: 'Платена сума до момента (€)',
+    en: 'Amount paid so far (€)',
+  },
+  'invoices.paidAmountEditNotice': {
+    bg: 'Полето показва вече платената сума до момента. Промяна го заменя изцяло - не се добавя към старата.',
+    en: 'This field shows the total paid so far. Changing it replaces that value - it does not add to it.',
+  },
+  'invoices.paidAmountExceedsTotal': {
+    bg: 'Платената сума не може да надвишава общата сума на фактурата',
+    en: 'The paid amount cannot exceed the invoice total',
+  },
+  'invoices.fullyPaid': {
+    bg: 'Напълно платена',
+    en: 'Fully paid',
+  },
   'invoices.downloadError': {
     bg: 'Не можах да изтегля файла',
     en: 'Could not download file',

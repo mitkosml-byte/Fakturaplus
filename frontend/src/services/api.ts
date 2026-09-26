@@ -161,7 +161,7 @@ class ApiService {
     search?: string;
     start_date?: string;
     end_date?: string;
-    payment_status?: 'paid' | 'unpaid' | 'overdue';
+    payment_status?: 'paid' | 'unpaid' | 'partial' | 'overdue';
   }): Promise<Invoice[]> {
     const queryParams = new URLSearchParams();
     if (params?.supplier) queryParams.set('supplier', params.supplier);
@@ -174,7 +174,7 @@ class ApiService {
     return this.fetch(`/invoices${query ? `?${query}` : ''}`);
   }
 
-  async createInvoice(invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at' | 'is_paid' | 'paid_at'>): Promise<Invoice> {
+  async createInvoice(invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at' | 'is_paid' | 'paid_amount' | 'paid_at'>): Promise<Invoice> {
     return this.fetch('/invoices', {
       method: 'POST',
       body: JSON.stringify(invoice),

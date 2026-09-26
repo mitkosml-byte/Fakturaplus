@@ -11,6 +11,8 @@ import {
   Modal,
   ImageBackground,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -83,12 +85,15 @@ export default function InvoicesScreen() {
   const [startPickerVisible, setStartPickerVisible] = useState(false);
   const [endPickerVisible, setEndPickerVisible] = useState(false);
   const [showOnlyEikIssues, setShowOnlyEikIssues] = useState(false);
-  const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'overdue'>('all');
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'partial' | 'overdue'>('all');
 
   // Lets the Home dashboard's unpaid-invoices reminder deep-link straight
   // into this filter instead of always landing on "all".
   useEffect(() => {
-    if (params.paymentFilter === 'paid' || params.paymentFilter === 'unpaid' || params.paymentFilter === 'overdue') {
+    if (
+      params.paymentFilter === 'paid' || params.paymentFilter === 'unpaid' ||
+      params.paymentFilter === 'partial' || params.paymentFilter === 'overdue'
+    ) {
       setPaymentFilter(params.paymentFilter);
     }
   }, [params.paymentFilter]);
@@ -161,13 +166,47 @@ export default function InvoicesScreen() {
   }, [selectedInvoice]);
 
   const [updatingPayment, setUpdatingPayment] = useState(false);
+  const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [paymentAmountInput, setPaymentAmountInput] = useState('');
+
+  const applyInvoiceUpdate = (updated: Invoice) => {
+    setSelectedInvoice(updated);
+    setInvoices((prev) => prev.map((inv) => (inv.id === updated.id ? updated : inv)));
+  };
 
   const handleTogglePaid = async (invoice: Invoice) => {
     setUpdatingPayment(true);
     try {
       const updated = await api.updateInvoice(invoice.id, { is_paid: !invoice.is_paid });
-      setSelectedInvoice(updated);
-      setInvoices((prev) => prev.map((inv) => (inv.id === updated.id ? updated : inv)));
+      applyInvoiceUpdate(updated);
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setUpdatingPayment(false);
+    }
+  };
+
+  const openPaymentModal = (invoice: Invoice) => {
+    setPaymentAmountInput(invoice.paid_amount > 0 ? invoice.paid_amount.toFixed(2) : '');
+    setPaymentModalVisible(true);
+  };
+
+  const handleSavePaymentAmount = async () => {
+    if (!selectedInvoice) return;
+    const amount = parseFloat(paymentAmountInput);
+    if (isNaN(amount) || amount < 0) {
+      Alert.alert(t('common.error'), t('budget.invalidAmount'));
+      return;
+    }
+    if (amount > selectedInvoice.total_amount + 0.01) {
+      Alert.alert(t('common.error'), t('invoices.paidAmountExceedsTotal'));
+      return;
+    }
+    setUpdatingPayment(true);
+    try {
+      const updated = await api.updateInvoice(selectedInvoice.id, { paid_amount: amount });
+      applyInvoiceUpdate(updated);
+      setPaymentModalVisible(false);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -239,11 +278,14 @@ export default function InvoicesScreen() {
 
       {item.payment_method === 'bank_transfer' && !item.is_paid && (() => {
         const overdue = !!item.payment_due_date && new Date(item.payment_due_date).getTime() < Date.now();
+        const isPartial = item.paid_amount > 0;
+        const statusLabel = overdue ? t('invoices.overdue') : (isPartial ? t('invoices.partiallyPaid') : t('invoices.unpaid'));
         return (
           <View style={[styles.eikWarningBadge, overdue && styles.overdueBadge]}>
-            <Ionicons name={overdue ? 'alert-circle' : 'time-outline'} size={13} color={overdue ? '#EF4444' : '#F59E0B'} />
+            <Ionicons name={overdue ? 'alert-circle' : (isPartial ? 'pie-chart-outline' : 'time-outline')} size={13} color={overdue ? '#EF4444' : '#F59E0B'} />
             <Text style={[styles.eikWarningBadgeText, overdue && { color: '#EF4444' }]}>
-              {overdue ? t('invoices.overdue') : t('invoices.unpaid')}
+              {statusLabel}
+              {isPartial ? ` (${(item.total_amount - item.paid_amount).toFixed(2)} €)` : ''}
               {item.payment_due_date ? ` · ${formatDate(item.payment_due_date)}` : ''}
             </Text>
           </View>
@@ -407,6 +449,7 @@ export default function InvoicesScreen() {
             {([
               { key: 'all', label: t('invoices.paymentFilterAll') },
               { key: 'unpaid', label: t('invoices.paymentFilterUnpaid') },
+              { key: 'partial', label: t('invoices.partiallyPaid') },
               { key: 'overdue', label: t('invoices.paymentFilterOverdue') },
               { key: 'paid', label: t('invoices.paymentFilterPaid') },
             ] as const).map((opt) => (
@@ -598,6 +641,26 @@ export default function InvoicesScreen() {
                               {overdue ? t('invoices.overdueSince') : t('invoices.paymentDueDate')}: {formatDate(selectedInvoice.payment_due_date)}
                             </Text>
                           )}
+
+                          {!selectedInvoice.is_paid && selectedInvoice.paid_amount > 0 && (
+                            <View style={styles.paymentProgressBox}>
+                              <Text style={styles.paymentProgressText}>
+                                {t('invoices.paidOfTotal')
+                                  .replace('{paid}', selectedInvoice.paid_amount.toFixed(2))
+                                  .replace('{total}', selectedInvoice.total_amount.toFixed(2))}
+                              </Text>
+                              <Text style={styles.paymentRemainingText}>
+                                {t('invoices.remainingAmount')}: {(selectedInvoice.total_amount - selectedInvoice.paid_amount).toFixed(2)} €
+                              </Text>
+                              <View style={styles.paymentProgressBar}>
+                                <View style={[
+                                  styles.paymentProgressBarFill,
+                                  { width: `${Math.min(100, (selectedInvoice.paid_amount / selectedInvoice.total_amount) * 100)}%` }
+                                ]} />
+                              </View>
+                            </View>
+                          )}
+
                           <TouchableOpacity
                             style={styles.paidCheckboxRow}
                             onPress={() => handleTogglePaid(selectedInvoice)}
@@ -609,10 +672,23 @@ export default function InvoicesScreen() {
                             <Text style={styles.paidCheckboxLabel}>
                               {selectedInvoice.is_paid && selectedInvoice.paid_at
                                 ? `${t('invoices.paidOn')} ${formatDate(selectedInvoice.paid_at)}`
-                                : t('invoices.markAsPaid')}
+                                : t('invoices.markFullyPaid')}
                             </Text>
                             {updatingPayment && <ActivityIndicator size="small" color="#8B5CF6" />}
                           </TouchableOpacity>
+
+                          {!selectedInvoice.is_paid && (
+                            <TouchableOpacity
+                              style={styles.recordPaymentButton}
+                              onPress={() => openPaymentModal(selectedInvoice)}
+                              disabled={updatingPayment}
+                            >
+                              <Ionicons name="cash-outline" size={16} color="#8B5CF6" />
+                              <Text style={styles.recordPaymentButtonText}>
+                                {selectedInvoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
                         </>
                       )}
                     </View>
@@ -704,6 +780,53 @@ export default function InvoicesScreen() {
             )}
           </View>
         </View>
+      </Modal>
+
+      {/* Record/edit payment amount - edit-in-place, same convention as the
+          daily-revenue form: the field shows what's already paid, and
+          saving REPLACES that value rather than adding to it. */}
+      <Modal visible={paymentModalVisible} animationType="fade" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedInvoice && selectedInvoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
+              </Text>
+              <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
+                <Ionicons name="close" size={28} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedInvoice && (
+              <>
+                <View style={styles.editNoticeBanner}>
+                  <Ionicons name="information-circle" size={18} color="#8B5CF6" />
+                  <Text style={styles.editNoticeText}>{t('invoices.paidAmountEditNotice')}</Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('invoices.paidAmountLabel')}</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={paymentAmountInput}
+                    onChangeText={setPaymentAmountInput}
+                    keyboardType="decimal-pad"
+                    placeholder="0.00"
+                    placeholderTextColor="#64748B"
+                    autoFocus
+                  />
+                  <Text style={styles.inputHint}>
+                    {t('invoices.totalAmount')}: {selectedInvoice.total_amount.toFixed(2)} €
+                  </Text>
+                </View>
+
+                <TouchableOpacity style={styles.submitButton} onPress={handleSavePaymentAmount} disabled={updatingPayment}>
+                  {updatingPayment ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
         </SafeAreaView>
       </View>
@@ -1011,6 +1134,55 @@ const styles = StyleSheet.create({
     color: 'white',
     marginBottom: 20,
   },
+  editNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 16,
+  },
+  editNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#C4B5FD',
+    lineHeight: 16,
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 13,
+    color: '#94A3B8',
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: 'white',
+  },
+  inputHint: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 6,
+  },
+  submitButton: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  submitButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   exportOption: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1153,6 +1325,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'white',
     flex: 1,
+  },
+  paymentProgressBox: {
+    marginBottom: 10,
+  },
+  paymentProgressText: {
+    fontSize: 13,
+    color: 'white',
+    fontWeight: '600',
+  },
+  paymentRemainingText: {
+    fontSize: 12,
+    color: '#F59E0B',
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  paymentProgressBar: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#334155',
+    overflow: 'hidden',
+  },
+  paymentProgressBarFill: {
+    height: '100%',
+    backgroundColor: '#8B5CF6',
+    borderRadius: 3,
+  },
+  recordPaymentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    alignSelf: 'flex-start',
+  },
+  recordPaymentButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8B5CF6',
   },
   itemsSection: {
     marginBottom: 16,

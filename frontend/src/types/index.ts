@@ -75,6 +75,10 @@ export interface Invoice {
   items?: InvoiceItemCreate[];
   payment_method?: PaymentMethod;
   is_paid: boolean;
+  // Cumulative amount paid so far - "fully paid" means paid_amount >=
+  // total_amount (is_paid is derived from this server-side). Lets a large
+  // invoice be paid off in installments instead of all at once.
+  paid_amount: number;
   payment_due_date?: string;
   paid_at?: string;
   created_at: string;

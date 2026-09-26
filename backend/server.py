@@ -267,6 +267,10 @@ class Invoice(BaseModel):
     # неплатени по подразбиране.
     payment_method: Optional[str] = None  # cash | bank_transfer
     is_paid: bool = False
+    # Кумулативна платена сума към момента - "напълно платена" означава
+    # paid_amount >= total_amount (is_paid се извежда от това, не обратното).
+    # Позволява частично плащане на едра фактура на няколко вноски.
+    paid_amount: float = 0.0
     payment_due_date: Optional[datetime] = None  # само при bank_transfer
     paid_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -353,6 +357,7 @@ class InvoiceUpdate(BaseModel):
     payment_method: Optional[str] = None
     payment_due_date: Optional[str] = None
     is_paid: Optional[bool] = None
+    paid_amount: Optional[float] = None
 
 class DailyRevenue(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -2389,10 +2394,12 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     # default (common B2B trade credit term), so the reminder has something
     # to compare against even if nobody set one explicitly.
     is_paid = False
+    paid_amount = 0.0
     paid_at = None
     payment_due_date = None
     if invoice_dict.get("payment_method") == "cash":
         is_paid = True
+        paid_amount = invoice_dict.get("total_amount", 0)
         paid_at = invoice_date
     elif invoice_dict.get("payment_method") == "bank_transfer":
         if invoice_dict.get("payment_due_date"):
@@ -2491,6 +2498,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         date=invoice_date,
         items=items_list,
         is_paid=is_paid,
+        paid_amount=paid_amount,
         paid_at=paid_at,
         payment_due_date=payment_due_date,
         **{k: v for k, v in invoice_dict.items() if k not in ["date", "items", "payment_due_date"]}
@@ -2539,7 +2547,7 @@ async def get_invoices(
     search: Optional[str] = None,  # matches supplier OR invoice_number, unlike the two above which AND together
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    payment_status: Optional[str] = None,  # paid | unpaid | overdue
+    payment_status: Optional[str] = None,  # paid | unpaid | partial | overdue
     current_user: User = Depends(get_current_user)
 ):
     _, query = await get_company_scope(current_user)
@@ -2563,6 +2571,11 @@ async def get_invoices(
     elif payment_status == "unpaid":
         query["is_paid"] = False
         query["payment_method"] = "bank_transfer"
+    elif payment_status == "partial":
+        # A subset of "unpaid" - something has been paid, but not all of it.
+        query["is_paid"] = False
+        query["payment_method"] = "bank_transfer"
+        query["paid_amount"] = {"$gt": 0}
     elif payment_status == "overdue":
         query["is_paid"] = False
         query["payment_method"] = "bank_transfer"
@@ -2608,16 +2621,47 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
 
     # Same auto-paid/due-date rules as on create, so switching an invoice's
     # payment method later behaves the same as picking it up front.
-    cash_auto_paid = update_data.get("payment_method") == "cash" and "is_paid" not in update_data
+    cash_auto_paid = (
+        update_data.get("payment_method") == "cash"
+        and "is_paid" not in update_data
+        and "paid_amount" not in update_data
+    )
     if cash_auto_paid:
         update_data["is_paid"] = True
+        update_data["paid_amount"] = update_data.get("total_amount", existing.get("total_amount", 0))
         update_data["paid_at"] = update_data.get("date", existing["date"])  # paid on the spot, at invoice date
     if update_data.get("payment_method") == "bank_transfer" and "payment_due_date" not in update_data and not existing.get("payment_due_date"):
         update_data["payment_due_date"] = update_data.get("date", existing["date"]) + timedelta(days=14)
-    # Ticking "is_paid" directly (the passive tick-box path) stamps/clears
-    # paid_at to "now" - when the user actually confirmed the payment.
-    if "is_paid" in update_data and not cash_auto_paid:
+
+    if "paid_amount" in update_data and not cash_auto_paid:
+        # paid_amount is the source of truth for payment progress once
+        # given - it drives is_paid/paid_at, not the other way round, so a
+        # partial payment (0 < paid_amount < total) always shows is_paid as
+        # False with the exact remaining balance recoverable as
+        # total_amount - paid_amount (see /statistics/summary's use of it).
+        effective_total = update_data.get("total_amount", existing.get("total_amount", 0))
+        paid_amount = update_data["paid_amount"]
+        if paid_amount < 0:
+            raise HTTPException(status_code=400, detail="Платената сума не може да е отрицателна")
+        if paid_amount > effective_total + 0.01:
+            raise HTTPException(status_code=400, detail="Платената сума не може да надвишава общата сума на фактурата")
+        was_fully_paid = bool(existing.get("is_paid"))
+        now_fully_paid = paid_amount >= effective_total - 0.01
+        update_data["is_paid"] = now_fully_paid
+        if now_fully_paid and not was_fully_paid:
+            update_data["paid_at"] = datetime.now(timezone.utc)
+        elif not now_fully_paid:
+            update_data["paid_at"] = None
+    elif "is_paid" in update_data and not cash_auto_paid:
+        # Ticking "is_paid" directly (the quick mark-fully-paid/unpaid
+        # toggle, without keying in an exact amount) keeps paid_amount
+        # consistent with it, and stamps/clears paid_at to "now" - when the
+        # user actually confirmed the payment.
         update_data["paid_at"] = datetime.now(timezone.utc) if update_data["is_paid"] else None
+        update_data["paid_amount"] = (
+            update_data.get("total_amount", existing.get("total_amount", 0))
+            if update_data["is_paid"] else 0.0
+        )
 
     # Newly switched to reverse charge and no протокол yet - assign one,
     # same as on create.
@@ -3228,7 +3272,7 @@ async def get_summary(
     # two months ago that's still unpaid is still owed today, so it would be
     # misleading to only surface it while browsing that particular month.
     unpaid_query = {**scope, "payment_method": "bank_transfer", "is_paid": False}
-    unpaid_invoices = await db.invoices.find(unpaid_query, {"_id": 0, "total_amount": 1, "payment_due_date": 1}).to_list(1000)
+    unpaid_invoices = await db.invoices.find(unpaid_query, {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1}).to_list(1000)
     now_ts = datetime.now(timezone.utc)
     # Mongo drivers hand back naive UTC datetimes by default (no tz_aware
     # flag set on the client), which can't be compared directly to an
@@ -3285,8 +3329,11 @@ async def get_summary(
     total_card_revenue = sum(r.get("card_revenue", 0) for r in revenues)
     total_cash_revenue = total_fiscal_revenue - total_card_revenue + effective_pocket_money
 
-    total_unpaid_amount = sum(inv.get("total_amount", 0) for inv in unpaid_invoices)
-    total_overdue_amount = sum(inv.get("total_amount", 0) for inv in overdue_invoices)
+    # The outstanding balance, not the invoice's full amount - a partially
+    # paid invoice (paid_amount > 0 but < total_amount, still is_paid=False)
+    # should only count what's actually still owed.
+    total_unpaid_amount = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in unpaid_invoices)
+    total_overdue_amount = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in overdue_invoices)
 
     # ДДС от фискализиран оборот - изчислено по действителната ставка на
     # всеки запис (20% стандартна, 9% намалена, 0% и т.н.), а не с фиксирано
