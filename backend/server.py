@@ -3190,11 +3190,18 @@ async def get_summary(
     if not start_date and not end_date and current_month_only:
         now = datetime.now(timezone.utc)
         start_date = now.replace(day=1).strftime("%Y-%m-%d")
-        # End of month
+        # Last day of the current month - NOT the first day of the next one.
+        # Every query built from date_query/end_date below treats end_date as
+        # an INCLUSIVE boundary ($lte, or the payroll/depreciation helper's
+        # "not later than end_date"), so passing the 1st of next month here
+        # would let a record dated exactly on the 1st (revenue, expense,
+        # invoice, or a payroll/depreciation entry someone entered early)
+        # leak into THIS month's summary as well as its own month's.
         if now.month == 12:
-            end_date = now.replace(year=now.year + 1, month=1, day=1).strftime("%Y-%m-%d")
+            last_day = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
         else:
-            end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
+            last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
+        end_date = last_day.strftime("%Y-%m-%d")
     
     date_query = {}
     
@@ -3410,15 +3417,20 @@ async def get_supplier_statistics(
     from collections import defaultdict
     from datetime import timedelta
     
-    # Default to current month if no dates provided
+    # Default to current month if no dates provided. end_date must land on
+    # the LAST day of the month, not the 1st of the next one - it's used
+    # below as an inclusive $lte boundary (through 23:59:59 of that date),
+    # so the 1st-of-next-month form would pull that whole day's invoices
+    # into this month's supplier stats too. See get_summary's identical fix.
     now = datetime.now(timezone.utc)
     if not start_date and not end_date:
         start_date = now.replace(day=1).strftime("%Y-%m-%d")
         if now.month == 12:
-            end_date = now.replace(year=now.year + 1, month=1, day=1).strftime("%Y-%m-%d")
+            last_day = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
         else:
-            end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
-    
+            last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
+        end_date = last_day.strftime("%Y-%m-%d")
+
     # Build query for current period
     _, query = await get_company_scope(current_user)
     if start_date or end_date:
@@ -3892,12 +3904,18 @@ async def export_vat_ledger_excel(
     NRA's own file layout."""
     require_permission(current_user, "export_data")
     now = datetime.now(timezone.utc)
+    # end_date must be the LAST day of the month, not the 1st of the next
+    # one - both queries below treat it as an inclusive boundary (through
+    # 23:59:59 / plain $lte), so a tax ledger meant for "this month" would
+    # otherwise also pull in the 1st of next month's purchases and sales,
+    # double-counting that day across two consecutive VAT filings.
     if not start_date and not end_date:
         start_date = now.replace(day=1).strftime("%Y-%m-%d")
         if now.month == 12:
-            end_date = now.replace(year=now.year + 1, month=1, day=1).strftime("%Y-%m-%d")
+            last_day = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
         else:
-            end_date = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
+            last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
+        end_date = last_day.strftime("%Y-%m-%d")
 
     company_id, scope = await get_company_scope(current_user)
 
@@ -5189,27 +5207,47 @@ async def get_budget_status(current_user: User = Depends(get_current_user)):
     
     current_month = datetime.now().strftime("%Y-%m")
     budget = await db.budgets.find_one({"company_id": company_id, "month": current_month}, {"_id": 0})
-    
+
     if not budget:
         return {"has_budget": False}
-    
-    # Calculate current expenses
-    month_start = datetime.fromisoformat(f"{current_month}-01T00:00:00+00:00")
+
+    # Calculate current expenses. Bounded at both ends - an unbounded $gte
+    # alone would also pull in any future-dated invoice/expense (a
+    # pre-scheduled invoice, a typo'd date) into THIS month's budget check.
+    now = datetime.now(timezone.utc)
+    month_start_str = f"{current_month}-01"
+    month_start = datetime.fromisoformat(f"{month_start_str}T00:00:00+00:00")
+    if now.month == 12:
+        month_end_date = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
+    else:
+        month_end_date = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
+    month_end_str = month_end_date.strftime("%Y-%m-%d")
+    month_end = datetime.fromisoformat(f"{month_end_str}T00:00:00+00:00")
     _, scope = await get_company_scope(current_user)
 
     invoices = await db.invoices.find(
-        {**scope, "date": {"$gte": month_start}},
+        {**scope, "date": {"$gte": month_start, "$lte": month_end}},
         {"total_amount": 1}
     ).to_list(10000)
 
     expenses = await db.expenses.find(
-        {**scope, "date": {"$gte": current_month + "-01"}},
+        {**scope, "date": {"$gte": month_start_str, "$lte": month_end_str}},
         {"amount": 1}
     ).to_list(10000)
-    
+
+    # Payroll and depreciation are real, recurring costs of running the
+    # business - a budget cap that only tracked invoices and off-book
+    # expenses would silently ignore the two costs guaranteed to happen
+    # every month, and understate how close the company actually is to its
+    # limit. Same helpers and period bounds as /statistics/summary.
+    total_payroll_cost = await get_payroll_cost_for_period(company_id, current_user.user_id, month_start_str, month_end_str)
+    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, current_user.user_id, month_start_str, month_end_str)
+
     total_spent = sum(inv.get("total_amount", 0) for inv in invoices)
     total_spent += sum(exp.get("amount", 0) for exp in expenses)
-    
+    total_spent += total_payroll_cost
+    total_spent += total_depreciation_expense
+
     limit = budget.get("expense_limit", 0)
     threshold = budget.get("alert_threshold", 80)
     
@@ -5222,6 +5260,10 @@ async def get_budget_status(current_user: User = Depends(get_current_user)):
         "month": current_month,
         "expense_limit": limit,
         "total_spent": round(total_spent, 2),
+        "total_invoice_amount": round(sum(inv.get("total_amount", 0) for inv in invoices), 2),
+        "total_non_invoice_expenses": round(sum(exp.get("amount", 0) for exp in expenses), 2),
+        "total_payroll_cost": round(total_payroll_cost, 2),
+        "total_depreciation_expense": round(total_depreciation_expense, 2),
         "remaining": round(max(0, limit - total_spent), 2),
         "percent_used": round(percent_used, 1),
         "alert_threshold": threshold,
