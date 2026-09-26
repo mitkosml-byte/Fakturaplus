@@ -585,7 +585,7 @@ export default function HomeScreen() {
       {isOwner && (
         <Modal visible={personalExpenseModalVisible} animationType="slide" transparent>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
+            <View style={[styles.modalContent, { maxHeight: '90%' }]}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{t('personal.addExpense')}</Text>
                 <TouchableOpacity onPress={() => setPersonalExpenseModalVisible(false)}>
@@ -593,6 +593,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
 
+              <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('personal.amount')}</Text>
                 <TextInput
@@ -675,6 +676,7 @@ export default function HomeScreen() {
               <TouchableOpacity style={styles.submitButton} onPress={handleCreatePersonalExpense} disabled={isSubmittingForm}>
                 {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
               </TouchableOpacity>
+              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -683,7 +685,7 @@ export default function HomeScreen() {
       {/* Revenue Modal */}
       <Modal visible={revenueModalVisible} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('home.dailyRevenue')}</Text>
               <TouchableOpacity onPress={() => setRevenueModalVisible(false)}>
@@ -691,6 +693,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
+            <ScrollView showsVerticalScrollIndicator={false}>
             {/* Date Picker */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>{t('home.date')}</Text>
@@ -801,6 +804,7 @@ export default function HomeScreen() {
             <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue} disabled={isSubmittingForm}>
               {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('home.save')}</Text>}
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

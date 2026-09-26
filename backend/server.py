@@ -2973,7 +2973,10 @@ async def get_roi_analysis(
     is_profitable = total_profit > 0
     investment_covered = total_profit >= total_personal
     
-    # Generate AI insights
+    # Generate AI insights. Each daily_revenue record is one day with
+    # turnover actually logged, so its count is a reasonable proxy for how
+    # much real history backs this period's numbers (a calendar month can
+    # be mostly empty early on, or sparsely filled for a seasonal business).
     ai_insights = await generate_roi_insights(
         total_personal=total_personal,
         total_investment=total_investment,
@@ -2981,7 +2984,8 @@ async def get_roi_analysis(
         total_profit=total_profit,
         roi_percent=roi_percent,
         is_profitable=is_profitable,
-        investment_covered=investment_covered
+        investment_covered=investment_covered,
+        days_with_data=len(revenues),
     )
     
     return {
@@ -3006,24 +3010,41 @@ async def generate_roi_insights(
     total_profit: float,
     roi_percent: float,
     is_profitable: bool,
-    investment_covered: bool
+    investment_covered: bool,
+    days_with_data: int = 0,
 ) -> List[str]:
     """Генерира AI управленски предложения за ROI"""
     insights = []
-    
+
     # Basic insights без AI (винаги налични)
     if total_personal == 0:
         insights.append("📊 Няма въведени лични разходи за периода")
         return insights
-    
+
+    # ROI/profit swing wildly on a handful of days (one big invoice, one
+    # slow week) - flag that explicitly so the owner doesn't read a strong
+    # scaling/reinvestment suggestion into what's still a noisy sample.
+    # MIN_RELIABLE_DAYS is a judgment call, not a measured threshold - about
+    # a month and a half is the point where day-to-day noise usually stops
+    # dominating the trend for a small shop.
+    MIN_RELIABLE_DAYS = 45
+    data_is_sparse = days_with_data < MIN_RELIABLE_DAYS
+    if data_is_sparse:
+        day_word = "ден" if days_with_data == 1 else "дни"
+        insights.append(
+            f"📅 Анализът обхваща само {days_with_data} {day_word} с въведен оборот - "
+            f"изчакайте поне {MIN_RELIABLE_DAYS}-60 дни натрупани данни, преди да вземате "
+            "решения за мащабиране на база тези цифри"
+        )
+
     if investment_covered:
         insights.append("✅ Бизнесът покрива личната инвестиция за периода")
     elif is_profitable:
         diff = total_personal - total_profit
-        insights.append(f"⚠️ Печалбата не покрива напълно личната инвестиция (остават {diff:.2f} лв)")
+        insights.append(f"⚠️ Печалбата не покрива напълно личната инвестиция (остават {diff:.2f} €)")
     else:
         insights.append("❌ Работиш повече за бизнеса, отколкото бизнесът за теб")
-    
+
     if roi_percent > 100:
         insights.append(f"🚀 Отличен ROI: {roi_percent:.1f}% - инвестицията се изплаща многократно")
     elif roi_percent > 50:
@@ -3046,19 +3067,31 @@ async def generate_roi_insights(
         if not AI_FEATURES_ENABLED:
             raise RuntimeError("AI features disabled")
 
-        prompt = f"""Анализирай тези финансови показатели за малък бизнес:
-- Лична инвестиция на собственика: {total_personal:.2f} лв
-- Общ оборот: {total_revenue:.2f} лв
-- Печалба: {total_profit:.2f} лв
+        if data_is_sparse:
+            guidance = (
+                f"Периодът има само {days_with_data} дни с въведени данни - твърде малко за "
+                "надежден дългосрочен извод. НЕ предлагай конкретна сума за реинвестиране или "
+                "мащабиране на база тези цифри. Вместо това посъветвай собственика да изчака "
+                f"поне {MIN_RELIABLE_DAYS}-60 дни натрупани данни, евентуално с кратко наблюдение "
+                "върху засегашната тенденция."
+            )
+        else:
+            guidance = "Дай конкретна препоръка какво може да направи собственикът за подобрение."
+
+        prompt = f"""Анализирай тези финансови показатели за малък бизнес (период с {days_with_data} дни данни):
+- Лична инвестиция на собственика: {total_personal:.2f} €
+- Общ оборот: {total_revenue:.2f} €
+- Печалба: {total_profit:.2f} €
 - ROI: {roi_percent:.1f}%
 
-Дай ЕДНА кратка препоръка (до 15 думи) какво може да направи собственикът за подобрение.
-Отговори директно с препоръката, без въвеждащ текст."""
+{guidance}
+Дай ЕДНА кратка препоръка (до 15 думи). Отговори директно с препоръката, без въвеждащ текст,
+и посочвай сумите винаги в евро (€), никога в лева."""
 
         response = await anthropic_client.messages.create(
             model="claude-opus-5",
             max_tokens=200,
-            system="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български.",
+            system="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български, като посочваш всички суми в евро (€), никога в лева.",
             messages=[{"role": "user", "content": prompt}],
         )
         ai_recommendation = next((b.text for b in response.content if b.type == "text"), "").strip()
