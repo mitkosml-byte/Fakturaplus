@@ -304,7 +304,25 @@ export default function ScanScreen() {
                 <Text style={styles.scanButtonHint}>{language === 'bg' ? 'От галерията' : 'From gallery'}</Text>
               </TouchableOpacity>
             </View>
-          ) : (
+          ) : null}
+
+          {!capturedImage && (
+            <View style={styles.tipsBox}>
+              <View style={styles.tipsHeader}>
+                <Ionicons name="sparkles-outline" size={18} color="#8B5CF6" />
+                <Text style={styles.tipsTitle}>{t('scan.tipsTitle')}</Text>
+              </View>
+              {[t('scan.tipSupplier'), t('scan.tipAmounts'), t('scan.tipItems'), t('scan.tipPayment')].map((tip, i) => (
+                <View key={i} style={styles.tipRow}>
+                  <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginTop: 2 }} />
+                  <Text style={styles.tipText}>{tip}</Text>
+                </View>
+              ))}
+              <Text style={styles.tipsFooter}>{t('scan.tipsFooter')}</Text>
+            </View>
+          )}
+
+          {capturedImage && (
             <View style={styles.resultContainer}>
               {/* Preview Image */}
               <View style={styles.imagePreview}>
@@ -704,6 +722,41 @@ const styles = StyleSheet.create({
   scanButtonHint: {
     fontSize: 12,
     color: '#64748B',
+  },
+  tipsBox: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 20,
+  },
+  tipsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  tipsTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'white',
+  },
+  tipRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 8,
+  },
+  tipText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#94A3B8',
+    lineHeight: 19,
+  },
+  tipsFooter: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   resultContainer: {
     flex: 1,

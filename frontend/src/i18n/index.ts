@@ -222,6 +222,30 @@ export const translations: Translations = {
     bg: 'От галерия',
     en: 'From Gallery',
   },
+  'scan.tipsTitle': {
+    bg: 'Какво разпознава сканирането',
+    en: 'What the scan recognizes',
+  },
+  'scan.tipSupplier': {
+    bg: 'Доставчик, ЕИК и номер на фактурата',
+    en: 'Supplier, VAT ID and invoice number',
+  },
+  'scan.tipAmounts': {
+    bg: 'Обща сума, ДДС и данъчно третиране (стандартна ставка, намалена, обратно начисляване...)',
+    en: 'Total amount, VAT and tax treatment (standard rate, reduced, reverse charge...)',
+  },
+  'scan.tipItems': {
+    bg: 'Отделните артикули - и те се сверяват автоматично с предходна цена от същия доставчик',
+    en: 'Individual line items - automatically checked against the last price from the same supplier',
+  },
+  'scan.tipPayment': {
+    bg: 'Начин на плащане и срок, ако е отпечатан на фактурата',
+    en: 'Payment method and due date, if printed on the invoice',
+  },
+  'scan.tipsFooter': {
+    bg: 'Само за доставчически фактури - работи най-добре със снимка на цяла, ясно осветена фактура.',
+    en: 'For supplier invoices only - works best with a full, well-lit photo of the invoice.',
+  },
   'scan.processing': {
     bg: 'Обработка...',
     en: 'Processing...',
