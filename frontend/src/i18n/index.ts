@@ -239,8 +239,8 @@ export const translations: Translations = {
     en: 'Invoice from a supplier',
   },
   'scan.modeSales': {
-    bg: 'Издадена фактура (продажба)',
-    en: 'Issued invoice (sale)',
+    bg: 'Издадена фактура',
+    en: 'Issued invoice',
   },
   'scan.salesFormTitle': {
     bg: 'Обобщение на продажбата',

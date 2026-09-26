@@ -2521,12 +2521,12 @@ const styles = StyleSheet.create({
   
   // Chart Controls
   chartControlsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 10,
     marginBottom: 16,
   },
   chartTypeSelector: {
     flexDirection: 'row',
+    alignSelf: 'flex-start',
     backgroundColor: '#1E293B',
     borderRadius: 8,
     padding: 4,
@@ -2545,8 +2545,10 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   rankingButton: {
+    flex: 1,
+    alignItems: 'center',
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderRadius: 6,
   },
   rankingButtonActive: {

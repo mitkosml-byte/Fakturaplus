@@ -337,7 +337,7 @@ export default function ScanScreen() {
                     style={[styles.modeButton, scanMode === 'purchase' && styles.modeButtonActive]}
                     onPress={() => setScanMode('purchase')}
                   >
-                    <Text style={[styles.modeButtonText, scanMode === 'purchase' && styles.modeButtonTextActive]}>
+                    <Text style={[styles.modeButtonText, scanMode === 'purchase' && styles.modeButtonTextActive]} numberOfLines={1}>
                       {t('scan.modePurchase')}
                     </Text>
                   </TouchableOpacity>
@@ -345,7 +345,7 @@ export default function ScanScreen() {
                     style={[styles.modeButton, scanMode === 'sales' && styles.modeButtonActive]}
                     onPress={() => setScanMode('sales')}
                   >
-                    <Text style={[styles.modeButtonText, scanMode === 'sales' && styles.modeButtonTextActive]}>
+                    <Text style={[styles.modeButtonText, scanMode === 'sales' && styles.modeButtonTextActive]} numberOfLines={1}>
                       {t('scan.modeSales')}
                     </Text>
                   </TouchableOpacity>
