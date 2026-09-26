@@ -30,7 +30,7 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 export default function HomeScreen() {
   const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
-  const { isOwner } = useAuth();
+  const { isOwner, hasPermission } = useAuth();
   const router = useRouter();
 
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -447,24 +447,33 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Action Buttons */}
-        <View style={styles.actionsContainer}>
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#10B981' }]}
-            onPress={() => setRevenueModalVisible(true)}
-          >
-            <Ionicons name="cash" size={24} color="white" />
-            <Text style={styles.actionButtonText}>{t('home.dailyRevenue')}</Text>
-          </TouchableOpacity>
+        {/* Action Buttons - each gated on its own permission (an owner can
+            fine-tune these independently per member via the permissions
+            checklist), rather than showing a button whose only possible
+            outcome is a permission-denied error from the backend. */}
+        {(hasPermission('add_revenue') || hasPermission('add_expenses')) && (
+          <View style={styles.actionsContainer}>
+            {hasPermission('add_revenue') && (
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+                onPress={() => setRevenueModalVisible(true)}
+              >
+                <Ionicons name="cash" size={24} color="white" />
+                <Text style={styles.actionButtonText}>{t('home.dailyRevenue')}</Text>
+              </TouchableOpacity>
+            )}
 
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#F59E0B' }]}
-            onPress={() => setExpenseModalVisible(true)}
-          >
-            <Ionicons name="remove-circle" size={24} color="white" />
-            <Text style={styles.actionButtonText}>{t('home.expenses')}</Text>
-          </TouchableOpacity>
-        </View>
+            {hasPermission('add_expenses') && (
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#F59E0B' }]}
+                onPress={() => setExpenseModalVisible(true)}
+              >
+                <Ionicons name="remove-circle" size={24} color="white" />
+                <Text style={styles.actionButtonText}>{t('home.expenses')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Personal Expenses & ROI Section (Owner Only) */}
         {isOwner && (
