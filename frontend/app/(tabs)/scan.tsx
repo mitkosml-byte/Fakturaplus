@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { Alert } from '../../src/utils/alert';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
@@ -36,6 +37,15 @@ const emptyItem = (): EditableItem => ({ name: '', quantity: '1', unit: 'бр.',
 export default function ScanScreen() {
   const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
+  const router = useRouter();
+
+  // Which direction the scanned document is: a purchase invoice FROM a
+  // supplier (the default, feeds the invoice form below) or a sales
+  // invoice/receipt the business itself ISSUED to a customer (feeds
+  // straight into that day's daily revenue instead - no separate
+  // sales-invoice record is kept, per the app's pocket-ledger scope).
+  const [scanMode, setScanMode] = useState<'purchase' | 'sales'>('purchase');
+  const [salesVatRate, setSalesVatRate] = useState<20 | 9 | 0>(20);
 
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -73,6 +83,18 @@ export default function ScanScreen() {
     if (Math.abs(ratio - 0.20) < 0.01) setVatTreatment('standard_20');
     else if (Math.abs(ratio - 0.09) < 0.01) setVatTreatment('reduced_9');
   }, [amountWithoutVat, vatAmount, vatTreatment]);
+
+  // Same auto-detection, but snapped to the fixed 20/9/0% chips the daily
+  // revenue form uses, for sales mode.
+  useEffect(() => {
+    const base = parseFloat(amountWithoutVat);
+    const vat = parseFloat(vatAmount);
+    if (!base) return;
+    const ratio = vat / base;
+    if (Math.abs(ratio - 0.09) < 0.01) setSalesVatRate(9);
+    else if (Math.abs(ratio) < 0.01) setSalesVatRate(0);
+    else setSalesVatRate(20);
+  }, [amountWithoutVat, vatAmount]);
 
   // Live ЕИК format/checksum check, debounced so it doesn't fire on every keystroke
   useEffect(() => {
@@ -242,6 +264,29 @@ export default function ScanScreen() {
     }
   };
 
+  // Sales mode hands off to the Home tab's existing daily-revenue modal
+  // (via router params, the same pattern the unpaid-invoices card already
+  // uses to deep-link into invoices.tsx) rather than saving anything here
+  // directly - that modal already knows how to load whatever's currently
+  // logged for the date and let the owner reconcile it with this scanned
+  // amount, instead of silently overwriting the day's other sales.
+  const handleAddToRevenue = () => {
+    const total = parseFloat(totalAmount);
+    if (!total) {
+      Alert.alert(t('common.error'), t('msg.fillRequired'));
+      return;
+    }
+    router.push({
+      pathname: '/(tabs)',
+      params: {
+        ocrDate: format(invoiceDate, 'yyyy-MM-dd'),
+        ocrFiscalRevenue: String(total),
+        ocrVatRate: String(salesVatRate),
+      },
+    });
+    resetForm();
+  };
+
   const updateItem = (index: number, patch: Partial<EditableItem>) => {
     setItems(prev => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
   };
@@ -286,6 +331,27 @@ export default function ScanScreen() {
                 <Text style={styles.subtitle}>{language === 'bg' ? 'Използвай OCR за автоматично извличане' : 'Use OCR for automatic extraction'}</Text>
               </View>
 
+              {!capturedImage && (
+                <View style={styles.modeToggle}>
+                  <TouchableOpacity
+                    style={[styles.modeButton, scanMode === 'purchase' && styles.modeButtonActive]}
+                    onPress={() => setScanMode('purchase')}
+                  >
+                    <Text style={[styles.modeButtonText, scanMode === 'purchase' && styles.modeButtonTextActive]}>
+                      {t('scan.modePurchase')}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modeButton, scanMode === 'sales' && styles.modeButtonActive]}
+                    onPress={() => setScanMode('sales')}
+                  >
+                    <Text style={[styles.modeButtonText, scanMode === 'sales' && styles.modeButtonTextActive]}>
+                      {t('scan.modeSales')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {!capturedImage ? (
                 <View style={styles.scanOptions}>
               <TouchableOpacity style={styles.scanButton} onPress={handleTakePhoto}>
@@ -306,7 +372,7 @@ export default function ScanScreen() {
             </View>
           ) : null}
 
-          {!capturedImage && (
+          {!capturedImage && scanMode === 'purchase' && (
             <View style={styles.tipsBox}>
               <View style={styles.tipsHeader}>
                 <Ionicons name="sparkles-outline" size={18} color="#8B5CF6" />
@@ -319,6 +385,24 @@ export default function ScanScreen() {
                 </View>
               ))}
               <Text style={styles.tipsFooter}>{t('scan.tipsFooter')}</Text>
+            </View>
+          )}
+
+          {!capturedImage && scanMode === 'sales' && (
+            <View style={styles.tipsBox}>
+              <View style={styles.tipsHeader}>
+                <Ionicons name="sparkles-outline" size={18} color="#8B5CF6" />
+                <Text style={styles.tipsTitle}>{t('scan.salesTipsTitle')}</Text>
+              </View>
+              <View style={styles.tipRow}>
+                <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginTop: 2 }} />
+                <Text style={styles.tipText}>{t('scan.salesTip1')}</Text>
+              </View>
+              <View style={styles.tipRow}>
+                <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginTop: 2 }} />
+                <Text style={styles.tipText}>{t('scan.salesTip2')}</Text>
+              </View>
+              <Text style={styles.tipsFooter}>{t('scan.salesTipsFooter')}</Text>
             </View>
           )}
 
@@ -340,9 +424,13 @@ export default function ScanScreen() {
                 </View>
               ) : (
                 <View style={styles.formContainer}>
-                  <Text style={styles.formTitle}>{language === 'bg' ? 'Данни от фактурата' : 'Invoice Data'}</Text>
-                  <Text style={styles.formHint}>{language === 'bg' ? 'Редактирайте при нужда' : 'Edit if needed'}</Text>
-                  
+                  <Text style={styles.formTitle}>
+                    {scanMode === 'sales' ? t('scan.salesFormTitle') : (language === 'bg' ? 'Данни от фактурата' : 'Invoice Data')}
+                  </Text>
+                  <Text style={styles.formHint}>
+                    {scanMode === 'sales' ? t('scan.salesFormHint') : (language === 'bg' ? 'Редактирайте при нужда' : 'Edit if needed')}
+                  </Text>
+
                   {/* AI Corrections Info */}
                   {ocrCorrections.length > 0 && (
                     <View style={styles.correctionsContainer}>
@@ -368,6 +456,56 @@ export default function ScanScreen() {
                     </View>
                   )}
 
+                  {scanMode === 'sales' ? (
+                    <>
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="information-circle" size={16} color="#8B5CF6" />
+                        <Text style={styles.protocolNoteText}>{t('scan.salesNote')}</Text>
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.issueDate')} *</Text>
+                        <TouchableOpacity style={styles.dateInputButton} onPress={() => setDatePickerVisible(true)}>
+                          <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                          <Text style={styles.dateInputText}>
+                            {format(invoiceDate, 'd MMMM yyyy', { locale: dateLocale })}
+                          </Text>
+                          <Ionicons name="chevron-down" size={20} color="#64748B" />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.totalAmount')} *</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={totalAmount}
+                          onChangeText={setTotalAmount}
+                          keyboardType="decimal-pad"
+                          placeholder="0.00"
+                          placeholderTextColor="#64748B"
+                        />
+                        <Text style={styles.eikWarningText}>{t('home.includesVAT')}</Text>
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.vatTreatment')}</Text>
+                        <View style={styles.vatTreatmentGrid}>
+                          {([20, 9, 0] as const).map((rate) => (
+                            <TouchableOpacity
+                              key={rate}
+                              style={[styles.vatTreatmentChip, salesVatRate === rate && styles.vatTreatmentChipActive]}
+                              onPress={() => setSalesVatRate(rate)}
+                            >
+                              <Text style={[styles.vatTreatmentChipText, salesVatRate === rate && styles.vatTreatmentChipTextActive]}>
+                                {rate}%
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    </>
+                  ) : (
+                    <>
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.supplier')} *</Text>
                     <TextInput
@@ -632,10 +770,12 @@ export default function ScanScreen() {
                       numberOfLines={3}
                     />
                   </View>
+                    </>
+                  )}
 
                   <TouchableOpacity
                     style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-                    onPress={handleSaveInvoice}
+                    onPress={scanMode === 'sales' ? handleAddToRevenue : handleSaveInvoice}
                     disabled={isSaving}
                   >
                     {isSaving ? (
@@ -643,7 +783,9 @@ export default function ScanScreen() {
                     ) : (
                       <>
                         <Ionicons name="checkmark-circle" size={24} color="white" />
-                        <Text style={styles.saveButtonText}>{t('scan.saveInvoice')}</Text>
+                        <Text style={styles.saveButtonText}>
+                          {scanMode === 'sales' ? t('scan.addToRevenue') : t('scan.saveInvoice')}
+                        </Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -689,6 +831,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#94A3B8',
     marginTop: 4,
+  },
+  modeToggle: {
+    flexDirection: 'row',
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+  },
+  modeButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 9,
+    alignItems: 'center',
+  },
+  modeButtonActive: {
+    backgroundColor: '#8B5CF6',
+  },
+  modeButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  modeButtonTextActive: {
+    color: 'white',
   },
   scanOptions: {
     flexDirection: 'row',

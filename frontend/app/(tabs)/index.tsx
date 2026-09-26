@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
@@ -33,6 +33,7 @@ export default function HomeScreen() {
   const { language } = useLanguageStore();
   const { isOwner, hasPermission } = useAuth();
   const router = useRouter();
+  const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string }>();
 
   const [summary, setSummary] = useState<Summary | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -86,6 +87,8 @@ export default function HomeScreen() {
   // Pre-fills the form with whatever is already logged for this date, so
   // saving corrects that value directly instead of adding a delta to it -
   // opening the form for a date with nothing logged yet leaves it at 0.
+  // Returns what it found (or null) so callers - like the OCR hand-off
+  // below - can react to whether the day already had something logged.
   const loadCurrentDayRevenue = useCallback(async (date: Date) => {
     try {
       const dateStr = format(date, 'yyyy-MM-dd');
@@ -94,11 +97,13 @@ export default function HomeScreen() {
       setPocketMoney(data.pocket_money > 0 ? data.pocket_money.toString() : '');
       setCardRevenue(data.card_revenue > 0 ? data.card_revenue.toString() : '');
       setRevenueVatRate(data.vat_rate_percent || 20);
+      return data;
     } catch (error) {
       setFiscalRevenue('');
       setPocketMoney('');
       setCardRevenue('');
       setRevenueVatRate(20);
+      return null;
     }
   }, []);
 
@@ -111,12 +116,64 @@ export default function HomeScreen() {
     }, [loadData])
   );
 
-  // Load current day revenue when revenue modal opens or date changes
+  // Set by the scan screen's "sales" mode hand-off (see the effect below) -
+  // a ref, not state, so consuming it doesn't itself retrigger the load
+  // effect it's read from.
+  const pendingOcrRevenueRef = useRef<{ amount: number; vatRate: 20 | 9 | 0 } | null>(null);
+  const [ocrAdditionNote, setOcrAdditionNote] = useState<string | null>(null);
+
+  // Load current day revenue when revenue modal opens or date changes, then
+  // fold in a pending OCR-scanned sale on top of whatever was already
+  // there - never replacing it - so scanning a receipt for a day that
+  // already has manually-logged sales adds to the total instead of erasing it.
   useEffect(() => {
-    if (revenueModalVisible) {
-      loadCurrentDayRevenue(revenueDate);
-    }
+    if (!revenueModalVisible) return;
+    (async () => {
+      const existing = await loadCurrentDayRevenue(revenueDate);
+      const pending = pendingOcrRevenueRef.current;
+      if (pending) {
+        const existingFiscal = existing?.fiscal_revenue || 0;
+        setFiscalRevenue((existingFiscal + pending.amount).toFixed(2));
+        if (!existing || existingFiscal === 0) {
+          setRevenueVatRate(pending.vatRate);
+        }
+        setOcrAdditionNote(
+          t('home.ocrAdditionNote').replace('{amount}', pending.amount.toFixed(2))
+        );
+        pendingOcrRevenueRef.current = null;
+      } else {
+        setOcrAdditionNote(null);
+      }
+    })();
+    // t() is a plain function from useTranslation(), recreated on every
+    // render (not memoized) - listing it here would refire this effect on
+    // every render and re-fetch/overwrite the addition it just applied.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revenueModalVisible, revenueDate, loadCurrentDayRevenue]);
+
+  // Hand-off from the scan screen's "sales" mode: a receipt/invoice the
+  // business itself issued was recognized there, and its amount/date/VAT
+  // rate arrive as router params so this reuses the SAME modal (and its
+  // existing-value loading above) rather than a separate save path that
+  // could silently overwrite the day's other sales.
+  useEffect(() => {
+    if (!ocrParams.ocrDate || !ocrParams.ocrFiscalRevenue) return;
+    const amount = parseFloat(ocrParams.ocrFiscalRevenue) || 0;
+    const vatRateNum = parseInt(ocrParams.ocrVatRate || '20', 10);
+    const vatRate: 20 | 9 | 0 = vatRateNum === 9 ? 9 : vatRateNum === 0 ? 0 : 20;
+    pendingOcrRevenueRef.current = { amount, vatRate };
+    setRevenueDate(new Date(`${ocrParams.ocrDate}T00:00:00`));
+    setRevenueModalVisible(true);
+    // Deferred to the next tick - calling this in the same pass as a
+    // fresh navigation (e.g. this screen just mounted from the hand-off
+    // itself) can fire before Expo Router's root layout has finished
+    // mounting, which throws.
+    const clearParamsTimeout = setTimeout(() => {
+      router.setParams({ ocrDate: undefined, ocrFiscalRevenue: undefined, ocrVatRate: undefined });
+    }, 0);
+    return () => clearTimeout(clearParamsTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ocrParams.ocrDate, ocrParams.ocrFiscalRevenue, ocrParams.ocrVatRate]);
 
   // Load expenses for selected date when expense modal opens or date changes
   const loadDayExpenses = useCallback(async (date: Date) => {
@@ -763,6 +820,13 @@ export default function HomeScreen() {
               <Ionicons name="information-circle" size={18} color="#8B5CF6" />
               <Text style={styles.editNoticeText}>{t('home.editInPlaceNotice')}</Text>
             </View>
+
+            {ocrAdditionNote && (
+              <View style={[styles.editNoticeBanner, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
+                <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                <Text style={[styles.editNoticeText, { color: '#6EE7B7' }]}>{ocrAdditionNote}</Text>
+              </View>
+            )}
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>{t('home.fiscalRevenueLabel')} (€)</Text>

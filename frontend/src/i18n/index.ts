@@ -86,6 +86,10 @@ export const translations: Translations = {
     bg: 'Импортирай разходи назад във времето',
     en: 'Import past expenses history',
   },
+  'home.ocrAdditionNote': {
+    bg: 'Добавени {amount} € от сканирана издадена фактура към сумата за деня.',
+    en: 'Added {amount} € from a scanned issued invoice to the day\'s total.',
+  },
   'home.restrictedDataNote': {
     bg: 'Част от данните са скрити за вашия достъп - показаните суми са изчислени без тях.',
     en: 'Some data is hidden for your access level - the figures shown are calculated without it.',
@@ -230,6 +234,46 @@ export const translations: Translations = {
     bg: 'От галерия',
     en: 'From Gallery',
   },
+  'scan.modePurchase': {
+    bg: 'Фактура от доставчик',
+    en: 'Invoice from a supplier',
+  },
+  'scan.modeSales': {
+    bg: 'Издадена фактура (продажба)',
+    en: 'Issued invoice (sale)',
+  },
+  'scan.salesFormTitle': {
+    bg: 'Обобщение на продажбата',
+    en: 'Sale summary',
+  },
+  'scan.salesFormHint': {
+    bg: 'Проверете сумата и датата преди да добавите към оборота',
+    en: 'Check the amount and date before adding to revenue',
+  },
+  'scan.salesNote': {
+    bg: 'Това е фактура, издадена от вас към клиент - няма да се запази като отделна фактура, а сумата ще се добави към дневния оборот за тази дата.',
+    en: "This is an invoice you issued to a customer - it won't be saved as a separate invoice; the amount will be added to that date's daily revenue instead.",
+  },
+  'scan.addToRevenue': {
+    bg: 'Добави към дневния оборот',
+    en: 'Add to daily revenue',
+  },
+  'scan.salesTipsTitle': {
+    bg: 'Какво прави сканирането тук',
+    en: 'What scanning does here',
+  },
+  'scan.salesTip1': {
+    bg: 'Разпознава общата сума и ДДС ставката от издадената фактура',
+    en: 'Recognizes the total amount and VAT rate from the issued invoice',
+  },
+  'scan.salesTip2': {
+    bg: 'Отваря дневния оборот за тази дата, за да прегледате и добавите сумата',
+    en: "Opens that date's daily revenue so you can review and add the amount",
+  },
+  'scan.salesTipsFooter': {
+    bg: 'Само за фактури, издадени от вас към клиенти - не се запазва отделен документ.',
+    en: "For invoices you issue to customers only - no separate document is kept.",
+  },
   'scan.tipsTitle': {
     bg: 'Какво разпознава сканирането',
     en: 'What the scan recognizes',
@@ -251,7 +295,7 @@ export const translations: Translations = {
     en: 'Payment method and due date, if printed on the invoice',
   },
   'scan.tipsFooter': {
-    bg: 'Само за доставчически фактури - работи най-добре със снимка на цяла, ясно осветена фактура.',
+    bg: 'Само за фактури от доставчици - работи най-добре със снимка на цяла, ясно осветена фактура.',
     en: 'For supplier invoices only - works best with a full, well-lit photo of the invoice.',
   },
   'scan.processing': {
