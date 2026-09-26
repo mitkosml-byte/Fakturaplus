@@ -25,6 +25,7 @@ import { validateEikFormat } from '../../src/utils/eik';
 import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
+import ExcelImportModal from '../../src/components/ExcelImportModal';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -73,6 +74,7 @@ export default function InvoicesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [importModalVisible, setImportModalVisible] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   // Which of this invoice's items triggered a price-increase alert when it
   // was created - fetched lazily per invoice_id so the item rows can flag
@@ -365,9 +367,14 @@ export default function InvoicesScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
             <Text style={styles.title}>{t('invoices.title')}</Text>
-            <TouchableOpacity style={styles.exportButton} onPress={() => setExportModalVisible(true)}>
-              <Ionicons name="download" size={24} color="#8B5CF6" />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={styles.exportButton} onPress={() => setImportModalVisible(true)} accessibilityLabel={t('import.button')}>
+                <Ionicons name="cloud-upload-outline" size={24} color="#8B5CF6" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.exportButton} onPress={() => setExportModalVisible(true)}>
+                <Ionicons name="download" size={24} color="#8B5CF6" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Search */}
@@ -549,6 +556,19 @@ export default function InvoicesScreen() {
           </View>
         </View>
       </Modal>
+
+      <ExcelImportModal
+        visible={importModalVisible}
+        onClose={() => setImportModalVisible(false)}
+        entity="invoices"
+        title={t('import.button')}
+        fields={[
+          { key: 'supplier', label: t('invoices.supplier') },
+          { key: 'invoice_number', label: t('invoices.invoiceNo') },
+          { key: 'total_amount', label: t('invoices.total'), format: (v) => `${Number(v).toFixed(2)} €` },
+        ]}
+        onImported={loadInvoices}
+      />
 
       {/* Invoice Detail Modal */}
       <Modal visible={!!selectedInvoice} animationType="slide" transparent>

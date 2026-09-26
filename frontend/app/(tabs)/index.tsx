@@ -24,6 +24,7 @@ import { format, addDays, subDays } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
+import ExcelImportModal from '../../src/components/ExcelImportModal';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -37,6 +38,8 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [revenueModalVisible, setRevenueModalVisible] = useState(false);
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
+  const [importRevenueModalVisible, setImportRevenueModalVisible] = useState(false);
+  const [importExpenseModalVisible, setImportExpenseModalVisible] = useState(false);
   const [personalExpenseModalVisible, setPersonalExpenseModalVisible] = useState(false);
   
   // ROI state (owner only)
@@ -496,6 +499,23 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {(hasPermission('add_revenue') || hasPermission('add_expenses')) && (
+          <View style={styles.importLinksRow}>
+            {hasPermission('add_revenue') && (
+              <TouchableOpacity style={styles.importLink} onPress={() => setImportRevenueModalVisible(true)}>
+                <Ionicons name="cloud-upload-outline" size={14} color="#8B5CF6" />
+                <Text style={styles.importLinkText}>{t('home.importRevenueHistory')}</Text>
+              </TouchableOpacity>
+            )}
+            {hasPermission('add_expenses') && (
+              <TouchableOpacity style={styles.importLink} onPress={() => setImportExpenseModalVisible(true)}>
+                <Ionicons name="cloud-upload-outline" size={14} color="#8B5CF6" />
+                <Text style={styles.importLinkText}>{t('home.importExpensesHistory')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         {/* Personal Expenses & ROI Section - visible to anyone with
             view_personal_investments; adding a personal expense stays an
             owner-only write action regardless. */}
@@ -948,6 +968,31 @@ export default function HomeScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <ExcelImportModal
+        visible={importRevenueModalVisible}
+        onClose={() => setImportRevenueModalVisible(false)}
+        entity="daily_revenue"
+        title={t('home.importRevenueHistory')}
+        fields={[
+          { key: 'date', label: t('home.date') },
+          { key: 'fiscal_revenue', label: t('home.fiscalRevenue'), format: (v) => `${Number(v).toFixed(2)} €` },
+        ]}
+        onImported={loadData}
+      />
+
+      <ExcelImportModal
+        visible={importExpenseModalVisible}
+        onClose={() => setImportExpenseModalVisible(false)}
+        entity="expenses"
+        title={t('home.importExpensesHistory')}
+        fields={[
+          { key: 'date', label: t('home.date') },
+          { key: 'description', label: t('expenses.description') },
+          { key: 'amount', label: t('invoices.total'), format: (v) => `${Number(v).toFixed(2)} €` },
+        ]}
+        onImported={loadData}
+      />
         </SafeAreaView>
       </View>
     </ImageBackground>
@@ -1183,6 +1228,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 32,
+  },
+  importLinksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 16,
+    marginTop: -20,
+    marginBottom: 24,
+  },
+  importLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  importLinkText: {
+    fontSize: 12,
+    color: '#8B5CF6',
+    fontWeight: '500',
   },
   actionButton: {
     flex: 1,

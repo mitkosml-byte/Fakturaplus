@@ -24,6 +24,7 @@ import { format } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import ExcelImportModal from '../src/components/ExcelImportModal';
 
 const CATEGORY_SHORT_LABELS: Record<AssetCategory, string> = {
   cat_i: 'I · Сгради',
@@ -63,6 +64,7 @@ export default function AssetsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const [assetModalVisible, setAssetModalVisible] = useState(false);
+  const [importModalVisible, setImportModalVisible] = useState(false);
   const [editingAsset, setEditingAsset] = useState<FixedAsset | null>(null);
   const [assetForm, setAssetForm] = useState(emptyAssetForm());
   const [acquisitionDate, setAcquisitionDate] = useState(new Date());
@@ -251,7 +253,9 @@ export default function AssetsScreen() {
             <Ionicons name="arrow-back" size={24} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('assets.title')}</Text>
-          <View style={styles.backButton} />
+          <TouchableOpacity onPress={() => setImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('import.button')}>
+            <Ionicons name="cloud-upload-outline" size={22} color="white" />
+          </TouchableOpacity>
         </View>
 
         <View style={styles.summaryCard}>
@@ -532,6 +536,19 @@ export default function AssetsScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <ExcelImportModal
+        visible={importModalVisible}
+        onClose={() => setImportModalVisible(false)}
+        entity="assets"
+        title={t('import.button')}
+        fields={[
+          { key: 'name', label: t('assets.name') },
+          { key: 'category', label: t('assets.category') },
+          { key: 'acquisition_value', label: t('assets.acquisitionValue'), format: (v) => `${Number(v).toFixed(2)} €` },
+        ]}
+        onImported={loadData}
+      />
     </View>
   );
 }

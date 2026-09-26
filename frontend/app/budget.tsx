@@ -17,6 +17,7 @@ import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import ExcelImportModal from '../src/components/ExcelImportModal';
 
 export default function BudgetScreen() {
   const { t } = useTranslation();
@@ -27,6 +28,7 @@ export default function BudgetScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [importModalVisible, setImportModalVisible] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
   
   // Budget form
@@ -171,7 +173,9 @@ export default function BudgetScreen() {
             <Ionicons name="arrow-back" size={24} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('budget.title')}</Text>
-          <View style={{ width: 40 }} />
+          <TouchableOpacity onPress={() => setImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('import.button')}>
+            <Ionicons name="cloud-upload-outline" size={22} color="white" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -386,6 +390,18 @@ export default function BudgetScreen() {
           </View>
         </View>
       </Modal>
+
+      <ExcelImportModal
+        visible={importModalVisible}
+        onClose={() => setImportModalVisible(false)}
+        entity="budget"
+        title={t('import.button')}
+        fields={[
+          { key: 'month', label: t('budget.month') },
+          { key: 'expense_limit', label: t('budget.limit'), format: (v) => `${Number(v).toFixed(2)} €` },
+        ]}
+        onImported={loadData}
+      />
     </View>
   );
 }

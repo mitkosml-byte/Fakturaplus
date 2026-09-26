@@ -78,6 +78,14 @@ export const translations: Translations = {
     bg: 'Печалба',
     en: 'Profit',
   },
+  'home.importRevenueHistory': {
+    bg: 'Импортирай оборот назад във времето',
+    en: 'Import past revenue history',
+  },
+  'home.importExpensesHistory': {
+    bg: 'Импортирай разходи назад във времето',
+    en: 'Import past expenses history',
+  },
   'home.restrictedDataNote': {
     bg: 'Част от данните са скрити за вашия достъп - показаните суми са изчислени без тях.',
     en: 'Some data is hidden for your access level - the figures shown are calculated without it.',
@@ -593,6 +601,70 @@ export const translations: Translations = {
   'common.close': {
     bg: 'Затвори',
     en: 'Close',
+  },
+  'msg.downloadFailed': {
+    bg: 'Не можах да изтегля файла',
+    en: 'Could not download the file',
+  },
+  'import.button': {
+    bg: 'Импортирай от Excel',
+    en: 'Import from Excel',
+  },
+  'import.downloadTemplate': {
+    bg: 'Изтегли шаблон',
+    en: 'Download template',
+  },
+  'import.downloadTemplateHint': {
+    bg: 'Шаблонът съдържа заглавен ред, пример и кратки указания - попълнете го и го качете обратно.',
+    en: 'The template has a header row, an example row and short instructions - fill it in and upload it back.',
+  },
+  'import.pickFile': {
+    bg: 'Избери файл (.xlsx / .csv)',
+    en: 'Choose file (.xlsx / .csv)',
+  },
+  'import.analyzing': {
+    bg: 'Анализирам файла...',
+    en: 'Analyzing the file...',
+  },
+  'import.totalRows': {
+    bg: 'Общо редове',
+    en: 'Total rows',
+  },
+  'import.validRows': {
+    bg: 'Валидни',
+    en: 'Valid',
+  },
+  'import.errorRows': {
+    bg: 'С грешки',
+    en: 'With errors',
+  },
+  'import.row': {
+    bg: 'Ред',
+    en: 'Row',
+  },
+  'import.importRows': {
+    bg: 'Импортирай {count} реда',
+    en: 'Import {count} rows',
+  },
+  'import.noValidRows': {
+    bg: 'Няма валидни редове за импортиране - поправете файла и опитайте отново.',
+    en: 'No valid rows to import - fix the file and try again.',
+  },
+  'import.pickDifferentFile': {
+    bg: 'Избери друг файл',
+    en: 'Choose a different file',
+  },
+  'import.importing': {
+    bg: 'Импортирам...',
+    en: 'Importing...',
+  },
+  'import.doneSummary': {
+    bg: 'Успешно импортирани {imported} реда.',
+    en: 'Successfully imported {imported} rows.',
+  },
+  'import.doneFailedSummary': {
+    bg: '{failed} реда не бяха импортирани (напр. вече съществуват) - виж детайлите по-горе.',
+    en: '{failed} rows were not imported (e.g. already exist) - see details above.',
   },
   'common.success': {
     bg: 'Успех',
@@ -1874,6 +1946,10 @@ export const translations: Translations = {
     bg: 'Остават',
     en: 'Remaining',
   },
+  'budget.month': {
+    bg: 'Месец',
+    en: 'Month',
+  },
   'budget.limit': {
     bg: 'Лимит',
     en: 'Limit',
@@ -2160,6 +2236,7 @@ export const translations: Translations = {
   'payroll.bonus': { bg: 'Бонус за месеца', en: 'Bonus this month' },
   'payroll.attachPhoto': { bg: 'Прикачи снимка на ведомостта', en: 'Attach a photo of the payslip' },
   'payroll.photoAttached': { bg: 'Снимката е прикачена ✓', en: 'Photo attached ✓' },
+  'payroll.period': { bg: 'Период', en: 'Period' },
   'payroll.grossAmount': { bg: 'Брутно възнаграждение', en: 'Gross amount' },
   'payroll.employeeContributions': { bg: 'Осигуровки (за сметка на служителя)', en: "Contributions (employee's share)" },
   'payroll.incomeTax': { bg: 'Данък общ доход', en: 'Income tax' },

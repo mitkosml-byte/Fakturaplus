@@ -7,7 +7,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from enum import Enum
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -5090,6 +5090,7 @@ async def get_merged_item_statistics(
 from services.export_service import ExportService
 from services.audit_service import AuditService
 from services.forecast_service import ForecastService
+from services import import_service
 
 # Initialize services
 audit_service = AuditService(db)
@@ -6072,6 +6073,102 @@ async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: s
             y, m = _ym_add(y, m, 1)
 
     return round(total, 2)
+
+# ===================== BULK IMPORT (CSV/EXCEL) =====================
+# Each entity's commit step calls the EXISTING create_* route function per
+# row instead of re-implementing its business logic (duplicate detection,
+# depreciation defaults, payroll gross-up math, budget upsert...) - see
+# services/import_service.py's module docstring for why.
+
+_IMPORT_PERMISSIONS = {
+    "invoices": "manage_invoices",
+    "assets": "manage_budget",
+    "budget": "manage_budget",
+    "daily_revenue": "add_revenue",
+    "expenses": "add_expenses",
+    "payroll": "manage_budget",
+}
+
+class ImportCommitRequest(BaseModel):
+    rows: List[dict]
+
+@api_router.get("/import/template/{entity}")
+async def get_import_template(entity: str, current_user: User = Depends(get_current_user)):
+    if entity not in import_service.ENTITY_TEMPLATES:
+        raise HTTPException(status_code=404, detail="Непознат тип за импорт")
+    require_permission(current_user, _IMPORT_PERMISSIONS[entity])
+    try:
+        data = import_service.build_template(entity)
+    except import_service.ImportFileError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    filename = f"shablon_{entity}.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+@api_router.post("/import/{entity}/preview")
+@limiter.limit("20/minute")
+async def import_preview(entity: str, request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    if entity not in import_service.ENTITY_TEMPLATES:
+        raise HTTPException(status_code=404, detail="Непознат тип за импорт")
+    require_permission(current_user, _IMPORT_PERMISSIONS[entity])
+
+    content = await file.read()
+    try:
+        df = import_service.read_uploaded_table(content, file.filename or "")
+    except import_service.ImportFileError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    context: Dict[str, Any] = {}
+    if entity == "payroll":
+        _, scope = await get_company_scope(current_user)
+        employees = await db.employees.find(scope, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+        context["employees_by_name"] = {e["name"].strip().lower(): e["id"] for e in employees}
+
+    try:
+        return import_service.preview_rows(entity, df, context)
+    except import_service.ImportFileError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@api_router.post("/import/{entity}/commit")
+@limiter.limit("10/minute")
+async def import_commit(entity: str, request: Request, payload: ImportCommitRequest, current_user: User = Depends(get_current_user)):
+    if entity not in import_service.ENTITY_TEMPLATES:
+        raise HTTPException(status_code=404, detail="Непознат тип за импорт")
+    require_permission(current_user, _IMPORT_PERMISSIONS[entity])
+
+    imported = 0
+    failed = []
+    bg_tasks = BackgroundTasks()
+
+    for index, row_data in enumerate(payload.rows):
+        try:
+            if entity == "invoices":
+                await create_invoice(invoice=InvoiceCreate(**row_data), background_tasks=bg_tasks, current_user=current_user)
+            elif entity == "assets":
+                await create_asset(asset=FixedAssetCreate(**row_data), current_user=current_user)
+            elif entity == "budget":
+                await create_budget(budget=BudgetCreate(**row_data), current_user=current_user)
+            elif entity == "daily_revenue":
+                await create_daily_revenue(revenue=DailyRevenueCreate(**row_data), current_user=current_user)
+            elif entity == "expenses":
+                await create_expense(expense=NonInvoiceExpenseCreate(**row_data), current_user=current_user)
+            elif entity == "payroll":
+                await create_payroll_entry(entry=PayrollEntryCreate(**row_data), current_user=current_user)
+            imported += 1
+        except HTTPException as e:
+            failed.append({"index": index, "message": e.detail})
+        except Exception as e:
+            failed.append({"index": index, "message": str(e)})
+
+    if entity == "invoices":
+        # No HTTP response cycle will run these for us since create_invoice
+        # was called directly rather than as the request handler.
+        await bg_tasks()
+
+    return {"imported": imported, "failed": failed, "total": len(payload.rows)}
 
 # ===================== AUDIT LOG =====================
 

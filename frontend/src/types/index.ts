@@ -454,3 +454,27 @@ export interface AssetsSummary {
   active_count: number;
   disposed_count: number;
 }
+
+// Bulk CSV/Excel import ("Импортирай от Excel")
+export type ImportEntity = 'invoices' | 'assets' | 'budget' | 'daily_revenue' | 'expenses' | 'payroll';
+
+export interface ImportRowResult {
+  row_number: number;
+  status: 'ok' | 'error';
+  data: Record<string, any> | null;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface ImportPreviewResult {
+  total_rows: number;
+  valid_count: number;
+  error_count: number;
+  rows: ImportRowResult[];
+}
+
+export interface ImportCommitResult {
+  imported: number;
+  failed: { index: number; message: string }[];
+  total: number;
+}

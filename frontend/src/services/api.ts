@@ -1,4 +1,5 @@
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership } from '../types';
+import { Platform } from 'react-native';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -151,6 +152,45 @@ class ApiService {
     return this.fetch('/ocr/scan', {
       method: 'POST',
       body: JSON.stringify({ image_base64: imageBase64 }),
+    });
+  }
+
+  // Bulk import (CSV/Excel) - template download URL is a plain GET, handed
+  // to downloadAndShareFile by the caller like every other export link.
+  getImportTemplateUrl(entity: ImportEntity): string {
+    return `/api/import/template/${entity}`;
+  }
+
+  async previewImport(entity: ImportEntity, asset: { uri: string; name: string; mimeType?: string; file?: any }): Promise<ImportPreviewResult> {
+    const formData = new FormData();
+    if (Platform.OS === 'web' && asset.file) {
+      formData.append('file', asset.file, asset.name);
+    } else {
+      // React Native's fetch recognizes this {uri, name, type} shape and
+      // streams the file from disk - there is no Blob to construct here.
+      formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || 'application/octet-stream' } as any);
+    }
+
+    const headers: Record<string, string> = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+
+    const response = await fetch(`${API_URL}/api/import/${entity}/preview`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
+      throw new Error(error.detail || 'Грешка в заявката');
+    }
+    return response.json();
+  }
+
+  async commitImport(entity: ImportEntity, rows: Record<string, any>[]): Promise<ImportCommitResult> {
+    return this.fetch(`/import/${entity}/commit`, {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
     });
   }
 

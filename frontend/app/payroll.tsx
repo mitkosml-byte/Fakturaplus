@@ -23,6 +23,7 @@ import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import ExcelImportModal from '../src/components/ExcelImportModal';
 
 const emptyEmployeeForm = () => ({
   name: '',
@@ -46,6 +47,7 @@ export default function PayrollScreen() {
   const [selectedMonth, setSelectedMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
   const [employeeModalVisible, setEmployeeModalVisible] = useState(false);
+  const [importModalVisible, setImportModalVisible] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm());
 
@@ -319,9 +321,14 @@ export default function PayrollScreen() {
             <Ionicons name="arrow-back" size={24} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('payroll.title')}</Text>
-          <TouchableOpacity onPress={openRates} style={styles.backButton}>
-            <Ionicons name="settings-outline" size={22} color="white" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity onPress={() => setImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('import.button')}>
+              <Ionicons name="cloud-upload-outline" size={22} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={openRates} style={styles.backButton}>
+              <Ionicons name="settings-outline" size={22} color="white" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.monthSelector}>
@@ -662,6 +669,18 @@ export default function PayrollScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <ExcelImportModal
+        visible={importModalVisible}
+        onClose={() => setImportModalVisible(false)}
+        entity="payroll"
+        title={t('import.button')}
+        fields={[
+          { key: 'period_month', label: t('payroll.period'), format: (_v, row) => `${row.period_month}/${row.period_year}` },
+          { key: 'gross_amount', label: t('payroll.grossAmount'), format: (v, row) => `${Number(v ?? row.net_target ?? 0).toFixed(2)} €` },
+        ]}
+        onImported={loadData}
+      />
     </View>
   );
 }
