@@ -245,6 +245,33 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </TouchableOpacity>
 
+          {/* Team collaboration: shared calendar + messages (owner/manager/accountant) */}
+          {hasPermission('team_collaboration') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/calendar')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+                <Ionicons name="calendar" size={20} color="#8B5CF6" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('profile.calendar')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.calendarDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
+
+          {hasPermission('team_collaboration') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/messages')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                <Ionicons name="chatbubbles" size={20} color="#10B981" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('profile.messages')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.messagesDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
+
           {/* Budget - Owner and Manager only */}
           {hasPermission('manage_budget') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/budget')}>

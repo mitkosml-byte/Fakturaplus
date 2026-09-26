@@ -592,6 +592,22 @@ export const translations: Translations = {
     bg: 'ДДС напомняния',
     en: 'VAT reminders',
   },
+  'profile.calendar': {
+    bg: 'Календар',
+    en: 'Calendar',
+  },
+  'profile.calendarDesc': {
+    bg: 'Събития и напомняния за екипа',
+    en: 'Events and reminders for the team',
+  },
+  'profile.messages': {
+    bg: 'Съобщения',
+    en: 'Messages',
+  },
+  'profile.messagesDesc': {
+    bg: 'Екипен чат и лични съобщения',
+    en: 'Team chat and direct messages',
+  },
   'profile.backup': {
     bg: 'Google Drive бекъп',
     en: 'Google Drive Backup',
@@ -2364,6 +2380,43 @@ export const translations: Translations = {
   'notifications.pushInfo': { bg: 'Известията се изпращат като push нотификации. Уверете се, че сте ги разрешили.', en: 'Notifications are sent as push notifications. Make sure you have allowed them.' },
   'notifications.save': { bg: 'Запази настройки', en: 'Save settings' },
   'notifications.saved': { bg: 'Настройките са запазени', en: 'Settings saved' },
+  'notifications.pushTitle': { bg: 'Push известия', en: 'Push notifications' },
+  'notifications.pushSubtitle': { bg: 'Ново съобщение или напомняне се показва в известията на телефона', en: 'A new message or reminder shows up in your phone\'s notifications' },
+  'notifications.pushDenied': { bg: 'Известията са блокирани за този сайт. Разрешете ги от настройките на браузъра.', en: 'Notifications are blocked for this site. Allow them in your browser settings.' },
+  'notifications.pushError': { bg: 'Неуспешно включване на известията. Опитайте отново.', en: 'Could not enable notifications. Please try again.' },
+
+  // Calendar (shared team calendar - owner/manager/accountant)
+  'calendar.title': { bg: 'Календар', en: 'Calendar' },
+  'calendar.noEvents': { bg: 'Няма събития в този период', en: 'No events in this period' },
+  'calendar.personal': { bg: 'Лично', en: 'Personal' },
+  'calendar.shared': { bg: 'Споделено', en: 'Shared' },
+  'calendar.sharedBy': { bg: 'Споделено от', en: 'Shared by' },
+  'calendar.newEvent': { bg: 'Ново събитие', en: 'New event' },
+  'calendar.editEvent': { bg: 'Редактиране на събитие', en: 'Edit event' },
+  'calendar.eventTitle': { bg: 'Заглавие', en: 'Title' },
+  'calendar.eventTitlePlaceholder': { bg: 'Напр. Среща с ДДС консултант', en: 'e.g. Meeting with VAT consultant' },
+  'calendar.eventDescription': { bg: 'Описание (по избор)', en: 'Description (optional)' },
+  'calendar.eventDescriptionPlaceholder': { bg: 'Допълнителни детайли...', en: 'Additional details...' },
+  'calendar.eventDate': { bg: 'Дата', en: 'Date' },
+  'calendar.specificTime': { bg: 'Конкретен час', en: 'Specific time' },
+  'calendar.visibility': { bg: 'Видимост', en: 'Visibility' },
+  'calendar.reminder': { bg: 'Напомняне', en: 'Reminder' },
+  'calendar.reminder_none': { bg: 'Без', en: 'None' },
+  'calendar.reminder_min15': { bg: '15 мин. преди', en: '15 min before' },
+  'calendar.reminder_hour1': { bg: '1 час преди', en: '1 hour before' },
+  'calendar.reminder_day1': { bg: '1 ден преди', en: '1 day before' },
+  'calendar.titleRequired': { bg: 'Моля, въведете заглавие', en: 'Please enter a title' },
+  'calendar.deleteTitle': { bg: 'Изтриване на събитие', en: 'Delete event' },
+  'calendar.deleteConfirm': { bg: 'Сигурни ли сте, че искате да изтриете това събитие?', en: 'Are you sure you want to delete this event?' },
+
+  // Messages (team channel + direct messages)
+  'messages.title': { bg: 'Съобщения', en: 'Messages' },
+  'messages.noConversations': { bg: 'Все още няма разговори', en: 'No conversations yet' },
+  'messages.noMessagesYet': { bg: 'Все още няма съобщения', en: 'No messages yet' },
+  'messages.typeMessage': { bg: 'Напишете съобщение...', en: 'Type a message...' },
+  'messages.newDm': { bg: 'Ново лично съобщение', en: 'New direct message' },
+  'messages.noMembers': { bg: 'Няма колеги с достъп до тази функция', en: 'No teammates with access to this feature' },
+  'messages.enablePushHint': { bg: 'Включете известията, за да не пропускате съобщения', en: 'Enable notifications so you don\'t miss messages' },
 };
 
 // Zustand store for language

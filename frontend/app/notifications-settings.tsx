@@ -17,6 +17,7 @@ import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { NotificationSettings } from '../src/types';
 import { useTranslation } from '../src/i18n';
+import { getPushStatus, enablePushNotifications, disablePushNotifications } from '../src/utils/pushNotifications';
 
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -32,9 +33,40 @@ export default function NotificationsSettingsScreen() {
   const [periodicEnabled, setPeriodicEnabled] = useState(false);
   const [selectedDates, setSelectedDates] = useState<number[]>([]);
 
+  const [pushSupported, setPushSupported] = useState(true);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+
   useEffect(() => {
     loadSettings();
+    getPushStatus().then((status) => {
+      setPushSupported(status !== 'unsupported');
+      setPushEnabled(status === 'granted');
+    });
   }, []);
+
+  const handleTogglePush = async (value: boolean) => {
+    setPushBusy(true);
+    try {
+      if (value) {
+        const result = await enablePushNotifications();
+        if (!result.ok) {
+          Alert.alert(
+            t('common.error'),
+            result.error === 'denied' ? t('notifications.pushDenied') : t('notifications.pushError')
+          );
+          setPushEnabled(false);
+          return;
+        }
+        setPushEnabled(true);
+      } else {
+        await disablePushNotifications();
+        setPushEnabled(false);
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const loadSettings = async () => {
     try {
@@ -185,6 +217,30 @@ export default function NotificationsSettingsScreen() {
             </View>
           )}
         </View>
+
+            {pushSupported && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <View style={[styles.sectionIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                    <Ionicons name="notifications-circle" size={24} color="#10B981" />
+                  </View>
+                  <View style={styles.sectionTitleContainer}>
+                    <Text style={styles.sectionTitle}>{t('notifications.pushTitle')}</Text>
+                    <Text style={styles.sectionSubtitle}>{t('notifications.pushSubtitle')}</Text>
+                  </View>
+                  {pushBusy ? (
+                    <ActivityIndicator color="#10B981" />
+                  ) : (
+                    <Switch
+                      value={pushEnabled}
+                      onValueChange={handleTogglePush}
+                      trackColor={{ false: '#334155', true: '#10B981' }}
+                      thumbColor={pushEnabled ? 'white' : '#64748B'}
+                    />
+                  )}
+                </View>
+              </View>
+            )}
 
             <View style={styles.infoCard}>
               <Ionicons name="information-circle" size={24} color="#64748B" />

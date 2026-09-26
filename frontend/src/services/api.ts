@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -733,6 +733,65 @@ class ApiService {
 
   async getAssetsSummary(): Promise<AssetsSummary> {
     return this.fetch('/assets/summary');
+  }
+
+  // Team collaboration: calendar
+  async getCalendarEvents(start?: string, end?: string): Promise<CalendarEvent[]> {
+    const params = new URLSearchParams();
+    if (start) params.set('start', start);
+    if (end) params.set('end', end);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.fetch(`/calendar/events${query}`);
+  }
+
+  async createCalendarEvent(event: CalendarEventInput): Promise<CalendarEvent> {
+    return this.fetch('/calendar/events', { method: 'POST', body: JSON.stringify(event) });
+  }
+
+  async updateCalendarEvent(id: string, update: Partial<CalendarEventInput>): Promise<CalendarEvent> {
+    return this.fetch(`/calendar/events/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteCalendarEvent(id: string): Promise<void> {
+    await this.fetch(`/calendar/events/${id}`, { method: 'DELETE' });
+  }
+
+  // Team collaboration: messages
+  async getCollabMembers(): Promise<CollabMember[]> {
+    return this.fetch('/collab/members');
+  }
+
+  async getConversations(): Promise<ConversationSummary[]> {
+    return this.fetch('/messages/conversations');
+  }
+
+  async startDirectMessage(userId: string): Promise<{ conversation_id: string }> {
+    return this.fetch('/messages/dm/start', { method: 'POST', body: JSON.stringify({ user_id: userId }) });
+  }
+
+  async getMessages(conversationId: string, before?: string): Promise<Message[]> {
+    const query = before ? `?before=${encodeURIComponent(before)}` : '';
+    return this.fetch(`/messages/${encodeURIComponent(conversationId)}${query}`);
+  }
+
+  async sendMessage(conversationId: string, text: string): Promise<Message> {
+    return this.fetch(`/messages/${encodeURIComponent(conversationId)}`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+  }
+
+  async markConversationRead(conversationId: string): Promise<void> {
+    await this.fetch(`/messages/${encodeURIComponent(conversationId)}/read`, { method: 'POST' });
+  }
+
+  // Web Push
+  async subscribePush(subscription: { endpoint: string; keys: { p256dh: string; auth: string } }): Promise<void> {
+    await this.fetch('/push/subscribe', { method: 'POST', body: JSON.stringify(subscription) });
+  }
+
+  async unsubscribePush(endpoint: string): Promise<void> {
+    await this.fetch('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) });
   }
 }
 

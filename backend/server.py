@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import asyncio
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
@@ -526,14 +527,14 @@ def sanitize_user(user_doc: dict) -> dict:
     - A non-owner's stored permissions are trusted completely once their
       permissions_schema_version reaches PERMISSIONS_SCHEMA_VERSION - which
       update_user_role stamps on every explicit checklist save. Below that
-      version, this account's permissions predate the four new view_*
-      strings, so this role's default view_* set is unioned in (read-time
-      only, never persisted) until the owner's next real edit stamps the
-      current version. This can't be told apart from "an explicit save
-      that deliberately unticked all four" by inspecting the stored list
-      alone - a save that left all four off looks identical to one that
-      never mentioned them - so the version stamp, not the list's content,
-      is what carries that distinction."""
+      version, this account's permissions predate whatever was added at a
+      later version (see _PERMISSIONS_ADDED_AT_VERSION), so this role's
+      default set for each version this account hasn't reached yet is
+      unioned in (read-time only, never persisted) until the owner's next
+      real edit stamps the current version. This can't be told apart from
+      "an explicit save that deliberately unticked those permissions" by
+      inspecting the stored list alone - so the version stamp, not the
+      list's content, is what carries that distinction."""
     user_doc = dict(user_doc)
     user_doc["has_password"] = bool(user_doc.get("password_hash"))
     user_doc.pop("password_hash", None)
@@ -542,9 +543,14 @@ def sanitize_user(user_doc: dict) -> dict:
         user_doc["permissions"] = resolve_permissions(role, None)
     elif role == "owner":
         user_doc["permissions"] = sorted(set(user_doc["permissions"]) | ROLE_PERMISSIONS.get("owner", set()))
-    elif user_doc.get("permissions_schema_version", 1) < PERMISSIONS_SCHEMA_VERSION:
-        defaults = ROLE_PERMISSIONS.get(role, set()) & _SENSITIVE_FIELD_PERMISSIONS
-        user_doc["permissions"] = sorted(set(user_doc["permissions"]) | defaults)
+    else:
+        stamped_version = user_doc.get("permissions_schema_version", 1)
+        if stamped_version < PERMISSIONS_SCHEMA_VERSION:
+            defaults = set()
+            for version, added in _PERMISSIONS_ADDED_AT_VERSION.items():
+                if stamped_version < version:
+                    defaults |= ROLE_PERMISSIONS.get(role, set()) & added
+            user_doc["permissions"] = sorted(set(user_doc["permissions"]) | defaults)
     return user_doc
 
 async def get_company_scope(current_user: User) -> tuple:
@@ -598,6 +604,7 @@ ROLE_PERMISSIONS = {
         "manage_users", "manage_company", "view_audit_log", "manage_budget",
         "export_data", "view_statistics", "manage_invoices", "add_revenue", "add_expenses",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
+        "team_collaboration",
     },
     "manager": {
         "manage_budget", "export_data", "view_statistics", "manage_invoices",
@@ -605,10 +612,15 @@ ROLE_PERMISSIONS = {
         # Not view_personal_investments - a manager enters revenue/expenses
         # themselves but has no stake in the owner's personal investments.
         "view_pocket_money", "view_off_book_expenses", "view_profit",
+        "team_collaboration",
     },
     "staff": {
         "manage_invoices", "add_revenue", "add_expenses",
         "view_pocket_money", "view_off_book_expenses",
+        # Deliberately no team_collaboration by default - the shared
+        # calendar/messages feature is meant for owner/manager/accountant
+        # coordination, not day-to-day staff use. Still grantable per-user
+        # via the configurable ceiling below, same as every other permission.
     },
     "accountant": {
         "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
@@ -616,6 +628,7 @@ ROLE_PERMISSIONS = {
         # computed correctly, without needing the pocket-money/off-book
         # line items themselves or the owner's personal investments.
         "view_profit",
+        "team_collaboration",
     },
 }
 
@@ -623,6 +636,7 @@ _STAFF_LIKE_CONFIGURABLE = {
     "view_audit_log", "manage_budget", "export_data", "view_statistics",
     "manage_invoices", "add_revenue", "add_expenses",
     "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
+    "team_collaboration",
 }
 
 # The four sensitive-data-field permissions, used by sanitize_user's
@@ -639,7 +653,17 @@ _SENSITIVE_FIELD_PERMISSIONS = {
 # inspecting the stored list - is the only way to tell "never touched since
 # this version" apart from "deliberately configured to have none of the new
 # permissions").
-PERMISSIONS_SCHEMA_VERSION = 2
+PERMISSIONS_SCHEMA_VERSION = 3
+
+# Permissions introduced after PERMISSIONS_SCHEMA_VERSION 1, keyed by the
+# version that added them - see sanitize_user's migration branch below,
+# which unions in every entry whose key exceeds a legacy account's stamped
+# version. Kept separate from _SENSITIVE_FIELD_PERMISSIONS since that set
+# has its own, unrelated (field-visibility) meaning.
+_PERMISSIONS_ADDED_AT_VERSION = {
+    2: _SENSITIVE_FIELD_PERMISSIONS,
+    3: {"team_collaboration"},
+}
 
 ROLE_CONFIGURABLE_PERMISSIONS = {
     "manager": _STAFF_LIKE_CONFIGURABLE,
@@ -648,6 +672,7 @@ ROLE_CONFIGURABLE_PERMISSIONS = {
     "accountant": {
         "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
+        "team_collaboration",
     },
 }
 
@@ -5091,6 +5116,7 @@ from services.export_service import ExportService
 from services.audit_service import AuditService
 from services.forecast_service import ForecastService
 from services import import_service
+from services import push_service
 
 # Initialize services
 audit_service = AuditService(db)
@@ -6074,6 +6100,384 @@ async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: s
 
     return round(total, 2)
 
+# ===================== TEAM COLLABORATION (CALENDAR + MESSAGES + PUSH) =====================
+# A shared calendar and messaging system for the owner/manager/accountant
+# trio to coordinate (see the "team_collaboration" permission above) - a
+# personal+shared calendar, one company-wide chat channel plus 1:1 direct
+# messages, and Web Push so a new message/reminder shows up in the phone's
+# own notification tray even with the app closed. Everything here is plain
+# REST + polling (no websockets) to match the rest of this codebase and
+# avoid a persistent-connection auth story of its own - see push_service.py
+# for the actual browser-push delivery.
+
+async def get_team_members(company_id: str) -> List[dict]:
+    """Company members who currently hold team_collaboration - same
+    active-company + accountant-membership union as GET /auth/users, since
+    an accountant's ACTIVE company (and thus their live permissions) can be
+    a different client than this one."""
+    users = await db.users.find(
+        {"company_id": company_id},
+        {"_id": 0, "user_id": 1, "name": 1, "picture": 1, "role": 1, "permissions": 1}
+    ).to_list(1000)
+    members = []
+    existing_ids = set()
+    for u in users:
+        existing_ids.add(u["user_id"])
+        perms = u.get("permissions") or resolve_permissions(u.get("role", "staff"), None)
+        if "team_collaboration" in perms:
+            members.append({"user_id": u["user_id"], "name": u["name"], "picture": u.get("picture"), "role": u.get("role")})
+
+    accountant_memberships = await db.company_memberships.find(
+        {"company_id": company_id, "role": "accountant"},
+        {"_id": 0, "user_id": 1, "permissions": 1}
+    ).to_list(1000)
+    membership_permissions = {
+        m["user_id"]: (m.get("permissions") or resolve_permissions("accountant", None))
+        for m in accountant_memberships
+    }
+    extra_ids = [uid for uid in membership_permissions if uid not in existing_ids]
+    if extra_ids:
+        extra_users = await db.users.find(
+            {"user_id": {"$in": extra_ids}},
+            {"_id": 0, "user_id": 1, "name": 1, "picture": 1}
+        ).to_list(1000)
+        for u in extra_users:
+            if "team_collaboration" in membership_permissions.get(u["user_id"], []):
+                members.append({"user_id": u["user_id"], "name": u["name"], "picture": u.get("picture"), "role": "accountant"})
+    return members
+
+def _team_channel_id(company_id: str) -> str:
+    return f"team:{company_id}"
+
+async def get_conversation_recipients(current_user: User, conversation_id: str) -> List[str]:
+    """Authorizes current_user's access to conversation_id and returns the
+    OTHER participants' user_ids (i.e. who to notify on a new message).
+    Raises 404 if the conversation doesn't exist / isn't this company's,
+    403 if it exists but current_user isn't a participant."""
+    if conversation_id == _team_channel_id(current_user.company_id or ""):
+        members = await get_team_members(current_user.company_id)
+        return [m["user_id"] for m in members if m["user_id"] != current_user.user_id]
+
+    conversation = await db.dm_conversations.find_one(
+        {"id": conversation_id, "company_id": current_user.company_id}, {"_id": 0}
+    )
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Разговорът не е намерен")
+    if current_user.user_id not in conversation["participant_ids"]:
+        raise HTTPException(status_code=403, detail="Нямате достъп до този разговор")
+    return [uid for uid in conversation["participant_ids"] if uid != current_user.user_id]
+
+async def get_or_create_dm_conversation(company_id: str, user_a: str, user_b: str) -> str:
+    participant_ids = sorted([user_a, user_b])
+    existing = await db.dm_conversations.find_one(
+        {"company_id": company_id, "participant_ids": participant_ids}, {"_id": 0, "id": 1}
+    )
+    if existing:
+        return existing["id"]
+    conversation_id = str(uuid.uuid4())
+    await db.dm_conversations.insert_one({
+        "id": conversation_id,
+        "company_id": company_id,
+        "participant_ids": participant_ids,
+        "created_at": datetime.now(timezone.utc),
+    })
+    return conversation_id
+
+async def notify_new_message(conversation_id: str, sender: User, text: str, recipient_ids: List[str]):
+    if conversation_id == _team_channel_id(sender.company_id or ""):
+        title = "Екипен чат"
+    else:
+        title = sender.name
+    body = f"{sender.name}: {text[:120]}" if title == "Екипен чат" else text[:120]
+    await push_service.send_to_users(
+        db, recipient_ids, title=title, body=body,
+        data={"type": "message", "conversation_id": conversation_id},
+    )
+
+class CalendarEventCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    event_date: str  # "YYYY-MM-DD"
+    event_time: Optional[str] = None  # "HH:MM"
+    visibility: str = "personal"  # "personal" | "shared"
+    reminder_minutes_before: Optional[int] = None
+
+class CalendarEventUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    event_date: Optional[str] = None
+    event_time: Optional[str] = None
+    visibility: Optional[str] = None
+    reminder_minutes_before: Optional[int] = None
+
+class CalendarEvent(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    creator_id: str
+    creator_name: str
+    title: str
+    description: Optional[str] = None
+    event_date: str
+    event_time: Optional[str] = None
+    visibility: str = "personal"
+    reminder_minutes_before: Optional[int] = None
+    reminder_sent: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+@api_router.get("/collab/members")
+async def list_collab_members(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    if not current_user.company_id:
+        return []
+    return await get_team_members(current_user.company_id)
+
+@api_router.post("/calendar/events", response_model=CalendarEvent)
+async def create_calendar_event(payload: CalendarEventCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    if not current_user.company_id:
+        raise HTTPException(status_code=400, detail="Нямате активна фирма")
+    if payload.visibility not in ("personal", "shared"):
+        raise HTTPException(status_code=400, detail="Невалидна видимост")
+    event = CalendarEvent(
+        company_id=current_user.company_id,
+        creator_id=current_user.user_id,
+        creator_name=current_user.name,
+        **payload.dict(),
+    )
+    await db.calendar_events.insert_one(event.dict())
+    return event
+
+@api_router.get("/calendar/events", response_model=List[CalendarEvent])
+async def list_calendar_events(start: Optional[str] = None, end: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    if not current_user.company_id:
+        return []
+    query: Dict[str, Any] = {
+        "company_id": current_user.company_id,
+        "$or": [{"visibility": "shared"}, {"creator_id": current_user.user_id}],
+    }
+    date_filter: Dict[str, Any] = {}
+    if start:
+        date_filter["$gte"] = start
+    if end:
+        date_filter["$lte"] = end
+    if date_filter:
+        query["event_date"] = date_filter
+    events = await db.calendar_events.find(query, {"_id": 0}).sort("event_date", 1).to_list(1000)
+    return events
+
+@api_router.put("/calendar/events/{event_id}", response_model=CalendarEvent)
+async def update_calendar_event(event_id: str, payload: CalendarEventUpdate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    existing = await db.calendar_events.find_one({"id": event_id, "company_id": current_user.company_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Събитието не е намерено")
+    if existing["creator_id"] != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Само създателят може да редактира това събитие")
+
+    update_data = {k: v for k, v in payload.dict(exclude_unset=True).items()}
+    if "visibility" in update_data and update_data["visibility"] not in ("personal", "shared"):
+        raise HTTPException(status_code=400, detail="Невалидна видимост")
+    # Any change to when the reminder should fire (or whether one exists at
+    # all) needs to re-arm it - otherwise an edit made after the original
+    # time had already passed would never send a reminder for the new time.
+    if {"event_date", "event_time", "reminder_minutes_before"} & update_data.keys():
+        update_data["reminder_sent"] = False
+    if update_data:
+        await db.calendar_events.update_one({"id": event_id}, {"$set": update_data})
+    return await db.calendar_events.find_one({"id": event_id}, {"_id": 0})
+
+@api_router.delete("/calendar/events/{event_id}")
+async def delete_calendar_event(event_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    existing = await db.calendar_events.find_one({"id": event_id, "company_id": current_user.company_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Събитието не е намерено")
+    if existing["creator_id"] != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Само създателят може да изтрива това събитие")
+    await db.calendar_events.delete_one({"id": event_id})
+    return {"message": "Изтрито"}
+
+@api_router.get("/messages/conversations")
+async def list_conversations(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    if not current_user.company_id:
+        return []
+
+    team_id = _team_channel_id(current_user.company_id)
+    members = await get_team_members(current_user.company_id)
+    member_by_id = {m["user_id"]: m for m in members}
+
+    dm_conversations = await db.dm_conversations.find(
+        {"company_id": current_user.company_id, "participant_ids": current_user.user_id}, {"_id": 0}
+    ).to_list(200)
+
+    conversation_ids = [team_id] + [c["id"] for c in dm_conversations]
+    reads = await db.conversation_reads.find(
+        {"conversation_id": {"$in": conversation_ids}, "user_id": current_user.user_id}, {"_id": 0}
+    ).to_list(len(conversation_ids))
+    last_read = {r["conversation_id"]: r["last_read_at"] for r in reads}
+
+    async def summarize(conversation_id: str, name: str, picture: Optional[str]):
+        last_message = await db.messages.find_one(
+            {"conversation_id": conversation_id}, {"_id": 0}, sort=[("created_at", -1)]
+        )
+        unread_query: Dict[str, Any] = {"conversation_id": conversation_id, "sender_id": {"$ne": current_user.user_id}}
+        if conversation_id in last_read:
+            unread_query["created_at"] = {"$gt": last_read[conversation_id]}
+        unread_count = await db.messages.count_documents(unread_query)
+        return {
+            "conversation_id": conversation_id,
+            "name": name,
+            "picture": picture,
+            "last_message": last_message["text"] if last_message else None,
+            "last_message_at": last_message["created_at"] if last_message else None,
+            "unread_count": unread_count,
+        }
+
+    result = [await summarize(team_id, "Екипен чат", None)]
+    for c in dm_conversations:
+        other_id = next((uid for uid in c["participant_ids"] if uid != current_user.user_id), None)
+        other = member_by_id.get(other_id)
+        name = other["name"] if other else "Потребител"
+        picture = other["picture"] if other else None
+        result.append(await summarize(c["id"], name, picture))
+
+    result.sort(key=lambda c: c["last_message_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return result
+
+@api_router.post("/messages/dm/start")
+async def start_dm(request: Request, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    body = await request.json()
+    other_user_id = body.get("user_id")
+    if not other_user_id or other_user_id == current_user.user_id:
+        raise HTTPException(status_code=400, detail="Невалиден получател")
+    members = await get_team_members(current_user.company_id or "")
+    if not any(m["user_id"] == other_user_id for m in members):
+        raise HTTPException(status_code=404, detail="Потребителят не е намерен в екипа")
+    conversation_id = await get_or_create_dm_conversation(current_user.company_id, current_user.user_id, other_user_id)
+    return {"conversation_id": conversation_id}
+
+@api_router.get("/messages/{conversation_id}")
+async def get_messages(conversation_id: str, before: Optional[str] = None, limit: int = 50, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    await get_conversation_recipients(current_user, conversation_id)
+    query: Dict[str, Any] = {"company_id": current_user.company_id, "conversation_id": conversation_id}
+    if before:
+        query["created_at"] = {"$lt": datetime.fromisoformat(before.replace("Z", "+00:00"))}
+    messages = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(min(limit, 200))
+    messages.reverse()
+    return messages
+
+@api_router.post("/messages/{conversation_id}")
+async def send_message(conversation_id: str, request: Request, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Съобщението е празно")
+    text = text[:2000]
+
+    recipients = await get_conversation_recipients(current_user, conversation_id)
+
+    now = datetime.now(timezone.utc)
+    message = {
+        "id": str(uuid.uuid4()),
+        "company_id": current_user.company_id,
+        "conversation_id": conversation_id,
+        "sender_id": current_user.user_id,
+        "sender_name": current_user.name,
+        "text": text,
+        "created_at": now,
+    }
+    await db.messages.insert_one(dict(message))
+    await db.conversation_reads.update_one(
+        {"conversation_id": conversation_id, "user_id": current_user.user_id},
+        {"$set": {"last_read_at": now, "company_id": current_user.company_id}},
+        upsert=True,
+    )
+    background_tasks.add_task(notify_new_message, conversation_id, current_user, text, recipients)
+    return message
+
+@api_router.post("/messages/{conversation_id}/read")
+async def mark_conversation_read(conversation_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "team_collaboration")
+    await get_conversation_recipients(current_user, conversation_id)
+    await db.conversation_reads.update_one(
+        {"conversation_id": conversation_id, "user_id": current_user.user_id},
+        {"$set": {"last_read_at": datetime.now(timezone.utc), "company_id": current_user.company_id}},
+        upsert=True,
+    )
+    return {"message": "OK"}
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str
+    keys: Dict[str, str]
+
+@api_router.post("/push/subscribe")
+async def push_subscribe(payload: PushSubscriptionIn, current_user: User = Depends(get_current_user)):
+    await db.push_subscriptions.update_one(
+        {"endpoint": payload.endpoint},
+        {"$set": {
+            "user_id": current_user.user_id,
+            "company_id": current_user.company_id,
+            "endpoint": payload.endpoint,
+            "keys": payload.keys,
+            "updated_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+    return {"message": "OK"}
+
+@api_router.post("/push/unsubscribe")
+async def push_unsubscribe(request: Request, current_user: User = Depends(get_current_user)):
+    body = await request.json()
+    endpoint = body.get("endpoint")
+    if endpoint:
+        await db.push_subscriptions.delete_one({"endpoint": endpoint, "user_id": current_user.user_id})
+    return {"message": "OK"}
+
+async def _calendar_reminder_tick():
+    """One pass over due-and-unsent calendar reminders. Split out from the
+    loop below so a test can call it directly without sleeping."""
+    now = datetime.now(timezone.utc)
+    candidates = await db.calendar_events.find(
+        {"reminder_minutes_before": {"$ne": None}, "reminder_sent": {"$ne": True}}, {"_id": 0}
+    ).to_list(500)
+    for ev in candidates:
+        try:
+            event_dt = datetime.fromisoformat(f"{ev['event_date']}T{ev.get('event_time') or '09:00'}:00").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        remind_at = event_dt - timedelta(minutes=ev["reminder_minutes_before"])
+        if remind_at <= now:
+            when = ev["event_date"] + (f" {ev['event_time']}" if ev.get("event_time") else "")
+            await push_service.send_to_user(
+                db, ev["creator_id"],
+                title=f"Напомняне: {ev['title']}",
+                body=when,
+                data={"type": "calendar", "event_id": ev["id"]},
+            )
+            await db.calendar_events.update_one({"id": ev["id"]}, {"$set": {"reminder_sent": True}})
+
+async def _calendar_reminder_loop():
+    while True:
+        try:
+            await _calendar_reminder_tick()
+        except Exception as e:
+            logger.error(f"Calendar reminder loop error: {e}")
+        await asyncio.sleep(180)
+
+@app.on_event("startup")
+async def start_calendar_reminder_loop():
+    # In-process only - if this dyno is asleep (free-tier idle scale-down) a
+    # reminder simply fires on the next request that wakes it instead of
+    # exactly on time. Acceptable for a first release; a dedicated cron
+    # hitting a small internal endpoint would be the fix if exact timing
+    # ever matters more than "eventually, once the app is open again".
+    asyncio.create_task(_calendar_reminder_loop())
+
 # ===================== BULK IMPORT (CSV/EXCEL) =====================
 # Each entity's commit step calls the EXISTING create_* route function per
 # row instead of re-implementing its business logic (duplicate detection,
@@ -6222,7 +6626,16 @@ async def create_indexes():
         
         # Audit log index
         await db.audit_logs.create_index([("company_id", 1), ("created_at", -1)])
-        
+
+        # Team collaboration indexes (calendar, messages, push)
+        await db.calendar_events.create_index([("company_id", 1), ("event_date", 1)])
+        await db.calendar_events.create_index([("reminder_minutes_before", 1), ("reminder_sent", 1)])
+        await db.messages.create_index([("conversation_id", 1), ("created_at", -1)])
+        await db.dm_conversations.create_index([("company_id", 1), ("participant_ids", 1)])
+        await db.conversation_reads.create_index([("conversation_id", 1), ("user_id", 1)], unique=True)
+        await db.push_subscriptions.create_index([("endpoint", 1)], unique=True)
+        await db.push_subscriptions.create_index([("user_id", 1)])
+
         logger.info("Database indexes created successfully")
     except Exception as e:
         logger.error(f"Error creating indexes: {e}")

@@ -13,7 +13,8 @@ export type Permission =
   | 'view_pocket_money'
   | 'view_off_book_expenses'
   | 'view_profit'
-  | 'view_personal_investments';
+  | 'view_personal_investments'
+  | 'team_collaboration';
 
 export type ConfigurableRole = 'manager' | 'staff' | 'accountant';
 
@@ -29,7 +30,7 @@ export type ConfigurableRole = 'manager' | 'staff' | 'accountant';
 export const ROLE_DEFAULT_PERMISSIONS: Record<ConfigurableRole, Permission[]> = {
   manager: [
     'manage_budget', 'export_data', 'view_statistics', 'manage_invoices', 'add_revenue', 'add_expenses',
-    'view_pocket_money', 'view_off_book_expenses', 'view_profit',
+    'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'team_collaboration',
   ],
   staff: [
     'manage_invoices', 'add_revenue', 'add_expenses',
@@ -37,7 +38,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<ConfigurableRole, Permission[]> = 
   ],
   accountant: [
     'view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices',
-    'view_profit',
+    'view_profit', 'team_collaboration',
   ],
 };
 
@@ -48,6 +49,7 @@ const STAFF_LIKE_CONFIGURABLE: Permission[] = [
   'view_audit_log', 'manage_budget', 'export_data', 'view_statistics',
   'manage_invoices', 'add_revenue', 'add_expenses',
   'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
+  'team_collaboration',
 ];
 
 export const ROLE_CONFIGURABLE_PERMISSIONS: Record<ConfigurableRole, Permission[]> = {
@@ -61,6 +63,7 @@ export const ROLE_CONFIGURABLE_PERMISSIONS: Record<ConfigurableRole, Permission[
   accountant: [
     'view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices',
     'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
+    'team_collaboration',
   ],
 };
 
@@ -78,6 +81,7 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   view_off_book_expenses: { bg: 'Вижда разходи "в канала"', en: 'Sees off-book expenses' },
   view_profit: { bg: 'Вижда печалба', en: 'Sees profit' },
   view_personal_investments: { bg: 'Вижда лични инвестиции/ROI', en: 'Sees personal investments/ROI' },
+  team_collaboration: { bg: 'Календар и съобщения', en: 'Calendar and messages' },
 };
 
 export function getPermissionLabel(permission: Permission, language: Language): string {

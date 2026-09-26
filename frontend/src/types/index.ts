@@ -478,3 +478,54 @@ export interface ImportCommitResult {
   failed: { index: number; message: string }[];
   total: number;
 }
+
+// Team collaboration: shared calendar + messages (owner/manager/accountant)
+export interface CalendarEvent {
+  id: string;
+  company_id: string;
+  creator_id: string;
+  creator_name: string;
+  title: string;
+  description?: string | null;
+  event_date: string; // "YYYY-MM-DD"
+  event_time?: string | null; // "HH:MM"
+  visibility: 'personal' | 'shared';
+  reminder_minutes_before?: number | null;
+  reminder_sent: boolean;
+  created_at: string;
+}
+
+export interface CalendarEventInput {
+  title: string;
+  description?: string;
+  event_date: string;
+  event_time?: string | null;
+  visibility: 'personal' | 'shared';
+  reminder_minutes_before?: number | null;
+}
+
+export interface CollabMember {
+  user_id: string;
+  name: string;
+  picture?: string | null;
+  role: string;
+}
+
+export interface ConversationSummary {
+  conversation_id: string;
+  name: string;
+  picture?: string | null;
+  last_message: string | null;
+  last_message_at: string | null;
+  unread_count: number;
+}
+
+export interface Message {
+  id: string;
+  company_id: string;
+  conversation_id: string;
+  sender_id: string;
+  sender_name: string;
+  text: string;
+  created_at: string;
+}
