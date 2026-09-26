@@ -1014,6 +1014,14 @@ export const translations: Translations = {
     bg: 'Покажи само тях',
     en: 'Show only these',
   },
+  'invoices.filtersButton': {
+    bg: 'Филтри',
+    en: 'Filters',
+  },
+  'invoices.filtersActive': {
+    bg: 'активни',
+    en: 'active',
+  },
 
   // Company Settings
   'company.title': {

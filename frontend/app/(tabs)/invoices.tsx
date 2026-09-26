@@ -88,6 +88,7 @@ export default function InvoicesScreen() {
   const [endPickerVisible, setEndPickerVisible] = useState(false);
   const [showOnlyEikIssues, setShowOnlyEikIssues] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'partial' | 'overdue'>('all');
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   // Lets the Home dashboard's unpaid-invoices reminder deep-link straight
   // into this filter instead of always landing on "all".
@@ -97,6 +98,7 @@ export default function InvoicesScreen() {
       params.paymentFilter === 'partial' || params.paymentFilter === 'overdue'
     ) {
       setPaymentFilter(params.paymentFilter);
+      setFiltersExpanded(true);
     }
   }, [params.paymentFilter]);
 
@@ -257,65 +259,56 @@ export default function InvoicesScreen() {
     }
   };
 
-  const renderInvoice = ({ item }: { item: Invoice }) => (
-    <TouchableOpacity
-      style={styles.invoiceCard}
-      onPress={() => setSelectedInvoice(item)}
-      onLongPress={() => handleDeleteInvoice(item.id)}
-    >
-      <View style={styles.invoiceHeader}>
-        <View style={styles.supplierContainer}>
-          <Ionicons name="business" size={20} color="#8B5CF6" />
-          <Text style={styles.supplierName} numberOfLines={1}>{item.supplier}</Text>
-        </View>
-        <Text style={styles.invoiceDate}>{formatDate(item.date)}</Text>
-      </View>
+  const renderInvoice = ({ item }: { item: Invoice }) => {
+    const eikIssue = hasEikIssue(item);
+    const isUnpaid = item.payment_method === 'bank_transfer' && !item.is_paid;
+    const overdue = isUnpaid && !!item.payment_due_date && new Date(item.payment_due_date).getTime() < Date.now();
+    const isPartial = isUnpaid && item.paid_amount > 0;
+    const statusLabel = overdue ? t('invoices.overdue') : (isPartial ? t('invoices.partiallyPaid') : t('invoices.unpaid'));
 
-      {hasEikIssue(item) && (
-        <View style={styles.eikWarningBadge}>
-          <Ionicons name="alert-circle" size={13} color="#F59E0B" />
-          <Text style={styles.eikWarningBadgeText}>{t('invoices.missingEik')}</Text>
-        </View>
-      )}
-
-      {item.payment_method === 'bank_transfer' && !item.is_paid && (() => {
-        const overdue = !!item.payment_due_date && new Date(item.payment_due_date).getTime() < Date.now();
-        const isPartial = item.paid_amount > 0;
-        const statusLabel = overdue ? t('invoices.overdue') : (isPartial ? t('invoices.partiallyPaid') : t('invoices.unpaid'));
-        return (
-          <View style={[styles.eikWarningBadge, overdue && styles.overdueBadge]}>
-            <Ionicons name={overdue ? 'alert-circle' : (isPartial ? 'pie-chart-outline' : 'time-outline')} size={13} color={overdue ? '#EF4444' : '#F59E0B'} />
-            <Text style={[styles.eikWarningBadgeText, overdue && { color: '#EF4444' }]}>
-              {statusLabel}
-              {isPartial ? ` (${(item.total_amount - item.paid_amount).toFixed(2)} €)` : ''}
-              {item.payment_due_date ? ` · ${formatDate(item.payment_due_date)}` : ''}
-            </Text>
+    return (
+      <TouchableOpacity
+        style={styles.invoiceCard}
+        onPress={() => setSelectedInvoice(item)}
+        onLongPress={() => handleDeleteInvoice(item.id)}
+      >
+        <View style={styles.invoiceRowTop}>
+          <View style={styles.supplierContainer}>
+            <Ionicons name="business" size={18} color="#8B5CF6" />
+            <Text style={styles.supplierName} numberOfLines={1}>{item.supplier}</Text>
           </View>
-        );
-      })()}
-
-      <View style={styles.invoiceDetails}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>{t('invoices.invoiceNo')}:</Text>
-          <Text style={styles.detailValue}>{item.invoice_number}</Text>
+          <Text style={styles.totalValueCompact}>{item.total_amount.toFixed(2)} €</Text>
         </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>{t('invoices.withoutVAT')}:</Text>
-          <Text style={styles.detailValue}>{item.amount_without_vat.toFixed(2)} €</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>{t('stats.vat')}:</Text>
-          <Text style={styles.detailValue}>{item.vat_amount.toFixed(2)} €</Text>
-        </View>
-      </View>
 
-      <View style={styles.invoiceFooter}>
-        <Text style={styles.totalLabel}>{t('invoices.total')}:</Text>
-        <Text style={styles.totalValue}>{item.total_amount.toFixed(2)} €</Text>
-      </View>
-    </TouchableOpacity>
-  );
+        <View style={styles.invoiceRowBottom}>
+          <Text style={styles.invoiceMeta} numberOfLines={1}>
+            {item.invoice_number} · {formatDate(item.date)}
+          </Text>
 
+          {(eikIssue || isUnpaid) && (
+            <View style={styles.compactBadgeRow}>
+              {eikIssue && (
+                <View style={styles.compactBadge}>
+                  <Ionicons name="alert-circle" size={11} color="#F59E0B" />
+                  <Text style={styles.compactBadgeText}>{t('invoices.missingEik')}</Text>
+                </View>
+              )}
+              {isUnpaid && (
+                <View style={[styles.compactBadge, overdue && styles.overdueBadge]}>
+                  <Ionicons name={overdue ? 'alert-circle' : (isPartial ? 'pie-chart-outline' : 'time-outline')} size={11} color={overdue ? '#EF4444' : '#F59E0B'} />
+                  <Text style={[styles.compactBadgeText, overdue && { color: '#EF4444' }]}>
+                    {statusLabel}{isPartial ? ` (${(item.total_amount - item.paid_amount).toFixed(2)} €)` : ''}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const activeFilterCount = (periodPreset !== 'all' ? 1 : 0) + (paymentFilter !== 'all' ? 1 : 0);
   const eikIssueCount = useMemo(() => invoices.filter(hasEikIssue).length, [invoices, hasEikIssue]);
   const visibleInvoices = useMemo(
     () => (showOnlyEikIssues ? invoices.filter(hasEikIssue) : invoices),
@@ -395,82 +388,100 @@ export default function InvoicesScreen() {
             )}
           </View>
 
-          {/* Period filter */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.periodChipsRow}
-            contentContainerStyle={styles.periodChipsContent}
+          {/* Filters toggle — collapsed by default so the chip rows don't
+              permanently eat vertical space above the list */}
+          <TouchableOpacity
+            style={styles.filtersToggle}
+            onPress={() => setFiltersExpanded((prev) => !prev)}
           >
-            {periodOptions.map((opt) => (
-              <TouchableOpacity
-                key={opt.key}
-                style={[styles.periodChip, periodPreset === opt.key && styles.periodChipActive]}
-                onPress={() => setPeriodPreset(opt.key)}
-              >
-                <Text style={[styles.periodChipText, periodPreset === opt.key && styles.periodChipTextActive]}>
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+            <Ionicons name="options-outline" size={16} color="#8B5CF6" />
+            <Text style={styles.filtersToggleText}>
+              {t('invoices.filtersButton')}
+              {activeFilterCount > 0 ? ` · ${activeFilterCount} ${t('invoices.filtersActive')}` : ''}
+            </Text>
+            <Ionicons name={filtersExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#8B5CF6" />
+          </TouchableOpacity>
 
-          {periodPreset === 'custom' && (
-            <View style={styles.customRangeRow}>
-              <TouchableOpacity style={styles.customRangeButton} onPress={() => setStartPickerVisible(true)}>
-                <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
-                <Text style={styles.customRangeButtonText}>
-                  {t('invoices.periodFrom')}: {format(customStartDate, 'd MMM yyyy', { locale: dateLocale })}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.customRangeButton} onPress={() => setEndPickerVisible(true)}>
-                <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
-                <Text style={styles.customRangeButtonText}>
-                  {t('invoices.periodTo')}: {format(customEndDate, 'd MMM yyyy', { locale: dateLocale })}
-                </Text>
-              </TouchableOpacity>
-              <DateTimePickerModal
-                isVisible={startPickerVisible}
-                mode="date"
-                date={customStartDate}
-                onConfirm={(d) => { setCustomStartDate(d); setStartPickerVisible(false); }}
-                onCancel={() => setStartPickerVisible(false)}
-              />
-              <DateTimePickerModal
-                isVisible={endPickerVisible}
-                mode="date"
-                date={customEndDate}
-                onConfirm={(d) => { setCustomEndDate(d); setEndPickerVisible(false); }}
-                onCancel={() => setEndPickerVisible(false)}
-              />
-            </View>
+          {filtersExpanded && (
+            <>
+              {/* Period filter */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.periodChipsRow}
+                contentContainerStyle={styles.periodChipsContent}
+              >
+                {periodOptions.map((opt) => (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[styles.periodChip, periodPreset === opt.key && styles.periodChipActive]}
+                    onPress={() => setPeriodPreset(opt.key)}
+                  >
+                    <Text style={[styles.periodChipText, periodPreset === opt.key && styles.periodChipTextActive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {periodPreset === 'custom' && (
+                <View style={styles.customRangeRow}>
+                  <TouchableOpacity style={styles.customRangeButton} onPress={() => setStartPickerVisible(true)}>
+                    <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+                    <Text style={styles.customRangeButtonText}>
+                      {t('invoices.periodFrom')}: {format(customStartDate, 'd MMM yyyy', { locale: dateLocale })}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.customRangeButton} onPress={() => setEndPickerVisible(true)}>
+                    <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+                    <Text style={styles.customRangeButtonText}>
+                      {t('invoices.periodTo')}: {format(customEndDate, 'd MMM yyyy', { locale: dateLocale })}
+                    </Text>
+                  </TouchableOpacity>
+                  <DateTimePickerModal
+                    isVisible={startPickerVisible}
+                    mode="date"
+                    date={customStartDate}
+                    onConfirm={(d) => { setCustomStartDate(d); setStartPickerVisible(false); }}
+                    onCancel={() => setStartPickerVisible(false)}
+                  />
+                  <DateTimePickerModal
+                    isVisible={endPickerVisible}
+                    mode="date"
+                    date={customEndDate}
+                    onConfirm={(d) => { setCustomEndDate(d); setEndPickerVisible(false); }}
+                    onCancel={() => setEndPickerVisible(false)}
+                  />
+                </View>
+              )}
+
+              {/* Payment status filter */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.periodChipsRow}
+                contentContainerStyle={styles.periodChipsContent}
+              >
+                {([
+                  { key: 'all', label: t('invoices.paymentFilterAll') },
+                  { key: 'unpaid', label: t('invoices.paymentFilterUnpaid') },
+                  { key: 'partial', label: t('invoices.partiallyPaid') },
+                  { key: 'overdue', label: t('invoices.paymentFilterOverdue') },
+                  { key: 'paid', label: t('invoices.paymentFilterPaid') },
+                ] as const).map((opt) => (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[styles.periodChip, paymentFilter === opt.key && styles.periodChipActive]}
+                    onPress={() => setPaymentFilter(opt.key)}
+                  >
+                    <Text style={[styles.periodChipText, paymentFilter === opt.key && styles.periodChipTextActive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
           )}
-
-          {/* Payment status filter */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.periodChipsRow}
-            contentContainerStyle={styles.periodChipsContent}
-          >
-            {([
-              { key: 'all', label: t('invoices.paymentFilterAll') },
-              { key: 'unpaid', label: t('invoices.paymentFilterUnpaid') },
-              { key: 'partial', label: t('invoices.partiallyPaid') },
-              { key: 'overdue', label: t('invoices.paymentFilterOverdue') },
-              { key: 'paid', label: t('invoices.paymentFilterPaid') },
-            ] as const).map((opt) => (
-              <TouchableOpacity
-                key={opt.key}
-                style={[styles.periodChip, paymentFilter === opt.key && styles.periodChipActive]}
-                onPress={() => setPaymentFilter(opt.key)}
-              >
-                <Text style={[styles.periodChipText, paymentFilter === opt.key && styles.periodChipTextActive]}>
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
 
           {/* ЕИК issues banner */}
           {eikIssueCount > 0 && (
@@ -899,6 +910,23 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
   },
+  filtersToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: '#1E293B',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  filtersToggleText: {
+    fontSize: 13,
+    color: '#8B5CF6',
+    fontWeight: '600',
+  },
   periodChipsRow: {
     marginTop: 12,
     height: 44,
@@ -994,30 +1022,50 @@ const styles = StyleSheet.create({
   },
   invoiceCard: {
     backgroundColor: '#1E293B',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
   },
-  invoiceHeader: {
+  invoiceRowTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
   },
-  eikWarningBadge: {
+  totalValueCompact: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#8B5CF6',
+    marginLeft: 8,
+  },
+  invoiceRowBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 8,
+  },
+  invoiceMeta: {
+    fontSize: 12,
+    color: '#64748B',
+    flexShrink: 1,
+  },
+  compactBadgeRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexShrink: 0,
+  },
+  compactBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
+    gap: 4,
     backgroundColor: 'rgba(245, 158, 11, 0.15)',
     borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginBottom: 10,
-    marginTop: -4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
   },
-  eikWarningBadgeText: {
-    fontSize: 11,
+  compactBadgeText: {
+    fontSize: 10,
     fontWeight: '600',
     color: '#F59E0B',
   },
@@ -1061,47 +1109,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'white',
     flex: 1,
-  },
-  invoiceDate: {
-    fontSize: 12,
-    color: '#64748B',
-  },
-  invoiceDetails: {
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-    paddingTop: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  detailLabel: {
-    fontSize: 13,
-    color: '#94A3B8',
-  },
-  detailValue: {
-    fontSize: 13,
-    color: '#E2E8F0',
-  },
-  invoiceFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  totalLabel: {
-    fontSize: 14,
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
-  totalValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#8B5CF6',
   },
   emptyContainer: {
     alignItems: 'center',
