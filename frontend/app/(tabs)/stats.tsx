@@ -941,6 +941,18 @@ export default function StatsScreen() {
                     const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (windowedIncomeBarData.length + 1)) / windowedIncomeBarData.length)));
                     return (
                       <BarChart
+                        // react-native-gifted-charts only runs each bar's
+                        // grow-in animation on that bar component's FIRST
+                        // mount (empty deps useEffect internally) - if the
+                        // chart re-renders with new values while reusing
+                        // the same index-keyed bar instances (e.g. after a
+                        // background data refresh), the bar heights freeze
+                        // at their old animated value even though the
+                        // printed numbers update. Keying the whole chart by
+                        // its own values forces a full remount whenever the
+                        // numbers actually change, so every bar animates in
+                        // fresh and never gets stuck below its real level.
+                        key={`income-${clampedChartPage}-${windowedIncomeBarData.map((d) => d.value).join('_')}`}
                         data={windowedIncomeBarData}
                         width={plotWidth}
                         height={180}
@@ -980,6 +992,9 @@ export default function StatsScreen() {
                     const barWidth = Math.max(10, Math.min(20, Math.floor((plotWidth - spacing * (windowedExpenseBarData.length + 1)) / windowedExpenseBarData.length)));
                     return (
                       <BarChart
+                        // Same stuck-bar-height issue as the income chart
+                        // above - see the comment there.
+                        key={`expense-${clampedChartPage}-${windowedExpenseBarData.map((d) => d.value).join('_')}`}
                         data={windowedExpenseBarData}
                         width={plotWidth}
                         height={180}
@@ -1381,6 +1396,9 @@ export default function StatsScreen() {
                         const barWidth = Math.max(16, Math.min(30, Math.floor((plotWidth - spacing * (barData.length + 1)) / barData.length)));
                         return (
                           <BarChart
+                            // Same stuck-bar-height issue as the income/expense
+                            // overview charts - see the comment there.
+                            key={`supplier-${supplierRankingType}-${barData.map((d) => d.value).join('_')}`}
                             data={barData}
                             width={plotWidth}
                             height={200}
