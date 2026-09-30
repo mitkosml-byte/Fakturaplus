@@ -232,7 +232,7 @@ export default function HomeScreen() {
       return;
     }
     if (!personalDescription.trim()) {
-      Alert.alert(t('common.error'), t('common.fillAllFields'));
+      Alert.alert(t('common.error'), t('msg.fillAllFields'));
       return;
     }
     if (isSubmittingForm) return;
@@ -593,15 +593,24 @@ export default function HomeScreen() {
                 <Ionicons name="person-circle" size={24} color="#8B5CF6" />
                 <Text style={styles.roiTitle}>{t('personal.title')}</Text>
               </View>
-              {isOwner && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <TouchableOpacity
-                  style={styles.addPersonalButton}
-                  onPress={() => setPersonalExpenseModalVisible(true)}
+                  style={styles.historyPersonalButton}
+                  onPress={() => router.push('/personal-expenses')}
                 >
-                  <Ionicons name="add-circle" size={20} color="#8B5CF6" />
-                  <Text style={styles.addPersonalText}>{t('personal.addExpense')}</Text>
+                  <Ionicons name="time-outline" size={18} color="#94A3B8" />
+                  <Text style={styles.historyPersonalText}>{t('personal.history')}</Text>
                 </TouchableOpacity>
-              )}
+                {isOwner && (
+                  <TouchableOpacity
+                    style={styles.addPersonalButton}
+                    onPress={() => setPersonalExpenseModalVisible(true)}
+                  >
+                    <Ionicons name="add-circle" size={20} color="#8B5CF6" />
+                    <Text style={styles.addPersonalText}>{t('personal.addExpense')}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
 
             {loadingRoi ? (
@@ -1585,6 +1594,19 @@ const styles = StyleSheet.create({
   addPersonalText: {
     fontSize: 12,
     color: '#8B5CF6',
+    fontWeight: '600',
+  },
+  historyPersonalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    padding: 8,
+    backgroundColor: 'rgba(148, 163, 184, 0.15)',
+    borderRadius: 8,
+  },
+  historyPersonalText: {
+    fontSize: 12,
+    color: '#94A3B8',
     fontWeight: '600',
   },
   roiStats: {

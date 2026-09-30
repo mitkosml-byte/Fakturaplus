@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -629,7 +629,7 @@ class ApiService {
   }
 
   // Personal Expenses (Owner only)
-  async getPersonalExpenses(params?: { month?: number; year?: number; expense_type?: string; category?: string }): Promise<{ personal_expenses: any[] }> {
+  async getPersonalExpenses(params?: { month?: number; year?: number; expense_type?: string; category?: string }): Promise<{ personal_expenses: PersonalExpense[] }> {
     const queryParams = new URLSearchParams();
     if (params?.month) queryParams.set('month', params.month.toString());
     if (params?.year) queryParams.set('year', params.year.toString());

@@ -553,3 +553,22 @@ export interface Message {
   text: string;
   created_at: string;
 }
+
+export type PersonalExpenseType = 'investment' | 'recurring' | 'one_time';
+export type PersonalExpenseCategory = 'goods' | 'service' | 'personnel' | 'rent' | 'extraordinary' | 'other';
+
+export interface PersonalExpense {
+  id: string;
+  user_id: string;
+  company_id: string;
+  amount: number;
+  description: string;
+  expense_type: PersonalExpenseType;
+  category: PersonalExpenseCategory;
+  period_month: number;
+  period_year: number;
+  supplier_id?: string | null;
+  project_name?: string | null;
+  notes?: string | null;
+  created_at: string;
+}

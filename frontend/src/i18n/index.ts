@@ -1838,9 +1838,13 @@ export const translations: Translations = {
     bg: 'Добави разход',
     en: 'Add Expense',
   },
+  'personal.history': {
+    bg: 'История',
+    en: 'History',
+  },
   'personal.amount': {
-    bg: 'Сума (лв)',
-    en: 'Amount (BGN)',
+    bg: 'Сума (€)',
+    en: 'Amount (€)',
   },
   'personal.description': {
     bg: 'Описание',
@@ -2043,8 +2047,8 @@ export const translations: Translations = {
     en: 'Set Budget',
   },
   'budget.monthlyLimit': {
-    bg: 'Месечен лимит (лв)',
-    en: 'Monthly Limit (BGN)',
+    bg: 'Месечен лимит (€)',
+    en: 'Monthly Limit (€)',
   },
   'budget.alertAt': {
     bg: 'Предупреждение при (%)',
@@ -2087,8 +2091,8 @@ export const translations: Translations = {
     en: 'Description',
   },
   'budget.amount': {
-    bg: 'Сума (лв)',
-    en: 'Amount (BGN)',
+    bg: 'Сума (€)',
+    en: 'Amount (€)',
   },
   'budget.dayOfMonth': {
     bg: 'Ден от месеца (1-28)',
