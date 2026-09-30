@@ -449,6 +449,94 @@ class ExportService:
         return output.getvalue()
 
     @staticmethod
+    def generate_employee_compliance_excel(
+        holiday_work: List[dict],
+        leave: List[dict],
+        company_name: str = "",
+        period_label: str = ""
+    ) -> bytes:
+        """A list of which employees worked on an official holiday (extra-
+        pay entitlement under Чл. 262 КТ) and which took leave, for an
+        accountant to attach to the required company/personnel documents."""
+        if not EXCEL_AVAILABLE:
+            raise ImportError("openpyxl is not installed")
+
+        wb = openpyxl.Workbook()
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="8B5CF6", end_color="8B5CF6", fill_type="solid")
+        header_row = 4
+
+        def write_title(ws, title):
+            ws.merge_cells('A1:D1')
+            ws['A1'] = f"{title} - {company_name}" if company_name else title
+            ws['A1'].font = Font(bold=True, size=14)
+            ws['A2'] = period_label or f"Генерирано: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+
+        LEAVE_TYPE_LABELS = {"paid": "Платена", "unpaid": "Неплатена", "sick": "Болнична"}
+
+        # ===== Работа на официални празници =====
+        ws = wb.active
+        ws.title = "Работа на празници"
+        write_title(ws, "Работа на официални празници")
+
+        holiday_headers = ["№", "Служител", "Дата", "Празник", "Бележка"]
+        for col, header in enumerate(holiday_headers, 1):
+            cell = ws.cell(row=header_row, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+
+        for idx, entry in enumerate(holiday_work, 1):
+            row = header_row + idx
+            date_str = str(entry.get("date", ""))[:10]
+            try:
+                date_str = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m.%Y")
+            except ValueError:
+                pass
+            row_values = [idx, entry.get("employee_name", ""), date_str, entry.get("holiday_name", ""), entry.get("note") or ""]
+            for col, value in enumerate(row_values, 1):
+                ws.cell(row=row, column=col, value=value)
+
+        for col, width in zip(range(1, len(holiday_headers) + 1), [5, 26, 13, 40, 30]):
+            ws.column_dimensions[get_column_letter(col)].width = width
+
+        # ===== Отпуски =====
+        ws2 = wb.create_sheet("Отпуски")
+        write_title(ws2, "Отпуски")
+
+        leave_headers = ["№", "Служител", "Вид отсъствие", "От дата", "До дата", "Брой дни", "Бележка"]
+        for col, header in enumerate(leave_headers, 1):
+            cell = ws2.cell(row=header_row, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+
+        for idx, entry in enumerate(leave, 1):
+            row = header_row + idx
+            start_str = str(entry.get("start_date", ""))[:10]
+            end_str = str(entry.get("end_date", ""))[:10]
+            days_count = ""
+            try:
+                start_d = datetime.strptime(start_str, "%Y-%m-%d")
+                end_d = datetime.strptime(end_str, "%Y-%m-%d")
+                days_count = (end_d - start_d).days + 1
+                start_str = start_d.strftime("%d.%m.%Y")
+                end_str = end_d.strftime("%d.%m.%Y")
+            except ValueError:
+                pass
+            leave_type_label = LEAVE_TYPE_LABELS.get(entry.get("leave_type"), entry.get("leave_type", ""))
+            row_values = [idx, entry.get("employee_name", ""), leave_type_label, start_str, end_str, days_count, entry.get("note") or ""]
+            for col, value in enumerate(row_values, 1):
+                ws2.cell(row=row, column=col, value=value)
+
+        for col, width in zip(range(1, len(leave_headers) + 1), [5, 26, 14, 13, 13, 10, 30]):
+            ws2.column_dimensions[get_column_letter(col)].width = width
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue()
+
+    @staticmethod
     def generate_statistics_pdf(
         stats: dict,
         top_suppliers: Optional[List[dict]] = None,

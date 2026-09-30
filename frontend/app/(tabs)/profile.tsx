@@ -335,6 +335,20 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Employee holiday-work + leave tracking - Owner and Manager */}
+          {hasPermission('manage_budget') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/employee-absences')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                <Ionicons name="sunny" size={20} color="#F59E0B" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('absences.title')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.absencesDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
+
           {/* Fixed Assets (ДМА) - Owner and Manager */}
           {hasPermission('manage_budget') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/assets')}>

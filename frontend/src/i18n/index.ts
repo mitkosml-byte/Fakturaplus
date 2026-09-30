@@ -2295,6 +2295,7 @@ export const translations: Translations = {
   },
 
   'profile.payrollDesc': { bg: 'Служители и месечни ведомости', en: 'Employees and monthly payroll' },
+  'profile.absencesDesc': { bg: 'Работа на празници и отпуски за счетоводителя', en: 'Holiday work and leave for the accountant' },
   'payroll.title': { bg: 'Ведомост за заплати', en: 'Payroll' },
   'payroll.employees': { bg: 'Служители', en: 'Employees' },
   'payroll.noEmployees': { bg: 'Няма добавени служители', en: 'No employees yet' },
@@ -2469,6 +2470,30 @@ export const translations: Translations = {
   'closedDays.statusDefaultClosed': { bg: 'По подразбиране: затворен ден (по седмичния график)', en: 'By default: closed day (weekly schedule)' },
   'closedDays.statusExceptionClosed': { bg: 'Изключение: затворен', en: 'Exception: closed' },
   'closedDays.statusExceptionOpen': { bg: 'Изключение: отворен', en: 'Exception: open' },
+
+  // Employee holiday-work + leave tracking (accountant compliance list)
+  'absences.title': { bg: 'Празници и отпуски', en: 'Holidays and leave' },
+  'absences.holidayWorkTab': { bg: 'Работа на празници', en: 'Holiday work' },
+  'absences.leaveTab': { bg: 'Отпуски', en: 'Leave' },
+  'absences.noHolidayWork': { bg: 'Няма отбелязана работа на празници за тази година', en: 'No holiday work logged for this year' },
+  'absences.noLeave': { bg: 'Няма отбелязани отпуски за тази година', en: 'No leave logged for this year' },
+  'absences.addEntry': { bg: 'Добави запис', en: 'Add entry' },
+  'absences.addHolidayWork': { bg: 'Работа на празник', en: 'Holiday work' },
+  'absences.addLeave': { bg: 'Нова отпуска', en: 'New leave' },
+  'absences.employee': { bg: 'Служител', en: 'Employee' },
+  'absences.noEmployees': { bg: 'Нямате добавени служители', en: 'No employees added yet' },
+  'absences.holiday': { bg: 'Празник', en: 'Holiday' },
+  'absences.leaveType': { bg: 'Вид отсъствие', en: 'Leave type' },
+  'absences.startDate': { bg: 'От дата', en: 'Start date' },
+  'absences.endDate': { bg: 'До дата', en: 'End date' },
+  'absences.note': { bg: 'Бележка', en: 'Note' },
+  'absences.notePlaceholder': { bg: 'По избор', en: 'Optional' },
+  'absences.endBeforeStart': { bg: 'Крайната дата е преди началната', en: 'End date is before the start date' },
+  'absences.deleteHolidayWorkConfirm': { bg: 'Да се изтрие ли записът за работа на празник?', en: 'Delete this holiday-work entry?' },
+  'absences.deleteLeaveConfirm': { bg: 'Да се изтрие ли записът за отпуска?', en: 'Delete this leave entry?' },
+  'absences.export': { bg: 'Експорт за счетоводителя', en: 'Export for the accountant' },
+  'absences.exportHint': { bg: 'Excel файл с работата на празници и отпуските за избрания период', en: 'Excel file with holiday work and leave for the selected period' },
+  'absences.exportExcel': { bg: 'Изтегли Excel', en: 'Download Excel' },
 
   // Messages (team channel + direct messages)
   'messages.title': { bg: 'Съобщения', en: 'Messages' },

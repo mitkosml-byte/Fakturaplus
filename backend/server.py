@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
 from enum import Enum
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 import base64
 import httpx
 import io
@@ -4384,6 +4384,67 @@ async def export_vat_ledger_excel(
     except ImportError:
         raise HTTPException(status_code=500, detail="Excel export not available")
 
+@api_router.get("/export/employee-compliance/excel")
+@limiter.limit("20/minute")
+async def export_employee_compliance_excel(
+    request: Request,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Export the list of employees who worked on an official holiday
+    (Чл. 262 КТ extra-pay entitlement) and employee leave for a period, so
+    the accountant can attach it to the required company/personnel documents."""
+    require_permission(current_user, "export_data")
+    now = datetime.now(timezone.utc)
+    if not start_date and not end_date:
+        start_date = now.replace(month=1, day=1).strftime("%Y-%m-%d")
+        end_date = now.strftime("%Y-%m-%d")
+
+    company_id, scope = await get_company_scope(current_user)
+
+    hw_query = dict(scope)
+    hw_query["date"] = {"$gte": start_date, "$lte": end_date}
+    holiday_work = await db.employee_holiday_work.find(hw_query, {"_id": 0}).sort("date", 1).to_list(10000)
+
+    leave_query = dict(scope)
+    leave_query["end_date"] = {"$gte": start_date}
+    leave_query["start_date"] = {"$lte": end_date}
+    leave = await db.employee_leave.find(leave_query, {"_id": 0}).sort("start_date", 1).to_list(10000)
+
+    company_name = ""
+    if company_id:
+        company = await db.companies.find_one({"id": company_id})
+        company_name = company.get("name", "") if company else ""
+
+    period_label = f"Период: {start_date} - {end_date}"
+
+    try:
+        excel_data = ExportService.generate_employee_compliance_excel(
+            holiday_work=holiday_work,
+            leave=leave,
+            company_name=company_name,
+            period_label=period_label
+        )
+
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+            action="export",
+            entity_type="employee_compliance",
+            company_id=company_id,
+            details={"format": "excel", "start_date": start_date, "end_date": end_date}
+        )
+
+        filename = f"praznici_otpuski_{start_date}_{end_date}.xlsx"
+        return Response(
+            content=excel_data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Excel export not available")
+
 # ===================== BACKUP ENDPOINTS =====================
 
 class BackupData(BaseModel):
@@ -6122,6 +6183,227 @@ async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, s
         total += e.get("total_employer_cost", 0)
     return total
 
+# ===================== OFFICIAL HOLIDAYS / РАБОТА НА ПРАЗНИЦИ И ОТПУСКИ =====================
+# Tracks which employees worked on an official Bulgarian public holiday
+# (extra-pay entitlement under Чл. 262 КТ) and employee leave (paid/unpaid/
+# sick), so an accountant can pull a list for a period to attach to the
+# required company documents. The holiday calendar itself isn't stored -
+# it's computed on demand from the fixed statutory dates plus the movable
+# Orthodox Easter ones, so it never goes stale across years.
+
+# The 9 fixed dates eligible for the Чл. 154, ал. 2 КТ weekend-shift rule
+# (Гергьовден/6 май is a public holiday but is NOT on this list in the
+# Labor Code, so it never shifts).
+_BG_FIXED_HOLIDAYS = [
+    (1, 1, "Нова година"),
+    (3, 3, "Ден на Освобождението на България"),
+    (5, 1, "Ден на труда и на международната работническа солидарност"),
+    (5, 6, "Гергьовден, Ден на храбростта и на Българската армия"),
+    (5, 24, "Ден на българската просвета и култура и на славянската писменост"),
+    (9, 6, "Ден на Съединението"),
+    (9, 22, "Ден на Независимостта на България"),
+    (12, 24, "Бъдни вечер"),
+    (12, 25, "Рождество Христово"),
+    (12, 26, "Втори ден на Коледа"),
+]
+_BG_SHIFT_ELIGIBLE = {(m, d) for (m, d, _) in _BG_FIXED_HOLIDAYS if (m, d) != (5, 6)}
+
+def _orthodox_easter(year: int) -> date:
+    """Orthodox (Julian-calendar) Easter Sunday, converted to the Gregorian
+    date - Meeus' Julian algorithm plus the +13 day Julian/Gregorian offset
+    (valid 1900-2099, comfortably covering this app's lifetime)."""
+    a = year % 4
+    b = year % 7
+    c = year % 19
+    d = (19 * c + 15) % 30
+    e = (2 * a + 4 * b - d + 34) % 7
+    month = (d + e + 114) // 31
+    day = (d + e + 114) % 31 + 1
+    julian_easter = date(year, month, day)
+    return julian_easter + timedelta(days=13)
+
+def get_bulgarian_public_holidays(year: int) -> List[dict]:
+    """Official non-working days for a civil year: the fixed statutory
+    dates, the 4 Orthodox-Easter-based ones, and the Чл. 154, ал. 2 КТ
+    weekend-shift day for any eligible fixed date that lands on a weekend.
+    This is a best-effort calculation, not a substitute for the accountant
+    checking the official government-published list for edge cases."""
+    holidays = []
+    for month, day, name in _BG_FIXED_HOLIDAYS:
+        d = date(year, month, day)
+        holidays.append({"date": d.isoformat(), "name": name})
+        if (month, day) in _BG_SHIFT_ELIGIBLE and d.weekday() in (5, 6):  # Sat=5, Sun=6
+            shift_days = 2 if d.weekday() == 5 else 1
+            shift_date = d + timedelta(days=shift_days)
+            holidays.append({
+                "date": shift_date.isoformat(),
+                "name": f"{name} (почивен ден по чл. 154, ал. 2 КТ)"
+            })
+
+    easter = _orthodox_easter(year)
+    for offset, name in [(-2, "Велики петък"), (-1, "Велика събота"), (0, "Великден"), (1, "Велики понеделник")]:
+        d = easter + timedelta(days=offset)
+        holidays.append({"date": d.isoformat(), "name": name})
+
+    # Two adjacent statutory dates (e.g. 25/26 December) can both fall on a
+    # weekend and independently shift to the SAME following weekday - merge
+    # those into one entry instead of listing the same date twice.
+    merged: dict = {}
+    for h in holidays:
+        if h["date"] in merged:
+            merged[h["date"]] = merged[h["date"]] + " / " + h["name"]
+        else:
+            merged[h["date"]] = h["name"]
+    result = [{"date": d, "name": n} for d, n in merged.items()]
+    result.sort(key=lambda h: h["date"])
+    return result
+
+def _holiday_name_for_date(date_str: str) -> Optional[str]:
+    year = int(date_str[:4])
+    for h in get_bulgarian_public_holidays(year):
+        if h["date"] == date_str:
+            return h["name"]
+    return None
+
+@api_router.get("/holidays")
+async def get_holidays(year: int, current_user: User = Depends(get_current_user)):
+    """Официалният календар на неработните дни за годината - публична
+    информация, не се филтрира по фирма."""
+    return get_bulgarian_public_holidays(year)
+
+class EmployeeHolidayWork(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    employee_id: str
+    employee_name: str  # snapshot - survives the employee being renamed/deactivated later
+    date: str  # YYYY-MM-DD, must be an official holiday
+    holiday_name: str  # snapshot of which holiday this was, at creation time
+    note: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class EmployeeHolidayWorkCreate(BaseModel):
+    employee_id: str
+    date: str
+    note: Optional[str] = None
+
+class LeaveType(str, Enum):
+    PAID = "paid"        # Платена
+    UNPAID = "unpaid"    # Неплатена
+    SICK = "sick"         # Болнична
+
+class EmployeeLeave(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    employee_id: str
+    employee_name: str
+    leave_type: LeaveType
+    start_date: str
+    end_date: str
+    note: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class EmployeeLeaveCreate(BaseModel):
+    employee_id: str
+    leave_type: LeaveType
+    start_date: str
+    end_date: str
+    note: Optional[str] = None
+
+async def _get_employee_for_company(employee_id: str, company_id: Optional[str], current_user: User) -> dict:
+    query = {"id": employee_id, "company_id": company_id} if company_id else {"id": employee_id, "user_id": current_user.user_id}
+    employee = await db.employees.find_one(query, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Служителят не е намерен")
+    return employee
+
+@api_router.post("/employees/holiday-work", response_model=EmployeeHolidayWork)
+async def create_holiday_work(payload: EmployeeHolidayWorkCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
+    company_id, _ = await get_company_scope(current_user)
+    employee = await _get_employee_for_company(payload.employee_id, company_id, current_user)
+
+    holiday_name = _holiday_name_for_date(payload.date)
+    if not holiday_name:
+        raise HTTPException(status_code=400, detail="Избраната дата не е официален празник")
+
+    entry = EmployeeHolidayWork(
+        company_id=company_id or "",
+        employee_id=payload.employee_id,
+        employee_name=employee["name"],
+        date=payload.date,
+        holiday_name=holiday_name,
+        note=payload.note,
+    )
+    await db.employee_holiday_work.insert_one(entry.dict())
+    return entry
+
+@api_router.get("/employees/holiday-work", response_model=List[EmployeeHolidayWork])
+async def list_holiday_work(start_date: Optional[str] = None, end_date: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
+    _, scope = await get_company_scope(current_user)
+    query = dict(scope)
+    if start_date or end_date:
+        query["date"] = {}
+        if start_date:
+            query["date"]["$gte"] = start_date
+        if end_date:
+            query["date"]["$lte"] = end_date
+    entries = await db.employee_holiday_work.find(query, {"_id": 0}).sort("date", 1).to_list(10000)
+    return [EmployeeHolidayWork(**e) for e in entries]
+
+@api_router.delete("/employees/holiday-work/{entry_id}")
+async def delete_holiday_work(entry_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
+    _, scope = await get_company_scope(current_user)
+    result = await db.employee_holiday_work.delete_one({"id": entry_id, **scope})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    return {"message": "Записът е изтрит"}
+
+@api_router.post("/employees/leave", response_model=EmployeeLeave)
+async def create_leave(payload: EmployeeLeaveCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
+    company_id, _ = await get_company_scope(current_user)
+    employee = await _get_employee_for_company(payload.employee_id, company_id, current_user)
+
+    if payload.end_date < payload.start_date:
+        raise HTTPException(status_code=400, detail="Крайната дата е преди началната")
+
+    entry = EmployeeLeave(
+        company_id=company_id or "",
+        employee_id=payload.employee_id,
+        employee_name=employee["name"],
+        leave_type=payload.leave_type,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        note=payload.note,
+    )
+    await db.employee_leave.insert_one(entry.dict())
+    return entry
+
+@api_router.get("/employees/leave", response_model=List[EmployeeLeave])
+async def list_leave(start_date: Optional[str] = None, end_date: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
+    _, scope = await get_company_scope(current_user)
+    query = dict(scope)
+    # Overlap match - a leave period only needs to intersect the requested
+    # window, not fall entirely inside it (e.g. leave spanning month-end).
+    if start_date:
+        query["end_date"] = {"$gte": start_date}
+    if end_date:
+        query["start_date"] = {"$lte": end_date}
+    entries = await db.employee_leave.find(query, {"_id": 0}).sort("start_date", 1).to_list(10000)
+    return [EmployeeLeave(**e) for e in entries]
+
+@api_router.delete("/employees/leave/{entry_id}")
+async def delete_leave(entry_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
+    _, scope = await get_company_scope(current_user)
+    result = await db.employee_leave.delete_one({"id": entry_id, **scope})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    return {"message": "Записът е изтрит"}
+
 # ===================== FIXED ASSETS / ДЪЛГОТРАЙНИ АКТИВИ (ДМА) =====================
 
 class AssetCategory(str, Enum):
@@ -6990,6 +7272,10 @@ async def create_indexes():
 
         # Closed-day exceptions (one override per company per date)
         await db.closed_date_exceptions.create_index([("company_id", 1), ("date", 1)], unique=True)
+
+        # Employee holiday-work / leave tracking
+        await db.employee_holiday_work.create_index([("company_id", 1), ("date", 1)])
+        await db.employee_leave.create_index([("company_id", 1), ("start_date", 1), ("end_date", 1)])
 
         logger.info("Database indexes created successfully")
     except Exception as e:

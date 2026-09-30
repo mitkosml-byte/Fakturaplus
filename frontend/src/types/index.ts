@@ -434,6 +434,38 @@ export interface PayrollEntry extends PayrollBreakdown {
   created_at: string;
 }
 
+// Official Bulgarian public holidays (computed, not stored) and
+// per-employee holiday-work / leave tracking for accountant compliance.
+export interface PublicHoliday {
+  date: string; // YYYY-MM-DD
+  name: string;
+}
+
+export interface HolidayWorkEntry {
+  id: string;
+  company_id: string;
+  employee_id: string;
+  employee_name: string;
+  date: string;
+  holiday_name: string;
+  note?: string;
+  created_at: string;
+}
+
+export type LeaveType = 'paid' | 'unpaid' | 'sick';
+
+export interface LeaveEntry {
+  id: string;
+  company_id: string;
+  employee_id: string;
+  employee_name: string;
+  leave_type: LeaveType;
+  start_date: string;
+  end_date: string;
+  note?: string;
+  created_at: string;
+}
+
 // Fixed Assets / Дълготрайни активи (ДМА)
 export type AssetCategory = 'cat_i' | 'cat_ii' | 'cat_iii' | 'cat_iv' | 'cat_v' | 'cat_vi' | 'cat_vii';
 export type AssetStatus = 'active' | 'fully_depreciated' | 'disposed';

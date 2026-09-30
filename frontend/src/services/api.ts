@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, ClosedDateException } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -756,6 +756,50 @@ class ApiService {
 
   async deletePayrollEntry(id: string): Promise<void> {
     await this.fetch(`/payroll/${id}`, { method: 'DELETE' });
+  }
+
+  // Official holidays (computed, public) + employee holiday-work / leave
+  // tracking - lets an accountant pull a compliance list for a period.
+  async getPublicHolidays(year: number): Promise<PublicHoliday[]> {
+    return this.fetch(`/holidays?year=${year}`);
+  }
+
+  async getHolidayWorkEntries(params?: { start_date?: string; end_date?: string }): Promise<HolidayWorkEntry[]> {
+    const query = new URLSearchParams();
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
+    const qs = query.toString();
+    return this.fetch(`/employees/holiday-work${qs ? `?${qs}` : ''}`);
+  }
+
+  async createHolidayWorkEntry(params: { employee_id: string; date: string; note?: string }): Promise<HolidayWorkEntry> {
+    return this.fetch('/employees/holiday-work', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async deleteHolidayWorkEntry(id: string): Promise<void> {
+    await this.fetch(`/employees/holiday-work/${id}`, { method: 'DELETE' });
+  }
+
+  async getLeaveEntries(params?: { start_date?: string; end_date?: string }): Promise<LeaveEntry[]> {
+    const query = new URLSearchParams();
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
+    const qs = query.toString();
+    return this.fetch(`/employees/leave${qs ? `?${qs}` : ''}`);
+  }
+
+  async createLeaveEntry(params: { employee_id: string; leave_type: LeaveType; start_date: string; end_date: string; note?: string }): Promise<LeaveEntry> {
+    return this.fetch('/employees/leave', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async deleteLeaveEntry(id: string): Promise<void> {
+    await this.fetch(`/employees/leave/${id}`, { method: 'DELETE' });
   }
 
   // Fixed Assets / Дълготрайни активи (ДМА)
