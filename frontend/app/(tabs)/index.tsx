@@ -292,6 +292,16 @@ export default function HomeScreen() {
     );
   };
 
+  // Dismissing without saving must not leave revenueDate pointing at
+  // whatever day was last browsed with the prev/next arrows or the date
+  // picker - otherwise the NEXT tap of the "Дневен оборот" quick action
+  // silently reopens on that stale day instead of today, and a correction
+  // typed there lands on the wrong date while today's total looks unchanged.
+  const closeRevenueModal = () => {
+    setRevenueModalVisible(false);
+    setRevenueDate(new Date());
+  };
+
   const handleAddRevenue = async () => {
     if (!fiscalRevenue && !pocketMoney) {
       Alert.alert(t('common.error'), t('msg.enterAtLeastOne'));
@@ -765,7 +775,7 @@ export default function HomeScreen() {
           <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('home.dailyRevenue')}</Text>
-              <TouchableOpacity onPress={() => setRevenueModalVisible(false)}>
+              <TouchableOpacity onPress={closeRevenueModal}>
                 <Ionicons name="close" size={28} color="#94A3B8" />
               </TouchableOpacity>
             </View>
