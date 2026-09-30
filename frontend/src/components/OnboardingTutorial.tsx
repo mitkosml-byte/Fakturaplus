@@ -2,16 +2,15 @@ import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useSegments, usePathname } from 'expo-router';
+import { useSegments, usePathname, useRouter } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { useOnboardingStore } from '../stores/onboardingStore';
 
 // Non-intrusive, one-time product tour: auto-opens the first time a given
-// user logs in (see useOnboardingStore.checkAndMaybeOpen), and stays
-// reachable afterwards via a small floating "?" button rendered on every
-// authenticated screen - so a user who skipped/finished it once can still
-// pull it back up later if they need a refresher.
+// user logs in (see useOnboardingStore.checkAndMaybeOpen). The small floating
+// "?" button rendered on every authenticated screen is a separate, permanent
+// shortcut to the Help screen - not a way to replay this tour.
 const STEPS = [
   { icon: 'sparkles', titleKey: 'tutorial.step1Title', textKey: 'tutorial.step1Text' },
   { icon: 'scan', titleKey: 'tutorial.step2Title', textKey: 'tutorial.step2Text' },
@@ -21,7 +20,7 @@ const STEPS = [
   { icon: 'help-buoy', titleKey: 'tutorial.step6Title', textKey: 'tutorial.step6Text' },
 ] as const;
 
-const HIDDEN_ON_SEGMENTS = ['login', 'forgot-password'];
+const HIDDEN_ON_SEGMENTS = ['login', 'forgot-password', 'help'];
 
 // Every tab-root screen (Home, Scan, Invoices, Stats, Profile) already has a
 // tab bar eating into the bottom, and several also place a real "add" FAB at
@@ -37,8 +36,9 @@ export function OnboardingTutorial() {
   const { t } = useTranslation();
   const segments = useSegments();
   const pathname = usePathname();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { isVisible, open, markSeen, checkAndMaybeOpen } = useOnboardingStore();
+  const { isVisible, markSeen, checkAndMaybeOpen } = useOnboardingStore();
   const [step, setStep] = React.useState(0);
 
   useEffect(() => {
@@ -79,7 +79,7 @@ export function OnboardingTutorial() {
       {!hideFloatingButton && (
         <TouchableOpacity
           style={[styles.floatingButton, { bottom: floatingBottom }]}
-          onPress={open}
+          onPress={() => router.push('/help')}
           accessibilityLabel={t('tutorial.helpButtonLabel')}
         >
           <Ionicons name="help" size={20} color="white" />

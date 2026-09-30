@@ -2,17 +2,15 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // One-time onboarding tutorial, shown automatically the first time a given
-// user logs in, and reopenable anytime after via the floating "?" button
-// (see OnboardingTutorial.tsx). Keyed per-user (not a single global flag) so
-// a shared device correctly re-shows it to a genuinely new account, and so
-// switching accounts on the same device doesn't skip it for the second user.
+// user logs in (see OnboardingTutorial.tsx). Keyed per-user (not a single
+// global flag) so a shared device correctly re-shows it to a genuinely new
+// account, and so switching accounts on the same device doesn't skip it for
+// the second user.
 const seenKey = (userId: string) => `onboarding_seen_${userId}`;
 
 interface OnboardingState {
   isVisible: boolean;
   checkedUserId: string | null;
-  open: () => void;
-  close: () => void;
   checkAndMaybeOpen: (userId: string) => Promise<void>;
   markSeen: (userId: string) => Promise<void>;
 }
@@ -20,9 +18,6 @@ interface OnboardingState {
 export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   isVisible: false,
   checkedUserId: null,
-
-  open: () => set({ isVisible: true }),
-  close: () => set({ isVisible: false }),
 
   // Runs once per user per app session - checks the persisted flag and
   // auto-opens the tutorial only if this user has never dismissed it.

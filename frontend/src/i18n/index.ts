@@ -1426,8 +1426,8 @@ export const translations: Translations = {
     en: 'Always available',
   },
   'tutorial.step6Text': {
-    bg: 'Бутонът "?" долу вляво връща този туториал по всяко време, ако ви потрябва помощ отново.',
-    en: 'The "?" button at the bottom-left brings this tutorial back anytime you need help again.',
+    bg: 'Бутонът "?" долу вляво ви отвежда директно в Помощ по всяко време, ако ви потрябва помощ отново.',
+    en: 'The "?" button at the bottom-left takes you straight to Help anytime you need it again.',
   },
   'tutorial.stepCounter': {
     bg: 'Стъпка {current} от {total}',
@@ -1450,8 +1450,8 @@ export const translations: Translations = {
     en: 'Got it',
   },
   'tutorial.helpButtonLabel': {
-    bg: 'Помощ / Туториал',
-    en: 'Help / Tutorial',
+    bg: 'Помощ',
+    en: 'Help',
   },
 
   // Roles
