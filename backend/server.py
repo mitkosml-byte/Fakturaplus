@@ -129,6 +129,12 @@ class Company(BaseModel):
     email: Optional[str] = None  # Имейл
     bank_name: Optional[str] = None  # Банка
     bank_iban: Optional[str] = None  # IBAN
+    # Дни от седмицата, в които фирмата обичайно е затворена (0=понеделник
+    # ... 6=неделя, Python date.weekday() конвенция) - изключват се от
+    # статистиките за среден дневен оборот вместо да се броят за дни с
+    # нулев оборот. None/липсващо поле = не е конфигурирано (нищо не се
+    # изключва), за да не променя поведението на вече съществуващи фирми.
+    closed_weekdays: Optional[List[int]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -143,6 +149,7 @@ class CompanyCreate(BaseModel):
     email: Optional[str] = None
     bank_name: Optional[str] = None
     bank_iban: Optional[str] = None
+    closed_weekdays: Optional[List[int]] = None
 
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
@@ -155,6 +162,7 @@ class CompanyUpdate(BaseModel):
     email: Optional[str] = None
     bank_name: Optional[str] = None
     bank_iban: Optional[str] = None
+    closed_weekdays: Optional[List[int]] = None
 
 class User(BaseModel):
     user_id: str
@@ -1971,6 +1979,118 @@ async def update_company(company_update: CompanyUpdate, current_user: User = Dep
 # is the one the frontend actually calls, and it also merges in accountant
 # memberships, which this one never did.)
 
+# ===================== CLOSED DAYS (weekly pattern + one-off exceptions) =====================
+# Company.closed_weekdays above holds the RECURRING pattern (e.g. "always
+# closed on Sunday"). This section adds per-date OVERRIDES on top of it: an
+# extra one-off closure (a holiday, an unplanned closure) with closed=True,
+# or a reopening of an otherwise-closed weekday (e.g. open this one Sunday
+# before a holiday rush) with closed=False. An exception always wins over
+# the weekly pattern for its own date.
+
+class ClosedDateException(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    date: str  # YYYY-MM-DD
+    closed: bool
+    label: Optional[str] = None  # напр. "Великден", "Ремонт"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ClosedDateExceptionUpsert(BaseModel):
+    date: str
+    closed: bool
+    label: Optional[str] = None
+
+def is_date_closed(date_str: str, closed_weekdays: set, exceptions_map: dict) -> bool:
+    """date_str is YYYY-MM-DD. An exception for this exact date always wins;
+    otherwise falls back to the recurring weekly pattern."""
+    if date_str in exceptions_map:
+        return exceptions_map[date_str]
+    weekday = datetime.strptime(date_str, "%Y-%m-%d").weekday()
+    return weekday in closed_weekdays
+
+async def get_closed_days_lookup(company_id: Optional[str]) -> tuple:
+    """Returns (closed_weekdays set, {date_str: closed bool} exceptions map)
+    for a company, ready to pass into is_date_closed for every date in a
+    range without re-querying per date."""
+    if not company_id:
+        return set(), {}
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "closed_weekdays": 1})
+    closed_weekdays = set(company.get("closed_weekdays") or []) if company else set()
+    exceptions = await db.closed_date_exceptions.find(
+        {"company_id": company_id}, {"_id": 0, "date": 1, "closed": 1}
+    ).to_list(2000)
+    exceptions_map = {e["date"]: e["closed"] for e in exceptions}
+    return closed_weekdays, exceptions_map
+
+@api_router.get("/company/closed-date-exceptions", response_model=List[ClosedDateException])
+async def get_closed_date_exceptions(current_user: User = Depends(get_current_user)):
+    """Връща еднократните изключения от седмичния график (празници,
+    извънредни затваряния или отваряния)."""
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return []
+    exceptions = await db.closed_date_exceptions.find(
+        {"company_id": company_id}, {"_id": 0}
+    ).sort("date", 1).to_list(2000)
+    return [ClosedDateException(**e) for e in exceptions]
+
+@api_router.put("/company/closed-date-exceptions", response_model=ClosedDateException)
+async def upsert_closed_date_exception(payload: ClosedDateExceptionUpsert, current_user: User = Depends(get_current_user)):
+    """Добавя/обновява изключение за конкретна дата (само Owner)."""
+    require_permission(current_user, "manage_company")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+
+    existing = await db.closed_date_exceptions.find_one({"company_id": company_id, "date": payload.date})
+    if existing:
+        await db.closed_date_exceptions.update_one(
+            {"company_id": company_id, "date": payload.date},
+            {"$set": {"closed": payload.closed, "label": payload.label}}
+        )
+        saved = await db.closed_date_exceptions.find_one({"company_id": company_id, "date": payload.date}, {"_id": 0})
+    else:
+        exception = ClosedDateException(company_id=company_id, date=payload.date, closed=payload.closed, label=payload.label)
+        await db.closed_date_exceptions.insert_one(exception.dict())
+        saved = exception.dict()
+    return ClosedDateException(**saved)
+
+@api_router.delete("/company/closed-date-exceptions/{date}")
+async def delete_closed_date_exception(date: str, current_user: User = Depends(get_current_user)):
+    """Премахва изключение за дата - денят се връща към седмичния график по подразбиране."""
+    require_permission(current_user, "manage_company")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+    result = await db.closed_date_exceptions.delete_one({"company_id": company_id, "date": date})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Няма изключение за тази дата")
+    return {"message": "Изключението е премахнато"}
+
+@api_router.get("/company/open-days-count")
+async def get_open_days_count(start_date: str, end_date: str, current_user: User = Depends(get_current_user)):
+    """Брой работни (неизключени) дни в затворен интервал [start_date, end_date]
+    (YYYY-MM-DD, включително двата края) - използва се за коректно смятане
+    на среден дневен оборот, без почивните дни да го влачат надолу."""
+    company_id, _ = await get_company_scope(current_user)
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+
+    start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    if end < start:
+        raise HTTPException(status_code=400, detail="Крайната дата е преди началната")
+
+    total_days = (end - start).days + 1
+    open_days = 0
+    d = start
+    while d <= end:
+        date_str = d.strftime("%Y-%m-%d")
+        if not is_date_closed(date_str, closed_weekdays, exceptions_map):
+            open_days += 1
+        d += timedelta(days=1)
+
+    return {"open_days": open_days, "closed_days": total_days - open_days, "total_days": total_days}
+
 # ===================== AI DATA CORRECTION MODULE =====================
 
 class DataCorrectionResult(BaseModel):
@@ -3642,7 +3762,8 @@ async def get_chart_data(
     
     start_str = start.strftime("%Y-%m-%d")
 
-    _, scope = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
 
     # Get data
     inv_query = {**scope, "date": {"$gte": start}}
@@ -3681,7 +3802,18 @@ async def get_chart_data(
         for exp in expenses:
             date_str = exp["date"][:10] if isinstance(exp["date"], str) else exp["date"].strftime("%Y-%m-%d")
             daily_data[date_str]["expense"] += exp.get("amount", 0)
-    
+
+    # Zero-fill every calendar day in the window - a day with no invoice/
+    # revenue/expense record at all (a genuine closed day, but also just a
+    # slow day with nothing entered) previously wouldn't appear in the chart
+    # at all, silently shortening it. Touching daily_data[date_str] here
+    # materializes it as a real 0/0/0 entry via the defaultdict.
+    d = start.date()
+    end_date = now.date()
+    while d <= end_date:
+        daily_data[d.strftime("%Y-%m-%d")]
+        d += timedelta(days=1)
+
     # Convert to list sorted by date
     chart_data = []
     for date_str in sorted(daily_data.keys()):
@@ -3690,9 +3822,10 @@ async def get_chart_data(
             "label": date_str[5:],  # MM-DD
             "income": round(daily_data[date_str]["income"], 2),
             "expense": round(daily_data[date_str]["expense"], 2),
-            "vat": round(daily_data[date_str]["vat"], 2)
+            "vat": round(daily_data[date_str]["vat"], 2),
+            "is_closed": is_date_closed(date_str, closed_weekdays, exceptions_map),
         })
-    
+
     return chart_data
 
 @api_router.get("/statistics/suppliers")
@@ -6854,6 +6987,9 @@ async def create_indexes():
 
         # Multi-owner removal-approval requests
         await db.owner_actions.create_index([("company_id", 1), ("status", 1)])
+
+        # Closed-day exceptions (one override per company per date)
+        await db.closed_date_exceptions.create_index([("company_id", 1), ("date", 1)], unique=True)
 
         logger.info("Database indexes created successfully")
     except Exception as e:

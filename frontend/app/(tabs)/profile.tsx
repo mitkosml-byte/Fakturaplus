@@ -293,6 +293,20 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Closed days (weekly pattern + calendar exceptions) - Owner only */}
+          {hasPermission('manage_company') && (
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/closed-days')}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+                <Ionicons name="calendar-outline" size={20} color="#EF4444" />
+              </View>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>{t('profile.closedDays')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.closedDaysDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            </TouchableOpacity>
+          )}
+
           {/* Budget - Owner and Manager only */}
           {hasPermission('manage_budget') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/budget')}>

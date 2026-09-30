@@ -1,4 +1,5 @@
 // Localization system for the app
+import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { bg as dateFnsBg, enUS as dateFnsEnUS } from 'date-fns/locale';
@@ -611,6 +612,14 @@ export const translations: Translations = {
   'profile.messagesDesc': {
     bg: 'Екипен чат и лични съобщения',
     en: 'Team chat and direct messages',
+  },
+  'profile.closedDays': {
+    bg: 'Почивни дни',
+    en: 'Closed days',
+  },
+  'profile.closedDaysDesc': {
+    bg: 'Седмичен график и празници за статистиките',
+    en: 'Weekly schedule and holidays for statistics',
   },
   'profile.backup': {
     bg: 'Google Drive бекъп',
@@ -2442,6 +2451,25 @@ export const translations: Translations = {
   'calendar.deleteTitle': { bg: 'Изтриване на събитие', en: 'Delete event' },
   'calendar.deleteConfirm': { bg: 'Сигурни ли сте, че искате да изтриете това събитие?', en: 'Are you sure you want to delete this event?' },
 
+  // Closed days (weekly pattern + one-off exceptions, excluded from daily-average stats)
+  'closedDays.title': { bg: 'Почивни дни', en: 'Closed days' },
+  'closedDays.weeklyTitle': { bg: 'Седмичен график', en: 'Weekly schedule' },
+  'closedDays.weeklyHint': { bg: 'Отбележете кои дни от седмицата обичайно сте затворени - изключват се от средния дневен оборот в статистиките.', en: "Mark which weekdays you're normally closed - excluded from the average daily turnover in statistics." },
+  'closedDays.weeklySaved': { bg: 'Седмичният график е запазен', en: 'Weekly schedule saved' },
+  'closedDays.exceptionsTitle': { bg: 'Изключения в календара', en: 'Calendar exceptions' },
+  'closedDays.exceptionsHint': { bg: 'Докоснете дата, за да я отбележите като извънредно затворена (напр. празник) или отворена въпреки седмичния график.', en: 'Tap a date to mark it as an extra closure (e.g. a holiday) or open despite the weekly schedule.' },
+  'closedDays.legendWeekly': { bg: 'По график', en: 'By schedule' },
+  'closedDays.legendClosed': { bg: 'Затворен', en: 'Closed' },
+  'closedDays.legendOpen': { bg: 'Отворен', en: 'Open' },
+  'closedDays.labelPlaceholder': { bg: 'Бележка (напр. Великден)', en: 'Note (e.g. Easter)' },
+  'closedDays.markClosed': { bg: 'Отбележи като затворен', en: 'Mark as closed' },
+  'closedDays.markOpen': { bg: 'Отбележи като отворен', en: 'Mark as open' },
+  'closedDays.removeException': { bg: 'Премахни изключението', en: 'Remove exception' },
+  'closedDays.statusDefaultOpen': { bg: 'По подразбиране: отворен ден', en: 'By default: open day' },
+  'closedDays.statusDefaultClosed': { bg: 'По подразбиране: затворен ден (по седмичния график)', en: 'By default: closed day (weekly schedule)' },
+  'closedDays.statusExceptionClosed': { bg: 'Изключение: затворен', en: 'Exception: closed' },
+  'closedDays.statusExceptionOpen': { bg: 'Изключение: отворен', en: 'Exception: open' },
+
   // Messages (team channel + direct messages)
   'messages.title': { bg: 'Съобщения', en: 'Messages' },
   'messages.noConversations': { bg: 'Все още няма разговори', en: 'No conversations yet' },
@@ -2482,15 +2510,20 @@ export const useLanguageStore = create<LanguageState>((set) => ({
 // Translation hook
 export function useTranslation() {
   const { language } = useLanguageStore();
-  
-  const t = (key: string): string => {
+
+  // Stable across renders (only changes when the language itself does) - a
+  // fresh t on every render breaks any useCallback/useEffect that lists it
+  // as a dependency (e.g. a useFocusEffect-driven load()), causing that
+  // effect to re-fire on every render instead of just on focus, which can
+  // stomp local unsaved state with a freshly re-fetched server value.
+  const t = useCallback((key: string): string => {
     const translation = translations[key];
     if (!translation) {
       console.warn(`Missing translation for key: ${key}`);
       return key;
     }
     return translation[language] || translation['bg'] || key;
-  };
+  }, [language]);
 
   const dateLocale = language === 'bg' ? dateFnsBg : dateFnsEnUS;
 

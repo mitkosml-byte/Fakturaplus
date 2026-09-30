@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, ClosedDateException } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -364,6 +364,29 @@ class ApiService {
       method: 'PUT',
       body: JSON.stringify(company),
     });
+  }
+
+  // Closed days - the weekly pattern itself lives on Company.closed_weekdays
+  // (set via updateCompany), these cover the one-off calendar exceptions.
+  async getClosedDateExceptions(): Promise<ClosedDateException[]> {
+    return this.fetch('/company/closed-date-exceptions');
+  }
+
+  async upsertClosedDateException(params: { date: string; closed: boolean; label?: string }): Promise<ClosedDateException> {
+    return this.fetch('/company/closed-date-exceptions', {
+      method: 'PUT',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async deleteClosedDateException(date: string): Promise<{ message: string }> {
+    return this.fetch(`/company/closed-date-exceptions/${date}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getOpenDaysCount(startDate: string, endDate: string): Promise<{ open_days: number; closed_days: number; total_days: number }> {
+    return this.fetch(`/company/open-days-count?start_date=${startDate}&end_date=${endDate}`);
   }
 
   // Backup

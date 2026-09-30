@@ -22,8 +22,20 @@ export interface Company {
   email?: string;
   bank_name?: string;
   bank_iban?: string;
+  // Weekdays the business is normally closed (0=Monday..6=Sunday) - excluded
+  // from "average per day" statistics instead of counting as zero-revenue.
+  closed_weekdays?: number[];
   created_at: string;
   updated_at: string;
+}
+
+export interface ClosedDateException {
+  id: string;
+  company_id: string;
+  date: string; // YYYY-MM-DD
+  closed: boolean; // true = extra closure, false = reopens an otherwise-closed weekday
+  label?: string;
+  created_at: string;
 }
 
 export interface Invitation {
@@ -190,6 +202,7 @@ export interface ChartDataPoint {
   income: number;
   expense: number;
   vat: number;
+  is_closed: boolean;
 }
 
 export interface NotificationSettings {

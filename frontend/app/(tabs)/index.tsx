@@ -36,6 +36,12 @@ export default function HomeScreen() {
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string }>();
 
   const [summary, setSummary] = useState<Summary | null>(null);
+  // Open (non-closed) days so far this month - drives the average daily
+  // turnover card below instead of the raw day-of-month number, so a rest
+  // day (see Профил > Почивни дни) doesn't drag the average down. Defaults
+  // to the day-of-month itself until the real count loads, matching the
+  // previous behavior for that first render.
+  const [openDaysThisMonth, setOpenDaysThisMonth] = useState<number>(new Date().getDate());
   const [refreshing, setRefreshing] = useState(false);
   const [revenueModalVisible, setRevenueModalVisible] = useState(false);
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
@@ -81,6 +87,16 @@ export default function HomeScreen() {
       setSummary(summaryData);
     } catch (error) {
       console.error('Error loading data:', error);
+    }
+
+    try {
+      const now = new Date();
+      const monthStart = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
+      const todayStr = format(now, 'yyyy-MM-dd');
+      const openDays = await api.getOpenDaysCount(monthStart, todayStr);
+      setOpenDaysThisMonth(Math.max(1, openDays.open_days));
+    } catch (error) {
+      console.error('Error loading open-days count:', error);
     }
   }, []);
 
@@ -490,10 +506,10 @@ export default function HomeScreen() {
             <Ionicons name="chevron-forward" size={20} color="#64748B" />
           </View>
           <Text style={styles.avgTurnoverValue}>
-            {(((summary?.total_income || 0)) / new Date().getDate()).toFixed(2)} €
+            {(((summary?.total_income || 0)) / openDaysThisMonth).toFixed(2)} €
           </Text>
           <Text style={styles.avgTurnoverSubtitle}>
-            {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(new Date().getDate()))}
+            {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysThisMonth))}
           </Text>
         </TouchableOpacity>
 

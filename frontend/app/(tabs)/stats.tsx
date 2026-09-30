@@ -27,15 +27,6 @@ const chartWidth = width - 80;
 const pieChartRadius = (width - 80) / 3;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
-// Mirrors the rolling-window lengths GET /statistics/chart-data uses on the
-// backend (now - timedelta(days=N)) - needed here to average turnover over
-// the whole window, not just the days that happen to have entries.
-const PERIOD_DAY_COUNT: Record<'week' | 'month' | 'year', number> = {
-  week: 7,
-  month: 30,
-  year: 365,
-};
-
 // Color palette for charts
 const CHART_COLORS = [
   '#8B5CF6', '#10B981', '#F59E0B', '#EF4444', '#3B82F6',
@@ -376,13 +367,22 @@ export default function StatsScreen() {
     }
   };
 
-  // Chart data for overview
+  // Open (non-closed) days within the currently loaded window - drives the
+  // average-daily-turnover card below instead of a fixed period day count,
+  // so a rest/holiday day (marked in Профил > Почивни дни) doesn't drag the
+  // average down like a bad zero-revenue day would.
+  const openDaysInWindow = Math.max(1, chartData.filter((d) => !d.is_closed).length);
+
+  // Chart data for overview - a closed day (from Профил > Почивни дни) is
+  // shown in muted grey instead of green/red, so a genuinely closed day
+  // reads as "expected" at a glance instead of looking like a problem the
+  // way an unexplained zero on an open day would.
   const incomeBarData = chartData.map((item) => ({
     value: item.income,
     label: item.label,
-    frontColor: '#10B981',
+    frontColor: item.is_closed ? '#475569' : '#10B981',
     topLabelComponent: () => (
-      <Text style={{ color: '#10B981', fontSize: 10 }}>
+      <Text style={{ color: item.is_closed ? '#64748B' : '#10B981', fontSize: 10 }}>
         {item.income > 0 ? item.income.toFixed(0) : ''}
       </Text>
     ),
@@ -391,9 +391,9 @@ export default function StatsScreen() {
   const expenseBarData = chartData.map((item) => ({
     value: item.expense,
     label: item.label,
-    frontColor: '#EF4444',
+    frontColor: item.is_closed ? '#475569' : '#EF4444',
     topLabelComponent: () => (
-      <Text style={{ color: '#EF4444', fontSize: 10 }}>
+      <Text style={{ color: item.is_closed ? '#64748B' : '#EF4444', fontSize: 10 }}>
         {item.expense > 0 ? item.expense.toFixed(0) : ''}
       </Text>
     ),
@@ -837,10 +837,10 @@ export default function StatsScreen() {
                     <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
                   </View>
                   <Text style={styles.avgTurnoverStatValue}>
-                    {(chartData.reduce((sum, d) => sum + d.income, 0) / PERIOD_DAY_COUNT[period]).toFixed(2)} €
+                    {(chartData.reduce((sum, d) => sum + d.income, 0) / openDaysInWindow).toFixed(2)} €
                   </Text>
                   <Text style={styles.avgTurnoverStatSubtitle}>
-                    {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(PERIOD_DAY_COUNT[period]))}
+                    {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysInWindow))}
                   </Text>
                 </View>
 
