@@ -32,12 +32,36 @@ export interface Invitation {
   invited_by: string;
   email?: string;
   phone?: string;
-  role: 'manager' | 'staff' | 'accountant';
+  role: 'owner' | 'manager' | 'staff' | 'accountant';
   permissions?: string[];
   code: string;
   status: 'pending' | 'accepted' | 'cancelled' | 'expired';
   expires_at: string;
   created_at: string;
+}
+
+// Multi-owner (ООД) protection: removing or demoting a co-owner is never
+// unilateral - it becomes a pending request that the OTHER current owners
+// must unanimously approve (see backend/server.py's request_owner_status_change).
+export interface OwnerAction {
+  id: string;
+  company_id: string;
+  target_user_id: string;
+  target_name: string;
+  action: 'remove' | 'manager' | 'staff' | 'accountant';
+  requested_by: string;
+  requested_by_name: string;
+  required_approver_ids: string[];
+  approved_by: string[];
+  status: 'pending' | 'executed' | 'rejected';
+  created_at: string;
+  resolved_at?: string | null;
+}
+
+export interface UserActionResult {
+  status: 'executed' | 'pending_approval';
+  message: string;
+  action?: OwnerAction;
 }
 
 export interface CompanyMembership {

@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -94,15 +94,28 @@ class ApiService {
     return this.fetch('/auth/users');
   }
   
-  async updateUserRole(userId: string, role: string, permissions?: string[]): Promise<{ message: string }> {
+  async updateUserRole(userId: string, role: string, permissions?: string[]): Promise<UserActionResult> {
     return this.fetch(`/auth/role/${userId}`, {
       method: 'PUT',
       body: JSON.stringify({ role, permissions }),
     });
   }
-  
-  async removeUserFromCompany(userId: string): Promise<{ message: string }> {
+
+  async removeUserFromCompany(userId: string): Promise<UserActionResult> {
     return this.fetch(`/auth/users/${userId}`, { method: 'DELETE' });
+  }
+
+  // Multi-owner removal-approval requests
+  async getOwnerActions(): Promise<OwnerAction[]> {
+    return this.fetch('/company/owner-actions');
+  }
+
+  async approveOwnerAction(actionId: string): Promise<{ message: string; status: string }> {
+    return this.fetch(`/company/owner-actions/${actionId}/approve`, { method: 'POST' });
+  }
+
+  async rejectOwnerAction(actionId: string): Promise<{ message: string }> {
+    return this.fetch(`/company/owner-actions/${actionId}/reject`, { method: 'POST' });
   }
   
   // Invitations
@@ -324,6 +337,16 @@ class ApiService {
     bank_iban?: string;
   }): Promise<Company> {
     return this.fetch('/company', {
+      method: 'POST',
+      body: JSON.stringify(company),
+    });
+  }
+
+  // Creates a brand new company owned by the current user, in addition to
+  // whichever one(s) they already have - unlike createOrUpdateCompany,
+  // which only ever edits the current one. Switches the user into it.
+  async createAdditionalCompany(company: { name: string; eik: string }): Promise<Company> {
+    return this.fetch('/companies', {
       method: 'POST',
       body: JSON.stringify(company),
     });

@@ -18,12 +18,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
-import { User, Invitation } from '../src/types';
+import { User, Invitation, OwnerAction } from '../src/types';
 import { useAuth } from '../src/contexts/AuthContext';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import * as Clipboard from 'expo-clipboard';
 import { getRoleName as sharedGetRoleName, getRoleColor } from '../src/utils/roles';
 import { ROLE_DEFAULT_PERMISSIONS, ConfigurableRole } from '../src/utils/permissions';
+
+// The role pickers below offer "owner" alongside the three configurable
+// roles, but an owner's permission set is always the full fixed set (see
+// ROLE_PERMISSIONS in backend/server.py) - never checklist-configurable -
+// so it's handled as a distinct branch wherever ConfigurableRole drives UI.
+type PickableRole = ConfigurableRole | 'owner';
 import { PermissionsChecklist } from '../src/components';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -37,15 +43,16 @@ export default function UsersManagementScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
-  
+  const [ownerActions, setOwnerActions] = useState<OwnerAction[]>([]);
+
   // Invitation modal
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePhone, setInvitePhone] = useState('');
-  const [inviteRole, setInviteRole] = useState<ConfigurableRole>('staff');
+  const [inviteRole, setInviteRole] = useState<PickableRole>('staff');
   const [invitePermissions, setInvitePermissions] = useState<string[]>(ROLE_DEFAULT_PERMISSIONS.staff);
   const [inviting, setInviting] = useState(false);
-  
+
   // Invitation code modal
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [invitationCode, setInvitationCode] = useState('');
@@ -53,12 +60,14 @@ export default function UsersManagementScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const [usersData, invitationsData] = await Promise.all([
+      const [usersData, invitationsData, ownerActionsData] = await Promise.all([
         api.getCompanyUsers(),
         api.getInvitations(),
+        api.getOwnerActions(),
       ]);
       setUsers(usersData);
       setInvitations(invitationsData);
+      setOwnerActions(ownerActionsData);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -78,10 +87,11 @@ export default function UsersManagementScreen() {
 
   // Switching role resets the checklist to that role's defaults - fine-tuning
   // is meant to start from a sensible baseline each time, not carry over
-  // ticks that may not even apply to the newly-picked role.
-  const handleSelectInviteRole = (role: ConfigurableRole) => {
+  // ticks that may not even apply to the newly-picked role. "owner" has no
+  // checklist at all - the role always carries the full fixed permission set.
+  const handleSelectInviteRole = (role: PickableRole) => {
     setInviteRole(role);
-    setInvitePermissions(ROLE_DEFAULT_PERMISSIONS[role]);
+    setInvitePermissions(role === 'owner' ? [] : ROLE_DEFAULT_PERMISSIONS[role]);
   };
 
   const toggleInvitePermission = (permission: string) => {
@@ -105,7 +115,10 @@ export default function UsersManagementScreen() {
         email: inviteEmail || undefined,
         phone: invitePhone || undefined,
         role: inviteRole,
-        permissions: invitePermissions,
+        // Owner always carries the full fixed permission set server-side -
+        // omitting the field (not sending []) is what tells resolve_permissions
+        // to use that default instead of intersecting against an empty ceiling.
+        permissions: inviteRole === 'owner' ? undefined : invitePermissions,
       });
 
       setInvitationCode(result.invitation.code);
@@ -172,23 +185,25 @@ export default function UsersManagementScreen() {
 
   // Edit access modal (role + permissions checklist) for an existing member
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [editRole, setEditRole] = useState<ConfigurableRole>('staff');
+  const [editRole, setEditRole] = useState<PickableRole>('staff');
   const [editPermissions, setEditPermissions] = useState<string[]>([]);
   const [savingAccess, setSavingAccess] = useState(false);
 
   const openEditAccess = (user: User) => {
-    const role = user.role as ConfigurableRole;
+    const role = user.role as PickableRole;
     setEditingUser(user);
     setEditRole(role);
-    setEditPermissions(user.permissions && user.permissions.length > 0 ? user.permissions : ROLE_DEFAULT_PERMISSIONS[role]);
+    setEditPermissions(
+      role === 'owner' ? [] : (user.permissions && user.permissions.length > 0 ? user.permissions : ROLE_DEFAULT_PERMISSIONS[role])
+    );
   };
 
   // Same as at invite time - switching role starts the checklist over at
   // that role's defaults, since a permission ticked for the old role may
-  // not even be offered for the new one.
-  const handleSelectEditRole = (role: ConfigurableRole) => {
+  // not even be offered for the new one. "owner" has no checklist.
+  const handleSelectEditRole = (role: PickableRole) => {
     setEditRole(role);
-    setEditPermissions(ROLE_DEFAULT_PERMISSIONS[role]);
+    setEditPermissions(role === 'owner' ? [] : ROLE_DEFAULT_PERMISSIONS[role]);
   };
 
   const toggleEditPermission = (permission: string) => {
@@ -201,13 +216,24 @@ export default function UsersManagementScreen() {
     if (!editingUser) return;
     setSavingAccess(true);
     try {
-      await api.updateUserRole(editingUser.user_id, editRole, editPermissions);
+      const result = await api.updateUserRole(
+        editingUser.user_id,
+        editRole,
+        editRole === 'owner' ? undefined : editPermissions
+      );
       await loadData();
       setEditingUser(null);
-      Alert.alert(
-        language === 'bg' ? 'Успех' : 'Success',
-        language === 'bg' ? 'Достъпът е обновен' : 'Access updated'
-      );
+      if (result.status === 'pending_approval') {
+        Alert.alert(
+          language === 'bg' ? 'Изисква се одобрение' : 'Approval required',
+          result.message
+        );
+      } else {
+        Alert.alert(
+          language === 'bg' ? 'Успех' : 'Success',
+          language === 'bg' ? 'Достъпът е обновен' : 'Access updated'
+        );
+      }
     } catch (error: any) {
       Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
     } finally {
@@ -215,21 +241,31 @@ export default function UsersManagementScreen() {
     }
   };
 
-  const handleRemoveUser = async (userId: string, userName: string) => {
+  const handleRemoveUser = async (user: User) => {
+    const isOwnerTarget = user.role === 'owner';
     Alert.alert(
       language === 'bg' ? 'Премахване' : 'Remove',
-      language === 'bg' 
-        ? `Сигурни ли сте, че искате да премахнете ${userName}?`
-        : `Are you sure you want to remove ${userName}?`,
+      isOwnerTarget
+        ? (language === 'bg'
+            ? `${user.name} е собственик. Премахването ще създаде заявка, която трябва да бъде одобрена от другите собственици.`
+            : `${user.name} is an owner. Removal will create a request that the other owners must approve.`)
+        : (language === 'bg'
+            ? `Сигурни ли сте, че искате да премахнете ${user.name}?`
+            : `Are you sure you want to remove ${user.name}?`),
       [
         { text: language === 'bg' ? 'Отказ' : 'Cancel', style: 'cancel' },
         {
-          text: language === 'bg' ? 'Премахни' : 'Remove',
+          text: isOwnerTarget
+            ? (language === 'bg' ? 'Изпрати заявка' : 'Send request')
+            : (language === 'bg' ? 'Премахни' : 'Remove'),
           style: 'destructive',
           onPress: async () => {
             try {
-              await api.removeUserFromCompany(userId);
+              const result = await api.removeUserFromCompany(user.user_id);
               await loadData();
+              if (result.status === 'pending_approval') {
+                Alert.alert(language === 'bg' ? 'Изисква се одобрение' : 'Approval required', result.message);
+              }
             } catch (error: any) {
               Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
             }
@@ -237,6 +273,30 @@ export default function UsersManagementScreen() {
         },
       ]
     );
+  };
+
+  const handleApproveOwnerAction = async (action: OwnerAction) => {
+    try {
+      const result = await api.approveOwnerAction(action.id);
+      await loadData();
+      if (result.status === 'executed') {
+        Alert.alert(
+          language === 'bg' ? 'Изпълнено' : 'Executed',
+          language === 'bg' ? 'Заявката получи всички нужни одобрения и беше изпълнена.' : 'The request received all required approvals and was executed.'
+        );
+      }
+    } catch (error: any) {
+      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+    }
+  };
+
+  const handleRejectOwnerAction = async (action: OwnerAction) => {
+    try {
+      await api.rejectOwnerAction(action.id);
+      await loadData();
+    } catch (error: any) {
+      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+    }
   };
 
   const getRoleName = (role: string) => sharedGetRoleName(role, language);
@@ -357,7 +417,7 @@ export default function UsersManagementScreen() {
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={styles.actionButton}
-                          onPress={() => handleRemoveUser(user.user_id, user.name)}
+                          onPress={() => handleRemoveUser(user)}
                         >
                           <Ionicons name="person-remove" size={18} color="#EF4444" />
                         </TouchableOpacity>
@@ -367,6 +427,48 @@ export default function UsersManagementScreen() {
                 </View>
               ))}
             </View>
+
+            {/* Pending owner removal/demotion requests - visible to every
+                owner, including the target, per the transparency-as-a-
+                safeguard design (see request_owner_status_change). */}
+            {ownerActions.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>
+                  {t('users.pendingOwnerActions')} ({ownerActions.length})
+                </Text>
+                {ownerActions.map((action) => {
+                  const canDecide = !!currentUser && action.required_approver_ids.includes(currentUser.user_id);
+                  const canReject = canDecide || currentUser?.user_id === action.target_user_id || currentUser?.user_id === action.requested_by;
+                  const alreadyApproved = !!currentUser && action.approved_by.includes(currentUser.user_id);
+                  const actionLabel = action.action === 'remove' ? t('users.ownerActionRemove') : getRoleName(action.action);
+                  return (
+                    <View key={action.id} style={styles.ownerActionCard}>
+                      <Text style={styles.ownerActionText}>
+                        {t('users.ownerActionSummary')
+                          .replace('{requester}', action.requested_by_name)
+                          .replace('{target}', action.target_name)
+                          .replace('{action}', actionLabel)}
+                      </Text>
+                      <Text style={styles.ownerActionProgress}>
+                        {t('users.ownerActionApprovals')}: {action.approved_by.length} / {action.required_approver_ids.length + 1}
+                      </Text>
+                      <View style={styles.ownerActionButtons}>
+                        {canDecide && !alreadyApproved && (
+                          <TouchableOpacity style={styles.ownerActionApprove} onPress={() => handleApproveOwnerAction(action)}>
+                            <Text style={styles.ownerActionApproveText}>{t('users.approve')}</Text>
+                          </TouchableOpacity>
+                        )}
+                        {canReject && (
+                          <TouchableOpacity style={styles.ownerActionReject} onPress={() => handleRejectOwnerAction(action)}>
+                            <Text style={styles.ownerActionRejectText}>{t('users.reject')}</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
 
             {/* Pending Invitations */}
             {pendingInvitations.length > 0 && (
@@ -486,21 +588,34 @@ export default function UsersManagementScreen() {
                         {getRoleName('accountant')}
                       </Text>
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.roleOption, inviteRole === 'owner' && styles.roleOptionActive]}
+                      onPress={() => handleSelectInviteRole('owner')}
+                    >
+                      <Text style={[styles.roleOptionText, inviteRole === 'owner' && styles.roleOptionTextActive]}>
+                        {getRoleName('owner')}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
                   {inviteRole === 'accountant' && (
                     <Text style={styles.accountantHint}>{t('invitations.accountantHint')}</Text>
                   )}
+                  {inviteRole === 'owner' && (
+                    <Text style={styles.accountantHint}>{t('users.ownerInviteHint')}</Text>
+                  )}
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('invitations.permissionsTitle')}</Text>
-                  <Text style={styles.permissionsHint}>{t('invitations.permissionsHint')}</Text>
-                  <PermissionsChecklist
-                    role={inviteRole}
-                    selected={invitePermissions}
-                    onToggle={toggleInvitePermission}
-                  />
-                </View>
+                {inviteRole !== 'owner' && (
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('invitations.permissionsTitle')}</Text>
+                    <Text style={styles.permissionsHint}>{t('invitations.permissionsHint')}</Text>
+                    <PermissionsChecklist
+                      role={inviteRole}
+                      selected={invitePermissions}
+                      onToggle={toggleInvitePermission}
+                    />
+                  </View>
+                )}
 
                 <TouchableOpacity
                   style={[styles.inviteButton, inviting && styles.buttonDisabled]}
@@ -567,21 +682,37 @@ export default function UsersManagementScreen() {
                               {getRoleName('accountant')}
                             </Text>
                           </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.roleOption, editRole === 'owner' && styles.roleOptionActive]}
+                            onPress={() => handleSelectEditRole('owner')}
+                          >
+                            <Text style={[styles.roleOptionText, editRole === 'owner' && styles.roleOptionTextActive]}>
+                              {getRoleName('owner')}
+                            </Text>
+                          </TouchableOpacity>
                         </View>
                         {editRole === 'accountant' && (
                           <Text style={styles.accountantHint}>{t('invitations.accountantHint')}</Text>
                         )}
+                        {editRole === 'owner' && editingUser?.role !== 'owner' && (
+                          <Text style={styles.accountantHint}>{t('users.ownerInviteHint')}</Text>
+                        )}
+                        {editingUser?.role === 'owner' && editRole !== 'owner' && (
+                          <Text style={styles.accountantHint}>{t('users.ownerDemoteHint')}</Text>
+                        )}
                       </View>
 
-                      <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{t('invitations.permissionsTitle')}</Text>
-                        <Text style={styles.permissionsHint}>{t('invitations.permissionsHint')}</Text>
-                        <PermissionsChecklist
-                          role={editRole}
-                          selected={editPermissions}
-                          onToggle={toggleEditPermission}
-                        />
-                      </View>
+                      {editRole !== 'owner' && (
+                        <View style={styles.inputGroup}>
+                          <Text style={styles.inputLabel}>{t('invitations.permissionsTitle')}</Text>
+                          <Text style={styles.permissionsHint}>{t('invitations.permissionsHint')}</Text>
+                          <PermissionsChecklist
+                            role={editRole}
+                            selected={editPermissions}
+                            onToggle={toggleEditPermission}
+                          />
+                        </View>
+                      )}
 
                       <TouchableOpacity
                         style={[styles.inviteButton, savingAccess && styles.buttonDisabled]}
@@ -805,6 +936,52 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     marginTop: 8,
+  },
+  ownerActionCard: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  ownerActionText: {
+    fontSize: 14,
+    color: 'white',
+  },
+  ownerActionProgress: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 6,
+  },
+  ownerActionButtons: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  ownerActionApprove: {
+    flex: 1,
+    backgroundColor: '#10B981',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  ownerActionApproveText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  ownerActionReject: {
+    flex: 1,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  ownerActionRejectText: {
+    color: '#EF4444',
+    fontWeight: '600',
+    fontSize: 13,
   },
   noAccessContainer: {
     flex: 1,

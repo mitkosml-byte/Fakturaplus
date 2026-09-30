@@ -743,6 +743,79 @@ async def company_has_other_members(company_id: str, excluding_user_id: str) -> 
     )
     return other is not None
 
+# A ООД (multi-owner company) support: stripping someone's owner status -
+# whether by removing them outright or demoting their role - is never a
+# single owner's unilateral call. It always goes through owner_actions
+# below, which requires every OTHER current owner (never the target, never
+# just the requester alone) to approve before it takes effect. This is the
+# most protective rule that still lets a company actually function: with 3+
+# owners, a bad-faith owner can't be outvoted by just one accomplice, but
+# can't block their own removal either since they're excluded from the
+# approver set; with exactly 2 owners there IS no independent third
+# approver, so the request is refused outright rather than silently
+# auto-approving on the requester's own say-so - a two-partner disagreement
+# has to be resolved between the two of them (one leaving voluntarily, or
+# bringing in a third owner first), not settled by whoever clicks first.
+async def get_company_owners(company_id: str) -> List[dict]:
+    return await db.users.find(
+        {"company_id": company_id, "role": "owner"}, {"_id": 0, "user_id": 1, "name": 1}
+    ).to_list(100)
+
+async def request_owner_status_change(company_id: str, target_user: dict, requested_by: User, action: str) -> dict:
+    """Queues removing/demoting an owner for the other owners' approval.
+    `action` is "remove" or the role string being demoted to. Only call
+    this when target_user's role is currently "owner". Raises HTTPException
+    if there aren't enough independent owners to authorize it at all."""
+    owners = await get_company_owners(company_id)
+    target_id = target_user["user_id"]
+
+    if len(owners) <= 1:
+        raise HTTPException(status_code=400, detail="Не можете да премахнете единствения собственик на фирмата.")
+
+    required_approver_ids = [o["user_id"] for o in owners if o["user_id"] not in (target_id, requested_by.user_id)]
+    if not required_approver_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"При двама собственици премахването на съдружник изисква взаимно съгласие - "
+                f"{target_user.get('name', 'другият собственик')} трябва сам да напусне доброволно, "
+                f"или добавете трети собственик, чието независимо одобрение да разреши въпроса."
+            ),
+        )
+
+    action_doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": company_id,
+        "target_user_id": target_id,
+        "target_name": target_user.get("name", ""),
+        "action": action,
+        "requested_by": requested_by.user_id,
+        "requested_by_name": requested_by.name,
+        "required_approver_ids": required_approver_ids,
+        "approved_by": [requested_by.user_id],
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc),
+        "resolved_at": None,
+    }
+    await db.owner_actions.insert_one(dict(action_doc))
+    action_doc.pop("_id", None)
+    return action_doc
+
+async def execute_owner_action(action: dict):
+    if action["action"] == "remove":
+        await db.users.update_one(
+            {"user_id": action["target_user_id"]},
+            {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
+        )
+    else:
+        new_role = action["action"]
+        permissions = resolve_permissions(new_role, None)
+        await db.users.update_one(
+            {"user_id": action["target_user_id"]},
+            {"$set": {"role": new_role, "permissions": permissions, "permissions_schema_version": PERMISSIONS_SCHEMA_VERSION}}
+        )
+        await ensure_membership(action["target_user_id"], action["company_id"], new_role, permissions)
+
 async def get_session_token(request: Request) -> Optional[str]:
     # Check cookie first
     session_token = request.cookies.get("session_token")
@@ -1227,6 +1300,18 @@ async def update_user_role(user_id: str, request: Request, current_user: User = 
     if user_id == current_user.user_id and current_user.role == "owner":
         raise HTTPException(status_code=400, detail="Не можете да променяте собствената си роля на собственик")
 
+    # Demoting a co-owner strips their owner powers just as surely as
+    # removing them would - it needs the same unanimous sign-off from the
+    # other owners, not a single owner's unilateral edit. Promoting someone
+    # TO owner, or changing role among non-owners, stays immediate.
+    if target_user.get("role") == "owner" and role != "owner":
+        pending_action = await request_owner_status_change(current_user.company_id, target_user, current_user, role)
+        return {
+            "status": "pending_approval",
+            "message": "Промяната засяга собственик и изисква одобрение от другите собственици, преди да влезе в сила.",
+            "action": pending_action,
+        }
+
     permissions = resolve_permissions(role, requested_permissions)
 
     # Stamps this account as having gone through a real checklist save on
@@ -1245,7 +1330,7 @@ async def update_user_role(user_id: str, request: Request, current_user: User = 
     # in sync, in case this user held accountant-level access here.
     await ensure_membership(user_id, current_user.company_id, role, permissions)
 
-    return {"message": "Ролята е обновена"}
+    return {"status": "executed", "message": "Ролята е обновена"}
 
 @api_router.get("/auth/users")
 async def get_all_users(current_user: User = Depends(get_current_user)):
@@ -1303,6 +1388,18 @@ async def remove_user_from_company(user_id: str, current_user: User = Depends(ge
     if not target_user:
         raise HTTPException(status_code=404, detail="Потребителят не е намерен")
 
+    # A co-owner can never be unilaterally kicked out - see
+    # request_owner_status_change's docstring for the full reasoning.
+    if target_user.get("role") == "owner":
+        if target_user.get("company_id") != current_user.company_id:
+            raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
+        pending_action = await request_owner_status_change(current_user.company_id, target_user, current_user, "remove")
+        return {
+            "status": "pending_approval",
+            "message": "Премахването на собственик изисква одобрение от другите собственици, преди да влезе в сила.",
+            "action": pending_action,
+        }
+
     # An accountant's membership may exist here even while they're
     # currently switched into a different client's data, so check
     # company_memberships first rather than requiring an exact
@@ -1332,7 +1429,7 @@ async def remove_user_from_company(user_id: str, current_user: User = Depends(ge
                     {"user_id": user_id},
                     {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
                 )
-        return {"message": "Достъпът на счетоводителя е премахнат"}
+        return {"status": "executed", "message": "Достъпът на счетоводителя е премахнат"}
 
     if target_user.get("company_id") != current_user.company_id:
         raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
@@ -1348,7 +1445,61 @@ async def remove_user_from_company(user_id: str, current_user: User = Depends(ge
         {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
     )
 
-    return {"message": "Потребителят е премахнат от фирмата"}
+    return {"status": "executed", "message": "Потребителят е премахнат от фирмата"}
+
+# ===================== OWNER ACTIONS (multi-owner removal safeguard) =====================
+
+@api_router.get("/company/owner-actions")
+async def list_owner_actions(current_user: User = Depends(get_current_user)):
+    """Чакащи заявки за премахване/понижаване на собственик - видими за
+    всички собственици на фирмата, включително целта на заявката (пълна
+    прозрачност е самата защита срещу злоупотреба)."""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само собственик може да вижда тези заявки")
+    if not current_user.company_id:
+        return []
+    return await db.owner_actions.find(
+        {"company_id": current_user.company_id, "status": "pending"}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+
+@api_router.post("/company/owner-actions/{action_id}/approve")
+async def approve_owner_action(action_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само собственик може да одобрява")
+    action = await db.owner_actions.find_one({"id": action_id, "company_id": current_user.company_id}, {"_id": 0})
+    if not action or action["status"] != "pending":
+        raise HTTPException(status_code=404, detail="Заявката не е намерена")
+    if current_user.user_id not in action["required_approver_ids"]:
+        raise HTTPException(status_code=403, detail="Не сте сред собствениците, чието одобрение се изисква за тази заявка")
+
+    approved_by = sorted(set(action.get("approved_by", [])) | {current_user.user_id})
+    all_approved = set(action["required_approver_ids"]).issubset(set(approved_by))
+    update = {"approved_by": approved_by}
+    if all_approved:
+        await execute_owner_action(action)
+        update["status"] = "executed"
+        update["resolved_at"] = datetime.now(timezone.utc)
+    await db.owner_actions.update_one({"id": action_id}, {"$set": update})
+    return {"message": "Одобрено", "status": update.get("status", "pending")}
+
+@api_router.post("/company/owner-actions/{action_id}/reject")
+async def reject_owner_action(action_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само собственик може да отхвърля")
+    action = await db.owner_actions.find_one({"id": action_id, "company_id": current_user.company_id}, {"_id": 0})
+    if not action or action["status"] != "pending":
+        raise HTTPException(status_code=404, detail="Заявката не е намерена")
+    # The target can always object to their own removal (extra protection
+    # on top of the required-approvers rule), same as any required approver
+    # or the person who requested it in the first place (their own withdrawal).
+    allowed = current_user.user_id in (action["required_approver_ids"] + [action["target_user_id"], action["requested_by"]])
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Нямате право да отхвърлите тази заявка")
+    await db.owner_actions.update_one(
+        {"id": action_id},
+        {"$set": {"status": "rejected", "resolved_at": datetime.now(timezone.utc)}}
+    )
+    return {"message": "Заявката е отхвърлена"}
 
 # ===================== INVITATION ENDPOINTS =====================
 
@@ -1357,14 +1508,14 @@ async def create_invitation(invitation_data: InvitationCreate, current_user: Use
     """Създава покана за нов потребител (само Owner)"""
     if current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Само титулярят може да изпраща покани")
-    
+
     if not current_user.company_id:
         raise HTTPException(status_code=400, detail="Нямате фирма")
-    
+
     if not invitation_data.email and not invitation_data.phone:
         raise HTTPException(status_code=400, detail="Въведете имейл или телефон")
-    
-    if invitation_data.role not in ["manager", "staff", "accountant"]:
+
+    if invitation_data.role not in ["manager", "staff", "accountant", "owner"]:
         raise HTTPException(status_code=400, detail="Невалидна роля за покана")
     
     # Check if user with this email already exists in the company
@@ -1495,14 +1646,16 @@ async def accept_invitation(request: Request, current_user: User = Depends(get_c
     if invitation.get("email") and invitation["email"].lower() != current_user.email.lower():
         raise HTTPException(status_code=403, detail="Тази покана е издадена за друг имейл адрес")
 
-    # Accountant invitations don't require leaving your current company
-    # first - a счетоводител can hold access to several client companies
-    # at once and switch between them (see /companies/switch). Every other
-    # role keeps the one-company rule, UNLESS the current company would be
-    # left with no one in it anyway (e.g. the throwaway company that
-    # registration auto-creates for someone who wasn't invited yet) - in
-    # that case there's no one to strand, so let them switch straight over.
-    if invitation["role"] != "accountant" and current_user.company_id:
+    # Accountant AND owner invitations don't require leaving your current
+    # company first - a счетоводител can hold access to several client
+    # companies at once (see /companies/switch), and someone becoming a
+    # co-owner here very plausibly already owns a different business
+    # elsewhere. Every other role keeps the one-company rule, UNLESS the
+    # current company would be left with no one in it anyway (e.g. the
+    # throwaway company that registration auto-creates for someone who
+    # wasn't invited yet) - in that case there's no one to strand, so let
+    # them switch straight over.
+    if invitation["role"] not in ("accountant", "owner") and current_user.company_id:
         if await company_has_other_members(current_user.company_id, current_user.user_id):
             raise HTTPException(status_code=400, detail="Вече сте член на фирма. Първо напуснете текущата фирма.")
 
@@ -1636,8 +1789,17 @@ async def leave_company(current_user: User = Depends(get_current_user)):
             )
         return {"message": "Успешно напуснахте фирмата"}
 
-    if current_user.role == "owner" and await company_has_other_members(current_user.company_id, current_user.user_id):
-        raise HTTPException(status_code=400, detail="Титулярят не може да напусне фирмата. Прехвърлете собствеността първо.")
+    if current_user.role == "owner":
+        # Leaving is fine as long as at least one OTHER owner remains to
+        # keep the company running - with a co-owner still in place, other
+        # (non-owner) teammates aren't being stranded either. Only a truly
+        # sole owner of a company that has other people in it is blocked,
+        # since there'd be no one left with owner authority at all.
+        other_owners = await db.users.count_documents({
+            "company_id": current_user.company_id, "role": "owner", "user_id": {"$ne": current_user.user_id}
+        })
+        if other_owners == 0 and await company_has_other_members(current_user.company_id, current_user.user_id):
+            raise HTTPException(status_code=400, detail="Вие сте единственият собственик на фирма с други членове. Добавете друг собственик, преди да напуснете.")
 
     await db.users.update_one(
         {"user_id": current_user.user_id},
@@ -1735,6 +1897,34 @@ async def create_or_update_company(company_data: CompanyCreate, current_user: Us
         )
         
         return company
+
+@api_router.post("/companies", response_model=Company)
+async def create_additional_company(company_data: CompanyCreate, current_user: User = Depends(get_current_user)):
+    """Създава ДОПЪЛНИТЕЛНА фирма за потребител, който вече притежава (или
+    членува в) поне една - за собственик на няколко отделни фирми/ООД-та.
+    За разлика от POST /company (което създава само ако потребителят
+    изобщо няма фирма, иначе редактира текущата), този endpoint винаги
+    създава нова фирма, запазва достъпа до старата чрез company_memberships
+    (същият механизъм, по който счетоводител държи няколко клиента) и
+    превключва потребителя в новата - той може да се върне към старата по
+    всяко време през превключвателя на фирми."""
+    existing_company = await db.companies.find_one({"eik": company_data.eik}, {"_id": 0})
+    if existing_company:
+        raise HTTPException(status_code=400, detail="Фирма с този ЕИК вече съществува. Използвайте код за присъединяване.")
+
+    company = Company(**company_data.dict())
+    await db.companies.insert_one(company.dict())
+
+    if current_user.company_id:
+        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role, current_user.permissions)
+    permissions = resolve_permissions("owner", None)
+    await ensure_membership(current_user.user_id, company.id, "owner", permissions)
+
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$set": {"company_id": company.id, "role": "owner", "permissions": permissions}}
+    )
+    return company
 
 @api_router.get("/company", response_model=Optional[Company])
 async def get_my_company(current_user: User = Depends(get_current_user)):
@@ -6635,6 +6825,9 @@ async def create_indexes():
         await db.conversation_reads.create_index([("conversation_id", 1), ("user_id", 1)], unique=True)
         await db.push_subscriptions.create_index([("endpoint", 1)], unique=True)
         await db.push_subscriptions.create_index([("user_id", 1)])
+
+        # Multi-owner removal-approval requests
+        await db.owner_actions.create_index([("company_id", 1), ("status", 1)])
 
         logger.info("Database indexes created successfully")
     except Exception as e:

@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Modal,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +35,10 @@ export default function ProfileScreen() {
   const [memberships, setMemberships] = useState<CompanyMembership[]>([]);
   const [showSwitcherModal, setShowSwitcherModal] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
+  const [showNewCompanyModal, setShowNewCompanyModal] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState('');
+  const [newCompanyEik, setNewCompanyEik] = useState('');
+  const [creatingCompany, setCreatingCompany] = useState(false);
 
   const loadCompany = useCallback(async () => {
     try {
@@ -90,6 +95,27 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleCreateCompany = async () => {
+    if (!newCompanyName.trim() || !newCompanyEik.trim()) {
+      Alert.alert(t('common.error'), t('companySwitcher.newCompanyMissingFields'));
+      return;
+    }
+    setCreatingCompany(true);
+    try {
+      await api.createAdditionalCompany({ name: newCompanyName.trim(), eik: newCompanyEik.trim() });
+      setShowNewCompanyModal(false);
+      setShowSwitcherModal(false);
+      setNewCompanyName('');
+      setNewCompanyEik('');
+      await Promise.all([refreshUser(), loadCompany(), loadMemberships()]);
+      Alert.alert(t('common.success'), t('companySwitcher.newCompanyCreated'));
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setCreatingCompany(false);
+    }
+  };
+
   const handleLogout = () => {
     Alert.alert(
       t('profile.logout'),
@@ -142,20 +168,15 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Company Banner - tappable switcher when the user has access to more than one company */}
+            {/* Company Banner - always opens the switcher, which also has
+                the "add another company" entry point, not just a way to
+                jump between companies you already have. */}
             {company && (
-              memberships.length > 1 ? (
-                <TouchableOpacity style={styles.companyBanner} onPress={() => setShowSwitcherModal(true)}>
-                  <Ionicons name="business" size={20} color="#8B5CF6" />
-                  <Text style={styles.companyName}>{company.name}</Text>
-                  <Ionicons name="swap-horizontal" size={18} color="#8B5CF6" />
-                </TouchableOpacity>
-              ) : (
-                <View style={styles.companyBanner}>
-                  <Ionicons name="business" size={20} color="#8B5CF6" />
-                  <Text style={styles.companyName}>{company.name}</Text>
-                </View>
-              )
+              <TouchableOpacity style={styles.companyBanner} onPress={() => setShowSwitcherModal(true)} accessibilityLabel={t('companySwitcher.switchCompany')}>
+                <Ionicons name="business" size={20} color="#8B5CF6" />
+                <Text style={styles.companyName}>{company.name}</Text>
+                <Ionicons name="swap-horizontal" size={18} color="#8B5CF6" />
+              </TouchableOpacity>
             )}
 
             {/* User Card */}
@@ -513,12 +534,79 @@ export default function ProfileScreen() {
             ))}
 
             <TouchableOpacity
+              style={styles.switcherAddOption}
+              onPress={() => { setShowSwitcherModal(false); setShowNewCompanyModal(true); }}
+            >
+              <View style={styles.switcherOptionIcon}>
+                <Ionicons name="add-circle-outline" size={18} color="#10B981" />
+              </View>
+              <Text style={styles.switcherAddOptionText}>{t('companySwitcher.addAnother')}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={styles.languageModalCancel}
               onPress={() => setShowSwitcherModal(false)}
             >
               <Text style={styles.languageModalCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* New Company Modal - creates an ADDITIONAL company the user also
+          owns (multiple separate businesses), distinct from editing the
+          currently active one in Company Settings. */}
+      <Modal
+        visible={showNewCompanyModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowNewCompanyModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowNewCompanyModal(false)}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.switcherModalContent} onPress={() => {}}>
+            <Text style={styles.languageModalTitle}>{t('companySwitcher.addAnother')}</Text>
+            <Text style={styles.newCompanyHint}>{t('companySwitcher.newCompanyHint')}</Text>
+
+            <Text style={styles.newCompanyLabel}>{t('company.name')}</Text>
+            <TextInput
+              style={styles.newCompanyInput}
+              value={newCompanyName}
+              onChangeText={setNewCompanyName}
+              placeholder={t('company.name')}
+              placeholderTextColor="#64748B"
+            />
+
+            <Text style={styles.newCompanyLabel}>{t('company.eik')}</Text>
+            <TextInput
+              style={styles.newCompanyInput}
+              value={newCompanyEik}
+              onChangeText={setNewCompanyEik}
+              placeholder={t('company.eik')}
+              placeholderTextColor="#64748B"
+              keyboardType="number-pad"
+            />
+
+            <TouchableOpacity
+              style={[styles.newCompanySubmit, creatingCompany && { opacity: 0.6 }]}
+              onPress={handleCreateCompany}
+              disabled={creatingCompany}
+            >
+              {creatingCompany ? <ActivityIndicator color="white" /> : (
+                <Text style={styles.newCompanySubmitText}>{t('common.save')}</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.languageModalCancel}
+              onPress={() => setShowNewCompanyModal(false)}
+            >
+              <Text style={styles.languageModalCancelText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
     </ImageBackground>
@@ -778,5 +866,52 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
     fontWeight: '500',
+  },
+  switcherAddOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  switcherAddOptionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#10B981',
+  },
+  newCompanyHint: {
+    fontSize: 13,
+    color: '#94A3B8',
+    marginBottom: 16,
+  },
+  newCompanyLabel: {
+    fontSize: 13,
+    color: '#94A3B8',
+    marginBottom: 6,
+  },
+  newCompanyInput: {
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: 'white',
+    fontSize: 15,
+    marginBottom: 14,
+  },
+  newCompanySubmit: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  newCompanySubmitText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 15,
   },
 });
