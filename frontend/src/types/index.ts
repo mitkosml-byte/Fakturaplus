@@ -94,7 +94,8 @@ export interface Invoice {
   vat_treatment?: VatTreatment;
   protocol_number?: string;
   date: string;
-  image_base64?: string;
+  image_base64?: string; // Legacy - едностранично сканиране
+  image_base64s?: string[]; // Всички страници на сканираната фактура, по ред
   notes?: string;
   items?: InvoiceItemCreate[];
   payment_method?: PaymentMethod;

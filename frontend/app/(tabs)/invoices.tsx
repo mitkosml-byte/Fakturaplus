@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -168,6 +169,40 @@ export default function InvoicesScreen() {
       });
     return () => { cancelled = true; };
   }, [selectedInvoice]);
+
+  // The list endpoint never returns the scanned page images (kept out to
+  // keep list payloads small) - fetch the full invoice on demand only when
+  // its detail modal is open, so pages can be reviewed after saving.
+  const [scannedPages, setScannedPages] = useState<string[]>([]);
+  const [loadingScannedPages, setLoadingScannedPages] = useState(false);
+  const [viewerPageIndex, setViewerPageIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!selectedInvoice) {
+      setScannedPages([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingScannedPages(true);
+    api.getInvoice(selectedInvoice.id)
+      .then((full) => {
+        if (cancelled) return;
+        const pages = full.image_base64s && full.image_base64s.length > 0
+          ? full.image_base64s
+          : full.image_base64
+          ? [full.image_base64]
+          : [];
+        setScannedPages(pages);
+      })
+      .catch((error) => {
+        console.error('Error loading invoice scan images:', error);
+        if (!cancelled) setScannedPages([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingScannedPages(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedInvoice?.id]);
 
   const [updatingPayment, setUpdatingPayment] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
@@ -790,6 +825,32 @@ export default function InvoicesScreen() {
                   );
                 })()}
 
+                {(loadingScannedPages || scannedPages.length > 0) && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionLabel}>{t('invoices.scannedPages')}</Text>
+                    {loadingScannedPages ? (
+                      <ActivityIndicator size="small" color="#64748B" style={{ marginTop: 8 }} />
+                    ) : (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                        {scannedPages.map((uri, index) => (
+                          <TouchableOpacity
+                            key={index}
+                            style={styles.scannedPageThumbWrapper}
+                            onPress={() => setViewerPageIndex(index)}
+                          >
+                            <Image source={{ uri }} style={styles.scannedPageThumb} resizeMode="cover" />
+                            {scannedPages.length > 1 && (
+                              <View style={styles.scannedPageBadge}>
+                                <Text style={styles.scannedPageBadgeText}>{index + 1}</Text>
+                              </View>
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    )}
+                  </View>
+                )}
+
                 {selectedInvoice.notes && (
                   <View style={styles.detailSection}>
                     <Text style={styles.detailSectionLabel}>{t('invoices.notes')}</Text>
@@ -810,6 +871,48 @@ export default function InvoicesScreen() {
               </ScrollView>
             )}
           </View>
+        </View>
+      </Modal>
+
+      {/* Full-screen scanned page viewer - opened by tapping a thumbnail in
+          the detail modal above. */}
+      <Modal visible={viewerPageIndex !== null} animationType="fade" transparent>
+        <View style={styles.pageViewerOverlay}>
+          <TouchableOpacity
+            style={styles.pageViewerClose}
+            onPress={() => setViewerPageIndex(null)}
+            accessibilityLabel={t('common.close')}
+          >
+            <Ionicons name="close" size={28} color="white" />
+          </TouchableOpacity>
+          {viewerPageIndex !== null && (
+            <>
+              <Image
+                source={{ uri: scannedPages[viewerPageIndex] }}
+                style={styles.pageViewerImage}
+                resizeMode="contain"
+              />
+              {scannedPages.length > 1 && (
+                <View style={styles.pageViewerNav}>
+                  <TouchableOpacity
+                    style={styles.pageViewerNavButton}
+                    disabled={viewerPageIndex === 0}
+                    onPress={() => setViewerPageIndex((i) => (i !== null ? Math.max(0, i - 1) : i))}
+                  >
+                    <Ionicons name="chevron-back" size={24} color={viewerPageIndex === 0 ? '#475569' : 'white'} />
+                  </TouchableOpacity>
+                  <Text style={styles.pageViewerNavText}>{viewerPageIndex + 1} / {scannedPages.length}</Text>
+                  <TouchableOpacity
+                    style={styles.pageViewerNavButton}
+                    disabled={viewerPageIndex === scannedPages.length - 1}
+                    onPress={() => setViewerPageIndex((i) => (i !== null ? Math.min(scannedPages.length - 1, i + 1) : i))}
+                  >
+                    <Ionicons name="chevron-forward" size={24} color={viewerPageIndex === scannedPages.length - 1 ? '#475569' : 'white'} />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </>
+          )}
         </View>
       </Modal>
 
@@ -1247,6 +1350,63 @@ const styles = StyleSheet.create({
   },
   detailSection: {
     marginBottom: 16,
+  },
+  scannedPageThumbWrapper: {
+    marginRight: 10,
+    position: 'relative',
+  },
+  scannedPageThumb: {
+    width: 72,
+    height: 96,
+    borderRadius: 8,
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  scannedPageBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  scannedPageBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  pageViewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageViewerClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 1,
+    padding: 8,
+  },
+  pageViewerImage: {
+    width: '100%',
+    height: '80%',
+  },
+  pageViewerNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 24,
+    marginTop: 16,
+  },
+  pageViewerNavButton: {
+    padding: 8,
+  },
+  pageViewerNavText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
   protocolBanner: {
     flexDirection: 'row',

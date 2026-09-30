@@ -260,7 +260,8 @@ class Invoice(BaseModel):
     vat_treatment: Optional[VatTreatment] = None  # ДДС третиране за дневника на покупки
     protocol_number: Optional[str] = None  # Номер на протокол по чл.117 ЗДДС (само за reverse_charge)
     date: datetime
-    image_base64: Optional[str] = None
+    image_base64: Optional[str] = None  # Legacy - фактури, сканирани преди многостраничната поддръжка
+    image_base64s: Optional[List[str]] = None  # Всички страници на сканираната фактура, по ред
     notes: Optional[str] = None
     items: Optional[List[dict]] = None  # Списък с артикули
     # Плащане към доставчика - незададено (None) означава "не се следи",
@@ -338,7 +339,8 @@ class InvoiceCreate(BaseModel):
     total_amount: float
     vat_treatment: Optional[VatTreatment] = None
     date: str
-    image_base64: Optional[str] = None
+    image_base64: Optional[str] = None  # Legacy - едностранично сканиране
+    image_base64s: Optional[List[str]] = None  # Всички страници на сканираната фактура, по ред
     notes: Optional[str] = None
     items: Optional[List[InvoiceItemCreate]] = None  # Артикули
     payment_method: Optional[str] = None  # cash | bank_transfer
@@ -2401,7 +2403,10 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 - ДДС в България обикновено е 20%.
 - Датата винаги във формат YYYY-MM-DD.
 - Ако дадена стойност наистина не може да се прочете - остави я празна ("" за текст, 0 за число, null за дата), но НЕ измисляй данни, които не се виждат на изображението.
-- Разпознавай възможно най-много от вариациите в изписването (главни/малки букви, съкращения на правни форми, различно разположение на текста)."""
+- Разпознавай възможно най-много от вариациите в изписването (главни/малки букви, съкращения на правни форми, различно разположение на текста).
+
+МНОГОСТРАНИЧНИ ФАКТУРИ:
+Понякога ще получиш НЯКОЛКО изображения една след друга (в реда, в който са заснети) - това са СТРАНИЦИ НА ЕДНА И СЪЩА ФАКТУРА, а не отделни документи. Заглавната част (доставчик, ЕИК, номер, дата) обикновено е само на първата страница - вземи я оттам. Таблицата с артикули може да продължава през няколко страници - извлечи РЕДОВЕТЕ ОТ ВСИЧКИ СТРАНИЦИ ПОРЕД, като ги обединиш в един общ списък, без да пропускаш или дублираш редове (внимавай ако последният ред на една страница и първият на следващата съвпадат - това е една и съща позиция, не я брой два пъти). Общите суми (данъчна основа, ДДС, обща сума за плащане) обикновено са отпечатани само на ПОСЛЕДНАТА страница - вземи ги оттам, а не сумирай ръчно от отделните страници."""
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
 @limiter.limit("20/minute")
@@ -2410,33 +2415,57 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
         raise HTTPException(status_code=503, detail="AI разпознаването временно не е налично. Моля, въведете данните ръчно.")
 
     body = await request.json()
-    image_data = body.get("image_base64", "")
+    # Multi-page capture sends a list; a single legacy image still sends
+    # the singular field - normalize both into one ordered list of pages.
+    images_data: List[str] = body.get("image_base64s") or []
+    if not images_data:
+        single = body.get("image_base64", "")
+        if single:
+            images_data = [single]
 
-    if not image_data:
+    if not images_data:
         raise HTTPException(status_code=400, detail="Липсва изображение")
 
-    # Извличане на media type от data URL префикса (ако има), преди да го махнем
-    media_type = "image/jpeg"
-    if image_data.startswith("data:") and "," in image_data:
-        header, image_data = image_data.split(",", 1)
-        header_match = re.match(r"data:([^;]+);base64", header)
-        if header_match:
-            media_type = header_match.group(1)
-    elif "," in image_data:
-        image_data = image_data.split(",")[1]
+    MAX_OCR_PAGES = 6
+    if len(images_data) > MAX_OCR_PAGES:
+        raise HTTPException(status_code=400, detail=f"Твърде много страници (макс. {MAX_OCR_PAGES}).")
 
     # Reject oversized images before they're decoded and forwarded to the
     # Anthropic API - otherwise a single request can exhaust server memory
     # on decode and amplify AI API cost with no real invoice-photo use case
     # ever needing more than this. Base64 is ~4/3 the size of the raw
-    # bytes, so this caps the decoded image at roughly 10MB.
+    # bytes, so this caps each decoded page at roughly 10MB.
     MAX_OCR_IMAGE_BASE64_CHARS = 14_000_000
-    if len(image_data) > MAX_OCR_IMAGE_BASE64_CHARS:
-        raise HTTPException(status_code=413, detail="Изображението е твърде голямо. Моля, използвайте по-малка снимка (до ~10MB).")
+
+    image_blocks = []
+    for raw in images_data:
+        page_data = raw
+        media_type = "image/jpeg"
+        if page_data.startswith("data:") and "," in page_data:
+            header, page_data = page_data.split(",", 1)
+            header_match = re.match(r"data:([^;]+);base64", header)
+            if header_match:
+                media_type = header_match.group(1)
+        elif "," in page_data:
+            page_data = page_data.split(",")[1]
+
+        if len(page_data) > MAX_OCR_IMAGE_BASE64_CHARS:
+            raise HTTPException(status_code=413, detail="Изображението е твърде голямо. Моля, използвайте по-малка снимка (до ~10MB на страница).")
+
+        image_blocks.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": page_data}
+        })
 
     # Get company_id for supplier matching
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
+
+    prompt_text = (
+        "Извлечи всички данни от тази фактура: доставчика (не получателя!), ЕИК ако е видим, номер, дата, суми и ВСИЧКИ редове от таблицата с артикули."
+        if len(image_blocks) == 1 else
+        f"Изображенията по-горе са {len(image_blocks)} последователни страници на ЕДНА фактура. Извлечи всички данни от нея: доставчика (не получателя!), ЕИК ако е видим, номер, дата, сумите от последната страница и ВСИЧКИ редове от таблицата с артикули, обединени от всички страници."
+    )
 
     try:
         response = await anthropic_client.messages.parse(
@@ -2446,13 +2475,10 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
             messages=[{
                 "role": "user",
                 "content": [
-                    {
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": media_type, "data": image_data}
-                    },
+                    *image_blocks,
                     {
                         "type": "text",
-                        "text": "Извлечи всички данни от тази фактура: доставчика (не получателя!), ЕИК ако е видим, номер, дата, суми и ВСИЧКИ редове от таблицата с артикули."
+                        "text": prompt_text
                     }
                 ]
             }],
@@ -2796,7 +2822,7 @@ async def get_invoices(
         query["payment_method"] = "bank_transfer"
         query["payment_due_date"] = {"$lt": datetime.now(timezone.utc)}
 
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(1000)
     return [Invoice(**inv) for inv in invoices]
 
 @api_router.get("/invoices/protocols/reverse-charge")
@@ -2809,7 +2835,7 @@ async def get_reverse_charge_protocols(current_user: User = Depends(get_current_
     _, query = await get_company_scope(current_user)
     query["vat_treatment"] = VatTreatment.REVERSE_CHARGE
 
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(1000)
     return [Invoice(**inv) for inv in invoices]
 
 @api_router.get("/invoices/{invoice_id}", response_model=Invoice)
@@ -3862,7 +3888,7 @@ async def get_detailed_supplier_stats(
     _, query = await get_company_scope(current_user)
     query["supplier"] = {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}
 
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", 1).to_list(10000)
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", 1).to_list(10000)
     
     if not invoices:
         return {
@@ -4052,7 +4078,7 @@ async def get_single_supplier_stats(
         if end_date:
             query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
     
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(1000)
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(1000)
     
     if not invoices:
         return {
@@ -4186,7 +4212,7 @@ async def export_vat_ledger_excel(
         "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
         "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
     }
-    purchases = await db.invoices.find(inv_query, {"_id": 0, "image_base64": 0}).sort("date", 1).to_list(10000)
+    purchases = await db.invoices.find(inv_query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", 1).to_list(10000)
 
     rev_query = dict(scope)
     rev_query["date"] = {"$gte": start_date, "$lte": end_date}
@@ -5331,7 +5357,7 @@ async def export_invoices_excel(
             query["date"] = {}
         query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
     
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(10000)
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(10000)
     
     # Get company name
     company_name = ""
@@ -5380,7 +5406,7 @@ async def export_invoices_pdf(
             query["date"] = {}
         query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
     
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0}).sort("date", -1).to_list(10000)
+    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(10000)
     
     company_name = ""
     if company_id:

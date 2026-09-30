@@ -160,11 +160,12 @@ class ApiService {
     });
   }
 
-  // OCR
-  async scanInvoice(imageBase64: string): Promise<OCRResult> {
+  // OCR - accepts one or several photographed pages of the same invoice;
+  // the backend merges them into a single set of extracted fields.
+  async scanInvoice(images: string[]): Promise<OCRResult> {
     return this.fetch('/ocr/scan', {
       method: 'POST',
-      body: JSON.stringify({ image_base64: imageBase64 }),
+      body: JSON.stringify({ image_base64s: images }),
     });
   }
 
@@ -232,6 +233,12 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(invoice),
     });
+  }
+
+  // Fetches the full invoice record including its scanned page image(s) -
+  // the list endpoints above omit those to keep list payloads small.
+  async getInvoice(id: string): Promise<Invoice> {
+    return this.fetch(`/invoices/${id}`);
   }
 
   async updateInvoice(id: string, invoice: Partial<Invoice>): Promise<Invoice> {

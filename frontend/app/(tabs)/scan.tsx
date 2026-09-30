@@ -49,7 +49,11 @@ export default function ScanScreen() {
 
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  // Every photographed page of the current invoice, in capture order - a
+  // long invoice can span several pages, so this isn't limited to one shot.
+  // Each entry is a full data URI (ready to display AND to send to the
+  // backend, which strips the prefix itself).
+  const [capturedImages, setCapturedImages] = useState<string[]>([]);
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
   const [ocrCorrections, setOcrCorrections] = useState<string[]>([]);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
@@ -120,6 +124,26 @@ export default function ScanScreen() {
   // to sites), so photos often came out blurry regardless of screen size
   // or phone quality - the native camera app has full autofocus/HDR and
   // uses the phone's actual camera capabilities.
+  // Adds a newly captured page to the current invoice and re-runs OCR over
+  // ALL pages so far (not just the new one) - a total on the last page or a
+  // header on the first page can only be read correctly once every page is
+  // known, so partial per-page results would just get overwritten anyway.
+  const addPage = async (dataUri: string) => {
+    const updated = [...capturedImages, dataUri];
+    setCapturedImages(updated);
+    await processImages(updated);
+  };
+
+  const removePage = async (index: number) => {
+    const updated = capturedImages.filter((_, i) => i !== index);
+    if (updated.length === 0) {
+      resetForm();
+      return;
+    }
+    setCapturedImages(updated);
+    await processImages(updated);
+  };
+
   const handleTakePhoto = async () => {
     try {
       const result = await ImagePicker.launchCameraAsync({
@@ -129,8 +153,7 @@ export default function ScanScreen() {
       });
 
       if (!result.canceled && result.assets[0].base64) {
-        setCapturedImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
-        await processImage(result.assets[0].base64);
+        await addPage(`data:image/jpeg;base64,${result.assets[0].base64}`);
       }
     } catch (error) {
       console.error('Error taking photo:', error);
@@ -146,17 +169,16 @@ export default function ScanScreen() {
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      setCapturedImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
-      await processImage(result.assets[0].base64);
+      await addPage(`data:image/jpeg;base64,${result.assets[0].base64}`);
     }
   };
 
-  const processImage = async (base64: string) => {
+  const processImages = async (images: string[]) => {
     setIsScanning(true);
     setOcrCorrections([]);
     setOcrConfidence(null);
     try {
-      const result = await api.scanInvoice(base64);
+      const result = await api.scanInvoice(images);
       setOcrResult(result);
       setSupplier(result.supplier);
       setSupplierEik(result.supplier_eik || '');
@@ -245,7 +267,7 @@ export default function ScanScreen() {
         total_amount: parseFloat(totalAmount) || 0,
         vat_treatment: vatTreatment || undefined,
         date: invoiceDate.toISOString(),
-        image_base64: capturedImage || undefined,
+        image_base64s: capturedImages.length > 0 ? capturedImages : undefined,
         notes: notes || undefined,
         items: itemsPayload.length > 0 ? itemsPayload : undefined,
         payment_method: paymentMethod || undefined,
@@ -300,7 +322,7 @@ export default function ScanScreen() {
   };
 
   const resetForm = () => {
-    setCapturedImage(null);
+    setCapturedImages([]);
     setOcrResult(null);
     setSupplier('');
     setSupplierEik('');
@@ -331,7 +353,7 @@ export default function ScanScreen() {
                 <Text style={styles.subtitle}>{language === 'bg' ? 'Използвай OCR за автоматично извличане' : 'Use OCR for automatic extraction'}</Text>
               </View>
 
-              {!capturedImage && (
+              {capturedImages.length === 0 && (
                 <View style={styles.modeToggle}>
                   <TouchableOpacity
                     style={[styles.modeButton, scanMode === 'purchase' && styles.modeButtonActive]}
@@ -352,7 +374,7 @@ export default function ScanScreen() {
                 </View>
               )}
 
-              {!capturedImage ? (
+              {capturedImages.length === 0 ? (
                 <View style={styles.scanOptions}>
               <TouchableOpacity style={styles.scanButton} onPress={handleTakePhoto}>
                 <View style={styles.scanIconContainer}>
@@ -372,7 +394,7 @@ export default function ScanScreen() {
             </View>
           ) : null}
 
-          {!capturedImage && scanMode === 'purchase' && (
+          {capturedImages.length === 0 && scanMode === 'purchase' && (
             <View style={styles.tipsBox}>
               <View style={styles.tipsHeader}>
                 <Ionicons name="sparkles-outline" size={18} color="#8B5CF6" />
@@ -388,7 +410,7 @@ export default function ScanScreen() {
             </View>
           )}
 
-          {!capturedImage && scanMode === 'sales' && (
+          {capturedImages.length === 0 && scanMode === 'sales' && (
             <View style={styles.tipsBox}>
               <View style={styles.tipsHeader}>
                 <Ionicons name="sparkles-outline" size={18} color="#8B5CF6" />
@@ -406,11 +428,52 @@ export default function ScanScreen() {
             </View>
           )}
 
-          {capturedImage && (
+          {capturedImages.length > 0 && (
             <View style={styles.resultContainer}>
-              {/* Preview Image */}
+              {/* Captured pages - a long invoice can span several photos,
+                  each shown as a thumbnail with its own remove button. */}
               <View style={styles.imagePreview}>
-                <Image source={{ uri: capturedImage }} style={styles.previewImage} resizeMode="contain" />
+                {capturedImages.length > 1 && (
+                  <Text style={styles.pagesCountText}>
+                    {language === 'bg' ? `Фактура с ${capturedImages.length} страници` : `Invoice with ${capturedImages.length} pages`}
+                  </Text>
+                )}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pagesStrip}>
+                  {capturedImages.map((uri, index) => (
+                    <View key={index} style={styles.pageThumbWrapper}>
+                      <Image source={{ uri }} style={styles.pageThumb} resizeMode="cover" />
+                      <View style={styles.pageThumbBadge}>
+                        <Text style={styles.pageThumbBadgeText}>{index + 1}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.pageThumbRemove}
+                        onPress={() => removePage(index)}
+                        disabled={isScanning}
+                        accessibilityLabel={language === 'bg' ? 'Премахни страницата' : 'Remove page'}
+                      >
+                        <Ionicons name="close" size={14} color="white" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.addPageTile}
+                    onPress={handleTakePhoto}
+                    disabled={isScanning}
+                    accessibilityLabel={t('scan.addPage')}
+                  >
+                    <Ionicons name="add" size={22} color="#8B5CF6" />
+                  </TouchableOpacity>
+                </ScrollView>
+                <View style={styles.pageActionsRow}>
+                  <TouchableOpacity style={styles.addPageButton} onPress={handleTakePhoto} disabled={isScanning}>
+                    <Ionicons name="camera" size={16} color="#8B5CF6" />
+                    <Text style={styles.addPageButtonText}>{t('scan.addPage')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.addPageButton} onPress={handlePickImage} disabled={isScanning}>
+                    <Ionicons name="image" size={16} color="#8B5CF6" />
+                    <Text style={styles.addPageButtonText}>{t('scan.fromGallery')}</Text>
+                  </TouchableOpacity>
+                </View>
                 <TouchableOpacity style={styles.retakeButton} onPress={resetForm}>
                   <Ionicons name="refresh" size={20} color="white" />
                   <Text style={styles.retakeText}>{t('scan.newScan')}</Text>
@@ -933,10 +996,81 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
   },
-  previewImage: {
-    width: '100%',
-    height: 200,
+  pagesCountText: {
+    color: '#C4B5FD',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  pagesStrip: {
+    flexDirection: 'row',
+  },
+  pageThumbWrapper: {
+    marginRight: 10,
+    position: 'relative',
+  },
+  pageThumb: {
+    width: 72,
+    height: 96,
     borderRadius: 8,
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  pageThumbBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  pageThumbBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  pageThumbRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addPageTile: {
+    width: 72,
+    height: 96,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#334155',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  addPageButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  addPageButtonText: {
+    color: '#8B5CF6',
+    fontSize: 13,
+    fontWeight: '600',
   },
   retakeButton: {
     flexDirection: 'row',

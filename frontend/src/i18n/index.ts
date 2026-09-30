@@ -446,6 +446,10 @@ export const translations: Translations = {
     bg: 'Ново сканиране',
     en: 'New Scan',
   },
+  'scan.addPage': {
+    bg: 'Добави страница',
+    en: 'Add Page',
+  },
   'scan.tapToFocus': {
     bg: 'Докоснете екрана за фокусиране',
     en: 'Tap screen to focus',
@@ -833,6 +837,10 @@ export const translations: Translations = {
   'invoices.notes': {
     bg: 'Бележки',
     en: 'Notes',
+  },
+  'invoices.scannedPages': {
+    bg: 'Сканирани страници',
+    en: 'Scanned Pages',
   },
   'invoices.items': {
     bg: 'Артикули',
