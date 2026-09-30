@@ -19,19 +19,19 @@ export default function TermsOfServiceScreen() {
   
   const content = language === 'bg' ? {
     title: 'Условия за ползване',
-    lastUpdated: 'Последна актуализация: Януари 2025',
+    lastUpdated: 'Последна актуализация: 30 септември 2026 г.',
     sections: [
       {
         title: '1. Приемане на условията',
-        text: 'С използването на Invoice Manager вие приемате тези условия за ползване. Ако не сте съгласни с някое от условията, моля не използвайте приложението.',
+        text: 'С използването на Фактура+ вие приемате тези условия за ползване. Ако не сте съгласни с някое от условията, моля не използвайте приложението.',
       },
       {
         title: '2. Описание на услугата',
-        text: 'Invoice Manager е приложение за управление на фактури, финансова отчетност и изчисляване на ДДС за бизнеси в България. Услугата включва OCR сканиране, статистики и backup функционалност.',
+        text: 'Фактура+ е приложение за управление на фактури, дневен оборот, разходи, ведомости, дълготрайни активи и финансова отчетност за бизнеси в България. Услугата включва OCR сканиране на фактури (вкл. многостранични), автоматично изчисляване на ДДС, статистики и прогнози, работа в екип с роли и права за достъп, споделен календар и съобщения, проследяване на цени, одитен лог, изчисляване на официалните празници и проследяване на отпуски, износ на данни и Google Drive backup функционалност.',
       },
       {
         title: '3. Потребителски акаунт',
-        text: 'Вие сте отговорни за:\n• Поддържане на конфиденциалност на акаунта\n• Всички дейности под вашия акаунт\n• Актуалност на информацията\n• Незабавно уведомяване при неоторизиран достъп',
+        text: 'Вие сте отговорни за:\n• Поддържане на конфиденциалност на акаунта\n• Всички дейности под вашия акаунт\n• Актуалност на информацията\n• Незабавно уведомяване при неоторизиран достъп\n• Данните, които въвеждате за други лица (служители, съдружници), включително уведомяването им, когато е приложимо по закон',
       },
       {
         title: '4. Допустимо използване',
@@ -39,11 +39,11 @@ export default function TermsOfServiceScreen() {
       },
       {
         title: '5. Интелектуална собственост',
-        text: 'Всички права върху приложението, включително код, дизайн, лого и съдържание, принадлежат на Invoice Manager. Получавате ограничен лиценз за лично, некомерсиално използване.',
+        text: 'Всички права върху приложението, включително код, дизайн, лого и съдържание, принадлежат на Фактура+. Получавате ограничен лиценз за използване на услугата в рамките на вашата фирма.',
       },
       {
         title: '6. Ограничение на отговорността',
-        text: 'Услугата се предоставя "както е". Не гарантираме непрекъснатост или липса на грешки. Не носим отговорност за:\n• Загуба на данни\n• Финансови загуби от използване на приложението\n• Грешки в изчисленията',
+        text: 'Услугата се предоставя "както е". Не гарантираме непрекъснатост или липса на грешки. Приложението е помощен инструмент - крайната отговорност за верността на счетоводните и данъчни резултати остава на потребителя/счетоводителя. Не носим отговорност за:\n• Загуба на данни\n• Финансови загуби от използване на приложението\n• Грешки в изчисленията или в автоматично разпознатите от AI данни',
       },
       {
         title: '7. Прекратяване',
@@ -60,19 +60,19 @@ export default function TermsOfServiceScreen() {
     ],
   } : {
     title: 'Terms of Service',
-    lastUpdated: 'Last updated: January 2025',
+    lastUpdated: 'Last updated: September 30, 2026',
     sections: [
       {
         title: '1. Acceptance of Terms',
-        text: 'By using Invoice Manager, you accept these terms of service. If you do not agree with any of the terms, please do not use the application.',
+        text: 'By using Fakturaplus, you accept these terms of service. If you do not agree with any of the terms, please do not use the application.',
       },
       {
         title: '2. Service Description',
-        text: 'Invoice Manager is an application for invoice management, financial reporting, and VAT calculation for businesses in Bulgaria. The service includes OCR scanning, statistics, and backup functionality.',
+        text: 'Fakturaplus is an application for managing invoices, daily revenue, expenses, payroll, fixed assets, and financial reporting for businesses in Bulgaria. The service includes OCR scanning of invoices (incl. multi-page ones), automatic VAT calculation, statistics and forecasts, team collaboration with roles and access permissions, a shared calendar and messaging, price tracking, an audit log, official-holiday calculation and leave tracking, data export, and Google Drive backup functionality.',
       },
       {
         title: '3. User Account',
-        text: 'You are responsible for:\n• Maintaining account confidentiality\n• All activities under your account\n• Keeping information up to date\n• Immediately reporting unauthorized access',
+        text: 'You are responsible for:\n• Maintaining account confidentiality\n• All activities under your account\n• Keeping information up to date\n• Immediately reporting unauthorized access\n• Any data you enter about other individuals (employees, co-owners), including notifying them where required by law',
       },
       {
         title: '4. Acceptable Use',
@@ -80,11 +80,11 @@ export default function TermsOfServiceScreen() {
       },
       {
         title: '5. Intellectual Property',
-        text: 'All rights to the application, including code, design, logo, and content, belong to Invoice Manager. You receive a limited license for personal, non-commercial use.',
+        text: 'All rights to the application, including code, design, logo, and content, belong to Fakturaplus. You receive a limited license to use the service within your company.',
       },
       {
         title: '6. Limitation of Liability',
-        text: 'The service is provided "as is". We do not guarantee uninterrupted or error-free operation. We are not liable for:\n• Data loss\n• Financial losses from using the application\n• Calculation errors',
+        text: 'The service is provided "as is". We do not guarantee uninterrupted or error-free operation. The app is a helper tool - final responsibility for the accuracy of accounting and tax results remains with the user/accountant. We are not liable for:\n• Data loss\n• Financial losses from using the application\n• Errors in calculations or in AI-recognized data',
       },
       {
         title: '7. Termination',
@@ -96,7 +96,7 @@ export default function TermsOfServiceScreen() {
       },
       {
         title: '9. Governing Law',
-        text: 'These terms are governed by the laws of the Republic of Bulgaria. Disputes are resolved by competent courts in Bulgaria.',
+        text: 'These terms are governed by the laws of the Republic of Bulgaria. Disputes are resolved by the competent courts in Bulgaria.',
       },
     ],
   };

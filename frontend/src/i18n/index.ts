@@ -17,7 +17,7 @@ export const translations: Translations = {
   // Login Screen
   'login.title': {
     bg: 'Управление на фактури',
-    en: 'Invoice Manager',
+    en: 'Invoice Management',
   },
   'login.subtitle': {
     bg: 'Влезте, за да продължите',
@@ -1274,16 +1274,16 @@ export const translations: Translations = {
   
   // Help Screen
   'help.title': {
-    bg: 'Помощ / Help',
+    bg: 'Помощ',
     en: 'Help',
   },
   'help.appTitle': {
-    bg: 'Invoice Manager',
-    en: 'Invoice Manager',
+    bg: 'Фактура+',
+    en: 'Fakturaplus',
   },
   'help.appSubtitle': {
-    bg: 'Управление на фактури и финанси',
-    en: 'Invoice and Finance Management',
+    bg: 'Фактури, финанси и екип на едно място',
+    en: 'Invoices, finances and your team in one place',
   },
   'help.version': {
     bg: 'Версия',
