@@ -591,9 +591,9 @@ export default function HomeScreen() {
             <View style={styles.roiHeader}>
               <View style={styles.roiTitleRow}>
                 <Ionicons name="person-circle" size={24} color="#8B5CF6" />
-                <Text style={styles.roiTitle}>{t('personal.title')}</Text>
+                <Text style={styles.roiTitle} numberOfLines={1}>{t('personal.title')}</Text>
               </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={styles.roiActionsRow}>
                 <TouchableOpacity
                   style={styles.historyPersonalButton}
                   onPress={() => router.push('/personal-expenses')}
@@ -1568,10 +1568,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(139, 92, 246, 0.3)',
   },
   roiHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     marginBottom: 16,
+    gap: 10,
   },
   roiTitleRow: {
     flexDirection: 'row',
@@ -1582,6 +1580,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#8B5CF6',
+    flexShrink: 1,
+  },
+  roiActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   addPersonalButton: {
     flexDirection: 'row',
@@ -1590,6 +1594,7 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: 'rgba(139, 92, 246, 0.15)',
     borderRadius: 8,
+    flexShrink: 1,
   },
   addPersonalText: {
     fontSize: 12,
@@ -1603,6 +1608,7 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: 'rgba(148, 163, 184, 0.15)',
     borderRadius: 8,
+    flexShrink: 1,
   },
   historyPersonalText: {
     fontSize: 12,
