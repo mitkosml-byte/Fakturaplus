@@ -890,6 +890,14 @@ class ApiService {
   async unsubscribePush(endpoint: string): Promise<void> {
     await this.fetch('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) });
   }
+
+  // Feedback
+  async submitFeedback(message: string, isAnonymous: boolean): Promise<{ message: string }> {
+    return this.fetch('/feedback', {
+      method: 'POST',
+      body: JSON.stringify({ message, is_anonymous: isAnonymous }),
+    });
+  }
 }
 
 export const api = new ApiService();

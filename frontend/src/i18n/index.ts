@@ -1337,7 +1337,123 @@ export const translations: Translations = {
     bg: 'При въпроси или проблеми, моля свържете се с вашия счетоводител или системен администратор.',
     en: 'For questions or issues, please contact your accountant or system administrator.',
   },
-  
+
+  // Feedback box (bottom of Help screen)
+  'feedback.title': {
+    bg: 'Обратна връзка',
+    en: 'Feedback',
+  },
+  'feedback.intro': {
+    bg: 'Фактура+ е направено от опит в реалния бизнес, но никой не познава нуждите на вашата фирма по-добре от вас. Ще се радваме на всяка идея или забелязан проблем - това е начинът да изградим един наистина по-обхватен и по-добър продукт в помощ на бизнеса.',
+    en: "Fakturaplus is built from real business experience, but nobody knows your company's needs better than you do. We welcome every idea or issue you notice - it's how we build a genuinely more complete, better product to help your business.",
+  },
+  'feedback.anonymousLabel': {
+    bg: 'Анонимно',
+    en: 'Anonymous',
+  },
+  'feedback.namedLabel': {
+    bg: 'С моето име',
+    en: 'With my name',
+  },
+  'feedback.placeholder': {
+    bg: 'Споделете проблем, идея или предложение...',
+    en: 'Share a problem, idea, or suggestion...',
+  },
+  'feedback.submit': {
+    bg: 'Изпрати',
+    en: 'Submit',
+  },
+  'feedback.submitting': {
+    bg: 'Изпращане...',
+    en: 'Submitting...',
+  },
+  'feedback.success': {
+    bg: 'Благодарим! Съобщението е изпратено.',
+    en: 'Thank you! Your message has been sent.',
+  },
+  'feedback.error': {
+    bg: 'Възникна грешка. Опитайте отново.',
+    en: 'Something went wrong. Please try again.',
+  },
+  'feedback.emptyError': {
+    bg: 'Моля, въведете съобщение.',
+    en: 'Please enter a message.',
+  },
+
+  // Onboarding tutorial (shown once on first login, reopenable via the "?" button)
+  'tutorial.step1Title': {
+    bg: 'Добре дошли във Фактура+!',
+    en: 'Welcome to Fakturaplus!',
+  },
+  'tutorial.step1Text': {
+    bg: 'Кратко ще ви разведем из основните функции. Отнема половин минута - можете да го пропуснете по всяко време.',
+    en: "We'll give you a quick tour of the main features. It takes half a minute - you can skip it anytime.",
+  },
+  'tutorial.step2Title': {
+    bg: 'Сканиране на фактури',
+    en: 'Scanning invoices',
+  },
+  'tutorial.step2Text': {
+    bg: 'От "Сканирай" снимате фактура (дори многостранична) и AI разпознава доставчик, суми и ДДС автоматично.',
+    en: 'From "Scan" you photograph an invoice (even a multi-page one) and AI reads the supplier, amounts and VAT automatically.',
+  },
+  'tutorial.step3Title': {
+    bg: 'Оборот и разходи',
+    en: 'Revenue and expenses',
+  },
+  'tutorial.step3Text': {
+    bg: 'От Начало въвеждате дневния оборот и разходите без фактура. Записът за деня се поправя, а не се сумира.',
+    en: "From Home you enter the day's revenue and expenses without an invoice. A day's entry is corrected, not added to.",
+  },
+  'tutorial.step4Title': {
+    bg: 'Статистики и почивни дни',
+    en: 'Statistics and closed days',
+  },
+  'tutorial.step4Text': {
+    bg: 'В Статистики виждате графики, ДДС за плащане и прогнози. Отбележете почивните дни на фирмата, за да не изкривяват средния оборот.',
+    en: "Statistics shows charts, VAT to pay and forecasts. Mark your company's closed days so they don't skew the average turnover.",
+  },
+  'tutorial.step5Title': {
+    bg: 'Екип и права',
+    en: 'Team and permissions',
+  },
+  'tutorial.step5Text': {
+    bg: 'От Профил поканете мениджър, служител или счетоводител - всеки с точно определени права на достъп.',
+    en: 'From Profile, invite a manager, staff member or accountant - each with precisely defined access rights.',
+  },
+  'tutorial.step6Title': {
+    bg: 'Винаги на разположение',
+    en: 'Always available',
+  },
+  'tutorial.step6Text': {
+    bg: 'Бутонът "?" горе на екрана връща този туториал по всяко време, ако ви потрябва помощ отново.',
+    en: 'The "?" button at the top of the screen brings this tutorial back anytime you need help again.',
+  },
+  'tutorial.stepCounter': {
+    bg: 'Стъпка {current} от {total}',
+    en: 'Step {current} of {total}',
+  },
+  'tutorial.skip': {
+    bg: 'Пропусни',
+    en: 'Skip',
+  },
+  'tutorial.back': {
+    bg: 'Назад',
+    en: 'Back',
+  },
+  'tutorial.next': {
+    bg: 'Напред',
+    en: 'Next',
+  },
+  'tutorial.done': {
+    bg: 'Разбрах',
+    en: 'Got it',
+  },
+  'tutorial.helpButtonLabel': {
+    bg: 'Помощ / Туториал',
+    en: 'Help / Tutorial',
+  },
+
   // Roles
   'role.accountant': {
     bg: 'Счетоводител',

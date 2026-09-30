@@ -73,6 +73,11 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL', 'Фактура+ <onboarding@resend.dev>')
 EMAIL_FEATURES_ENABLED = bool(RESEND_API_KEY)
 
+# Developer/product-owner account - not a per-company role, this is who can
+# read the in-app feedback inbox (see /feedback below) before the app has
+# its own support domain/inbox to forward it to instead.
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'mitkosml@gmail.com')
+
 async def send_email(to_email: str, subject: str, html_body: str) -> bool:
     if not EMAIL_FEATURES_ENABLED:
         return False
@@ -7081,6 +7086,41 @@ async def push_unsubscribe(request: Request, current_user: User = Depends(get_cu
         await db.push_subscriptions.delete_one({"endpoint": endpoint, "user_id": current_user.user_id})
     return {"message": "OK"}
 
+# ===================== IN-APP FEEDBACK =====================
+
+class FeedbackCreate(BaseModel):
+    message: str = Field(..., min_length=3, max_length=2000)
+    is_anonymous: bool = False
+
+@api_router.post("/feedback")
+async def submit_feedback(payload: FeedbackCreate, current_user: User = Depends(get_current_user)):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "message": payload.message,
+        "is_anonymous": payload.is_anonymous,
+        "created_at": datetime.now(timezone.utc),
+    }
+    # An anonymous submission carries no identity at all, by design - not
+    # even for internal linking - so the choice the user made in the app is
+    # actually honored, not just hidden in the UI.
+    if not payload.is_anonymous:
+        doc["user_name"] = current_user.name
+        doc["user_email"] = current_user.email
+        doc["company_id"] = current_user.company_id
+    await db.feedback_submissions.insert_one(doc)
+    return {"message": "OK"}
+
+@api_router.get("/feedback")
+async def list_feedback(current_user: User = Depends(get_current_user)):
+    # There's no support domain/inbox yet (see privacy-policy.tsx note) - this
+    # is a stopgap so submitted feedback is actually reachable in the
+    # meantime, restricted to the app's own developer rather than any
+    # company's owner.
+    if current_user.email != ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="Няма достъп")
+    items = await db.feedback_submissions.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return items
+
 async def _calendar_reminder_tick():
     """One pass over due-and-unsent calendar reminders. Split out from the
     loop below so a test can call it directly without sleeping."""
@@ -7277,6 +7317,7 @@ async def create_indexes():
         await db.dm_conversations.create_index([("company_id", 1), ("participant_ids", 1)])
         await db.conversation_reads.create_index([("conversation_id", 1), ("user_id", 1)], unique=True)
         await db.push_subscriptions.create_index([("endpoint", 1)], unique=True)
+        await db.feedback_submissions.create_index([("created_at", -1)])
         await db.push_subscriptions.create_index([("user_id", 1)])
 
         # Multi-owner removal-approval requests

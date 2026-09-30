@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
 import { OfflineBanner } from '../src/components/OfflineBanner';
 import { PriceAlertPopup } from '../src/components/PriceAlertPopup';
+import { OnboardingTutorial } from '../src/components/OnboardingTutorial';
 
 // Single source of truth for auth-based navigation. Screens (login.tsx,
 // the tabs layout) used to each run their own redirect effect; two
@@ -52,6 +53,7 @@ function AppShell() {
       <View style={styles.container}>
         <OfflineBanner />
         <PriceAlertPopup />
+        <OnboardingTutorial />
         <Stack
           screenOptions={{
             headerShown: false,

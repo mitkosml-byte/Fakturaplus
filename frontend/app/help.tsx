@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,11 +6,14 @@ import {
   ScrollView,
   TouchableOpacity,
   ImageBackground,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useTranslation, useLanguageStore } from '../src/i18n';
+import { api } from '../src/services/api';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -23,7 +26,26 @@ interface HelpSection {
 export default function HelpScreen() {
   const { t } = useTranslation();
   const { language } = useLanguageStore();
-  
+
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackAnonymous, setFeedbackAnonymous] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'submitting' | 'success' | 'error' | 'empty'>('idle');
+
+  const handleSubmitFeedback = async () => {
+    if (!feedbackMessage.trim()) {
+      setFeedbackStatus('empty');
+      return;
+    }
+    setFeedbackStatus('submitting');
+    try {
+      await api.submitFeedback(feedbackMessage.trim(), feedbackAnonymous);
+      setFeedbackMessage('');
+      setFeedbackStatus('success');
+    } catch (error) {
+      setFeedbackStatus('error');
+    }
+  };
+
   // Help content based on language
   const helpSections = language === 'bg' ? [
     {
@@ -411,6 +433,73 @@ export default function HelpScreen() {
               </Text>
             </View>
 
+            {/* Feedback box */}
+            <View style={styles.feedbackCard}>
+              <View style={styles.feedbackHeader}>
+                <Ionicons name="chatbubble-ellipses" size={26} color="#8B5CF6" />
+                <Text style={styles.feedbackTitle}>{t('feedback.title')}</Text>
+              </View>
+              <Text style={styles.feedbackIntro}>{t('feedback.intro')}</Text>
+
+              <View style={styles.toggleRow}>
+                <TouchableOpacity
+                  style={[styles.toggleButton, feedbackAnonymous && styles.toggleButtonActive]}
+                  onPress={() => setFeedbackAnonymous(true)}
+                >
+                  <Ionicons name="eye-off-outline" size={16} color={feedbackAnonymous ? 'white' : '#94A3B8'} />
+                  <Text style={[styles.toggleButtonText, feedbackAnonymous && styles.toggleButtonTextActive]}>
+                    {t('feedback.anonymousLabel')}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.toggleButton, !feedbackAnonymous && styles.toggleButtonActive]}
+                  onPress={() => setFeedbackAnonymous(false)}
+                >
+                  <Ionicons name="person-outline" size={16} color={!feedbackAnonymous ? 'white' : '#94A3B8'} />
+                  <Text style={[styles.toggleButtonText, !feedbackAnonymous && styles.toggleButtonTextActive]}>
+                    {t('feedback.namedLabel')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <TextInput
+                style={styles.feedbackInput}
+                placeholder={t('feedback.placeholder')}
+                placeholderTextColor="#64748B"
+                value={feedbackMessage}
+                onChangeText={(v) => {
+                  setFeedbackMessage(v);
+                  if (feedbackStatus !== 'idle') setFeedbackStatus('idle');
+                }}
+                multiline
+                numberOfLines={4}
+                maxLength={2000}
+                textAlignVertical="top"
+              />
+
+              {feedbackStatus === 'empty' && (
+                <Text style={styles.feedbackErrorText}>{t('feedback.emptyError')}</Text>
+              )}
+              {feedbackStatus === 'error' && (
+                <Text style={styles.feedbackErrorText}>{t('feedback.error')}</Text>
+              )}
+              {feedbackStatus === 'success' && (
+                <Text style={styles.feedbackSuccessText}>{t('feedback.success')}</Text>
+              )}
+
+              <TouchableOpacity
+                style={styles.feedbackSubmitButton}
+                onPress={handleSubmitFeedback}
+                disabled={feedbackStatus === 'submitting'}
+              >
+                {feedbackStatus === 'submitting' ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <Text style={styles.feedbackSubmitButtonText}>{t('feedback.submit')}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
             <View style={{ height: 40 }} />
           </ScrollView>
         </SafeAreaView>
@@ -525,5 +614,91 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 20,
+  },
+  feedbackCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  feedbackHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  feedbackTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+  },
+  feedbackIntro: {
+    fontSize: 13,
+    color: '#94A3B8',
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  toggleButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+  },
+  toggleButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  toggleButtonTextActive: {
+    color: 'white',
+  },
+  feedbackInput: {
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    padding: 12,
+    color: 'white',
+    fontSize: 14,
+    minHeight: 90,
+    marginBottom: 10,
+  },
+  feedbackErrorText: {
+    fontSize: 12,
+    color: '#EF4444',
+    marginBottom: 8,
+  },
+  feedbackSuccessText: {
+    fontSize: 12,
+    color: '#10B981',
+    marginBottom: 8,
+  },
+  feedbackSubmitButton: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  feedbackSubmitButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
   },
 });
