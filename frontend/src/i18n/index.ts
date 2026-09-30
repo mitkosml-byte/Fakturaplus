@@ -1426,8 +1426,8 @@ export const translations: Translations = {
     en: 'Always available',
   },
   'tutorial.step6Text': {
-    bg: 'Бутонът "?" горе на екрана връща този туториал по всяко време, ако ви потрябва помощ отново.',
-    en: 'The "?" button at the top of the screen brings this tutorial back anytime you need help again.',
+    bg: 'Бутонът "?" долу вляво връща този туториал по всяко време, ако ви потрябва помощ отново.',
+    en: 'The "?" button at the bottom-left brings this tutorial back anytime you need help again.',
   },
   'tutorial.stepCounter': {
     bg: 'Стъпка {current} от {total}',

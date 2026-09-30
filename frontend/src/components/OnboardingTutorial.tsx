@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useSegments } from 'expo-router';
+import { useSegments, usePathname } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { useOnboardingStore } from '../stores/onboardingStore';
@@ -23,10 +23,20 @@ const STEPS = [
 
 const HIDDEN_ON_SEGMENTS = ['login', 'forgot-password'];
 
+// Every tab-root screen (Home, Scan, Invoices, Stats, Profile) already has a
+// tab bar eating into the bottom, and several also place a real "add" FAB at
+// bottom-right (employee-absences.tsx) or export/logout icons in the header
+// top-right (stats/invoices/profile) - bottom-left is the one corner none of
+// them use, so the help button lives there instead of fighting each screen's
+// own layout. Mirrors the tab-bar height constant from (tabs)/_layout.tsx.
+const TAB_ROUTES = ['/', '/scan', '/invoices', '/stats', '/profile'];
+const TAB_BAR_HEIGHT = 70;
+
 export function OnboardingTutorial() {
   const { user, isAuthenticated } = useAuth();
   const { t } = useTranslation();
   const segments = useSegments();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { isVisible, open, markSeen, checkAndMaybeOpen } = useOnboardingStore();
   const [step, setStep] = React.useState(0);
@@ -42,6 +52,8 @@ export function OnboardingTutorial() {
   }, [isVisible]);
 
   const hideFloatingButton = !isAuthenticated || HIDDEN_ON_SEGMENTS.includes(segments[0] as string);
+  const isTabRoot = TAB_ROUTES.includes(pathname);
+  const floatingBottom = insets.bottom + (isTabRoot ? TAB_BAR_HEIGHT + 12 : 16);
 
   const finish = () => {
     if (user?.user_id) markSeen(user.user_id);
@@ -66,7 +78,7 @@ export function OnboardingTutorial() {
     <>
       {!hideFloatingButton && (
         <TouchableOpacity
-          style={[styles.floatingButton, { top: insets.top + 8 }]}
+          style={[styles.floatingButton, { bottom: floatingBottom }]}
           onPress={open}
           accessibilityLabel={t('tutorial.helpButtonLabel')}
         >
@@ -122,7 +134,7 @@ export function OnboardingTutorial() {
 const styles = StyleSheet.create({
   floatingButton: {
     position: 'absolute',
-    right: 12,
+    left: 16,
     zIndex: 999,
     width: 36,
     height: 36,
