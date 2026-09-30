@@ -3124,12 +3124,18 @@ async def get_today_revenue(current_user: User = Depends(get_current_user)):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     _, scope = await get_company_scope(current_user)
     existing = await db.daily_revenue.find_one({**scope, "date": today}, {"_id": 0})
+    # Same visibility rule as /statistics/summary and /statistics/chart-data -
+    # pocket_money is a distinct sensitive field, not the whole record, so a
+    # viewer without view_pocket_money still gets fiscal/card revenue (they
+    # may hold add_revenue and legitimately need to edit those) with only
+    # pocket_money zeroed out, rather than the whole endpoint being blocked.
+    can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
 
     if existing:
         return {
             "date": today,
             "fiscal_revenue": existing.get("fiscal_revenue", 0),
-            "pocket_money": existing.get("pocket_money", 0)
+            "pocket_money": existing.get("pocket_money", 0) if can_see_pocket_money else 0
         }
     return {
         "date": today,
@@ -3142,12 +3148,13 @@ async def get_revenue_by_date(date: str, current_user: User = Depends(get_curren
     """Get revenue for a specific date, for the whole company"""
     _, scope = await get_company_scope(current_user)
     existing = await db.daily_revenue.find_one({**scope, "date": date}, {"_id": 0})
+    can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
 
     if existing:
         return {
             "date": date,
             "fiscal_revenue": existing.get("fiscal_revenue", 0),
-            "pocket_money": existing.get("pocket_money", 0),
+            "pocket_money": existing.get("pocket_money", 0) if can_see_pocket_money else 0,
             "card_revenue": existing.get("card_revenue", 0),
             "vat_rate_percent": existing.get("vat_rate_percent", 20.0)
         }
@@ -3175,7 +3182,11 @@ async def get_daily_revenues(
         else:
             query["date"] = {"$lte": end_date}
 
+    can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
     revenues = await db.daily_revenue.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    if not can_see_pocket_money:
+        for r in revenues:
+            r["pocket_money"] = 0
     return [DailyRevenue(**r) for r in revenues]
 
 # ===================== NON-INVOICE EXPENSE ENDPOINTS =====================
@@ -3198,6 +3209,7 @@ async def get_expenses(
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
+    require_permission(current_user, "view_off_book_expenses")
     _, query = await get_company_scope(current_user)
 
     if start_date:

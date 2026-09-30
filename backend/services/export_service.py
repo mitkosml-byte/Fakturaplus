@@ -39,6 +39,22 @@ except ImportError:
     PDF_AVAILABLE = False
 
 
+# Excel/CSV formula injection (CWE-1236): a cell value starting with one of
+# these characters is interpreted by Excel as a formula when the file is
+# opened, which can trigger a legacy DDE command or exfiltrate data via
+# =HYPERLINK(...). A leading apostrophe forces Excel to treat the cell as
+# literal text instead. Applied to every free-text value that originates
+# from user input (supplier names, notes, employee names, etc.) before it
+# is written to a cell.
+_FORMULA_TRIGGER_CHARS = ('=', '+', '-', '@', '\t', '\r')
+
+
+def _excel_safe(value):
+    if isinstance(value, str) and value.startswith(_FORMULA_TRIGGER_CHARS):
+        return "'" + value
+    return value
+
+
 class ExportService:
     @staticmethod
     def generate_invoices_excel(invoices: List[dict], company_name: str = "") -> bytes:
@@ -102,12 +118,12 @@ class ExportService:
             
             data = [
                 date_str,
-                inv.get('supplier', ''),
-                inv.get('invoice_number', ''),
+                _excel_safe(inv.get('supplier', '')),
+                _excel_safe(inv.get('invoice_number', '')),
                 amount_without_vat,
                 vat_amount,
                 total,
-                inv.get('notes', '') or ''
+                _excel_safe(inv.get('notes', '') or '')
             ]
             
             for col, value in enumerate(data, 1):
@@ -367,8 +383,8 @@ class ExportService:
                     deadline_overdue = deadline < today
 
             row_values = [
-                idx, date_str, inv.get("supplier", ""), inv.get("supplier_eik") or "",
-                inv.get("invoice_number", ""), doc_type, protocol_number, deadline_str, *values
+                idx, date_str, _excel_safe(inv.get("supplier", "")), _excel_safe(inv.get("supplier_eik") or ""),
+                _excel_safe(inv.get("invoice_number", "")), doc_type, _excel_safe(protocol_number), deadline_str, *values
             ]
             for col, value in enumerate(row_values, 1):
                 cell = ws.cell(row=row, column=col, value=value)
@@ -493,7 +509,7 @@ class ExportService:
                 date_str = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m.%Y")
             except ValueError:
                 pass
-            row_values = [idx, entry.get("employee_name", ""), date_str, entry.get("holiday_name", ""), entry.get("note") or ""]
+            row_values = [idx, _excel_safe(entry.get("employee_name", "")), date_str, entry.get("holiday_name", ""), _excel_safe(entry.get("note") or "")]
             for col, value in enumerate(row_values, 1):
                 ws.cell(row=row, column=col, value=value)
 
@@ -524,7 +540,7 @@ class ExportService:
             except ValueError:
                 pass
             leave_type_label = LEAVE_TYPE_LABELS.get(entry.get("leave_type"), entry.get("leave_type", ""))
-            row_values = [idx, entry.get("employee_name", ""), leave_type_label, start_str, end_str, days_count, entry.get("note") or ""]
+            row_values = [idx, _excel_safe(entry.get("employee_name", "")), leave_type_label, start_str, end_str, days_count, _excel_safe(entry.get("note") or "")]
             for col, value in enumerate(row_values, 1):
                 ws2.cell(row=row, column=col, value=value)
 
