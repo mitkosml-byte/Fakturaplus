@@ -25,6 +25,8 @@ import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
+import { PeriodNavigator } from '../../src/components/PeriodNavigator';
+import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -36,10 +38,16 @@ export default function HomeScreen() {
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string }>();
 
   const [summary, setSummary] = useState<Summary | null>(null);
-  // Open (non-closed) days so far this month - drives the average daily
-  // turnover card below instead of the raw day-of-month number, so a rest
-  // day (see Профил > Почивни дни) doesn't drag the average down. Defaults
-  // to the day-of-month itself until the real count loads, matching the
+  // Which period the dashboard cards below are showing - defaults to the
+  // current (in-progress) calendar month, matching the previous hardcoded
+  // behavior, but lets the user step back to any past day/week/month/year
+  // or a custom range instead of the cards just going silent at zero on the
+  // 1st of a new month with no way back to see where last month's data went.
+  const [periodState, setPeriodState] = useState<PeriodState>(DEFAULT_PERIOD_STATE);
+  // Open (non-closed) days within the selected period - drives the average
+  // daily turnover card below instead of the raw day count, so a rest day
+  // (see Профил > Почивни дни) doesn't drag the average down. Defaults to
+  // the day-of-month itself until the real count loads, matching the
   // previous behavior for that first render.
   const [openDaysThisMonth, setOpenDaysThisMonth] = useState<number>(new Date().getDate());
   const [refreshing, setRefreshing] = useState(false);
@@ -82,23 +90,24 @@ export default function HomeScreen() {
   const [isExpenseDatePickerVisible, setExpenseDatePickerVisible] = useState(false);
 
   const loadData = useCallback(async () => {
+    const bounds = getPeriodBounds(periodState);
+    const start_date = toApiDate(bounds.start);
+    const end_date = toApiDate(bounds.end);
+
     try {
-      const summaryData = await api.getSummary();
+      const summaryData = await api.getSummary({ start_date, end_date });
       setSummary(summaryData);
     } catch (error) {
       console.error('Error loading data:', error);
     }
 
     try {
-      const now = new Date();
-      const monthStart = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
-      const todayStr = format(now, 'yyyy-MM-dd');
-      const openDays = await api.getOpenDaysCount(monthStart, todayStr);
+      const openDays = await api.getOpenDaysCount(start_date, end_date);
       setOpenDaysThisMonth(Math.max(1, openDays.open_days));
     } catch (error) {
       console.error('Error loading open-days count:', error);
     }
-  }, []);
+  }, [periodState]);
 
   // Pre-fills the form with whatever is already logged for this date, so
   // saving corrects that value directly instead of adding a delta to it -
@@ -397,6 +406,8 @@ export default function HomeScreen() {
               </View>
             </View>
 
+            <PeriodNavigator state={periodState} onChange={setPeriodState} />
+
             {/* Summary Cards */}
             <View style={styles.summaryContainer}>
               <View style={[styles.summaryCard, styles.incomeCard]}>
@@ -497,7 +508,10 @@ export default function HomeScreen() {
             broken down by period, for deeper business analysis */}
         <TouchableOpacity
           style={styles.avgTurnoverCard}
-          onPress={() => router.push({ pathname: '/(tabs)/stats', params: { period: 'month' } })}
+          onPress={() => router.push({
+            pathname: '/(tabs)/stats',
+            params: { period: periodState.mode === 'week' || periodState.mode === 'year' ? periodState.mode : 'month' },
+          })}
           activeOpacity={0.8}
         >
           <View style={styles.avgTurnoverHeader}>

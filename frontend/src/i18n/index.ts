@@ -104,8 +104,8 @@ export const translations: Translations = {
     en: 'Average Daily Turnover',
   },
   'home.avgDailyTurnoverSubtitle': {
-    bg: 'този месец, за {days} дни · виж по периоди',
-    en: 'this month, over {days} days · view by period',
+    bg: '{days} отворени дни · виж повече в Статистики',
+    en: '{days} open days · see more in Statistics',
   },
   'home.expenses': {
     bg: 'В канала',
@@ -522,6 +522,44 @@ export const translations: Translations = {
   'stats.year': {
     bg: 'Година',
     en: 'Year',
+  },
+
+  // Shared period navigator (Home dashboard + Stats overview cards)
+  'periodNav.day': {
+    bg: 'Ден',
+    en: 'Day',
+  },
+  'periodNav.week': {
+    bg: 'Седмица',
+    en: 'Week',
+  },
+  'periodNav.month': {
+    bg: 'Месец',
+    en: 'Month',
+  },
+  'periodNav.year': {
+    bg: 'Година',
+    en: 'Year',
+  },
+  'periodNav.range': {
+    bg: 'Диапазон',
+    en: 'Range',
+  },
+  'periodNav.previous': {
+    bg: 'Предходен период',
+    en: 'Previous period',
+  },
+  'periodNav.next': {
+    bg: 'Следващ период',
+    en: 'Next period',
+  },
+  'periodNav.backToCurrent': {
+    bg: 'Обратно към текущия',
+    en: 'Back to current',
+  },
+  'periodNav.vsPrevious': {
+    bg: 'спрямо предходния период',
+    en: 'vs. the previous period',
   },
   'stats.income': {
     bg: 'Приходи',

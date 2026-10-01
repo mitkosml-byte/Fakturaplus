@@ -21,6 +21,8 @@ import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { Alert } from '../../src/utils/alert';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
+import { PeriodNavigator } from '../../src/components/PeriodNavigator';
+import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 
 const { width } = Dimensions.get('window');
 const chartWidth = width - 80;
@@ -97,7 +99,13 @@ export default function StatsScreen() {
   const [loadingInflation, setLoadingInflation] = useState(false);
   const [inflationExpanded, setInflationExpanded] = useState(false);
 
-  // Overview enrichments: previous-month comparison, top-3 quick view,
+  // Which period the overview summary cards (income/expense/VAT/profit)
+  // below show - independent of `period` above, which only controls the
+  // rolling chart window further down. Defaults to the current calendar
+  // month, matching the previous hardcoded behavior.
+  const [summaryPeriodState, setSummaryPeriodState] = useState<PeriodState>(DEFAULT_PERIOD_STATE);
+
+  // Overview enrichments: previous-period comparison, top-3 quick view,
   // forecast and ROI trend
   const [previousSummary, setPreviousSummary] = useState<Summary | null>(null);
   const [topSuppliers, setTopSuppliers] = useState<SupplierStats[]>([]);
@@ -108,15 +116,16 @@ export default function StatsScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const now = new Date();
-      const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const prevMonthStart = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), 1).toISOString();
-      const prevMonthEnd = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth() + 1, 0, 23, 59, 59).toISOString();
+      const bounds = getPeriodBounds(summaryPeriodState);
+      const start_date = toApiDate(bounds.start);
+      const end_date = toApiDate(bounds.end);
+      const prevStart = toApiDate(bounds.prevStart);
+      const prevEnd = toApiDate(bounds.prevEnd);
 
       const [summaryData, chartDataResult, prevSummaryData] = await Promise.all([
-        api.getSummary(),
+        api.getSummary({ start_date, end_date }),
         api.getChartData(period),
-        api.getSummary({ start_date: prevMonthStart, end_date: prevMonthEnd }),
+        api.getSummary({ start_date: prevStart, end_date: prevEnd }),
       ]);
       setSummary(summaryData);
       setChartData(chartDataResult);
@@ -157,7 +166,7 @@ export default function StatsScreen() {
         console.error('Error loading ROI trend:', error);
       }
     }
-  }, [period, hasPermission, isOwner]);
+  }, [period, summaryPeriodState, hasPermission, isOwner]);
 
   const loadSupplierStats = useCallback(async () => {
     setLoadingSuppliers(true);
@@ -843,6 +852,8 @@ export default function StatsScreen() {
                     {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysInWindow))}
                   </Text>
                 </View>
+
+                <PeriodNavigator state={summaryPeriodState} onChange={setSummaryPeriodState} />
 
                 {/* Summary Cards */}
                 <View style={styles.summaryGrid}>
