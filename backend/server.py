@@ -2642,8 +2642,18 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
     except anthropic_sdk.AuthenticationError:
         logger.error("OCR Error: invalid or missing Anthropic API key")
         raise HTTPException(status_code=503, detail="AI разпознаването не е конфигурирано правилно на сървъра. Моля, въведете данните ръчно.")
-    except anthropic_sdk.RateLimitError:
+    except (anthropic_sdk.RateLimitError, anthropic_sdk.OverloadedError):
         raise HTTPException(status_code=503, detail="AI услугата за разпознаване е временно претоварена. Моля, опитайте отново след малко.")
+    except anthropic_sdk.PermissionDeniedError:
+        # Anthropic returns 403 for a depleted/too-low credit balance on the
+        # API key, not just real permission issues - this is the one case a
+        # user might reasonably describe as "hit a limit", so it gets its
+        # own distinct message instead of falling into the generic bucket
+        # below, which is indistinguishable from a transient connectivity blip.
+        logger.error("OCR Error: Anthropic API permission denied - likely a depleted/too-low credit balance")
+        raise HTTPException(status_code=503, detail="AI акаунтът на приложението няма достатъчен баланс в момента. Моля, свържете се със системния администратор.")
+    except anthropic_sdk.RequestTooLargeError:
+        raise HTTPException(status_code=413, detail="Изображението е твърде голямо за AI услугата. Моля, използвайте по-малка снимка.")
     except anthropic_sdk.APIConnectionError:
         logger.exception("OCR Error: could not reach the Anthropic API (network/TLS)")
         raise HTTPException(status_code=502, detail="Сървърът не успя да се свърже с AI услугата (мрежов проблем). Моля, опитайте отново след малко.")
@@ -2662,8 +2672,15 @@ def ai_exception_to_http(e: Exception, log_context: str) -> HTTPException:
     if isinstance(e, anthropic_sdk.AuthenticationError):
         logger.error(f"{log_context}: invalid or missing Anthropic API key")
         return HTTPException(status_code=503, detail="AI функцията не е конфигурирана правилно на сървъра.")
-    if isinstance(e, anthropic_sdk.RateLimitError):
+    if isinstance(e, (anthropic_sdk.RateLimitError, anthropic_sdk.OverloadedError)):
         return HTTPException(status_code=503, detail="AI услугата е временно претоварена. Моля, опитайте отново след малко.")
+    if isinstance(e, anthropic_sdk.PermissionDeniedError):
+        # See the matching comment in /ocr/scan - a 403 here almost always
+        # means a depleted/too-low credit balance, not a real permission issue.
+        logger.error(f"{log_context}: Anthropic API permission denied - likely a depleted/too-low credit balance")
+        return HTTPException(status_code=503, detail="AI акаунтът на приложението няма достатъчен баланс в момента. Моля, свържете се със системния администратор.")
+    if isinstance(e, anthropic_sdk.RequestTooLargeError):
+        return HTTPException(status_code=413, detail="Заявката е твърде голяма за AI услугата.")
     if isinstance(e, anthropic_sdk.APIConnectionError):
         logger.exception(f"{log_context}: could not reach the Anthropic API (network/TLS)")
         return HTTPException(status_code=502, detail="Сървърът не успя да се свърже с AI услугата (мрежов проблем).")
