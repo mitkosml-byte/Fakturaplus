@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { FixedAsset, AssetCategory, AssetCategoryInfo, AssetsSummary } from '../src/types';

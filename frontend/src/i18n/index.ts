@@ -565,6 +565,10 @@ export const translations: Translations = {
     bg: 'Обратно към текущия',
     en: 'Back to current',
   },
+  'periodNav.jumpToPeriod': {
+    bg: 'Избери период от календар',
+    en: 'Pick a period from the calendar',
+  },
   'periodNav.vsPrevious': {
     bg: 'спрямо предходния период',
     en: 'vs. the previous period',
@@ -932,6 +936,10 @@ export const translations: Translations = {
   'invoices.deleteInvoice': {
     bg: 'Изтрий фактурата',
     en: 'Delete Invoice',
+  },
+  'invoices.editInvoice': {
+    bg: 'Редактирай фактурата',
+    en: 'Edit Invoice',
   },
   'invoices.scanFirst': {
     bg: 'Сканирайте първата си фактура',
@@ -2620,6 +2628,10 @@ export const translations: Translations = {
 
   // Closed days (weekly pattern + one-off exceptions, excluded from daily-average stats)
   'closedDays.title': { bg: 'Почивни дни', en: 'Closed days' },
+  'closedDays.homeHint': {
+    bg: 'За по-точно изчисление на средния оборот е добре да попълвате календара редовно - отбелязвайте кои дни сте затворени.',
+    en: 'For a more accurate average turnover, fill in the calendar regularly - mark which days you were closed.',
+  },
   'closedDays.weeklyTitle': { bg: 'Седмичен график', en: 'Weekly schedule' },
   'closedDays.weeklyHint': { bg: 'Отбележете кои дни от седмицата обичайно сте затворени - изключват се от средния дневен оборот в статистиките.', en: "Mark which weekdays you're normally closed - excluded from the average daily turnover in statistics." },
   'closedDays.weeklySaved': { bg: 'Седмичният график е запазен', en: 'Weekly schedule saved' },

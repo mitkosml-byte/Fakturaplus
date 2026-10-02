@@ -18,10 +18,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
-import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
-import { Invoice } from '../../src/types';
+import { Invoice, VatTreatment } from '../../src/types';
 import { validateEikFormat } from '../../src/utils/eik';
 import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
@@ -178,6 +178,10 @@ export default function InvoicesScreen() {
   const [viewerPageIndex, setViewerPageIndex] = useState<number | null>(null);
 
   useEffect(() => {
+    setEditMode(false);
+  }, [selectedInvoice?.id]);
+
+  useEffect(() => {
     if (!selectedInvoice) {
       setScannedPages([]);
       return;
@@ -211,6 +215,64 @@ export default function InvoicesScreen() {
   const applyInvoiceUpdate = (updated: Invoice) => {
     setSelectedInvoice(updated);
     setInvoices((prev) => prev.map((inv) => (inv.id === updated.id ? updated : inv)));
+  };
+
+  // Lets a successfully-scanned invoice have its OCR-misread header fields
+  // corrected in place, instead of the only option being delete + rescan.
+  const [editMode, setEditMode] = useState(false);
+  const [editSupplier, setEditSupplier] = useState('');
+  const [editSupplierEik, setEditSupplierEik] = useState('');
+  const [editInvoiceNumber, setEditInvoiceNumber] = useState('');
+  const [editDate, setEditDate] = useState(new Date());
+  const [isEditDatePickerVisible, setEditDatePickerVisible] = useState(false);
+  const [editAmountWithoutVat, setEditAmountWithoutVat] = useState('');
+  const [editVatAmount, setEditVatAmount] = useState('');
+  const [editVatTreatment, setEditVatTreatment] = useState<VatTreatment | ''>('');
+  const [editNotes, setEditNotes] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const startEditInvoice = (invoice: Invoice) => {
+    setEditSupplier(invoice.supplier);
+    setEditSupplierEik(invoice.supplier_eik || '');
+    setEditInvoiceNumber(invoice.invoice_number);
+    setEditDate(new Date(invoice.date));
+    setEditAmountWithoutVat(invoice.amount_without_vat.toFixed(2));
+    setEditVatAmount(invoice.vat_amount.toFixed(2));
+    setEditVatTreatment(invoice.vat_treatment || '');
+    setEditNotes(invoice.notes || '');
+    setEditMode(true);
+  };
+
+  const handleSaveEditedInvoice = async () => {
+    if (!selectedInvoice) return;
+    const supplier = editSupplier.trim();
+    const invoiceNumber = editInvoiceNumber.trim();
+    const withoutVat = parseFloat(editAmountWithoutVat.replace(',', '.'));
+    const vat = parseFloat(editVatAmount.replace(',', '.'));
+    if (!supplier || !invoiceNumber || isNaN(withoutVat) || isNaN(vat)) {
+      Alert.alert(t('common.error'), t('msg.fillRequired'));
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      const updated = await api.updateInvoice(selectedInvoice.id, {
+        supplier,
+        supplier_eik: editSupplierEik.trim() || undefined,
+        invoice_number: invoiceNumber,
+        date: editDate.toISOString(),
+        amount_without_vat: withoutVat,
+        vat_amount: vat,
+        total_amount: withoutVat + vat,
+        vat_treatment: editVatTreatment || undefined,
+        notes: editNotes.trim() || undefined,
+      });
+      applyInvoiceUpdate(updated);
+      setEditMode(false);
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const handleTogglePaid = async (invoice: Invoice) => {
@@ -635,13 +697,147 @@ export default function InvoicesScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.detailModalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{t('invoices.details')}</Text>
-              <TouchableOpacity onPress={() => setSelectedInvoice(null)}>
-                <Ionicons name="close" size={28} color="#94A3B8" />
-              </TouchableOpacity>
+              <Text style={styles.modalTitle}>{editMode ? t('invoices.editInvoice') : t('invoices.details')}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                {!editMode && selectedInvoice && (
+                  <TouchableOpacity onPress={() => startEditInvoice(selectedInvoice)} accessibilityLabel={t('invoices.editInvoice')}>
+                    <Ionicons name="pencil" size={22} color="#8B5CF6" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => (editMode ? setEditMode(false) : setSelectedInvoice(null))}>
+                  <Ionicons name="close" size={28} color="#94A3B8" />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            {selectedInvoice && (
+            {selectedInvoice && editMode && (
+              <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('invoices.supplier')} *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editSupplier}
+                    onChangeText={setEditSupplier}
+                    placeholderTextColor="#64748B"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('scan.supplierEik')}</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editSupplierEik}
+                    onChangeText={setEditSupplierEik}
+                    keyboardType="number-pad"
+                    placeholder="131071587"
+                    placeholderTextColor="#64748B"
+                    maxLength={13}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('invoices.invoiceNo')} *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editInvoiceNumber}
+                    onChangeText={setEditInvoiceNumber}
+                    placeholderTextColor="#64748B"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('invoices.dateLabel')} *</Text>
+                  <TouchableOpacity style={styles.dateInputButton} onPress={() => setEditDatePickerVisible(true)}>
+                    <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                    <Text style={styles.dateInputText}>
+                      {format(editDate, 'd MMMM yyyy', { locale: dateLocale })}
+                    </Text>
+                    <Ionicons name="chevron-down" size={20} color="#64748B" />
+                  </TouchableOpacity>
+                </View>
+                <DateTimePickerModal
+                  isVisible={isEditDatePickerVisible}
+                  mode="date"
+                  date={editDate}
+                  onConfirm={(d) => { setEditDate(d); setEditDatePickerVisible(false); }}
+                  onCancel={() => setEditDatePickerVisible(false)}
+                  confirmTextIOS={t('common.select')}
+                  cancelTextIOS={t('common.cancel')}
+                  locale={language}
+                />
+
+                <View style={styles.detailRow2}>
+                  <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <Text style={styles.inputLabel}>{t('invoices.withoutVAT')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editAmountWithoutVat}
+                      onChangeText={setEditAmountWithoutVat}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor="#64748B"
+                    />
+                  </View>
+                  <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <Text style={styles.inputLabel}>{t('scan.vatAmount')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editVatAmount}
+                      onChangeText={setEditVatAmount}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor="#64748B"
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.totalSection}>
+                  <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
+                  <Text style={styles.totalSectionValue}>
+                    {((parseFloat(editAmountWithoutVat.replace(',', '.')) || 0) + (parseFloat(editVatAmount.replace(',', '.')) || 0)).toFixed(2)} €
+                  </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('scan.vatTreatment')}</Text>
+                  <View style={styles.vatTreatmentGrid}>
+                    {(['standard_20', 'reduced_9', 'zero_rate', 'exempt', 'reverse_charge', 'outside_scope'] as VatTreatment[]).map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={[styles.vatTreatmentChip, editVatTreatment === option && styles.vatTreatmentChipActive]}
+                        onPress={() => setEditVatTreatment(option)}
+                      >
+                        <Text style={[styles.vatTreatmentChipText, editVatTreatment === option && styles.vatTreatmentChipTextActive]}>
+                          {t(`vat.${option}`)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('invoices.notes')}</Text>
+                  <TextInput
+                    style={[styles.input, { minHeight: 70 }]}
+                    value={editNotes}
+                    onChangeText={setEditNotes}
+                    multiline
+                    placeholderTextColor="#64748B"
+                  />
+                </View>
+
+                <View style={styles.editActionsRow}>
+                  <TouchableOpacity style={styles.editCancelButton} onPress={() => setEditMode(false)} disabled={savingEdit}>
+                    <Text style={styles.editCancelButtonText}>{t('common.cancel')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.submitButton, { flex: 1 }]} onPress={handleSaveEditedInvoice} disabled={savingEdit}>
+                    {savingEdit ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            )}
+
+            {selectedInvoice && !editMode && (
               <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.supplier')}</Text>
@@ -1332,6 +1528,64 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  dateInputButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+    gap: 10,
+  },
+  dateInputText: {
+    flex: 1,
+    color: 'white',
+    fontSize: 16,
+  },
+  vatTreatmentGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  vatTreatmentChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  vatTreatmentChipActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+  },
+  vatTreatmentChipText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  vatTreatmentChipTextActive: {
+    color: 'white',
+  },
+  editActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  editCancelButton: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: '#334155',
+  },
+  editCancelButtonText: {
+    color: '#E2E8F0',
     fontSize: 16,
     fontWeight: '600',
   },

@@ -1,8 +1,15 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { format } from 'date-fns';
-import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import {
+  format,
+  startOfWeek,
+  differenceInCalendarDays,
+  differenceInCalendarWeeks,
+  differenceInCalendarMonths,
+  differenceInCalendarYears,
+} from 'date-fns';
+import DateTimePickerModal from './AppDateTimePicker';
 import { useTranslation } from '../i18n';
 import {
   PeriodMode,
@@ -27,6 +34,7 @@ const MODES: PeriodMode[] = ['day', 'week', 'month', 'year', 'range'];
 export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
   const { t, dateLocale, language } = useTranslation();
   const [pickerOpenFor, setPickerOpenFor] = useState<'start' | 'end' | null>(null);
+  const [isJumpPickerVisible, setJumpPickerVisible] = useState(false);
 
   const bounds = getPeriodBounds(state);
   const label = formatPeriodLabel(state, bounds, dateLocale);
@@ -50,6 +58,35 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
   const goPrev = () => onChange({ ...state, offset: state.offset + 1 });
   const goNext = () => onChange({ ...state, offset: Math.max(0, state.offset - 1) });
   const goToday = () => onChange({ ...state, offset: 0 });
+
+  // Lets a far-back period be reached in one tap + one date pick instead of
+  // stepping the arrows one day/week/month/year at a time - picking any date
+  // inside the target day/week/month/year jumps straight to it.
+  const jumpToDate = (picked: Date) => {
+    const now = new Date();
+    let offset = 0;
+    switch (state.mode) {
+      case 'day':
+        offset = differenceInCalendarDays(now, picked);
+        break;
+      case 'week':
+        offset = differenceInCalendarWeeks(
+          startOfWeek(now, { weekStartsOn: 1 }),
+          startOfWeek(picked, { weekStartsOn: 1 }),
+          { weekStartsOn: 1 }
+        );
+        break;
+      case 'year':
+        offset = differenceInCalendarYears(now, picked);
+        break;
+      case 'month':
+      default:
+        offset = differenceInCalendarMonths(now, picked);
+        break;
+    }
+    onChange({ ...state, offset: Math.max(0, offset) });
+    setJumpPickerVisible(false);
+  };
 
   return (
     <View style={styles.container}>
@@ -89,14 +126,21 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
             <Ionicons name="chevron-back" size={20} color="#8B5CF6" />
           </TouchableOpacity>
 
-          <View style={styles.labelWrap}>
-            <Text style={styles.label}>{label}</Text>
+          <TouchableOpacity
+            style={styles.labelWrap}
+            onPress={() => setJumpPickerVisible(true)}
+            accessibilityLabel={t('periodNav.jumpToPeriod')}
+          >
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>{label}</Text>
+              <Ionicons name="chevron-down" size={14} color="#64748B" />
+            </View>
             {state.offset > 0 && (
               <TouchableOpacity onPress={goToday}>
                 <Text style={styles.todayLink}>{t('periodNav.backToCurrent')}</Text>
               </TouchableOpacity>
             )}
-          </View>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.navButton}
@@ -109,6 +153,17 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
         </View>
       )}
 
+      <DateTimePickerModal
+        isVisible={isJumpPickerVisible}
+        mode="date"
+        date={bounds.start}
+        maximumDate={new Date()}
+        onConfirm={jumpToDate}
+        onCancel={() => setJumpPickerVisible(false)}
+        confirmTextIOS={t('common.select')}
+        cancelTextIOS={t('common.cancel')}
+        locale={language}
+      />
       <DateTimePickerModal
         isVisible={pickerOpenFor === 'start'}
         mode="date"
@@ -182,6 +237,11 @@ const styles = StyleSheet.create({
   labelWrap: {
     flex: 1,
     alignItems: 'center',
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   label: {
     color: 'white',

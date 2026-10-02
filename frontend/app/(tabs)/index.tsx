@@ -16,7 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
-import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
 import { api } from '../../src/services/api';
 import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
@@ -26,6 +26,7 @@ import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
+import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -557,6 +558,15 @@ export default function HomeScreen() {
             {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysThisMonth))}
           </Text>
         </TouchableOpacity>
+
+        {/* Closed/open-days calendar - embedded here (collapsed by default)
+            so it's regularly filled in without needing a trip to Profile,
+            since it directly feeds the average-turnover figure above. */}
+        {hasPermission('manage_company') && (
+          <View style={{ marginBottom: 16 }}>
+            <ClosedDaysCalendar collapsible />
+          </View>
+        )}
 
         {/* Stats Overview */}
         <View style={styles.statsGrid}>
