@@ -8,6 +8,7 @@ import {
   TextInput,
   RefreshControl,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,7 +31,9 @@ export default function BudgetScreen() {
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
-  
+  const [savingBudget, setSavingBudget] = useState(false);
+  const [savingRecurring, setSavingRecurring] = useState(false);
+
   // Budget form
   const [budgetLimit, setBudgetLimit] = useState('');
   const [alertThreshold, setAlertThreshold] = useState('80');
@@ -85,7 +88,8 @@ export default function BudgetScreen() {
       Alert.alert(t('common.error'), t('budget.invalidAmount'));
       return;
     }
-    
+
+    setSavingBudget(true);
     try {
       const currentMonth = new Date().toISOString().slice(0, 7);
       await api.createBudget({
@@ -98,6 +102,8 @@ export default function BudgetScreen() {
       loadData();
     } catch (error) {
       Alert.alert(t('common.error'), t('budget.saveError'));
+    } finally {
+      setSavingBudget(false);
     }
   };
 
@@ -106,7 +112,8 @@ export default function BudgetScreen() {
       Alert.alert(t('common.error'), t('budget.invalidData'));
       return;
     }
-    
+
+    setSavingRecurring(true);
     try {
       await api.createRecurringExpense({
         description: recurringDesc,
@@ -121,6 +128,8 @@ export default function BudgetScreen() {
       loadData();
     } catch (error) {
       Alert.alert(t('common.error'), t('budget.saveError'));
+    } finally {
+      setSavingRecurring(false);
     }
   };
 
@@ -266,9 +275,10 @@ export default function BudgetScreen() {
             <View style={styles.sectionHeader}>
               <Ionicons name="repeat" size={24} color="#10B981" />
               <Text style={styles.sectionTitle}>{t('budget.recurring')}</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.addButton}
                 onPress={() => setShowRecurringModal(true)}
+                accessibilityLabel={t('budget.addRecurring')}
               >
                 <Ionicons name="add" size={24} color="white" />
               </TouchableOpacity>
@@ -333,8 +343,8 @@ export default function BudgetScreen() {
               >
                 <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveBudget}>
-                <Text style={styles.modalSaveText}>{t('common.save')}</Text>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveBudget} disabled={savingBudget}>
+                {savingBudget ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -383,8 +393,8 @@ export default function BudgetScreen() {
               >
                 <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveRecurringExpense}>
-                <Text style={styles.modalSaveText}>{t('common.save')}</Text>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveRecurringExpense} disabled={savingRecurring}>
+                {savingRecurring ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
               </TouchableOpacity>
             </View>
           </View>

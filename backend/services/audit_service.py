@@ -36,16 +36,18 @@ class AuditService:
     
     async def get_logs(
         self,
-        company_id: Optional[str] = None,
+        company_id: str,
         user_id: Optional[str] = None,
         action: Optional[str] = None,
         entity_type: Optional[str] = None,
         limit: int = 100
     ):
-        """Get audit logs with filters"""
-        query = {}
-        if company_id:
-            query["company_id"] = company_id
+        """Get audit logs with filters, always scoped to one company."""
+        if not company_id:
+            # A falsy company_id must never fall through to an empty query -
+            # that would match (and leak) every company's audit trail.
+            raise ValueError("company_id is required")
+        query = {"company_id": company_id}
         if user_id:
             query["user_id"] = user_id
         if action:

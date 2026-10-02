@@ -717,6 +717,10 @@ export const translations: Translations = {
     bg: 'Запази',
     en: 'Save',
   },
+  'common.operationFailed': {
+    bg: 'Действието не бе успешно. Опитайте отново.',
+    en: 'The operation failed. Please try again.',
+  },
   'common.delete': {
     bg: 'Изтрий',
     en: 'Delete',

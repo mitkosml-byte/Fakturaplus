@@ -302,11 +302,11 @@ class InvoiceItem(BaseModel):
 
 class InvoiceItemCreate(BaseModel):
     name: str
-    quantity: float = 1
+    quantity: float = Field(default=1, gt=0)
     unit: str = "бр."
-    unit_price: float
-    total_price: Optional[float] = None  # Ако не е подадено, се изчислява
-    vat_amount: Optional[float] = None
+    unit_price: float = Field(ge=0)
+    total_price: Optional[float] = Field(default=None, ge=0)  # Ако не е подадено, се изчислява
+    vat_amount: Optional[float] = Field(default=None, ge=0)
 
 # Item Price History - за проследяване на цените
 class ItemPriceHistory(BaseModel):
@@ -347,9 +347,9 @@ class InvoiceCreate(BaseModel):
     supplier: str
     supplier_eik: Optional[str] = None
     invoice_number: str
-    amount_without_vat: float
-    vat_amount: float
-    total_amount: float
+    amount_without_vat: float = Field(ge=0)
+    vat_amount: float = Field(ge=0)
+    total_amount: float = Field(ge=0)
     vat_treatment: Optional[VatTreatment] = None
     date: str
     image_base64: Optional[str] = None  # Legacy - едностранично сканиране
@@ -363,9 +363,9 @@ class InvoiceUpdate(BaseModel):
     supplier: Optional[str] = None
     supplier_eik: Optional[str] = None
     invoice_number: Optional[str] = None
-    amount_without_vat: Optional[float] = None
-    vat_amount: Optional[float] = None
-    total_amount: Optional[float] = None
+    amount_without_vat: Optional[float] = Field(default=None, ge=0)
+    vat_amount: Optional[float] = Field(default=None, ge=0)
+    total_amount: Optional[float] = Field(default=None, ge=0)
     vat_treatment: Optional[VatTreatment] = None
     protocol_number: Optional[str] = None
     date: Optional[str] = None
@@ -373,7 +373,7 @@ class InvoiceUpdate(BaseModel):
     payment_method: Optional[str] = None
     payment_due_date: Optional[str] = None
     is_paid: Optional[bool] = None
-    paid_amount: Optional[float] = None
+    paid_amount: Optional[float] = Field(default=None, ge=0)
 
 class DailyRevenue(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -388,10 +388,10 @@ class DailyRevenue(BaseModel):
 
 class DailyRevenueCreate(BaseModel):
     date: str
-    fiscal_revenue: float = 0
-    pocket_money: float = 0
-    card_revenue: float = 0
-    vat_rate_percent: float = 20.0
+    fiscal_revenue: float = Field(default=0, ge=0)
+    pocket_money: float = Field(default=0, ge=0)
+    card_revenue: float = Field(default=0, ge=0)
+    vat_rate_percent: float = Field(default=20.0, ge=0, le=100)
 
 class NonInvoiceExpense(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -404,7 +404,7 @@ class NonInvoiceExpense(BaseModel):
 
 class NonInvoiceExpenseCreate(BaseModel):
     description: str
-    amount: float
+    amount: float = Field(gt=0)
     date: str
 
 # ===================== PERSONAL EXPENSES & ROI MODELS =====================
@@ -438,11 +438,11 @@ class PersonalExpense(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class PersonalExpenseCreate(BaseModel):
-    amount: float
+    amount: float = Field(gt=0)
     description: str
     expense_type: str = "recurring"
     category: str = "other"
-    period_month: int
+    period_month: int = Field(ge=1, le=12)
     period_year: int
     supplier_id: Optional[str] = None
     project_name: Optional[str] = None
@@ -2358,12 +2358,12 @@ async def correct_ocr_data(
         elif abs(total_amount - (amount_without_vat + vat_amount)) > 0.02:
             corrected["total_amount"] = round(amount_without_vat + vat_amount, 2)
             corrections.append(f"Обща сума коригирана: {corrected['total_amount']}")
-        
-        # Ако само ДДС липсва
-        elif vat_amount == 0 and total_amount == amount_without_vat:
-            corrected["vat_amount"] = round(amount_without_vat * 0.20, 2)
-            corrected["total_amount"] = round(amount_without_vat * 1.20, 2)
-            corrections.append(f"ДДС добавено (20%): {corrected['vat_amount']}")
+
+        # НЕ приемаме vat_amount == 0 и total_amount == amount_without_vat за
+        # грешка на OCR - това е точно вярното четене за фактура с 0%
+        # ставка, освободена доставка или обратно начисляване. Добавянето
+        # на фалшиво 20% ДДС тук би подвело потребителя за легитимно
+        # освободена покупка.
 
     # 6. Корекция на редовете с продукти - нормализиране на имена (за да се
     # обединят със същия артикул, записан преди по друг начин) и на числата.
@@ -2987,12 +2987,13 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
             company_id, current_user.user_id, protocol_year
         )
 
-    result = await db.invoices.update_one(
+    # Existence was already confirmed above via `existing` - modified_count
+    # being 0 here just means the new values matched the old ones (e.g.
+    # re-saving unchanged fields), not that the invoice is missing.
+    await db.invoices.update_one(
         {"id": invoice_id, **scope},
         {"$set": update_data}
     )
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Фактурата не е намерена")
 
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
 
@@ -4761,8 +4762,12 @@ async def update_price_alert(
         {"id": alert_id, "company_id": company_id},
         {"$set": {"status": status}}
     )
-    
-    if result.modified_count == 0:
+
+    # matched_count (not modified_count) correctly means "not found" -
+    # modified_count is also 0 when the alert already had this exact
+    # status (e.g. marking an already-read alert read again), which isn't
+    # an error.
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Алармата не е намерена")
     
     return {"message": "Статусът е обновен"}
@@ -5890,11 +5895,11 @@ DEFAULT_PAYROLL_RATES = {
 
 class PayrollEntryCreate(BaseModel):
     employee_id: str
-    period_month: int  # 1-12
+    period_month: int = Field(ge=1, le=12)  # 1-12
     period_year: int
-    gross_amount: Optional[float] = None  # подадено ако agreement_type=gross (или ръчна корекция)
-    net_target: Optional[float] = None    # подадено ако agreement_type=net
-    bonus_amount: float = 0
+    gross_amount: Optional[float] = Field(default=None, gt=0)  # подадено ако agreement_type=gross (или ръчна корекция)
+    net_target: Optional[float] = Field(default=None, gt=0)    # подадено ако agreement_type=net
+    bonus_amount: float = Field(default=0, ge=0)
     notes: Optional[str] = None
     image_base64: Optional[str] = None
 
@@ -6447,8 +6452,8 @@ class FixedAssetCreate(BaseModel):
     category: AssetCategory
     acquisition_date: str
     in_service_date: str
-    acquisition_value: float
-    annual_depreciation_rate_percent: Optional[float] = None  # ако липсва, взима се максималната норма за категорията
+    acquisition_value: float = Field(gt=0)
+    annual_depreciation_rate_percent: Optional[float] = Field(default=None, gt=0, le=100)  # ако липсва, взима се максималната норма за категорията
     responsible_person: Optional[str] = None
     image_base64: Optional[str] = None
     notes: Optional[str] = None
@@ -6458,8 +6463,8 @@ class FixedAssetUpdate(BaseModel):
     category: Optional[AssetCategory] = None
     acquisition_date: Optional[str] = None
     in_service_date: Optional[str] = None
-    acquisition_value: Optional[float] = None
-    annual_depreciation_rate_percent: Optional[float] = None
+    acquisition_value: Optional[float] = Field(default=None, gt=0)
+    annual_depreciation_rate_percent: Optional[float] = Field(default=None, gt=0, le=100)
     responsible_person: Optional[str] = None
     image_base64: Optional[str] = None
     notes: Optional[str] = None
@@ -7233,7 +7238,9 @@ async def get_audit_logs(
     require_permission(current_user, "view_audit_log")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1, "role": 1})
     company_id = user_doc.get("company_id") if user_doc else None
-    
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+
     logs = await audit_service.get_logs(
         company_id=company_id,
         action=action,
