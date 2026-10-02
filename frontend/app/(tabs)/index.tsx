@@ -225,13 +225,25 @@ export default function HomeScreen() {
 
   // Load ROI/personal-investments data - visible to the owner and to any
   // delegated member the owner has granted view_personal_investments.
+  // Follows the same period navigator as the rest of the dashboard (via the
+  // calendar month its selected period falls in - the ROI endpoint and its
+  // AI insights are inherently month-shaped, e.g. "wait ~45 days of data"),
+  // instead of always silently defaulting to the current month regardless
+  // of what period the dashboard above is actually showing - that mismatch
+  // is exactly what made this card look "frozen" at zero once a new month
+  // started with no personal expenses logged yet, even though September's
+  // real data was still sitting right there, one period-back away.
   const canViewPersonalInvestments = hasPermission('view_personal_investments');
   const loadRoiData = useCallback(async () => {
     if (!canViewPersonalInvestments) return;
 
     setLoadingRoi(true);
     try {
-      const data = await api.getROIAnalysis();
+      const periodStart = getPeriodBounds(periodState).start;
+      const data = await api.getROIAnalysis({
+        month: periodStart.getMonth() + 1,
+        year: periodStart.getFullYear(),
+      });
       setRoiData(data);
     } catch (error) {
       console.error('Error loading ROI:', error);
@@ -239,7 +251,7 @@ export default function HomeScreen() {
     } finally {
       setLoadingRoi(false);
     }
-  }, [canViewPersonalInvestments]);
+  }, [canViewPersonalInvestments, periodState]);
 
   useFocusEffect(
     useCallback(() => {
@@ -262,7 +274,12 @@ export default function HomeScreen() {
     }
     if (isSubmittingForm) return;
 
-    const now = new Date();
+    // Tagged to whichever period the dashboard above is currently showing,
+    // not necessarily today's real calendar month - otherwise adding an
+    // expense while looking back at a past period would silently file it
+    // under the current month instead, making the card you're looking at
+    // never update (exactly what made this section look "frozen").
+    const periodStart = getPeriodBounds(periodState).start;
     setIsSubmittingForm(true);
     try {
       await api.createPersonalExpense({
@@ -270,8 +287,8 @@ export default function HomeScreen() {
         description: personalDescription.trim(),
         expense_type: personalType,
         category: personalCategory,
-        period_month: now.getMonth() + 1,
-        period_year: now.getFullYear(),
+        period_month: periodStart.getMonth() + 1,
+        period_year: periodStart.getFullYear(),
       });
 
       Alert.alert(t('common.success'), t('personal.created'));
@@ -621,7 +638,12 @@ export default function HomeScreen() {
             <View style={styles.roiHeader}>
               <View style={styles.roiTitleRow}>
                 <Ionicons name="person-circle" size={24} color="#8B5CF6" />
-                <Text style={styles.roiTitle} numberOfLines={1}>{t('personal.title')}</Text>
+                <View style={{ flexShrink: 1 }}>
+                  <Text style={styles.roiTitle} numberOfLines={1}>{t('personal.title')}</Text>
+                  <Text style={styles.roiPeriodLabel} numberOfLines={1}>
+                    {format(getPeriodBounds(periodState).start, 'LLLL yyyy', { locale: dateLocale })}
+                  </Text>
+                </View>
               </View>
               <View style={styles.roiActionsRow}>
                 <TouchableOpacity
@@ -720,6 +742,16 @@ export default function HomeScreen() {
               </View>
 
               <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.editNoticeBanner}>
+                <Ionicons name="information-circle" size={18} color="#8B5CF6" />
+                <Text style={styles.editNoticeText}>
+                  {t('personal.periodNotice').replace(
+                    '{period}',
+                    format(getPeriodBounds(periodState).start, 'LLLL yyyy', { locale: dateLocale })
+                  )}
+                </Text>
+              </View>
+
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('personal.amount')}</Text>
                 <TextInput
@@ -1611,6 +1643,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#8B5CF6',
     flexShrink: 1,
+  },
+  roiPeriodLabel: {
+    fontSize: 11,
+    color: '#64748B',
+    textTransform: 'capitalize',
+    marginTop: 1,
   },
   roiActionsRow: {
     flexDirection: 'row',

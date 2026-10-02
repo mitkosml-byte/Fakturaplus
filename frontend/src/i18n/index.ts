@@ -2005,6 +2005,10 @@ export const translations: Translations = {
     bg: 'Вашите инвестиции в бизнеса',
     en: 'Your investments in the business',
   },
+  'personal.periodNotice': {
+    bg: 'Ще се запише за {period} - месецът, който в момента гледате на Начало',
+    en: 'This will be recorded for {period} - the month you\'re currently viewing on Home',
+  },
   'personal.addExpense': {
     bg: 'Добави разход',
     en: 'Add Expense',
