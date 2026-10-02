@@ -10,7 +10,6 @@ interface AuthState {
   isAuthenticated: boolean;
   setUser: (user: User | null) => void;
   setToken: (token: string | null) => void;
-  login: (sessionId: string) => Promise<void>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -32,24 +31,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       removeStoredToken();
     }
     set({ token });
-  },
-
-  login: async (sessionId: string) => {
-    try {
-      set({ isLoading: true });
-      const result = await api.createSession(sessionId);
-      await setStoredToken(result.session_token);
-      api.setToken(result.session_token);
-      set({ 
-        user: result.user, 
-        token: result.session_token, 
-        isAuthenticated: true,
-        isLoading: false 
-      });
-    } catch (error) {
-      set({ isLoading: false });
-      throw error;
-    }
   },
 
   logout: async () => {

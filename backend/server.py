@@ -495,13 +495,6 @@ class OCRResult(BaseModel):
     corrections: Optional[List[str]] = None  # Списък с направени корекции
     confidence: Optional[float] = None  # Увереност в резултата (0-1)
 
-class SessionDataResponse(BaseModel):
-    id: str
-    email: str
-    name: str
-    picture: Optional[str] = None
-    session_token: str
-
 # ===================== AUTH HELPERS =====================
 
 VALID_ROLES = {"owner", "manager", "staff", "accountant"}
@@ -874,80 +867,6 @@ async def get_current_user_optional(request: Request) -> Optional[User]:
         return None
 
 # ===================== AUTH ENDPOINTS =====================
-
-@api_router.post("/auth/session")
-async def create_session(request: Request, response: Response):
-    body = await request.json()
-    session_id = body.get("session_id")
-    
-    if not session_id:
-        raise HTTPException(status_code=400, detail="Липсва session_id")
-    
-    # Exchange session_id for user data
-    async with httpx.AsyncClient() as client_http:
-        resp = await client_http.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": session_id}
-        )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Невалиден session_id")
-        user_data = resp.json()
-    
-    session_data = SessionDataResponse(**user_data)
-    
-    # Check if user exists
-    existing_user = await db.users.find_one({"email": session_data.email}, {"_id": 0})
-    
-    if not existing_user:
-        # Create new user
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        
-        # Auto-create company for new user
-        company_name = session_data.name.split()[0] + " Company" if session_data.name else "My Company"
-        new_company = Company(
-            name=company_name,
-            eik=f"AUTO{uuid.uuid4().hex[:9].upper()}"  # Temporary auto-generated EIK
-        )
-        await db.companies.insert_one(new_company.dict())
-        
-        new_user = {
-            "user_id": user_id,
-            "email": session_data.email,
-            "name": session_data.name,
-            "picture": session_data.picture,
-            "role": "owner",  # First user is owner
-            "permissions": resolve_permissions("owner", None),
-            "company_id": new_company.id,
-            "auth_provider": "google",
-            "created_at": datetime.now(timezone.utc)
-        }
-        await db.users.insert_one(new_user)
-    else:
-        user_id = existing_user["user_id"]
-    
-    # Create session
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    session_doc = {
-        "user_id": user_id,
-        "session_token": session_data.session_token,
-        "expires_at": expires_at,
-        "created_at": datetime.now(timezone.utc)
-    }
-    await db.user_sessions.insert_one(session_doc)
-    
-    # Set cookie
-    response.set_cookie(
-        key="session_token",
-        value=session_data.session_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=7 * 24 * 60 * 60,
-        path="/"
-    )
-    
-    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    return {"user": sanitize_user(user_doc), "session_token": session_data.session_token}
 
 @api_router.get("/auth/me")
 async def get_me(current_user: User = Depends(get_current_user)):
@@ -3883,6 +3802,7 @@ async def get_supplier_statistics(
     current_user: User = Depends(get_current_user)
 ):
     """Get comprehensive supplier statistics with trends, alerts, and rankings"""
+    require_permission(current_user, "view_statistics")
     from collections import defaultdict
     from datetime import timedelta
     
@@ -4060,9 +3980,10 @@ async def get_detailed_supplier_stats(
     current_user: User = Depends(get_current_user)
 ):
     """Get detailed statistics for a specific supplier with trends"""
+    require_permission(current_user, "view_statistics")
     from collections import defaultdict
     from urllib.parse import unquote
-    
+
     supplier_name = unquote(supplier_name)
 
     # Get all invoices for this supplier (no date filter for full history)
@@ -4193,8 +4114,9 @@ async def compare_suppliers(
     current_user: User = Depends(get_current_user)
 ):
     """Compare multiple suppliers"""
+    require_permission(current_user, "view_statistics")
     from urllib.parse import unquote
-    
+
     supplier_names = [unquote(s.strip()) for s in suppliers.split(",") if s.strip()]
     
     if len(supplier_names) < 2 or len(supplier_names) > 5:
@@ -4249,6 +4171,7 @@ async def get_single_supplier_stats(
     current_user: User = Depends(get_current_user)
 ):
     """Get detailed statistics for a specific supplier"""
+    require_permission(current_user, "view_statistics")
     _, query = await get_company_scope(current_user)
     query["supplier"] = {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}
 
@@ -4791,6 +4714,10 @@ async def get_price_alerts(
     current_user: User = Depends(get_current_user)
 ):
     """Връща ценови аларми за фирмата"""
+    # Deliberately NOT gated on view_statistics - invoices.tsx calls this
+    # per-invoice (with invoice_id set) to show "+X% vs last purchase"
+    # badges on line items for ANY user who can view that invoice, not
+    # just users with the advanced-statistics permission.
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
@@ -4899,8 +4826,9 @@ async def get_item_price_history(
     current_user: User = Depends(get_current_user)
 ):
     """Връща история на цените за артикул"""
+    require_permission(current_user, "view_statistics")
     from urllib.parse import unquote
-    
+
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -4977,8 +4905,9 @@ async def get_item_statistics(
     current_user: User = Depends(get_current_user)
 ):
     """Връща статистика за артикули - топ N по брой и стойност"""
+    require_permission(current_user, "view_statistics")
     from collections import defaultdict
-    
+
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -5106,6 +5035,7 @@ async def get_price_inflation(
     реално похарчената сума за артикула (не проста средна аритметична) -
     така артикул, купуван често за големи суми, тежи повече в общия
     процент от такъв, купен веднъж за дребна сума."""
+    require_permission(current_user, "view_statistics")
     from collections import defaultdict
 
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
@@ -5182,9 +5112,10 @@ async def get_item_by_supplier(
     current_user: User = Depends(get_current_user)
 ):
     """Сравнява цените на артикул между различни доставчици"""
+    require_permission(current_user, "view_statistics")
     from collections import defaultdict
     from urllib.parse import unquote
-    
+
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -5445,8 +5376,9 @@ async def get_merged_item_statistics(
     Връща статистика за артикули с приложени AI сливания.
     Сходните продукти са обединени в една позиция.
     """
+    require_permission(current_user, "view_statistics")
     from collections import defaultdict
-    
+
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     

@@ -16,7 +16,6 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (sessionId: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   setUser: (user: User | null) => void;
@@ -32,7 +31,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { user, isLoading, isAuthenticated, login, logout, checkAuth, refreshUser, setUser } = useAuthStore();
+  const { user, isLoading, isAuthenticated, logout, checkAuth, refreshUser, setUser } = useAuthStore();
 
   useEffect(() => {
     checkAuth();
@@ -77,10 +76,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{ 
       user, 
-      isLoading, 
-      isAuthenticated, 
-      login, 
-      logout, 
+      isLoading,
+      isAuthenticated,
+      logout,
       refreshUser, 
       setUser,
       ...roleHelpers

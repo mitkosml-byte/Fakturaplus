@@ -39,13 +39,6 @@ class ApiService {
   }
 
   // Auth
-  async createSession(sessionId: string): Promise<{ user: User; session_token: string }> {
-    return this.fetch('/auth/session', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: sessionId }),
-    });
-  }
-
   async register(email: string, password: string, name: string, invitationCode?: string): Promise<{ user: User; session_token: string; invite_error?: string | null }> {
     return this.fetch('/auth/register', {
       method: 'POST',
