@@ -7,7 +7,7 @@ import os
 import asyncio
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ValidationError
 from typing import List, Optional, Dict, Any
 from enum import Enum
 import uuid
@@ -2005,6 +2005,8 @@ async def get_open_days_count(start_date: str, end_date: str, current_user: User
         raise HTTPException(status_code=400, detail="Крайната дата е преди началната")
 
     total_days = (end - start).days + 1
+    if total_days > 1827:  # ~5 years - far more than any real averaging window needs
+        raise HTTPException(status_code=400, detail="Периодът е твърде голям (максимум 5 години)")
     open_days = 0
     d = start
     while d <= end:
@@ -3259,10 +3261,15 @@ async def delete_personal_expense(
     """Изтрива личен разход (само за собственик)"""
     if current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Само титулярът може да управлява лични разходи")
-    
+
+    # Scoped by company, not just this owner's own user_id - a company can
+    # have more than one owner, and GET /personal-expenses already shows
+    # every owner's entries together, so any owner should be able to
+    # delete any of them, not only the ones they personally entered.
+    company_id, _ = await get_company_scope(current_user)
     result = await db.personal_expenses.delete_one({
         "id": expense_id,
-        "user_id": current_user.user_id
+        "company_id": company_id
     })
     
     if result.deleted_count == 0:
@@ -7198,6 +7205,27 @@ async def import_commit(entity: str, request: Request, payload: ImportCommitRequ
     failed = []
     bg_tasks = BackgroundTasks()
 
+    # Short Bulgarian reasons for the validation-error types a bad import
+    # row actually hits (missing/negative/wrong-type cells), so a failed
+    # row shows something a non-technical user can act on instead of a
+    # raw Python/Pydantic exception string.
+    VALIDATION_ERROR_REASONS = {
+        "missing": "липсва задължително поле",
+        "greater_than": "трябва да е положително число",
+        "greater_than_equal": "не може да е отрицателно число",
+        "less_than_equal": "стойността е твърде голяма",
+        "float_parsing": "не е валидно число",
+        "int_parsing": "не е валидно цяло число",
+    }
+
+    def describe_validation_error(e: ValidationError) -> str:
+        parts = []
+        for err in e.errors():
+            field = ".".join(str(p) for p in err.get("loc", []))
+            reason = VALIDATION_ERROR_REASONS.get(err.get("type"), "невалидна стойност")
+            parts.append(f"{field}: {reason}" if field else reason)
+        return "; ".join(parts) or "невалидни данни в реда"
+
     for index, row_data in enumerate(payload.rows):
         try:
             if entity == "invoices":
@@ -7215,8 +7243,10 @@ async def import_commit(entity: str, request: Request, payload: ImportCommitRequ
             imported += 1
         except HTTPException as e:
             failed.append({"index": index, "message": e.detail})
-        except Exception as e:
-            failed.append({"index": index, "message": str(e)})
+        except ValidationError as e:
+            failed.append({"index": index, "message": describe_validation_error(e)})
+        except Exception:
+            failed.append({"index": index, "message": "Редът не можа да бъде обработен"})
 
     if entity == "invoices":
         # No HTTP response cycle will run these for us since create_invoice

@@ -35,25 +35,39 @@ export default function AppDateTimePicker({
   cancelTextIOS,
 }: AppDateTimePickerProps) {
   const isTime = mode === 'time';
-  const fieldFormat = isTime ? TIME_FORMAT : DATE_FORMAT;
-  const [value, setValue] = useState(() => format(date || new Date(), fieldFormat));
+  const isDateTime = mode === 'datetime';
+  const showDateField = !isTime;
+  const showTimeField = isTime || isDateTime;
 
-  // Re-sync the field to whatever date this picker was opened with, each
-  // time it's (re)opened - the input otherwise keeps whatever was typed
+  const [dateValue, setDateValue] = useState(() => format(date || new Date(), DATE_FORMAT));
+  const [timeValue, setTimeValue] = useState(() => format(date || new Date(), TIME_FORMAT));
+
+  // Re-sync the fields to whatever date this picker was opened with, each
+  // time it's (re)opened - the inputs otherwise keep whatever was typed
   // the previous time this same modal instance was shown.
   useEffect(() => {
-    if (isVisible) setValue(format(date || new Date(), fieldFormat));
+    if (isVisible) {
+      setDateValue(format(date || new Date(), DATE_FORMAT));
+      setTimeValue(format(date || new Date(), TIME_FORMAT));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVisible]);
 
   if (!isVisible) return null;
 
   const handleConfirm = () => {
-    if (!value) return;
-    const result = isTime
-      ? parse(value, TIME_FORMAT, date || new Date())
-      : parse(value, DATE_FORMAT, new Date());
+    if (isTime) {
+      const result = parse(timeValue, TIME_FORMAT, date || new Date());
+      if (isNaN(result.getTime())) return;
+      onConfirm(result);
+      return;
+    }
+    const result = parse(dateValue, DATE_FORMAT, new Date());
     if (isNaN(result.getTime())) return;
+    if (isDateTime) {
+      const [hh, mm] = timeValue.split(':').map(Number);
+      if (!isNaN(hh) && !isNaN(mm)) result.setHours(hh, mm, 0, 0);
+    }
     onConfirm(result);
   };
 
@@ -61,13 +75,20 @@ export default function AppDateTimePicker({
     <Modal visible={isVisible} animationType="fade" transparent onRequestClose={onCancel}>
       <View style={styles.overlay}>
         <View style={styles.card}>
-          {React.createElement('input', {
-            type: isTime ? 'time' : 'date',
-            value,
-            min: !isTime && minimumDate ? format(minimumDate, DATE_FORMAT) : undefined,
-            max: !isTime && maximumDate ? format(maximumDate, DATE_FORMAT) : undefined,
-            onChange: (e: any) => setValue(e.target.value),
+          {showDateField && React.createElement('input', {
+            type: 'date',
+            value: dateValue,
+            min: minimumDate ? format(minimumDate, DATE_FORMAT) : undefined,
+            max: maximumDate ? format(maximumDate, DATE_FORMAT) : undefined,
+            onChange: (e: any) => setDateValue(e.target.value),
             autoFocus: true,
+            style: isDateTime ? { ...webInputStyle, marginBottom: 10 } : webInputStyle,
+          })}
+          {showTimeField && React.createElement('input', {
+            type: 'time',
+            value: timeValue,
+            onChange: (e: any) => setTimeValue(e.target.value),
+            autoFocus: isTime,
             style: webInputStyle,
           })}
 
