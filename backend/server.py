@@ -561,6 +561,17 @@ def sanitize_user(user_doc: dict) -> dict:
             user_doc["permissions"] = sorted(set(user_doc["permissions"]) | defaults)
     return user_doc
 
+def simple_scope_query(company_id: Optional[str], user_id: str, **extra) -> dict:
+    """Shared shape for the budget/employees/assets/items endpoints: scope
+    to the whole company when there is one, else fall back to just this
+    user's own records. Unlike get_company_scope(), this doesn't also
+    pull in legacy null-company_id records from other teammates - these
+    collections were all added after company_id scoping already existed,
+    so there's no such legacy data for them to miss."""
+    query = {"company_id": company_id} if company_id else {"user_id": user_id}
+    query.update(extra)
+    return query
+
 async def get_company_scope(current_user: User) -> tuple:
     """Resolves the current user's company_id and a MongoDB query filter
     that scopes a read to the WHOLE company's records (every teammate),
@@ -6022,7 +6033,7 @@ async def get_employees(active_only: bool = False, current_user: User = Depends(
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
-    query = {"company_id": company_id} if company_id else {"user_id": current_user.user_id}
+    query = simple_scope_query(company_id, current_user.user_id)
     if active_only:
         query["active"] = True
 
@@ -6140,7 +6151,7 @@ async def get_payroll_entries(
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
-    query = {"company_id": company_id} if company_id else {"user_id": current_user.user_id}
+    query = simple_scope_query(company_id, current_user.user_id)
     if year:
         query["period_year"] = year
     if month:
@@ -6162,7 +6173,7 @@ async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, s
     """Сумира total_employer_cost на всички ведомостни записи, чийто месец
     попада в зададения период - използвано в /statistics/summary и в
     прогнозата за разходи, за да включат реалния разход за персонал."""
-    query = {"company_id": company_id} if company_id else {"user_id": user_id}
+    query = simple_scope_query(company_id, user_id)
     entries = await db.payroll_entries.find(query, {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1}).to_list(10000)
 
     total = 0.0
@@ -6302,7 +6313,7 @@ class EmployeeLeaveCreate(BaseModel):
     note: Optional[str] = None
 
 async def _get_employee_for_company(employee_id: str, company_id: Optional[str], current_user: User) -> dict:
-    query = {"id": employee_id, "company_id": company_id} if company_id else {"id": employee_id, "user_id": current_user.user_id}
+    query = simple_scope_query(company_id, current_user.user_id, id=employee_id)
     employee = await db.employees.find_one(query, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
@@ -6603,7 +6614,7 @@ async def get_assets(status: Optional[str] = None, current_user: User = Depends(
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
-    query = {"company_id": company_id} if company_id else {"user_id": current_user.user_id}
+    query = simple_scope_query(company_id, current_user.user_id)
     assets = await db.assets.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     enriched = [enrich_asset_with_depreciation(a) for a in assets]
     if status:
@@ -6616,7 +6627,7 @@ async def get_assets_summary(current_user: User = Depends(get_current_user)):
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
-    query = {"company_id": company_id} if company_id else {"user_id": current_user.user_id}
+    query = simple_scope_query(company_id, current_user.user_id)
     assets = await db.assets.find(query, {"_id": 0}).to_list(1000)
     enriched = [enrich_asset_with_depreciation(a) for a in assets]
 
@@ -6695,7 +6706,7 @@ async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: s
     """Сумира амортизацията за всички активи, чиито месечни начисления
     попадат в зададения период - използвано в /statistics/summary и в
     прогнозата за разходи, аналогично на get_payroll_cost_for_period."""
-    query = {"company_id": company_id} if company_id else {"user_id": user_id}
+    query = simple_scope_query(company_id, user_id)
     assets = await db.assets.find(query, {"_id": 0}).to_list(10000)
     if not assets:
         return 0.0
