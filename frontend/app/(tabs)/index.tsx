@@ -44,6 +44,19 @@ export default function HomeScreen() {
   // or a custom range instead of the cards just going silent at zero on the
   // 1st of a new month with no way back to see where last month's data went.
   const [periodState, setPeriodState] = useState<PeriodState>(DEFAULT_PERIOD_STATE);
+
+  // Quick-add revenue/expense should land inside whatever period the
+  // navigator above is showing, not always on today's real date - otherwise
+  // opening "Дневен оборот" while looking back at September silently adds a
+  // record to October instead, and the dashboard you're looking at never
+  // reflects it. Clamped to today for the current/future-reaching periods,
+  // since you can't log revenue for a day that hasn't happened yet.
+  const getDefaultActionDate = useCallback(() => {
+    const bounds = getPeriodBounds(periodState);
+    const now = new Date();
+    return bounds.end > now ? now : bounds.end;
+  }, [periodState]);
+
   // Open (non-closed) days within the selected period - drives the average
   // daily turnover card below instead of the raw day count, so a rest day
   // (see Профил > Почивни дни) doesn't drag the average down. Defaults to
@@ -337,11 +350,12 @@ export default function HomeScreen() {
   // Dismissing without saving must not leave revenueDate pointing at
   // whatever day was last browsed with the prev/next arrows or the date
   // picker - otherwise the NEXT tap of the "Дневен оборот" quick action
-  // silently reopens on that stale day instead of today, and a correction
-  // typed there lands on the wrong date while today's total looks unchanged.
+  // silently reopens on that stale day instead of the one matching the
+  // currently-viewed period, and a correction typed there lands on the
+  // wrong date while the dashboard you're looking at looks unchanged.
   const closeRevenueModal = () => {
     setRevenueModalVisible(false);
-    setRevenueDate(new Date());
+    setRevenueDate(getDefaultActionDate());
   };
 
   const handleAddRevenue = async () => {
@@ -365,7 +379,7 @@ export default function HomeScreen() {
       setPocketMoney('');
       setCardRevenue('');
       setRevenueVatRate(20);
-      setRevenueDate(new Date());
+      setRevenueDate(getDefaultActionDate());
       loadData();
       Alert.alert(t('common.success'), t('msg.revenueSaved'));
     } catch (error: any) {
@@ -594,7 +608,10 @@ export default function HomeScreen() {
             {hasPermission('add_revenue') && (
               <TouchableOpacity
                 style={[styles.actionButton, { backgroundColor: '#10B981' }]}
-                onPress={() => setRevenueModalVisible(true)}
+                onPress={() => {
+                  setRevenueDate(getDefaultActionDate());
+                  setRevenueModalVisible(true);
+                }}
               >
                 <Ionicons name="cash" size={24} color="white" />
                 <Text style={styles.actionButtonText}>{t('home.dailyRevenue')}</Text>
@@ -604,7 +621,10 @@ export default function HomeScreen() {
             {hasPermission('add_expenses') && (
               <TouchableOpacity
                 style={[styles.actionButton, { backgroundColor: '#F59E0B' }]}
-                onPress={() => setExpenseModalVisible(true)}
+                onPress={() => {
+                  setExpenseDate(getDefaultActionDate());
+                  setExpenseModalVisible(true);
+                }}
               >
                 <Ionicons name="remove-circle" size={24} color="white" />
                 <Text style={styles.actionButtonText}>{t('home.expenses')}</Text>
@@ -982,7 +1002,7 @@ export default function HomeScreen() {
               <Text style={styles.modalTitle}>{t('expenses.title')}</Text>
               <TouchableOpacity onPress={() => {
                 setExpenseModalVisible(false);
-                setExpenseDate(new Date());
+                setExpenseDate(getDefaultActionDate());
               }}>
                 <Ionicons name="close" size={28} color="#94A3B8" />
               </TouchableOpacity>
