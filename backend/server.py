@@ -2659,6 +2659,16 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
         raise HTTPException(status_code=502, detail="Сървърът не успя да се свърже с AI услугата (мрежов проблем). Моля, опитайте отново след малко.")
     except anthropic_sdk.APIStatusError as e:
         logger.error(f"OCR Error (API status): {e}")
+        # A depleted credit balance comes back from Anthropic as a plain 400
+        # invalid_request_error, not the 403 PermissionDeniedError handled
+        # above - confirmed from a real production log: "Error code: 400 -
+        # {'type': 'invalid_request_error', 'message': 'Your credit balance
+        # is too low to access the Anthropic API...'}". Every single request
+        # fails identically with this one, all day, regardless of retries -
+        # unlike a transient overload - so it gets the same clear balance
+        # message instead of the generic "connection error" bucket.
+        if "credit balance" in str(e).lower():
+            raise HTTPException(status_code=503, detail="AI акаунтът на приложението няма достатъчен баланс в момента. Моля, свържете се със системния администратор.")
         raise HTTPException(status_code=502, detail="Грешка при връзка с AI услугата за разпознаване.")
     except Exception as e:
         logger.exception("OCR Error")
@@ -2686,6 +2696,10 @@ def ai_exception_to_http(e: Exception, log_context: str) -> HTTPException:
         return HTTPException(status_code=502, detail="Сървърът не успя да се свърже с AI услугата (мрежов проблем).")
     if isinstance(e, anthropic_sdk.APIStatusError):
         logger.error(f"{log_context} (API status): {e}")
+        # See the matching comment in /ocr/scan - a depleted credit balance
+        # comes back as a plain 400 invalid_request_error, not a 403.
+        if "credit balance" in str(e).lower():
+            return HTTPException(status_code=503, detail="AI акаунтът на приложението няма достатъчен баланс в момента. Моля, свържете се със системния администратор.")
         return HTTPException(status_code=502, detail="Грешка при връзка с AI услугата.")
     logger.exception(log_context)
     return HTTPException(status_code=500, detail=f"Грешка: {str(e)}")
