@@ -371,6 +371,14 @@ export const translations: Translations = {
     bg: 'Срок за плащане (по подразбиране 14 дни)',
     en: 'Payment due date (defaults to 14 days)',
   },
+  'scan.dateNotFoundNote': {
+    bg: 'AI не откри дата на фактурата - моля, проверете и въведете я ръчно.',
+    en: "AI couldn't find a date on the invoice - please check and enter it manually.",
+  },
+  'scan.paymentMethodNotDetectedNote': {
+    bg: 'Открита е дата за падеж, но начинът на плащане не е ясен - моля, изберете ръчно.',
+    en: "A due date was found, but the payment method isn't clear - please choose manually.",
+  },
   'invoices.protocolDeadline': {
     bg: 'Краен срок за протокола',
     en: 'Protocol deadline',

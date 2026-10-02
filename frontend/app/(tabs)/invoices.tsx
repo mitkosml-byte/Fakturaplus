@@ -312,7 +312,21 @@ export default function InvoicesScreen() {
             <Ionicons name="business" size={18} color="#8B5CF6" />
             <Text style={styles.supplierName} numberOfLines={1}>{item.supplier}</Text>
           </View>
-          <Text style={styles.totalValueCompact}>{item.total_amount.toFixed(2)} €</Text>
+          <View style={styles.invoiceRowTopRight}>
+            <Text style={styles.totalValueCompact}>{item.total_amount.toFixed(2)} €</Text>
+            {/* Explicit, discoverable delete action - the same long-press
+                gesture on the card still works too (and goes through the
+                exact same confirm dialog below), but a visible "X" doesn't
+                rely on the user already knowing a long-press deletes. */}
+            <TouchableOpacity
+              style={styles.invoiceDeleteButton}
+              onPress={() => handleDeleteInvoice(item.id)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel={t('invoices.deleteInvoice')}
+            >
+              <Ionicons name="close-circle" size={20} color="#64748B" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.invoiceRowBottom}>
@@ -1140,6 +1154,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#8B5CF6',
     marginLeft: 8,
+  },
+  invoiceRowTopRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  invoiceDeleteButton: {
+    marginLeft: 8,
+    padding: 2,
   },
   invoiceRowBottom: {
     flexDirection: 'row',

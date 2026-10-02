@@ -69,6 +69,13 @@ export default function ScanScreen() {
   const [vatTreatment, setVatTreatment] = useState<VatTreatment | ''>('');
   const [notes, setNotes] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date());
+  // Tri-state: null before any scan (nothing to flag yet), true once OCR
+  // genuinely found a printed date, false when it didn't - in that case
+  // invoiceDate above still silently holds today's date (the field is
+  // required), so this is what drives the "no date found, please check"
+  // warning that keeps that silent default from being mistaken for a
+  // confirmed, OCR-read date.
+  const [dateFoundByOcr, setDateFoundByOcr] = useState<boolean | null>(null);
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [items, setItems] = useState<EditableItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>('');
@@ -205,33 +212,39 @@ export default function ScanScreen() {
         })));
       }
       
-      // Set invoice date from OCR if available
+      // Set invoice date from OCR if available - and flag it clearly when
+      // it isn't, instead of leaving invoiceDate silently at today's date
+      // with no sign that nothing was actually read off the invoice.
+      let foundDate = false;
       if (result.invoice_date) {
         try {
           const parsedDate = new Date(result.invoice_date);
           if (!isNaN(parsedDate.getTime())) {
             setInvoiceDate(parsedDate);
+            foundDate = true;
           }
         } catch (e) {
           // Keep default date if parsing fails
         }
       }
+      setDateFoundByOcr(foundDate);
 
-      // A payment due date printed on the invoice means it's a deferred
-      // (bank transfer) payment, not cash - reading it in also implies the
-      // payment method, so the user doesn't have to separately remember to
-      // pick "Банков превод" after OCR already found the actual due date.
-      // The manual due-date picker stays available below as a fallback for
-      // when the invoice doesn't print one at all.
+      // A payment due date printed on the invoice does NOT reliably mean a
+      // deferred bank-transfer payment - many Bulgarian invoice templates
+      // print a standard payment-term line even when the purchase was
+      // actually settled in cash on the spot, and auto-selecting "Банков
+      // превод" from that printed line alone was wrongly flagging cash
+      // purchases as unpaid. The due date is still useful if the user DOES
+      // pick bank transfer themselves, so it's still pre-filled - just no
+      // longer used to pick the payment method on the user's behalf.
       if (result.payment_due_date) {
         try {
           const parsedDueDate = new Date(result.payment_due_date);
           if (!isNaN(parsedDueDate.getTime())) {
-            setPaymentMethod('bank_transfer');
             setPaymentDueDate(parsedDueDate);
           }
         } catch (e) {
-          // Leave payment method unset if parsing fails - manual picker covers it
+          // Leave due date unset if parsing fails - manual picker covers it
         }
       }
     } catch (error: any) {
@@ -335,6 +348,7 @@ export default function ScanScreen() {
     setNotes('');
     setItems([]);
     setInvoiceDate(new Date());
+    setDateFoundByOcr(null);
     setPaymentMethod('');
     setPaymentDueDate(null);
   };
@@ -621,18 +635,24 @@ export default function ScanScreen() {
                   {/* Date of Issue */}
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.issueDate')} *</Text>
-                    <TouchableOpacity 
-                      style={styles.dateInputButton}
+                    <TouchableOpacity
+                      style={[styles.dateInputButton, dateFoundByOcr === false && styles.dateInputButtonWarning]}
                       onPress={() => setDatePickerVisible(true)}
                     >
-                      <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                      <Ionicons name="calendar" size={20} color={dateFoundByOcr === false ? '#F59E0B' : '#8B5CF6'} />
                       <Text style={styles.dateInputText}>
                         {format(invoiceDate, 'd MMMM yyyy', { locale: dateLocale })}
                       </Text>
                       <Ionicons name="chevron-down" size={20} color="#64748B" />
                     </TouchableOpacity>
+                    {dateFoundByOcr === false && (
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="alert-circle" size={16} color="#F59E0B" />
+                        <Text style={styles.protocolNoteText}>{t('scan.dateNotFoundNote')}</Text>
+                      </View>
+                    )}
                   </View>
-                  
+
                   <DateTimePickerModal
                     isVisible={isDatePickerVisible}
                     mode="date"
@@ -722,6 +742,12 @@ export default function ScanScreen() {
                         </TouchableOpacity>
                       ))}
                     </View>
+                    {!paymentMethod && paymentDueDate && (
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="information-circle" size={16} color="#8B5CF6" />
+                        <Text style={styles.protocolNoteText}>{t('scan.paymentMethodNotDetectedNote')}</Text>
+                      </View>
+                    )}
                     {paymentMethod === 'cash' && (
                       <View style={styles.protocolNote}>
                         <Ionicons name="checkmark-circle" size={16} color="#10B981" />
@@ -1218,6 +1244,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
     gap: 10,
+  },
+  dateInputButtonWarning: {
+    borderColor: '#F59E0B',
   },
   dateInputText: {
     flex: 1,
