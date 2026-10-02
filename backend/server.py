@@ -2594,7 +2594,7 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
 
     try:
         response = await anthropic_client.messages.parse(
-            model="claude-opus-5",
+            model="claude-opus-5-5",
             max_tokens=8000,
             system=OCR_SYSTEM_PROMPT,
             messages=[{
@@ -3528,7 +3528,7 @@ async def generate_roi_insights(
 и посочвай сумите винаги в евро (€), никога в лева."""
 
         response = await anthropic_client.messages.create(
-            model="claude-opus-5",
+            model="claude-opus-5-5",
             max_tokens=200,
             system="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български, като посочваш всички суми в евро (€), никога в лева.",
             messages=[{"role": "user", "content": prompt}],
@@ -5285,7 +5285,7 @@ async def run_ai_item_merge(company_id: str) -> dict:
 Върни само групи с 2 или повече варианта - пропусни продукти без дубликат."""
 
         response = await anthropic_client.messages.parse(
-            model="claude-opus-5",
+            model="claude-opus-5-5",
             max_tokens=8000,
             system="Ти си експертен асистент за анализ и групиране на продукти/суровини за малък бизнес в България.",
             messages=[{"role": "user", "content": prompt}],
