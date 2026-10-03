@@ -365,11 +365,11 @@ export default function PersonalExpensesHistoryScreen() {
                     style={styles.input}
                     value={description}
                     onChangeText={setDescription}
-                    placeholder={language === 'bg' ? 'напр. Наем, Заплати...' : 'e.g. Rent, Salaries...'}
+                    placeholder={t('personal.descriptionPlaceholder')}
                     placeholderTextColor={COLORS.textMuted}
                   />
 
-                  <Text style={styles.inputLabel}>{language === 'bg' ? 'Тип' : 'Type'}</Text>
+                  <Text style={styles.inputLabel}>{t('personal.type')}</Text>
                   <View style={styles.chipRowWrap}>
                     {(Object.keys(TYPE_KEYS) as PersonalExpenseType[]).map((tKey) => (
                       <TouchableOpacity
@@ -382,7 +382,7 @@ export default function PersonalExpensesHistoryScreen() {
                     ))}
                   </View>
 
-                  <Text style={styles.inputLabel}>{language === 'bg' ? 'Категория' : 'Category'}</Text>
+                  <Text style={styles.inputLabel}>{t('personal.category')}</Text>
                   <View style={styles.chipRowWrap}>
                     {(Object.keys(CATEGORY_KEYS) as PersonalExpenseCategory[]).map((cKey) => (
                       <TouchableOpacity

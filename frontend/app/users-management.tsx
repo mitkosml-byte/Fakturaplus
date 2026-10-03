@@ -103,10 +103,7 @@ export default function UsersManagementScreen() {
 
   const handleInvite = async () => {
     if (!inviteEmail && !invitePhone) {
-      Alert.alert(
-        language === 'bg' ? 'Грешка' : 'Error',
-        language === 'bg' ? 'Въведете имейл или телефон' : 'Enter email or phone'
-      );
+      Alert.alert(t('common.error'), t('users.enterEmailOrPhone'));
       return;
     }
 
@@ -133,10 +130,7 @@ export default function UsersManagementScreen() {
 
       await loadData();
     } catch (error: any) {
-      Alert.alert(
-        language === 'bg' ? 'Грешка' : 'Error',
-        error.message
-      );
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setInviting(false);
     }
@@ -144,16 +138,13 @@ export default function UsersManagementScreen() {
 
   const handleCopyCode = async () => {
     await Clipboard.setStringAsync(invitationCode);
-    Alert.alert(
-      language === 'bg' ? 'Копирано!' : 'Copied!',
-      language === 'bg' ? 'Кодът е копиран в клипборда' : 'Code copied to clipboard'
-    );
+    Alert.alert(t('users.copied'), t('users.codeCopiedToClipboard'));
   };
 
   const handleShareCode = async () => {
-    const message = language === 'bg'
-      ? `Поканен сте да се присъедините към ${companyName}!\n\nКод за достъп: ${invitationCode}\n\nОтворете приложението Фактура+ и въведете кода в Профил → Фирма → Присъединяване по покана.`
-      : `You are invited to join ${companyName}!\n\nAccess code: ${invitationCode}\n\nOpen the Fakturaplus app and enter the code in Profile → Company → Join by Invitation.`;
+    const message = t('users.shareInviteMessage')
+      .replace('{company}', companyName)
+      .replace('{code}', invitationCode);
     
     try {
       await Share.share({ message });
@@ -164,19 +155,19 @@ export default function UsersManagementScreen() {
 
   const handleCancelInvitation = async (invitationId: string) => {
     Alert.alert(
-      language === 'bg' ? 'Отмяна на покана' : 'Cancel Invitation',
-      language === 'bg' ? 'Сигурни ли сте?' : 'Are you sure?',
+      t('users.cancelInvitationTitle'),
+      t('common.areYouSure'),
       [
-        { text: language === 'bg' ? 'Не' : 'No', style: 'cancel' },
+        { text: t('common.no'), style: 'cancel' },
         {
-          text: language === 'bg' ? 'Да' : 'Yes',
+          text: t('common.yes'),
           style: 'destructive',
           onPress: async () => {
             try {
               await api.cancelInvitation(invitationId);
               await loadData();
             } catch (error: any) {
-              Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+              Alert.alert(t('common.error'), error.message);
             }
           },
         },
@@ -225,18 +216,12 @@ export default function UsersManagementScreen() {
       await loadData();
       setEditingUser(null);
       if (result.status === 'pending_approval') {
-        Alert.alert(
-          language === 'bg' ? 'Изисква се одобрение' : 'Approval required',
-          result.message
-        );
+        Alert.alert(t('users.approvalRequired'), result.message);
       } else {
-        Alert.alert(
-          language === 'bg' ? 'Успех' : 'Success',
-          language === 'bg' ? 'Достъпът е обновен' : 'Access updated'
-        );
+        Alert.alert(t('common.success'), t('users.accessUpdated'));
       }
     } catch (error: any) {
-      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setSavingAccess(false);
     }
@@ -245,30 +230,24 @@ export default function UsersManagementScreen() {
   const handleRemoveUser = async (user: User) => {
     const isOwnerTarget = user.role === 'owner';
     Alert.alert(
-      language === 'bg' ? 'Премахване' : 'Remove',
+      t('users.removeTitle'),
       isOwnerTarget
-        ? (language === 'bg'
-            ? `${user.name} е собственик. Премахването ще създаде заявка, която трябва да бъде одобрена от другите собственици.`
-            : `${user.name} is an owner. Removal will create a request that the other owners must approve.`)
-        : (language === 'bg'
-            ? `Сигурни ли сте, че искате да премахнете ${user.name}?`
-            : `Are you sure you want to remove ${user.name}?`),
+        ? t('users.removeOwnerWarning').replace('{name}', user.name)
+        : t('users.removeConfirmNamed').replace('{name}', user.name),
       [
-        { text: language === 'bg' ? 'Отказ' : 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: isOwnerTarget
-            ? (language === 'bg' ? 'Изпрати заявка' : 'Send request')
-            : (language === 'bg' ? 'Премахни' : 'Remove'),
+          text: isOwnerTarget ? t('users.sendRequest') : t('users.remove'),
           style: 'destructive',
           onPress: async () => {
             try {
               const result = await api.removeUserFromCompany(user.user_id);
               await loadData();
               if (result.status === 'pending_approval') {
-                Alert.alert(language === 'bg' ? 'Изисква се одобрение' : 'Approval required', result.message);
+                Alert.alert(t('users.approvalRequired'), result.message);
               }
             } catch (error: any) {
-              Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+              Alert.alert(t('common.error'), error.message);
             }
           },
         },
@@ -281,13 +260,10 @@ export default function UsersManagementScreen() {
       const result = await api.approveOwnerAction(action.id);
       await loadData();
       if (result.status === 'executed') {
-        Alert.alert(
-          language === 'bg' ? 'Изпълнено' : 'Executed',
-          language === 'bg' ? 'Заявката получи всички нужни одобрения и беше изпълнена.' : 'The request received all required approvals and was executed.'
-        );
+        Alert.alert(t('users.executed'), t('users.executedMessage'));
       }
     } catch (error: any) {
-      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+      Alert.alert(t('common.error'), error.message);
     }
   };
 
@@ -296,7 +272,7 @@ export default function UsersManagementScreen() {
       await api.rejectOwnerAction(action.id);
       await loadData();
     } catch (error: any) {
-      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+      Alert.alert(t('common.error'), error.message);
     }
   };
 
@@ -325,16 +301,14 @@ export default function UsersManagementScreen() {
                 <Ionicons name="arrow-back" size={24} color="white" />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>
-                {language === 'bg' ? 'Потребители' : 'Users'}
+                {t('users.headerTitle')}
               </Text>
               <View style={styles.headerRight} />
             </View>
             <View style={styles.noAccessContainer}>
               <Ionicons name="lock-closed" size={64} color={COLORS.danger} />
               <Text style={styles.noAccessText}>
-                {language === 'bg' 
-                  ? 'Само титулярят има достъп до тази секция'
-                  : 'Only the owner has access to this section'}
+                {t('users.ownerOnlyAccess')}
               </Text>
             </View>
           </SafeAreaView>
@@ -355,7 +329,7 @@ export default function UsersManagementScreen() {
               <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>
-              {language === 'bg' ? 'Потребители' : 'Users'}
+              {t('users.headerTitle')}
             </Text>
             <TouchableOpacity style={styles.addButton} onPress={() => setShowInviteModal(true)}>
               <Ionicons name="person-add" size={24} color={COLORS.primary} />
@@ -376,7 +350,7 @@ export default function UsersManagementScreen() {
             {/* Users List */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>
-                {language === 'bg' ? 'Членове на фирмата' : 'Company Members'} ({users.length})
+                {t('users.companyMembers')} ({users.length})
               </Text>
               
               {users.map((user) => (
@@ -475,7 +449,7 @@ export default function UsersManagementScreen() {
             {pendingInvitations.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>
-                  {language === 'bg' ? 'Чакащи покани' : 'Pending Invitations'} ({pendingInvitations.length})
+                  {t('users.pendingInvitations')} ({pendingInvitations.length})
                 </Text>
                 
                 {pendingInvitations.map((invitation) => (
@@ -487,7 +461,7 @@ export default function UsersManagementScreen() {
                           {invitation.email || invitation.phone}
                         </Text>
                         <Text style={styles.invitationCode}>
-                          {language === 'bg' ? 'Код' : 'Code'}: {invitation.code}
+                          {t('users.code')}: {invitation.code}
                         </Text>
                       </View>
                     </View>
@@ -518,7 +492,7 @@ export default function UsersManagementScreen() {
               <View style={[styles.modalContent, styles.modalContentScrollable]}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>
-                    {language === 'bg' ? 'Покани потребител' : 'Invite User'}
+                    {t('users.inviteUser')}
                   </Text>
                   <TouchableOpacity onPress={() => setShowInviteModal(false)}>
                     <Ionicons name="close" size={28} color={COLORS.textSecondary} />
@@ -529,7 +503,7 @@ export default function UsersManagementScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>
-                    {language === 'bg' ? 'Имейл' : 'Email'}
+                    {t('users.emailLabel')}
                   </Text>
                   <TextInput
                     style={styles.input}
@@ -543,12 +517,12 @@ export default function UsersManagementScreen() {
                 </View>
 
                 <Text style={styles.orText}>
-                  {language === 'bg' ? '— или —' : '— or —'}
+                  {t('users.or')}
                 </Text>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>
-                    {language === 'bg' ? 'Телефон' : 'Phone'}
+                    {t('users.phoneLabel')}
                   </Text>
                   <TextInput
                     style={styles.input}
@@ -562,7 +536,7 @@ export default function UsersManagementScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>
-                    {language === 'bg' ? 'Роля' : 'Role'}
+                    {t('users.role')}
                   </Text>
                   <View style={styles.roleSelector}>
                     <TouchableOpacity
@@ -629,7 +603,7 @@ export default function UsersManagementScreen() {
                     <>
                       <Ionicons name="send" size={20} color="white" />
                       <Text style={styles.inviteButtonText}>
-                        {language === 'bg' ? 'Създай покана' : 'Create Invitation'}
+                        {t('users.createInvitation')}
                       </Text>
                     </>
                   )}
@@ -739,12 +713,10 @@ export default function UsersManagementScreen() {
               <View style={styles.codeModalContent}>
                 <Ionicons name="checkmark-circle" size={64} color={COLORS.success} />
                 <Text style={styles.codeModalTitle}>
-                  {language === 'bg' ? 'Поканата е създадена!' : 'Invitation Created!'}
+                  {t('users.invitationCreated')}
                 </Text>
                 <Text style={styles.codeModalSubtitle}>
-                  {language === 'bg' 
-                    ? 'Споделете кода с поканения потребител:'
-                    : 'Share this code with the invited user:'}
+                  {t('users.shareCodeHint')}
                 </Text>
                 
                 <View style={styles.codeBox}>
@@ -755,13 +727,13 @@ export default function UsersManagementScreen() {
                   <TouchableOpacity style={styles.codeActionButton} onPress={handleCopyCode}>
                     <Ionicons name="copy" size={20} color={COLORS.primary} />
                     <Text style={styles.codeActionText}>
-                      {language === 'bg' ? 'Копирай' : 'Copy'}
+                      {t('users.copy')}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.codeActionButton} onPress={handleShareCode}>
                     <Ionicons name="share-social" size={20} color={COLORS.primary} />
                     <Text style={styles.codeActionText}>
-                      {language === 'bg' ? 'Сподели' : 'Share'}
+                      {t('users.share')}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -771,7 +743,7 @@ export default function UsersManagementScreen() {
                   onPress={() => setShowCodeModal(false)}
                 >
                   <Text style={styles.closeCodeButtonText}>
-                    {language === 'bg' ? 'Готово' : 'Done'}
+                    {t('users.done')}
                   </Text>
                 </TouchableOpacity>
               </View>

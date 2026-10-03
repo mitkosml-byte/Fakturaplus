@@ -42,15 +42,15 @@ export default function LoginScreen() {
 
   const handleEmailAuth = async () => {
     if (!email.trim()) {
-      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', language === 'bg' ? 'Въведете имейл' : 'Enter email');
+      Alert.alert(t('common.error'), t('login.enterEmail'));
       return;
     }
     if (!password.trim()) {
-      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', language === 'bg' ? 'Въведете парола' : 'Enter password');
+      Alert.alert(t('common.error'), t('login.enterPassword'));
       return;
     }
     if (authMode === 'register' && !name.trim()) {
-      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', language === 'bg' ? 'Въведете име' : 'Enter name');
+      Alert.alert(t('common.error'), t('login.enterName'));
       return;
     }
 
@@ -74,17 +74,15 @@ export default function LoginScreen() {
       // inviter's. Say so, but don't block sign-up over it.
       if (authMode === 'register' && inviteCode.trim() && 'invite_error' in result && result.invite_error) {
         Alert.alert(
-          language === 'bg' ? 'Кодът не проработи' : "Code didn't work",
-          result.invite_error + '\n\n' + (language === 'bg'
-            ? 'Профилът е създаден. Можете да опитате отново от Профил > Фирма > "Присъедини се по покана".'
-            : 'Your account was created. You can try again from Profile > Company > "Join by invitation".')
+          t('login.codeDidntWork'),
+          result.invite_error + '\n\n' + t('login.accountCreatedTryAgain')
         );
       }
       setUser(result.user);
       // The root layout's auth guard navigates to /(tabs) once
       // isAuthenticated flips true - no manual navigation needed here.
     } catch (error: any) {
-      Alert.alert(language === 'bg' ? 'Грешка' : 'Error', error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setIsProcessing(false);
     }
@@ -148,7 +146,7 @@ export default function LoginScreen() {
                   onPress={() => setAuthMode('login')}
                 >
                   <Text style={[styles.authToggleText, authMode === 'login' && styles.authToggleTextActive]}>
-                    {language === 'bg' ? 'Вход' : 'Login'}
+                    {t('login.loginTab')}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
@@ -156,7 +154,7 @@ export default function LoginScreen() {
                   onPress={() => setAuthMode('register')}
                 >
                   <Text style={[styles.authToggleText, authMode === 'register' && styles.authToggleTextActive]}>
-                    {language === 'bg' ? 'Регистрация' : 'Register'}
+                    {t('login.registerTab')}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -168,7 +166,7 @@ export default function LoginScreen() {
                     <Ionicons name="person-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
-                      placeholder={language === 'bg' ? 'Име' : 'Name'}
+                      placeholder={t('login.namePlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                       value={name}
                       onChangeText={setName}
@@ -183,7 +181,7 @@ export default function LoginScreen() {
                   <Ionicons name="mail-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
-                    placeholder={language === 'bg' ? 'Имейл' : 'Email'}
+                    placeholder={t('login.emailPlaceholder')}
                     placeholderTextColor={COLORS.textMuted}
                     value={email}
                     onChangeText={setEmail}
@@ -198,7 +196,7 @@ export default function LoginScreen() {
                   <Ionicons name="lock-closed-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
-                    placeholder={language === 'bg' ? 'Парола' : 'Password'}
+                    placeholder={t('login.passwordPlaceholder')}
                     placeholderTextColor={COLORS.textMuted}
                     value={password}
                     onChangeText={setPassword}
@@ -214,7 +212,7 @@ export default function LoginScreen() {
                 {authMode === 'login' && (
                   <TouchableOpacity onPress={() => router.push('/forgot-password')} style={styles.forgotPasswordLink}>
                     <Text style={styles.forgotPasswordText}>
-                      {language === 'bg' ? 'Забравена парола?' : 'Forgot password?'}
+                      {t('login.forgotPassword')}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -223,9 +221,7 @@ export default function LoginScreen() {
                   <TouchableOpacity onPress={() => setAuthMode('register')} style={styles.newUserHint}>
                     <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} />
                     <Text style={styles.newUserHintText}>
-                      {language === 'bg'
-                        ? 'Получихте покана или сте нов потребител? Регистрирайте се тук'
-                        : 'Got an invitation or new here? Register here'}
+                      {t('login.newUserHint')}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -234,7 +230,7 @@ export default function LoginScreen() {
                   <TouchableOpacity onPress={() => setShowInviteCode(true)} style={styles.inviteCodeToggle}>
                     <Ionicons name="key-outline" size={16} color={COLORS.primary} />
                     <Text style={styles.inviteCodeToggleText}>
-                      {language === 'bg' ? 'Имате код за покана? (по избор)' : 'Have an invitation code? (optional)'}
+                      {t('login.haveInviteCode')}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -244,7 +240,7 @@ export default function LoginScreen() {
                     <Ionicons name="key-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
-                      placeholder={language === 'bg' ? 'Код за покана (по избор)' : 'Invitation code (optional)'}
+                      placeholder={t('login.inviteCodePlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                       value={inviteCode}
                       onChangeText={(v) => setInviteCode(v.toUpperCase())}
@@ -257,10 +253,7 @@ export default function LoginScreen() {
 
                 <TouchableOpacity style={styles.emailButton} onPress={handleEmailAuth}>
                   <Text style={styles.emailButtonText}>
-                    {authMode === 'login' 
-                      ? (language === 'bg' ? 'Вход' : 'Login')
-                      : (language === 'bg' ? 'Регистрация' : 'Register')
-                    }
+                    {authMode === 'login' ? t('login.loginTab') : t('login.registerTab')}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -269,13 +262,13 @@ export default function LoginScreen() {
               <View style={styles.legalLinks}>
                 <TouchableOpacity onPress={() => router.push('/privacy-policy')}>
                   <Text style={styles.legalLink}>
-                    {language === 'bg' ? 'Поверителност' : 'Privacy Policy'}
+                    {t('login.privacyPolicy')}
                   </Text>
                 </TouchableOpacity>
                 <Text style={styles.legalDot}>•</Text>
                 <TouchableOpacity onPress={() => router.push('/terms-of-service')}>
                   <Text style={styles.legalLink}>
-                    {language === 'bg' ? 'Условия' : 'Terms'}
+                    {t('login.terms')}
                   </Text>
                 </TouchableOpacity>
               </View>

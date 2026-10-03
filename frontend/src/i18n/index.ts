@@ -23,15 +23,145 @@ export const translations: Translations = {
     bg: 'Влезте, за да продължите',
     en: 'Sign in to continue',
   },
-  'login.google': {
-    bg: 'Вход с Google',
-    en: 'Sign in with Google',
-  },
   'login.selectLanguage': {
     bg: 'Изберете език',
     en: 'Select language',
   },
-  
+  'login.enterEmail': {
+    bg: 'Въведете имейл',
+    en: 'Enter email',
+  },
+  'login.enterPassword': {
+    bg: 'Въведете парола',
+    en: 'Enter password',
+  },
+  'login.enterName': {
+    bg: 'Въведете име',
+    en: 'Enter name',
+  },
+  'login.codeDidntWork': {
+    bg: 'Кодът не проработи',
+    en: "Code didn't work",
+  },
+  'login.accountCreatedTryAgain': {
+    bg: 'Профилът е създаден. Можете да опитате отново от Профил > Фирма > "Присъедини се по покана".',
+    en: 'Your account was created. You can try again from Profile > Company > "Join by invitation".',
+  },
+  'login.loginTab': {
+    bg: 'Вход',
+    en: 'Login',
+  },
+  'login.registerTab': {
+    bg: 'Регистрация',
+    en: 'Register',
+  },
+  'login.namePlaceholder': {
+    bg: 'Име',
+    en: 'Name',
+  },
+  'login.emailPlaceholder': {
+    bg: 'Имейл',
+    en: 'Email',
+  },
+  'login.passwordPlaceholder': {
+    bg: 'Парола',
+    en: 'Password',
+  },
+  'login.forgotPassword': {
+    bg: 'Забравена парола?',
+    en: 'Forgot password?',
+  },
+  'login.newUserHint': {
+    bg: 'Получихте покана или сте нов потребител? Регистрирайте се тук',
+    en: 'Got an invitation or new here? Register here',
+  },
+  'login.haveInviteCode': {
+    bg: 'Имате код за покана? (по избор)',
+    en: 'Have an invitation code? (optional)',
+  },
+  'login.inviteCodePlaceholder': {
+    bg: 'Код за покана (по избор)',
+    en: 'Invitation code (optional)',
+  },
+  'login.privacyPolicy': {
+    bg: 'Поверителност',
+    en: 'Privacy Policy',
+  },
+  'login.terms': {
+    bg: 'Условия',
+    en: 'Terms',
+  },
+
+  // Forgot Password Screen
+  'forgotPassword.title': {
+    bg: 'Забравена парола',
+    en: 'Forgot Password',
+  },
+  'forgotPassword.enterEmail': {
+    bg: 'Въведете имейл',
+    en: 'Enter your email',
+  },
+  'forgotPassword.sent': {
+    bg: 'Изпратено',
+    en: 'Sent',
+  },
+  'forgotPassword.codeSentMessage': {
+    bg: 'Ако имейлът съществува в системата, изпратихме код за възстановяване. Проверете пощата си.',
+    en: 'If that email is registered, we sent a reset code. Check your inbox.',
+  },
+  'forgotPassword.enterCode': {
+    bg: 'Въведете кода от имейла',
+    en: 'Enter the code from the email',
+  },
+  'forgotPassword.enterNewPassword': {
+    bg: 'Въведете нова парола',
+    en: 'Enter a new password',
+  },
+  'forgotPassword.passwordChanged': {
+    bg: 'Паролата е сменена успешно. Моля, влезте отново.',
+    en: 'Password changed successfully. Please log in again.',
+  },
+  'forgotPassword.yourEmail': {
+    bg: 'Вашият имейл',
+    en: 'Your email',
+  },
+  'forgotPassword.willSendCode': {
+    bg: 'Ще ви изпратим код за възстановяване',
+    en: "We'll send you a reset code",
+  },
+  'forgotPassword.sendCode': {
+    bg: 'Изпрати код',
+    en: 'Send code',
+  },
+  'forgotPassword.alreadyHaveCode': {
+    bg: 'Вече имам код',
+    en: 'I already have a code',
+  },
+  'forgotPassword.codeAndNewPassword': {
+    bg: 'Код и нова парола',
+    en: 'Code and new password',
+  },
+  'forgotPassword.codeValidity': {
+    bg: 'Кодът е валиден 30 минути',
+    en: 'The code is valid for 30 minutes',
+  },
+  'forgotPassword.emailPlaceholder': {
+    bg: 'Имейл',
+    en: 'Email',
+  },
+  'forgotPassword.newPasswordPlaceholder': {
+    bg: 'Нова парола',
+    en: 'New password',
+  },
+  'forgotPassword.resetPassword': {
+    bg: 'Смени паролата',
+    en: 'Reset password',
+  },
+  'forgotPassword.sendNewCode': {
+    bg: 'Изпрати нов код',
+    en: 'Send a new code',
+  },
+
   // Navigation
   'nav.home': {
     bg: 'Главна',
@@ -379,6 +509,86 @@ export const translations: Translations = {
     bg: 'Открита е дата за падеж, но начинът на плащане не е ясен - моля, изберете ръчно.',
     en: "A due date was found, but the payment method isn't clear - please choose manually.",
   },
+  'scan.cameraError': {
+    bg: 'Не можах да заснема снимка',
+    en: 'Could not take photo',
+  },
+  'scan.scanError': {
+    bg: 'Грешка при сканиране',
+    en: 'Scan error',
+  },
+  'scan.tryAgain': {
+    bg: 'Моля, опитайте отново',
+    en: 'Please try again',
+  },
+  'scan.subtitle': {
+    bg: 'Използвай OCR за автоматично извличане',
+    en: 'Use OCR for automatic extraction',
+  },
+  'scan.useCameraHint': {
+    bg: 'Използвай камерата',
+    en: 'Use the camera',
+  },
+  'scan.fromGalleryHint': {
+    bg: 'От галерията',
+    en: 'From gallery',
+  },
+  'scan.invoiceWithPages': {
+    bg: 'Фактура с {count} страници',
+    en: 'Invoice with {count} pages',
+  },
+  'scan.removePage': {
+    bg: 'Премахни страницата',
+    en: 'Remove page',
+  },
+  'scan.invoiceDataTitle': {
+    bg: 'Данни от фактурата',
+    en: 'Invoice Data',
+  },
+  'scan.editIfNeeded': {
+    bg: 'Редактирайте при нужда',
+    en: 'Edit if needed',
+  },
+  'scan.aiCorrections': {
+    bg: 'AI корекции',
+    en: 'AI Corrections',
+  },
+  'scan.companyNamePlaceholder': {
+    bg: 'Име на фирмата',
+    en: 'Company name',
+  },
+  'scan.productsItemsLabel': {
+    bg: 'Продукти/артикули',
+    en: 'Products/items',
+  },
+  'scan.addShort': {
+    bg: 'Добави',
+    en: 'Add',
+  },
+  'scan.noProductsRecognized': {
+    bg: 'Няма разпознати продукти. Добавете ги ръчно при нужда.',
+    en: 'No products recognized. Add them manually if needed.',
+  },
+  'scan.productNamePlaceholder': {
+    bg: 'Име на продукта',
+    en: 'Product name',
+  },
+  'scan.qtyPlaceholder': {
+    bg: 'Бр.',
+    en: 'Qty',
+  },
+  'scan.unitPlaceholder': {
+    bg: 'Мярка',
+    en: 'Unit',
+  },
+  'scan.pricePlaceholder': {
+    bg: 'Цена',
+    en: 'Price',
+  },
+  'scan.notesPlaceholder': {
+    bg: 'Допълнителни бележки...',
+    en: 'Additional notes...',
+  },
   'invoices.protocolDeadline': {
     bg: 'Краен срок за протокола',
     en: 'Protocol deadline',
@@ -631,6 +841,14 @@ export const translations: Translations = {
     bg: 'Настройки',
     en: 'Settings',
   },
+  'profile.users': {
+    bg: 'Потребители',
+    en: 'Users',
+  },
+  'profile.usersDesc': {
+    bg: 'Управление и покани',
+    en: 'Manage & invite',
+  },
   'profile.company': {
     bg: 'Фирма',
     en: 'Company',
@@ -638,6 +856,22 @@ export const translations: Translations = {
   'profile.companyData': {
     bg: 'Данни на фирмата',
     en: 'Company data',
+  },
+  'profile.noCompanyYet': {
+    bg: 'Създайте фирма или се присъединете по покана',
+    en: 'Create a company or join by invitation',
+  },
+  'profile.accountSecurity': {
+    bg: 'Акаунт и сигурност',
+    en: 'Account & Security',
+  },
+  'profile.changePassword': {
+    bg: 'Смяна на парола',
+    en: 'Change password',
+  },
+  'profile.setPasswordForEmail': {
+    bg: 'Задайте парола за вход с имейл',
+    en: 'Set a password for email login',
   },
   'profile.notifications': {
     bg: 'Известия',
@@ -683,6 +917,14 @@ export const translations: Translations = {
     bg: 'Език',
     en: 'Language',
   },
+  'profile.languageBulgarian': {
+    bg: '🇧🇬 Български',
+    en: '🇧🇬 Български',
+  },
+  'profile.languageEnglish': {
+    bg: '🇬🇧 English',
+    en: '🇬🇧 English',
+  },
   'profile.info': {
     bg: 'Информация',
     en: 'Information',
@@ -694,6 +936,22 @@ export const translations: Translations = {
   'profile.howToUse': {
     bg: 'Как да използвате приложението',
     en: 'How to use the app',
+  },
+  'profile.privacyPolicy': {
+    bg: 'Поверителност',
+    en: 'Privacy Policy',
+  },
+  'profile.privacyPolicyDesc': {
+    bg: 'Защита на данните',
+    en: 'Data protection',
+  },
+  'profile.termsOfService': {
+    bg: 'Условия',
+    en: 'Terms of Service',
+  },
+  'profile.termsOfServiceDesc': {
+    bg: 'Правила за ползване',
+    en: 'Usage rules',
   },
   'profile.logout': {
     bg: 'Изход',
@@ -708,6 +966,18 @@ export const translations: Translations = {
   'common.cancel': {
     bg: 'Отказ',
     en: 'Cancel',
+  },
+  'common.areYouSure': {
+    bg: 'Сигурни ли сте?',
+    en: 'Are you sure?',
+  },
+  'common.yes': {
+    bg: 'Да',
+    en: 'Yes',
+  },
+  'common.no': {
+    bg: 'Не',
+    en: 'No',
   },
   'common.confirm': {
     bg: 'Потвърди',
@@ -2045,6 +2315,18 @@ export const translations: Translations = {
     bg: 'Описание',
     en: 'Description',
   },
+  'personal.descriptionPlaceholder': {
+    bg: 'напр. Наем, Заплати...',
+    en: 'e.g. Rent, Salaries...',
+  },
+  'personal.type': {
+    bg: 'Тип',
+    en: 'Type',
+  },
+  'personal.category': {
+    bg: 'Категория',
+    en: 'Category',
+  },
   'personal.typeInvestment': {
     bg: 'Инвестиция',
     en: 'Investment',
@@ -2470,6 +2752,118 @@ export const translations: Translations = {
   'users.removeConfirm': {
     bg: 'Сигурни ли сте, че искате да премахнете този потребител?',
     en: 'Are you sure you want to remove this user?',
+  },
+  'users.headerTitle': {
+    bg: 'Потребители',
+    en: 'Users',
+  },
+  'users.ownerOnlyAccess': {
+    bg: 'Само титулярят има достъп до тази секция',
+    en: 'Only the owner has access to this section',
+  },
+  'users.enterEmailOrPhone': {
+    bg: 'Въведете имейл или телефон',
+    en: 'Enter email or phone',
+  },
+  'users.copied': {
+    bg: 'Копирано!',
+    en: 'Copied!',
+  },
+  'users.codeCopiedToClipboard': {
+    bg: 'Кодът е копиран в клипборда',
+    en: 'Code copied to clipboard',
+  },
+  'users.shareInviteMessage': {
+    bg: 'Поканен сте да се присъедините към {company}!\n\nКод за достъп: {code}\n\nОтворете приложението Фактура+ и въведете кода в Профил → Фирма → Присъединяване по покана.',
+    en: 'You are invited to join {company}!\n\nAccess code: {code}\n\nOpen the Fakturaplus app and enter the code in Profile → Company → Join by Invitation.',
+  },
+  'users.cancelInvitationTitle': {
+    bg: 'Отмяна на покана',
+    en: 'Cancel Invitation',
+  },
+  'users.approvalRequired': {
+    bg: 'Изисква се одобрение',
+    en: 'Approval required',
+  },
+  'users.accessUpdated': {
+    bg: 'Достъпът е обновен',
+    en: 'Access updated',
+  },
+  'users.removeTitle': {
+    bg: 'Премахване',
+    en: 'Remove',
+  },
+  'users.removeOwnerWarning': {
+    bg: '{name} е собственик. Премахването ще създаде заявка, която трябва да бъде одобрена от другите собственици.',
+    en: '{name} is an owner. Removal will create a request that the other owners must approve.',
+  },
+  'users.removeConfirmNamed': {
+    bg: 'Сигурни ли сте, че искате да премахнете {name}?',
+    en: 'Are you sure you want to remove {name}?',
+  },
+  'users.sendRequest': {
+    bg: 'Изпрати заявка',
+    en: 'Send request',
+  },
+  'users.executed': {
+    bg: 'Изпълнено',
+    en: 'Executed',
+  },
+  'users.executedMessage': {
+    bg: 'Заявката получи всички нужни одобрения и беше изпълнена.',
+    en: 'The request received all required approvals and was executed.',
+  },
+  'users.companyMembers': {
+    bg: 'Членове на фирмата',
+    en: 'Company Members',
+  },
+  'users.pendingInvitations': {
+    bg: 'Чакащи покани',
+    en: 'Pending Invitations',
+  },
+  'users.code': {
+    bg: 'Код',
+    en: 'Code',
+  },
+  'users.inviteUser': {
+    bg: 'Покани потребител',
+    en: 'Invite User',
+  },
+  'users.emailLabel': {
+    bg: 'Имейл',
+    en: 'Email',
+  },
+  'users.or': {
+    bg: '— или —',
+    en: '— or —',
+  },
+  'users.phoneLabel': {
+    bg: 'Телефон',
+    en: 'Phone',
+  },
+  'users.createInvitation': {
+    bg: 'Създай покана',
+    en: 'Create Invitation',
+  },
+  'users.invitationCreated': {
+    bg: 'Поканата е създадена!',
+    en: 'Invitation Created!',
+  },
+  'users.shareCodeHint': {
+    bg: 'Споделете кода с поканения потребител:',
+    en: 'Share this code with the invited user:',
+  },
+  'users.copy': {
+    bg: 'Копирай',
+    en: 'Copy',
+  },
+  'users.share': {
+    bg: 'Сподели',
+    en: 'Share',
+  },
+  'users.done': {
+    bg: 'Готово',
+    en: 'Done',
   },
 
   'profile.payrollDesc': { bg: 'Служители и месечни ведомости', en: 'Employees and monthly payroll' },

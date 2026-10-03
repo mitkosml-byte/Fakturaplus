@@ -216,8 +216,8 @@ export default function ProfileScreen() {
                 <Ionicons name="people" size={20} color={COLORS.pink} />
               </View>
               <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{language === 'bg' ? 'Потребители' : 'Users'}</Text>
-                <Text style={styles.menuSubtitle}>{language === 'bg' ? 'Управление и покани' : 'Manage & invite'}</Text>
+                <Text style={styles.menuTitle}>{t('profile.users')}</Text>
+                <Text style={styles.menuSubtitle}>{t('profile.usersDesc')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
@@ -234,7 +234,7 @@ export default function ProfileScreen() {
                 <Text style={styles.menuSubtitle}>
                   {company
                     ? t('profile.companyData')
-                    : (language === 'bg' ? 'Създайте фирма или се присъединете по покана' : 'Create a company or join by invitation')}
+                    : t('profile.noCompanyYet')}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
@@ -246,11 +246,11 @@ export default function ProfileScreen() {
               <Ionicons name="lock-closed" size={20} color={COLORS.success} />
             </View>
             <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{language === 'bg' ? 'Акаунт и сигурност' : 'Account & Security'}</Text>
+              <Text style={styles.menuTitle}>{t('profile.accountSecurity')}</Text>
               <Text style={styles.menuSubtitle}>
                 {user?.has_password
-                  ? (language === 'bg' ? 'Смяна на парола' : 'Change password')
-                  : (language === 'bg' ? 'Задайте парола за вход с имейл' : 'Set a password for email login')}
+                  ? t('profile.changePassword')
+                  : t('profile.setPasswordForEmail')}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
@@ -426,7 +426,7 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>{t('profile.language')}</Text>
-              <Text style={styles.menuSubtitle}>{language === 'bg' ? '🇧🇬 Български' : '🇬🇧 English'}</Text>
+              <Text style={styles.menuSubtitle}>{language === 'bg' ? t('profile.languageBulgarian') : t('profile.languageEnglish')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -451,8 +451,8 @@ export default function ProfileScreen() {
               <Ionicons name="shield-checkmark" size={20} color={COLORS.success} />
             </View>
             <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{language === 'bg' ? 'Поверителност' : 'Privacy Policy'}</Text>
-              <Text style={styles.menuSubtitle}>{language === 'bg' ? 'Защита на данните' : 'Data protection'}</Text>
+              <Text style={styles.menuTitle}>{t('profile.privacyPolicy')}</Text>
+              <Text style={styles.menuSubtitle}>{t('profile.privacyPolicyDesc')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -462,8 +462,8 @@ export default function ProfileScreen() {
               <Ionicons name="document-text" size={20} color={COLORS.warning} />
             </View>
             <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{language === 'bg' ? 'Условия' : 'Terms of Service'}</Text>
-              <Text style={styles.menuSubtitle}>{language === 'bg' ? 'Правила за ползване' : 'Usage rules'}</Text>
+              <Text style={styles.menuTitle}>{t('profile.termsOfService')}</Text>
+              <Text style={styles.menuSubtitle}>{t('profile.termsOfServiceDesc')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>

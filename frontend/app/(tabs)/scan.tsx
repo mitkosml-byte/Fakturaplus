@@ -165,7 +165,7 @@ export default function ScanScreen() {
       }
     } catch (error) {
       console.error('Error taking photo:', error);
-      Alert.alert(t('common.error'), language === 'bg' ? 'Не можах да заснема снимка' : 'Could not take photo');
+      Alert.alert(t('common.error'), t('scan.cameraError'));
     }
   };
 
@@ -249,7 +249,7 @@ export default function ScanScreen() {
         }
       }
     } catch (error: any) {
-      Alert.alert(language === 'bg' ? 'Грешка при сканиране' : 'Scan error', error.message || (language === 'bg' ? 'Моля, опитайте отново' : 'Please try again'));
+      Alert.alert(t('scan.scanError'), error.message || t('scan.tryAgain'));
     } finally {
       setIsScanning(false);
     }
@@ -365,7 +365,7 @@ export default function ScanScreen() {
             <ScrollView style={styles.scrollView}>
               <View style={styles.header}>
                 <Text style={styles.title}>{t('scan.title')}</Text>
-                <Text style={styles.subtitle}>{language === 'bg' ? 'Използвай OCR за автоматично извличане' : 'Use OCR for automatic extraction'}</Text>
+                <Text style={styles.subtitle}>{t('scan.subtitle')}</Text>
               </View>
 
               {capturedImages.length === 0 && (
@@ -396,7 +396,7 @@ export default function ScanScreen() {
                   <Ionicons name="camera" size={48} color={COLORS.primary} />
                 </View>
                 <Text style={styles.scanButtonText}>{t('scan.takePhoto')}</Text>
-                <Text style={styles.scanButtonHint}>{language === 'bg' ? 'Използвай камерата' : 'Use the camera'}</Text>
+                <Text style={styles.scanButtonHint}>{t('scan.useCameraHint')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.scanButton} onPress={handlePickImage}>
@@ -404,7 +404,7 @@ export default function ScanScreen() {
                   <Ionicons name="image" size={48} color={COLORS.primary} />
                 </View>
                 <Text style={styles.scanButtonText}>{t('scan.fromGallery')}</Text>
-                <Text style={styles.scanButtonHint}>{language === 'bg' ? 'От галерията' : 'From gallery'}</Text>
+                <Text style={styles.scanButtonHint}>{t('scan.fromGalleryHint')}</Text>
               </TouchableOpacity>
             </View>
           ) : null}
@@ -450,7 +450,7 @@ export default function ScanScreen() {
               <View style={styles.imagePreview}>
                 {capturedImages.length > 1 && (
                   <Text style={styles.pagesCountText}>
-                    {language === 'bg' ? `Фактура с ${capturedImages.length} страници` : `Invoice with ${capturedImages.length} pages`}
+                    {t('scan.invoiceWithPages').replace('{count}', String(capturedImages.length))}
                   </Text>
                 )}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pagesStrip}>
@@ -464,7 +464,7 @@ export default function ScanScreen() {
                         style={styles.pageThumbRemove}
                         onPress={() => removePage(index)}
                         disabled={isScanning}
-                        accessibilityLabel={language === 'bg' ? 'Премахни страницата' : 'Remove page'}
+                        accessibilityLabel={t('scan.removePage')}
                       >
                         <Ionicons name="close" size={14} color="white" />
                       </TouchableOpacity>
@@ -503,10 +503,10 @@ export default function ScanScreen() {
               ) : (
                 <View style={styles.formContainer}>
                   <Text style={styles.formTitle}>
-                    {scanMode === 'sales' ? t('scan.salesFormTitle') : (language === 'bg' ? 'Данни от фактурата' : 'Invoice Data')}
+                    {scanMode === 'sales' ? t('scan.salesFormTitle') : t('scan.invoiceDataTitle')}
                   </Text>
                   <Text style={styles.formHint}>
-                    {scanMode === 'sales' ? t('scan.salesFormHint') : (language === 'bg' ? 'Редактирайте при нужда' : 'Edit if needed')}
+                    {scanMode === 'sales' ? t('scan.salesFormHint') : t('scan.editIfNeeded')}
                   </Text>
 
                   {/* AI Corrections Info */}
@@ -515,7 +515,7 @@ export default function ScanScreen() {
                       <View style={styles.correctionsHeader}>
                         <Ionicons name="sparkles" size={18} color={COLORS.success} />
                         <Text style={styles.correctionsTitle}>
-                          {language === 'bg' ? 'AI корекции' : 'AI Corrections'}
+                          {t('scan.aiCorrections')}
                         </Text>
                         {ocrConfidence && (
                           <View style={styles.confidenceBadge}>
@@ -590,7 +590,7 @@ export default function ScanScreen() {
                       style={styles.input}
                       value={supplier}
                       onChangeText={setSupplier}
-                      placeholder={language === 'bg' ? 'Име на фирмата' : 'Company name'}
+                      placeholder={t('scan.companyNamePlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                     />
                   </View>
@@ -789,21 +789,19 @@ export default function ScanScreen() {
                   <View style={styles.itemsSection}>
                     <View style={styles.itemsSectionHeader}>
                       <Text style={styles.inputLabel}>
-                        {language === 'bg' ? 'Продукти/артикули' : 'Products/items'}
+                        {t('scan.productsItemsLabel')}
                       </Text>
                       <TouchableOpacity style={styles.addItemButton} onPress={addItem}>
                         <Ionicons name="add" size={18} color={COLORS.primary} />
                         <Text style={styles.addItemButtonText}>
-                          {language === 'bg' ? 'Добави' : 'Add'}
+                          {t('scan.addShort')}
                         </Text>
                       </TouchableOpacity>
                     </View>
 
                     {items.length === 0 ? (
                       <Text style={styles.itemsEmptyHint}>
-                        {language === 'bg'
-                          ? 'Няма разпознати продукти. Добавете ги ръчно при нужда.'
-                          : 'No products recognized. Add them manually if needed.'}
+                        {t('scan.noProductsRecognized')}
                       </Text>
                     ) : (
                       items.map((item, index) => (
@@ -812,7 +810,7 @@ export default function ScanScreen() {
                             style={[styles.input, styles.itemNameInput]}
                             value={item.name}
                             onChangeText={(v) => updateItem(index, { name: v })}
-                            placeholder={language === 'bg' ? 'Име на продукта' : 'Product name'}
+                            placeholder={t('scan.productNamePlaceholder')}
                             placeholderTextColor={COLORS.textMuted}
                           />
                           <View style={styles.itemRowFields}>
@@ -821,14 +819,14 @@ export default function ScanScreen() {
                               value={item.quantity}
                               onChangeText={(v) => updateItem(index, { quantity: v })}
                               keyboardType="decimal-pad"
-                              placeholder={language === 'bg' ? 'Бр.' : 'Qty'}
+                              placeholder={t('scan.qtyPlaceholder')}
                               placeholderTextColor={COLORS.textMuted}
                             />
                             <TextInput
                               style={[styles.input, styles.itemSmallInput]}
                               value={item.unit}
                               onChangeText={(v) => updateItem(index, { unit: v })}
-                              placeholder={language === 'bg' ? 'Мярка' : 'Unit'}
+                              placeholder={t('scan.unitPlaceholder')}
                               placeholderTextColor={COLORS.textMuted}
                             />
                             <TextInput
@@ -836,7 +834,7 @@ export default function ScanScreen() {
                               value={item.unit_price}
                               onChangeText={(v) => updateItem(index, { unit_price: v })}
                               keyboardType="decimal-pad"
-                              placeholder={language === 'bg' ? 'Цена' : 'Price'}
+                              placeholder={t('scan.pricePlaceholder')}
                               placeholderTextColor={COLORS.textMuted}
                             />
                             <TouchableOpacity style={styles.removeItemButton} onPress={() => removeItem(index)}>
@@ -854,7 +852,7 @@ export default function ScanScreen() {
                       style={[styles.input, styles.textArea]}
                       value={notes}
                       onChangeText={setNotes}
-                      placeholder={language === 'bg' ? 'Допълнителни бележки...' : 'Additional notes...'}
+                      placeholder={t('scan.notesPlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                       multiline
                       numberOfLines={3}

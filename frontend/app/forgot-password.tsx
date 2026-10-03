@@ -16,14 +16,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
-import { useLanguageStore } from '../src/i18n';
+import { useTranslation } from '../src/i18n';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
-  const { language } = useLanguageStore();
+  const { t } = useTranslation();
 
   const [step, setStep] = useState<'request' | 'reset'>('request');
   const [email, setEmail] = useState('');
@@ -32,27 +32,19 @@ export default function ForgotPasswordScreen() {
   const [sending, setSending] = useState(false);
   const [resetting, setResetting] = useState(false);
 
-  const t = (bg: string, en: string) => (language === 'bg' ? bg : en);
-
   const handleRequestCode = async () => {
     const trimmed = email.trim();
     if (!trimmed) {
-      Alert.alert(t('Грешка', 'Error'), t('Въведете имейл', 'Enter your email'));
+      Alert.alert(t('common.error'), t('forgotPassword.enterEmail'));
       return;
     }
     setSending(true);
     try {
       await api.forgotPassword(trimmed);
-      Alert.alert(
-        t('Изпратено', 'Sent'),
-        t(
-          'Ако имейлът съществува в системата, изпратихме код за възстановяване. Проверете пощата си.',
-          'If that email is registered, we sent a reset code. Check your inbox.'
-        )
-      );
+      Alert.alert(t('forgotPassword.sent'), t('forgotPassword.codeSentMessage'));
       setStep('reset');
     } catch (error: any) {
-      Alert.alert(t('Грешка', 'Error'), error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setSending(false);
     }
@@ -61,23 +53,23 @@ export default function ForgotPasswordScreen() {
   const handleResetPassword = async () => {
     const trimmedCode = code.trim().toUpperCase();
     if (!trimmedCode) {
-      Alert.alert(t('Грешка', 'Error'), t('Въведете кода от имейла', 'Enter the code from the email'));
+      Alert.alert(t('common.error'), t('forgotPassword.enterCode'));
       return;
     }
     if (!newPassword.trim()) {
-      Alert.alert(t('Грешка', 'Error'), t('Въведете нова парола', 'Enter a new password'));
+      Alert.alert(t('common.error'), t('forgotPassword.enterNewPassword'));
       return;
     }
     setResetting(true);
     try {
       await api.resetPassword(email.trim(), trimmedCode, newPassword);
       Alert.alert(
-        t('Успех', 'Success'),
-        t('Паролата е сменена успешно. Моля, влезте отново.', 'Password changed successfully. Please log in again.'),
+        t('common.success'),
+        t('forgotPassword.passwordChanged'),
         [{ text: 'OK', onPress: () => router.replace('/login') }]
       );
     } catch (error: any) {
-      Alert.alert(t('Грешка', 'Error'), error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setResetting(false);
     }
@@ -91,7 +83,7 @@ export default function ForgotPasswordScreen() {
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
-            <Text style={styles.title}>{t('Забравена парола', 'Forgot Password')}</Text>
+            <Text style={styles.title}>{t('forgotPassword.title')}</Text>
             <View style={{ width: 40 }} />
           </View>
 
@@ -104,9 +96,9 @@ export default function ForgotPasswordScreen() {
                       <Ionicons name="mail" size={24} color={COLORS.primary} />
                     </View>
                     <View style={styles.sectionTitleContainer}>
-                      <Text style={styles.sectionTitle}>{t('Вашият имейл', 'Your email')}</Text>
+                      <Text style={styles.sectionTitle}>{t('forgotPassword.yourEmail')}</Text>
                       <Text style={styles.sectionSubtitle}>
-                        {t('Ще ви изпратим код за възстановяване', "We'll send you a reset code")}
+                        {t('forgotPassword.willSendCode')}
                       </Text>
                     </View>
                   </View>
@@ -131,13 +123,13 @@ export default function ForgotPasswordScreen() {
                     {sending ? (
                       <ActivityIndicator color="white" />
                     ) : (
-                      <Text style={styles.actionButtonText}>{t('Изпрати код', 'Send code')}</Text>
+                      <Text style={styles.actionButtonText}>{t('forgotPassword.sendCode')}</Text>
                     )}
                   </TouchableOpacity>
 
                   <TouchableOpacity onPress={() => setStep('reset')} style={styles.secondaryLink}>
                     <Text style={styles.secondaryLinkText}>
-                      {t('Вече имам код', 'I already have a code')}
+                      {t('forgotPassword.alreadyHaveCode')}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -148,9 +140,9 @@ export default function ForgotPasswordScreen() {
                       <Ionicons name="key" size={24} color={COLORS.primary} />
                     </View>
                     <View style={styles.sectionTitleContainer}>
-                      <Text style={styles.sectionTitle}>{t('Код и нова парола', 'Code and new password')}</Text>
+                      <Text style={styles.sectionTitle}>{t('forgotPassword.codeAndNewPassword')}</Text>
                       <Text style={styles.sectionSubtitle}>
-                        {t('Кодът е валиден 30 минути', 'The code is valid for 30 minutes')}
+                        {t('forgotPassword.codeValidity')}
                       </Text>
                     </View>
                   </View>
@@ -159,7 +151,7 @@ export default function ForgotPasswordScreen() {
                     style={styles.textInput}
                     value={email}
                     onChangeText={setEmail}
-                    placeholder={t('Имейл', 'Email')}
+                    placeholder={t('forgotPassword.emailPlaceholder')}
                     placeholderTextColor={COLORS.textMuted}
                     keyboardType="email-address"
                     autoCapitalize="none"
@@ -180,7 +172,7 @@ export default function ForgotPasswordScreen() {
                     style={styles.textInput}
                     value={newPassword}
                     onChangeText={setNewPassword}
-                    placeholder={t('Нова парола', 'New password')}
+                    placeholder={t('forgotPassword.newPasswordPlaceholder')}
                     placeholderTextColor={COLORS.textMuted}
                     secureTextEntry
                     textContentType="newPassword"
@@ -195,13 +187,13 @@ export default function ForgotPasswordScreen() {
                     {resetting ? (
                       <ActivityIndicator color="white" />
                     ) : (
-                      <Text style={styles.actionButtonText}>{t('Смени паролата', 'Reset password')}</Text>
+                      <Text style={styles.actionButtonText}>{t('forgotPassword.resetPassword')}</Text>
                     )}
                   </TouchableOpacity>
 
                   <TouchableOpacity onPress={() => setStep('request')} style={styles.secondaryLink}>
                     <Text style={styles.secondaryLinkText}>
-                      {t('Изпрати нов код', 'Send a new code')}
+                      {t('forgotPassword.sendNewCode')}
                     </Text>
                   </TouchableOpacity>
                 </View>
