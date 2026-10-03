@@ -256,6 +256,9 @@ def test_items_price_tracking(client):
     r = client.get("/api/items/merge-mappings", headers=owner)
     assert r.status_code == 200
 
+    r = client.post("/api/items/ai-merge", headers=owner)
+    assert r.status_code == 200
+
 
 def test_notifications_and_company(client):
     owner = h(STATE["owner_token"])
@@ -343,6 +346,12 @@ def test_roles_invitations_permissions(client):
     assert r.status_code == 403  # plain staff lacks view_statistics
     r = client.get("/api/forecast/revenue", headers=plain_staff)
     assert r.status_code == 403
+
+    r = client.get("/api/invoices", headers=plain_staff)
+    assert r.status_code == 200  # staff role defaults to manage_invoices
+
+    r = client.post("/api/items/ai-merge", headers=plain_staff)
+    assert r.status_code == 403  # plain staff lacks view_statistics
 
     # Financial-visibility redaction on /roi/analysis, /roi/trend and
     # /forecast/expenses: view_personal_investments/view_statistics gate the
@@ -442,6 +451,22 @@ def test_roles_invitations_permissions(client):
 
     r = client.delete(f"/api/personal-expenses/{visibility_pe_id}", headers=owner)
     assert r.status_code == 200
+
+    # No separate "view invoices" permission exists - unticking
+    # manage_invoices for a member must revoke read access too, not just
+    # the write endpoints that already required it.
+    r = client.put(f"/api/auth/role/{staff_id}", headers=owner, json={
+        "role": "accountant",
+        "permissions": [
+            "view_audit_log", "manage_budget", "export_data", "view_statistics",
+            "team_collaboration", "view_personal_investments",
+        ],  # manage_invoices deliberately left out
+    })
+    assert r.status_code == 200
+    r = client.get("/api/invoices", headers=staff)
+    assert r.status_code == 403
+    r = client.get("/api/invoices/nonexistent-id", headers=staff)
+    assert r.status_code == 403
 
     # Owner removes the accountant - permissions must reset, not stay elevated.
     r = client.delete(f"/api/auth/users/{staff_id}", headers=owner)

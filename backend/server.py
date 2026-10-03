@@ -3262,6 +3262,11 @@ async def get_invoices(
     payment_status: Optional[str] = None,  # paid | unpaid | partial | overdue
     current_user: User = Depends(get_current_user)
 ):
+    # Same gate as creating/editing/deleting an invoice - there's no
+    # separate "view invoices" permission, so an owner unticking
+    # manage_invoices for a member must actually revoke list access too,
+    # not just the write endpoints.
+    require_permission(current_user, "manage_invoices")
     _, query = await get_company_scope(current_user)
 
     if supplier:
@@ -3311,6 +3316,7 @@ async def get_reverse_charge_protocols(current_user: User = Depends(get_current_
 
 @api_router.get("/invoices/{invoice_id}", response_model=Invoice)
 async def get_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_invoices")
     _, scope = await get_company_scope(current_user)
     invoice = await db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
     if not invoice:
@@ -5755,6 +5761,11 @@ async def ai_merge_similar_items(
     request: Request,
     current_user: User = Depends(get_current_user)
 ):
+    # Gated on view_statistics, same as the rest of the statistics suite -
+    # this is a paid AI call that overwrites company-wide merge mappings
+    # everyone's item stats rely on, not something any authenticated member
+    # should be able to trigger regardless of their actual permissions.
+    require_permission(current_user, "view_statistics")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
