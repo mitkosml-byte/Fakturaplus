@@ -27,6 +27,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
+import { ScanCreditsBadge } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 
@@ -434,8 +435,11 @@ export default function HomeScreen() {
                 <Text style={styles.greeting}>{t('home.welcome')}</Text>
                 <Text style={styles.date}>{today}</Text>
               </View>
-              <View style={styles.headerIcon}>
-                <Ionicons name="receipt" size={28} color={COLORS.primary} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <ScanCreditsBadge />
+                <View style={styles.headerIcon}>
+                  <Ionicons name="receipt" size={28} color={COLORS.primary} />
+                </View>
               </View>
             </View>
 

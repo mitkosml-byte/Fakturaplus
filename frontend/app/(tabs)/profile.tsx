@@ -322,6 +322,17 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/scan-credits')}>
+            <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+              <Ionicons name="scan" size={20} color={COLORS.primary} />
+            </View>
+            <View style={styles.menuContent}>
+              <Text style={styles.menuTitle}>{t('scanCredits.title')}</Text>
+              <Text style={styles.menuSubtitle}>{t('scanCredits.totalRemaining')}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
           {/* Payroll - Owner and Manager */}
           {hasPermission('manage_budget') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/payroll')}>

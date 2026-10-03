@@ -618,3 +618,36 @@ export interface PersonalExpense {
   notes?: string | null;
   created_at: string;
 }
+
+// Scan credits - see ScanCreditService on the backend. The app's only
+// metered feature: everything else stays free, AI invoice scanning is
+// paid for beyond a small free monthly quota, shared company-wide.
+export interface ScanBalance {
+  free_remaining: number;
+  free_quota: number;
+  free_reset_at: string;
+  purchased_balance: number;
+  total_remaining: number;
+  auto_reload_enabled: boolean;
+  auto_reload_package_id?: string | null;
+}
+
+export type ScanTransactionType = 'scan_used' | 'purchase';
+
+export interface ScanTransaction {
+  id: string;
+  type: ScanTransactionType;
+  delta: number;
+  description: string;
+  price_eur?: number | null;
+  created_at: string;
+}
+
+export interface ScanPackage {
+  id: string;
+  name: string;
+  total_scans: number;
+  bonus_scans: number;
+  price_eur: number;
+  price_per_scan: number;
+}

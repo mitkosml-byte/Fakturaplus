@@ -22,6 +22,7 @@ from passlib.context import CryptContext
 import certifi
 from anthropic import AsyncAnthropic
 import anthropic as anthropic_sdk
+import stripe
 
 # The anthropic SDK's HTTP client (httpx2) verifies TLS against the
 # operating system's native certificate store by default. That store isn't
@@ -35,6 +36,14 @@ os.environ.setdefault('SSL_CERT_FILE', certifi.where())
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+# Imported at module scope (not down with the other services/* imports
+# further below) because PurchaseCustomRequest's Field(...) bounds, defined
+# early in this file, need its constants to exist already at class-body
+# evaluation time - unlike a plain function body, that isn't deferred to
+# first call.
+import services.scan_credit_service as scan_credit_service_module
+from services.scan_credit_service import ScanCreditService
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -77,6 +86,19 @@ EMAIL_FEATURES_ENABLED = bool(RESEND_API_KEY)
 # read the in-app feedback inbox (see /feedback below) before the app has
 # its own support domain/inbox to forward it to instead.
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'mitkosml@gmail.com')
+
+# Stripe (scan-credit purchases, see SCAN CREDITS below). Same
+# disabled-until-configured pattern as the AI/email features above - the
+# purchase/auto-reload endpoints return a clear 503 instead of crashing
+# until both keys are set on the deploy. STRIPE_WEBHOOK_SECRET is what lets
+# /webhooks/stripe cryptographically verify that a request claiming "this
+# payment succeeded" really came from Stripe and wasn't forged by a client -
+# without it, balance credits would be impossible to secure.
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '')
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+BILLING_ENABLED = bool(STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET)
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
 
 async def send_email(to_email: str, subject: str, html_body: str) -> bool:
     if not EMAIL_FEATURES_ENABLED:
@@ -623,7 +645,7 @@ ROLE_PERMISSIONS = {
         "manage_users", "manage_company", "view_audit_log", "manage_budget",
         "export_data", "view_statistics", "manage_invoices", "add_revenue", "add_expenses",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
-        "team_collaboration",
+        "team_collaboration", "manage_billing",
     },
     "manager": {
         "manage_budget", "export_data", "view_statistics", "manage_invoices",
@@ -2518,6 +2540,16 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
 
+    # Scan-credit gate - the one real variable cost in the whole app (see
+    # SCAN CREDITS below). Checked before the AI call is made, not after,
+    # so a company with an empty balance never triggers (and never pays
+    # for) the expensive part of this endpoint.
+    if not await scan_credit_service.has_scans_remaining(company_id, current_user.user_id):
+        raise HTTPException(
+            status_code=402,
+            detail="Нямате оставащи сканирания. Купете пакет, за да продължите.",
+        )
+
     prompt_text = (
         "Извлечи всички данни от тази фактура: доставчика (не получателя!), ЕИК ако е видим, номер, дата, суми и ВСИЧКИ редове от таблицата с артикули."
         if len(image_blocks) == 1 else
@@ -2554,6 +2586,13 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
 
         if correction_result.corrections_made:
             logger.info(f"OCR Corrections: {correction_result.corrections_made}")
+
+        # Spend exactly one scan now that the AI call actually succeeded -
+        # a failed/errored scan (any branch below) never gets charged.
+        await scan_credit_service.spend_scan(
+            company_id, current_user.user_id, current_user.name,
+            invoice_label=corrected.get("supplier") or None,
+        )
 
         return OCRResult(
             supplier=corrected.get("supplier", ""),
@@ -2635,6 +2674,350 @@ def ai_exception_to_http(e: Exception, log_context: str) -> HTTPException:
         return HTTPException(status_code=502, detail="Грешка при връзка с AI услугата.")
     logger.exception(log_context)
     return HTTPException(status_code=500, detail=f"Грешка: {str(e)}")
+
+# ===================== SCAN CREDITS =====================
+# The app's entire monetization surface - see ScanCreditService's module
+# docstring for the reasoning. Everything else in Фактура+ stays free;
+# only AI invoice scanning (the one feature with a real per-use cost) is
+# metered, via a shared per-company credit balance. Purchases never
+# directly increment a balance from a client-authenticated request - only
+# a verified Stripe webhook event does that (see /webhooks/stripe), so a
+# forged or replayed client request can never mint free credits.
+
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://fakturaplus-frontend.onrender.com")
+
+class ScanBalanceOut(BaseModel):
+    free_remaining: int
+    free_quota: int
+    free_reset_at: datetime
+    purchased_balance: int
+    total_remaining: int
+    auto_reload_enabled: bool
+    auto_reload_package_id: Optional[str] = None
+
+class ScanTransactionOut(BaseModel):
+    id: str
+    type: str
+    delta: int
+    description: str
+    price_eur: Optional[float] = None
+    created_at: datetime
+
+class ScanPackageOut(BaseModel):
+    id: str
+    name: str
+    total_scans: int
+    bonus_scans: int
+    price_eur: float
+    price_per_scan: float
+
+class PurchasePackageRequest(BaseModel):
+    package_id: str
+
+class PurchaseCustomRequest(BaseModel):
+    quantity: int = Field(ge=scan_credit_service_module.CUSTOM_MIN_SCANS, le=scan_credit_service_module.CUSTOM_MAX_SCANS)
+
+class AutoReloadRequest(BaseModel):
+    enabled: bool
+    package_id: Optional[str] = None
+
+def _scan_packages_catalogue() -> List[ScanPackageOut]:
+    out = []
+    for pkg_id in scan_credit_service_module.SCAN_PACKAGE_ORDER:
+        pkg = scan_credit_service_module.SCAN_PACKAGES[pkg_id]
+        total = pkg["paid_scans"] + pkg["bonus_scans"]
+        out.append(ScanPackageOut(
+            id=pkg_id, name=pkg["name"], total_scans=total, bonus_scans=pkg["bonus_scans"],
+            price_eur=pkg["price_eur"], price_per_scan=round(pkg["price_eur"] / total, 4),
+        ))
+    return out
+
+@api_router.get("/scan-credits", response_model=ScanBalanceOut)
+async def get_scan_credits(current_user: User = Depends(get_current_user)):
+    summary = await scan_credit_service.get_balance_summary(current_user.company_id, current_user.user_id)
+    return ScanBalanceOut(**summary)
+
+@api_router.get("/scan-credits/packages", response_model=List[ScanPackageOut])
+async def get_scan_packages(current_user: User = Depends(get_current_user)):
+    return _scan_packages_catalogue()
+
+@api_router.get("/scan-credits/history", response_model=List[ScanTransactionOut])
+async def get_scan_credits_history(current_user: User = Depends(get_current_user)):
+    rows = await scan_credit_service.get_history(current_user.company_id, current_user.user_id)
+    return [ScanTransactionOut(**row) for row in rows]
+
+@api_router.get("/scan-credits/history/export")
+@limiter.limit("20/minute")
+async def export_scan_credits_history(request: Request, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "export_data")
+    rows = await scan_credit_service.get_history(current_user.company_id, current_user.user_id)
+    company_name = ""
+    if current_user.company_id:
+        company = await db.companies.find_one({"id": current_user.company_id})
+        company_name = company.get("name", "") if company else ""
+    excel_data = ExportService.generate_scan_credits_excel(rows, company_name)
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name,
+        action="export", entity_type="scan_credits_history",
+        company_id=current_user.company_id, details={"format": "excel", "count": len(rows)},
+    )
+    filename = f"scan_credits_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return Response(
+        content=excel_data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+def _require_billing_enabled():
+    if not BILLING_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Покупката на сканирания временно не е налична. Моля, опитайте по-късно.",
+        )
+
+@api_router.post("/scan-credits/purchase/package")
+@limiter.limit("10/minute")
+async def purchase_scan_package(request: Request, payload: PurchasePackageRequest, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_billing")
+    _require_billing_enabled()
+    pkg = scan_credit_service_module.SCAN_PACKAGES.get(payload.package_id)
+    if not pkg:
+        raise HTTPException(status_code=400, detail="Непознат пакет")
+    total_scans = pkg["paid_scans"] + pkg["bonus_scans"]
+    scope_id = scan_credit_service.scope_id(current_user.company_id, current_user.user_id)
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "eur",
+                    "unit_amount": round(pkg["price_eur"] * 100),
+                    "product_data": {"name": f"Фактура+ — {pkg['name']} ({total_scans} сканирания)"},
+                },
+                "quantity": 1,
+            }],
+            metadata={
+                "scope_id": scope_id,
+                "company_id": current_user.company_id or "",
+                "user_id": current_user.user_id,
+                "user_name": current_user.name,
+                "purchase_type": "package",
+                "package_id": payload.package_id,
+                "scans": str(total_scans),
+                "price_eur": str(pkg["price_eur"]),
+            },
+            success_url=f"{FRONTEND_URL}/scan-credits?purchase=success",
+            cancel_url=f"{FRONTEND_URL}/scan-credits?purchase=cancelled",
+        )
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe checkout session error (package): {e}")
+        raise HTTPException(status_code=502, detail="Грешка при свързване с платежната система.")
+
+    return {"checkout_url": session.url}
+
+@api_router.post("/scan-credits/purchase/custom")
+@limiter.limit("10/minute")
+async def purchase_scan_custom(request: Request, payload: PurchaseCustomRequest, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_billing")
+    _require_billing_enabled()
+    price_eur = scan_credit_service_module.custom_price_eur(payload.quantity)
+    scope_id = scan_credit_service.scope_id(current_user.company_id, current_user.user_id)
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "eur",
+                    "unit_amount": round(price_eur * 100),
+                    "product_data": {"name": f"Фактура+ — {payload.quantity} сканирания (персонализирано)"},
+                },
+                "quantity": 1,
+            }],
+            metadata={
+                "scope_id": scope_id,
+                "company_id": current_user.company_id or "",
+                "user_id": current_user.user_id,
+                "user_name": current_user.name,
+                "purchase_type": "custom",
+                "scans": str(payload.quantity),
+                "price_eur": str(price_eur),
+            },
+            success_url=f"{FRONTEND_URL}/scan-credits?purchase=success",
+            cancel_url=f"{FRONTEND_URL}/scan-credits?purchase=cancelled",
+        )
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe checkout session error (custom): {e}")
+        raise HTTPException(status_code=502, detail="Грешка при свързване с платежната система.")
+
+    return {"checkout_url": session.url}
+
+@api_router.post("/scan-credits/auto-reload")
+@limiter.limit("10/minute")
+async def set_scan_auto_reload(request: Request, payload: AutoReloadRequest, current_user: User = Depends(get_current_user)):
+    """Enabling starts a real Stripe Subscription (one real monthly charge,
+    never a silent client-side flag) and returns a checkout_url the client
+    must complete - the subscription only takes effect once Stripe confirms
+    it via webhook. Disabling cancels the Stripe subscription immediately
+    (no "at period end" grace, no confirmation step) - a one-click, no-
+    questions-asked stop is the whole point: see the pricing conversation
+    this was built from."""
+    require_permission(current_user, "manage_billing")
+
+    if not payload.enabled:
+        subscription_id = await scan_credit_service.get_auto_reload_subscription_id(current_user.company_id, current_user.user_id)
+        if subscription_id and BILLING_ENABLED:
+            try:
+                stripe.Subscription.cancel(subscription_id)
+            except stripe.error.StripeError as e:
+                logger.error(f"Stripe subscription cancel error: {e}")
+        await scan_credit_service.set_auto_reload(current_user.company_id, current_user.user_id, enabled=False)
+        await audit_service.log_action(
+            user_id=current_user.user_id, user_name=current_user.name,
+            action="disable", entity_type="scan_auto_reload", company_id=current_user.company_id,
+        )
+        return {"auto_reload_enabled": False}
+
+    _require_billing_enabled()
+    pkg = scan_credit_service_module.SCAN_PACKAGES.get(payload.package_id)
+    if not pkg:
+        raise HTTPException(status_code=400, detail="Непознат пакет")
+    total_scans = pkg["paid_scans"] + pkg["bonus_scans"]
+    scope_id = scan_credit_service.scope_id(current_user.company_id, current_user.user_id)
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "eur",
+                    "unit_amount": round(pkg["price_eur"] * 100),
+                    "recurring": {"interval": "month"},
+                    "product_data": {"name": f"Фактура+ — автоматично презареждане ({pkg['name']}, {total_scans} сканирания/месец)"},
+                },
+                "quantity": 1,
+            }],
+            metadata={
+                "scope_id": scope_id,
+                "company_id": current_user.company_id or "",
+                "user_id": current_user.user_id,
+                "user_name": current_user.name,
+                "purchase_type": "auto_reload_setup",
+                "package_id": payload.package_id,
+                "scans": str(total_scans),
+                "price_eur": str(pkg["price_eur"]),
+            },
+            success_url=f"{FRONTEND_URL}/scan-credits?auto_reload=success",
+            cancel_url=f"{FRONTEND_URL}/scan-credits?auto_reload=cancelled",
+        )
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe subscription checkout error: {e}")
+        raise HTTPException(status_code=502, detail="Грешка при свързване с платежната система.")
+
+    return {"checkout_url": session.url}
+
+@api_router.post("/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    """Server-authoritative confirmation of a payment - this is the ONLY
+    code path anywhere that is allowed to credit purchased scan balance.
+    Never trust a plain "my payment succeeded" claim from an
+    authenticated-user endpoint instead of this signature-verified one;
+    that would let anyone grant themselves free scans by replaying or
+    forging the request."""
+    if not BILLING_ENABLED:
+        raise HTTPException(status_code=503, detail="Billing not configured")
+
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except (ValueError, stripe.error.SignatureVerificationError):
+        logger.error("Stripe webhook: invalid payload or signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    # Idempotency - Stripe redelivers events on any non-2xx response or
+    # timeout, so the exact same event id can arrive more than once. This
+    # must be checked before any balance mutation, not after.
+    first_time = await scan_credit_service.mark_webhook_event_processed(event["id"])
+    if not first_time:
+        return {"status": "already_processed"}
+
+    event_type = event["type"]
+    data = event["data"]["object"]
+
+    if event_type == "checkout.session.completed":
+        metadata = data.get("metadata") or {}
+        purchase_type = metadata.get("purchase_type")
+        company_id = metadata.get("company_id") or None
+        user_id = metadata.get("user_id")
+        user_name = metadata.get("user_name", "")
+
+        if purchase_type in ("package", "custom") and user_id:
+            scans = int(metadata.get("scans", 0))
+            price_eur = float(metadata.get("price_eur", 0))
+            label = (
+                f"Пакет „{scan_credit_service_module.SCAN_PACKAGES[metadata['package_id']]['name']}“"
+                if purchase_type == "package" and metadata.get("package_id") in scan_credit_service_module.SCAN_PACKAGES
+                else f"Персонализирана покупка ({scans} сканирания)"
+            )
+            await scan_credit_service.credit_purchase(
+                company_id, user_id, user_name, scans=scans, description=label,
+                price_eur=price_eur, payment_reference=data.get("id"),
+            )
+        elif purchase_type == "auto_reload_setup" and user_id:
+            # The Checkout Session itself only sets up the subscription;
+            # the recurring credit for THIS first period comes from the
+            # matching invoice.payment_succeeded event below, same as
+            # every later month - so this branch only records which
+            # subscription now backs the auto-reload toggle.
+            subscription_id = data.get("subscription")
+            await scan_credit_service.set_auto_reload(
+                company_id, user_id, enabled=True,
+                package_id=metadata.get("package_id"), subscription_id=subscription_id,
+            )
+            await audit_service.log_action(
+                user_id=user_id, user_name=user_name, action="enable",
+                entity_type="scan_auto_reload", company_id=company_id,
+                details={"package_id": metadata.get("package_id")},
+            )
+
+    elif event_type == "invoice.payment_succeeded":
+        subscription_id = data.get("subscription")
+        if subscription_id:
+            balance_doc = await db.scan_balances.find_one({"auto_reload_subscription_id": subscription_id})
+            if balance_doc and balance_doc.get("auto_reload_enabled"):
+                package_id = balance_doc.get("auto_reload_package_id")
+                pkg = scan_credit_service_module.SCAN_PACKAGES.get(package_id)
+                if pkg:
+                    total_scans = pkg["paid_scans"] + pkg["bonus_scans"]
+                    doc_company_id = balance_doc.get("company_id")
+                    # credit_purchase only uses user_id to derive the scope
+                    # when there's no company_id (see ScanCreditService.scope_id) -
+                    # recover the original one from the balance doc's own
+                    # _id in that case so the credit lands back on the same
+                    # scope it came from.
+                    doc_user_id = "" if doc_company_id else balance_doc["_id"].replace("user:", "", 1)
+                    await scan_credit_service.credit_purchase(
+                        doc_company_id, doc_user_id, "Автоматично презареждане",
+                        scans=total_scans,
+                        description=f"Автоматично презареждане — {pkg['name']}",
+                        price_eur=pkg["price_eur"], payment_reference=data.get("id"),
+                    )
+
+    elif event_type == "customer.subscription.deleted":
+        subscription_id = data.get("id")
+        balance_doc = await db.scan_balances.find_one({"auto_reload_subscription_id": subscription_id})
+        if balance_doc:
+            await db.scan_balances.update_one(
+                {"_id": balance_doc["_id"]},
+                {"$set": {"auto_reload_enabled": False, "auto_reload_package_id": None, "auto_reload_subscription_id": None}},
+            )
+
+    return {"status": "ok"}
 
 # ===================== PROTOCOL BY чл.117 ЗДДС NUMBERING =====================
 
@@ -5534,6 +5917,7 @@ from services import push_service
 # Initialize services
 audit_service = AuditService(db)
 forecast_service = ForecastService(db)
+scan_credit_service = ScanCreditService(db)
 
 @api_router.get("/export/invoices/excel")
 @limiter.limit("20/minute")
@@ -7340,6 +7724,11 @@ async def create_indexes():
         # Employee holiday-work / leave tracking
         await db.employee_holiday_work.create_index([("company_id", 1), ("date", 1)])
         await db.employee_leave.create_index([("company_id", 1), ("start_date", 1), ("end_date", 1)])
+
+        # Scan credits (balance doc is keyed by its own scope _id already;
+        # auto_reload_subscription_id is looked up by the Stripe webhook)
+        await db.scan_balances.create_index([("auto_reload_subscription_id", 1)], sparse=True)
+        await db.scan_transactions.create_index([("scope_id", 1), ("created_at", -1)])
 
         logger.info("Database indexes created successfully")
     except Exception as e:

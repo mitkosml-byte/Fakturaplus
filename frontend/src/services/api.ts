@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -32,7 +32,12 @@ class ApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
-      throw new Error(error.detail || 'Грешка в заявката');
+      const err = new Error(error.detail || 'Грешка в заявката') as Error & { status?: number };
+      // Attached so callers that need to branch on it (e.g. 402 = no scan
+      // credits remaining, show the purchase screen instead of a plain
+      // error alert) can do so without parsing the message text.
+      err.status = response.status;
+      throw err;
     }
 
     return response.json();
@@ -159,6 +164,48 @@ class ApiService {
     return this.fetch('/ocr/scan', {
       method: 'POST',
       body: JSON.stringify({ image_base64s: images }),
+    });
+  }
+
+  // Scan credits - the app's only metered feature, see
+  // backend/services/scan_credit_service.py. A scanInvoice() call above
+  // that fails with a 402 means this balance is at zero; the caller checks
+  // error.status (see fetch<T>) to route to the purchase screen instead of
+  // a generic error alert.
+  async getScanBalance(): Promise<ScanBalance> {
+    return this.fetch('/scan-credits');
+  }
+
+  async getScanPackages(): Promise<ScanPackage[]> {
+    return this.fetch('/scan-credits/packages');
+  }
+
+  async getScanCreditsHistory(): Promise<ScanTransaction[]> {
+    return this.fetch('/scan-credits/history');
+  }
+
+  getScanCreditsHistoryExportUrl(): string {
+    return '/api/scan-credits/history/export';
+  }
+
+  async purchaseScanPackage(packageId: string): Promise<{ checkout_url: string }> {
+    return this.fetch('/scan-credits/purchase/package', {
+      method: 'POST',
+      body: JSON.stringify({ package_id: packageId }),
+    });
+  }
+
+  async purchaseScanCustom(quantity: number): Promise<{ checkout_url: string }> {
+    return this.fetch('/scan-credits/purchase/custom', {
+      method: 'POST',
+      body: JSON.stringify({ quantity }),
+    });
+  }
+
+  async setScanAutoReload(enabled: boolean, packageId?: string): Promise<{ checkout_url?: string; auto_reload_enabled?: boolean }> {
+    return this.fetch('/scan-credits/auto-reload', {
+      method: 'POST',
+      body: JSON.stringify({ enabled, package_id: packageId }),
     });
   }
 

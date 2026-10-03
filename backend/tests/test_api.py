@@ -401,3 +401,133 @@ def test_feedback_box(client):
 
     r = client.get("/api/feedback", headers=owner)
     assert r.status_code == 403  # non-admin owner blocked from the feedback inbox
+
+
+def test_scan_credits(client):
+    """Fakturaplus's whole monetization surface - see ScanCreditService's
+    module docstring. Uses its own freshly-registered owner/company so the
+    balance assertions below aren't order-dependent on what other tests in
+    this module may or may not have scanned."""
+    import asyncio
+    import server
+
+    owner_email = f"master_credits_owner_{TS}@test.com"
+    r = client.post("/api/auth/register", json={"name": "Credits Owner", "email": owner_email, "password": "Passw0rd1"})
+    assert r.status_code == 200
+    owner_token = r.json()["session_token"]
+    owner_id = r.json()["user"]["user_id"]
+    owner = h(owner_token)
+
+    # Fresh company starts with the full free monthly quota and nothing purchased.
+    r = client.get("/api/scan-credits", headers=owner)
+    assert r.status_code == 200, r.text
+    balance = r.json()
+    assert balance["free_remaining"] == 10
+    assert balance["free_quota"] == 10
+    assert balance["purchased_balance"] == 0
+    assert balance["total_remaining"] == 10
+    assert balance["auto_reload_enabled"] is False
+
+    # Fixed catalogue, matches the pricing conversation this was built from.
+    r = client.get("/api/scan-credits/packages", headers=owner)
+    assert r.status_code == 200
+    packages = {p["id"]: p for p in r.json()}
+    assert packages["small"]["total_scans"] == 10 and packages["small"]["price_eur"] == 2.50
+    assert packages["medium"]["total_scans"] == 50 and packages["medium"]["price_eur"] == 11.00
+    assert packages["large"]["total_scans"] == 150 and packages["large"]["price_eur"] == 30.00
+    assert packages["business"]["total_scans"] == 400 and packages["business"]["price_eur"] == 72.00
+
+    # No Stripe keys configured in the test environment -> a clear 503
+    # instead of a crash, same disabled-until-configured pattern as the AI
+    # features. Never a silent "pretend it worked".
+    r = client.post("/api/scan-credits/purchase/package", headers=owner, json={"package_id": "small"})
+    assert r.status_code == 503
+
+    r = client.post("/api/scan-credits/auto-reload", headers=owner, json={"enabled": True, "package_id": "small"})
+    assert r.status_code == 503
+
+    r = client.post("/api/webhooks/stripe", json={})
+    assert r.status_code == 503
+
+    # manage_billing is owner-only, never configurable onto staff - see
+    # ROLE_PERMISSIONS/ROLE_CONFIGURABLE_PERMISSIONS.
+    staff_email = f"master_credits_staff_{TS}@test.com"
+    r = client.post("/api/auth/register", json={"name": "Credits Staff", "email": staff_email, "password": "Passw0rd1"})
+    assert r.status_code == 200
+    staff = h(r.json()["session_token"])
+    r = client.post("/api/invitations", headers=owner, json={"email": staff_email, "role": "staff"})
+    assert r.status_code == 200
+    code = r.json()["invitation"]["code"]
+    r = client.post("/api/invitations/accept", headers=staff, json={"code": code})
+    assert r.status_code == 200
+
+    r = client.post("/api/scan-credits/purchase/package", headers=staff, json={"package_id": "small"})
+    assert r.status_code == 403
+    r = client.post("/api/scan-credits/auto-reload", headers=staff, json={"enabled": False})
+    assert r.status_code == 403
+    # Balance is shared company-wide though - any teammate can check it.
+    r = client.get("/api/scan-credits", headers=staff)
+    assert r.status_code == 200
+
+    # Custom-quantity validation at the API boundary.
+    r = client.post("/api/scan-credits/purchase/custom", headers=owner, json={"quantity": 0})
+    assert r.status_code == 422
+    r = client.post("/api/scan-credits/purchase/custom", headers=owner, json={"quantity": 1001})
+    assert r.status_code == 422
+
+    # --- Direct service-level tests: the part that actually protects money ---
+    svc = server.scan_credit_service
+    company_id = balance_company_id = None
+    # Pull this fresh user's company_id the same way the endpoints do.
+    me = client.get("/api/auth/me", headers=owner).json()
+    company_id = me["company_id"]
+
+    async def _run():
+        # Stepped custom pricing matches the package brackets exactly.
+        assert server.scan_credit_service_module.custom_price_eur(10) == 2.50
+        assert server.scan_credit_service_module.custom_price_eur(11) == round(11 * (11.00 / 50), 2)
+        assert server.scan_credit_service_module.custom_price_eur(50) == round(50 * (11.00 / 50), 2)
+        assert server.scan_credit_service_module.custom_price_eur(51) == round(51 * (30.00 / 150), 2)
+        assert server.scan_credit_service_module.custom_price_eur(1000) == round(1000 * (72.00 / 400), 2)
+
+        # Spend down the free quota one at a time; the 11th spend with
+        # nothing purchased must fail closed, never go negative.
+        for _ in range(10):
+            spent = await svc.spend_scan(company_id, owner_id, "Credits Owner")
+            assert spent is True
+        assert await svc.has_scans_remaining(company_id, owner_id) is False
+        spent = await svc.spend_scan(company_id, owner_id, "Credits Owner")
+        assert spent is False
+        summary = await svc.get_balance_summary(company_id, owner_id)
+        assert summary["free_remaining"] == 0 and summary["purchased_balance"] == 0
+
+        # Credits only ever arrive via credit_purchase (the webhook path) -
+        # never from spend_scan or any client-facing endpoint directly.
+        await svc.credit_purchase(company_id, owner_id, "Credits Owner", scans=50, description="Пакет „Среден“", price_eur=11.0, payment_reference="pi_test_1")
+        summary = await svc.get_balance_summary(company_id, owner_id)
+        assert summary["purchased_balance"] == 50 and summary["total_remaining"] == 50
+
+        # Free is exhausted, so the next spend must draw from purchased.
+        spent = await svc.spend_scan(company_id, owner_id, "Credits Owner")
+        assert spent is True
+        summary = await svc.get_balance_summary(company_id, owner_id)
+        assert summary["purchased_balance"] == 49
+
+        # Webhook idempotency: the same Stripe event id is only ever
+        # processed once, no matter how many times it's redelivered.
+        assert await svc.mark_webhook_event_processed("evt_test_1") is True
+        assert await svc.mark_webhook_event_processed("evt_test_1") is False
+        assert await svc.mark_webhook_event_processed("evt_test_2") is True
+
+        # History reflects both the spends and the purchase, newest first.
+        history = await svc.get_history(company_id, owner_id)
+        assert history[0]["type"] == "scan_used"
+        assert any(tx["type"] == "purchase" and tx["delta"] == 50 for tx in history)
+
+    asyncio.run(_run())
+
+    r = client.get("/api/scan-credits/history", headers=owner)
+    assert r.status_code == 200 and len(r.json()) >= 2
+
+    r = client.get("/api/scan-credits/history/export", headers=owner)
+    assert r.status_code == 200 and "spreadsheet" in r.headers.get("content-type", "")

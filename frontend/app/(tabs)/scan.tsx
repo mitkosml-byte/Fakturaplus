@@ -249,7 +249,21 @@ export default function ScanScreen() {
         }
       }
     } catch (error: any) {
-      Alert.alert(t('scan.scanError'), error.message || t('scan.tryAgain'));
+      if (error.status === 402) {
+        // Out of scan credits - this is the app's one paid feature (see
+        // ScanCreditService on the backend), so route to the purchase
+        // screen instead of showing a dead-end error.
+        Alert.alert(
+          t('scanCredits.noScansLeft'),
+          t('scanCredits.noScansLeftBody'),
+          [
+            { text: t('common.cancel'), style: 'cancel' },
+            { text: t('scanCredits.goToPackages'), onPress: () => router.push('/scan-credits') },
+          ]
+        );
+      } else {
+        Alert.alert(t('scan.scanError'), error.message || t('scan.tryAgain'));
+      }
     } finally {
       setIsScanning(false);
     }

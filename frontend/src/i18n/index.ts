@@ -589,6 +589,152 @@ export const translations: Translations = {
     bg: 'Допълнителни бележки...',
     en: 'Additional notes...',
   },
+
+  // Scan credits - the app's only paid feature (see ScanCreditService on
+  // the backend). Package names come from the backend as plain Bulgarian
+  // strings; the screen maps a package's id through packageName* below
+  // for display instead, so English mode doesn't show Bulgarian labels.
+  'scanCredits.title': {
+    bg: 'Кредити за сканиране',
+    en: 'Scan Credits',
+  },
+  'scanCredits.totalRemaining': {
+    bg: 'сканирания общо оставащи',
+    en: 'scans remaining in total',
+  },
+  'scanCredits.includesPurchased': {
+    bg: 'вкл. {count} закупени · никога не изтичат',
+    en: 'incl. {count} purchased · never expire',
+  },
+  'scanCredits.freeOfQuota': {
+    bg: '{used}/{quota} безплатни',
+    en: '{used}/{quota} free',
+  },
+  'scanCredits.freeLabel': {
+    bg: 'безплатни',
+    en: 'free',
+  },
+  'scanCredits.freeRenewOn': {
+    bg: 'безплатните се подновяват на 1-во число',
+    en: 'the free quota renews on the 1st',
+  },
+  'scanCredits.recentTransactions': {
+    bg: 'Последни транзакции',
+    en: 'Recent transactions',
+  },
+  'scanCredits.viewAll': {
+    bg: 'Виж всички',
+    en: 'View all',
+  },
+  'scanCredits.downloadHistory': {
+    bg: 'Изтегли история (Excel)',
+    en: 'Download history (Excel)',
+  },
+  'scanCredits.noTransactionsYet': {
+    bg: 'Все още няма транзакции',
+    en: 'No transactions yet',
+  },
+  'scanCredits.transactionScanUsed': {
+    bg: 'Сканиране на фактура',
+    en: 'Invoice scan',
+  },
+  'scanCredits.transactionPurchase': {
+    bg: 'Покупка',
+    en: 'Purchase',
+  },
+  'scanCredits.buyPackages': {
+    bg: 'Купи пакет сканирания',
+    en: 'Buy a scan package',
+  },
+  'scanCredits.bestValue': {
+    bg: 'НАЙ-ИЗГОДНО',
+    en: 'BEST VALUE',
+  },
+  'scanCredits.buy': {
+    bg: 'Купи',
+    en: 'Buy',
+  },
+  'scanCredits.perScan': {
+    bg: '{price} €/бр.',
+    en: '€{price}/scan',
+  },
+  'scanCredits.packageLineWithBonus': {
+    bg: '{name} — {paid} + {bonus} бонус = {total}',
+    en: '{name} — {paid} + {bonus} bonus = {total}',
+  },
+  'scanCredits.packageLineNoBonus': {
+    bg: '{name} — {total} сканирания',
+    en: '{name} — {total} scans',
+  },
+  'scanCredits.packageNameSmall': { bg: 'Малък', en: 'Small' },
+  'scanCredits.packageNameMedium': { bg: 'Среден', en: 'Medium' },
+  'scanCredits.packageNameLarge': { bg: 'Голям', en: 'Large' },
+  'scanCredits.packageNameBusiness': { bg: 'Бизнес', en: 'Business' },
+  'scanCredits.customAmount': {
+    bg: 'Персонализирано количество',
+    en: 'Custom amount',
+  },
+  'scanCredits.customAmountHint': {
+    bg: 'До 1000 сканирания, цена на стъпки като пакетите',
+    en: 'Up to 1000 scans, priced in brackets like the packages',
+  },
+  'scanCredits.quantityLabel': {
+    bg: 'Брой:',
+    en: 'Quantity:',
+  },
+  'scanCredits.buyThisAmount': {
+    bg: 'Купи това количество',
+    en: 'Buy this amount',
+  },
+  'scanCredits.autoReload': {
+    bg: 'Автоматично презареждане',
+    en: 'Auto-reload',
+  },
+  'scanCredits.autoReloadHint': {
+    bg: 'Избираш пакет, който се купува автоматично всеки месец в деня на абонамента ти. Спираш по всяко време с един клик — без въпроси.',
+    en: 'Pick a package that is purchased automatically every month, on the day you subscribed. Stop any time with one click — no questions asked.',
+  },
+  'scanCredits.autoReloadActiveWith': {
+    bg: 'Активно: {name} ({count} сканирания/месец)',
+    en: 'Active: {name} ({count} scans/month)',
+  },
+  'scanCredits.stopAutoReload': {
+    bg: 'Спри автоматичното презареждане',
+    en: 'Stop auto-reload',
+  },
+  'scanCredits.chooseAutoReloadPackage': {
+    bg: 'Избери пакет за автоматично презареждане',
+    en: 'Choose a package for auto-reload',
+  },
+  'scanCredits.noScansLeft': {
+    bg: 'Нямаш оставащи сканирания',
+    en: 'No scans remaining',
+  },
+  'scanCredits.noScansLeftBody': {
+    bg: 'Безплатните се подновяват на 1-во число. Купи пакет сега, за да продължиш да сканираш днес.',
+    en: 'The free quota renews on the 1st. Buy a package now to keep scanning today.',
+  },
+  'scanCredits.outOfScansBanner': {
+    bg: 'Свършиха безплатните сканирания за този месец — купи пакет, за да продължиш.',
+    en: 'You’re out of free scans this month — buy a package to continue.',
+  },
+  'scanCredits.goToPackages': {
+    bg: 'Виж пакети',
+    en: 'View packages',
+  },
+  'scanCredits.close': {
+    bg: 'Затвори',
+    en: 'Close',
+  },
+  'scanCredits.loadError': {
+    bg: 'Грешка при зареждане на баланса',
+    en: 'Error loading your balance',
+  },
+  'scanCredits.openingCheckout': {
+    bg: 'Отваряне на плащане...',
+    en: 'Opening checkout...',
+  },
+
   'invoices.protocolDeadline': {
     bg: 'Краен срок за протокола',
     en: 'Protocol deadline',

@@ -14,7 +14,8 @@ export type Permission =
   | 'view_off_book_expenses'
   | 'view_profit'
   | 'view_personal_investments'
-  | 'team_collaboration';
+  | 'team_collaboration'
+  | 'manage_billing';
 
 export type ConfigurableRole = 'manager' | 'staff' | 'accountant';
 
@@ -82,6 +83,7 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   view_profit: { bg: 'Вижда печалба', en: 'Sees profit' },
   view_personal_investments: { bg: 'Вижда лични инвестиции/ROI', en: 'Sees personal investments/ROI' },
   team_collaboration: { bg: 'Календар и съобщения', en: 'Calendar and messages' },
+  manage_billing: { bg: 'Плащания и кредити за сканиране', en: 'Billing and scan credits' },
 };
 
 export function getPermissionLabel(permission: Permission, language: Language): string {

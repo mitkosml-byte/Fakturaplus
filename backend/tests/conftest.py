@@ -27,6 +27,7 @@ def _mock_database():
     server.db = AsyncMongoMockClient()["test_db"]
     server.audit_service.db = server.db
     server.forecast_service.db = server.db
+    server.scan_credit_service.db = server.db
     server.AI_FEATURES_ENABLED = False
     yield
 

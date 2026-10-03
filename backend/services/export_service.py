@@ -153,7 +153,72 @@ class ExportService:
         wb.save(output)
         output.seek(0)
         return output.getvalue()
-    
+
+    @staticmethod
+    def generate_scan_credits_excel(transactions: List[dict], company_name: str = "") -> bytes:
+        """Generate Excel file from a scan-credit transaction history."""
+        if not EXCEL_AVAILABLE:
+            raise ImportError("openpyxl is not installed")
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Сканирания"
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="8B5CF6", end_color="8B5CF6", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        thin_border = Border(
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin')
+        )
+
+        ws.merge_cells('A1:E1')
+        ws['A1'] = f"История на сканиранията - {company_name}" if company_name else "История на сканиранията"
+        ws['A1'].font = Font(bold=True, size=14)
+        ws['A1'].alignment = Alignment(horizontal="center")
+
+        ws.merge_cells('A2:E2')
+        ws['A2'] = f"Генерирано на: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        ws['A2'].alignment = Alignment(horizontal="center")
+
+        headers = ["Дата", "Описание", "Тип", "Брой", "Платена сума"]
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=4, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = thin_border
+
+        type_labels = {"scan_used": "Сканиране", "purchase": "Покупка"}
+
+        for row, tx in enumerate(transactions, 5):
+            created_at = tx.get('created_at', '')
+            date_str = created_at.strftime('%d.%m.%Y %H:%M') if isinstance(created_at, datetime) else str(created_at)[:16]
+            price_eur = tx.get('price_eur')
+
+            data = [
+                date_str,
+                _excel_safe(tx.get('description', '')),
+                type_labels.get(tx.get('type', ''), tx.get('type', '')),
+                tx.get('delta', 0),
+                f"{price_eur:.2f} €" if price_eur is not None else '',
+            ]
+
+            for col, value in enumerate(data, 1):
+                cell = ws.cell(row=row, column=col, value=value)
+                cell.border = thin_border
+                if col == 4:
+                    cell.alignment = Alignment(horizontal="right")
+
+        column_widths = [18, 36, 14, 10, 16]
+        for col, width in enumerate(column_widths, 1):
+            ws.column_dimensions[get_column_letter(col)].width = width
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue()
+
     @staticmethod
     def generate_invoices_pdf(invoices: List[dict], company_name: str = "") -> bytes:
         """Generate PDF file from invoices"""
