@@ -156,6 +156,18 @@ def test_budget(client):
     r = client.get("/api/budget/status", headers=owner)
     assert r.status_code == 200 and r.json()["has_budget"] is True
 
+    r = client.post("/api/recurring-expenses", headers=owner, json={
+        "description": "Наем", "amount": 500, "day_of_month": 1,
+    })
+    assert r.status_code == 200
+    recurring_id = r.json()["id"]
+
+    r = client.get("/api/recurring-expenses", headers=owner)
+    assert r.status_code == 200 and len(r.json()["recurring_expenses"]) == 1
+
+    r = client.delete(f"/api/recurring-expenses/{recurring_id}", headers=owner)
+    assert r.status_code == 200
+
 
 def test_statistics(client):
     owner = h(STATE["owner_token"])
@@ -353,6 +365,23 @@ def test_roles_invitations_permissions(client):
     r = client.post("/api/items/ai-merge", headers=plain_staff)
     assert r.status_code == 403  # plain staff lacks view_statistics
 
+    r = client.get("/api/recurring-expenses", headers=plain_staff)
+    assert r.status_code == 403  # plain staff lacks manage_budget
+    r = client.post("/api/recurring-expenses", headers=plain_staff, json={
+        "description": "Наем", "amount": 500, "day_of_month": 1,
+    })
+    assert r.status_code == 403
+    r = client.delete("/api/recurring-expenses/nonexistent-id", headers=plain_staff)
+    assert r.status_code == 403
+
+    r = client.put("/api/items/price-alert-settings", headers=plain_staff, json={"threshold_percent": 20})
+    assert r.status_code == 403  # plain staff lacks view_statistics
+
+    r = client.get("/api/items/merge-mappings", headers=plain_staff)
+    assert r.status_code == 403
+    r = client.delete("/api/items/merge-mappings/nonexistent", headers=plain_staff)
+    assert r.status_code == 403
+
     # Financial-visibility redaction on /roi/analysis, /roi/trend and
     # /forecast/expenses: view_personal_investments/view_statistics gate the
     # endpoint itself, but pocket_money/off_book_expenses/profit stay
@@ -466,6 +495,12 @@ def test_roles_invitations_permissions(client):
     r = client.get("/api/invoices", headers=staff)
     assert r.status_code == 403
     r = client.get("/api/invoices/nonexistent-id", headers=staff)
+    assert r.status_code == 403
+
+    # OCR scanning only ever feeds a draft into POST /invoices, so it's
+    # gated the same way - no burning the company's shared scan credits on
+    # a result this viewer could never save.
+    r = client.post("/api/ocr/scan", headers=staff, json={"image_base64": "x"})
     assert r.status_code == 403
 
     # Owner removes the accountant - permissions must reset, not stay elevated.

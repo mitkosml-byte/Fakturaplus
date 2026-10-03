@@ -2490,6 +2490,11 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 @api_router.post("/ocr/scan", response_model=OCRResult)
 @limiter.limit("20/minute")
 async def scan_invoice(request: Request, image_base64: str = None, current_user: User = Depends(get_current_user)):
+    # OCR only ever feeds a draft into POST /invoices (which already
+    # requires manage_invoices) - gating the scan itself too means a member
+    # without that permission can't burn the company's shared, paid scan
+    # credits on a result they could never save anyway.
+    require_permission(current_user, "manage_invoices")
     if not AI_FEATURES_ENABLED:
         raise HTTPException(status_code=503, detail="AI разпознаването временно не е налично. Моля, въведете данните ръчно.")
 
@@ -5239,8 +5244,13 @@ async def update_price_alert_settings(
     current_user: User = Depends(get_current_user)
 ):
     """Обновява настройки за ценови аларми"""
+    # Company-wide config for the price-tracking feature, same domain as
+    # the rest of /items/* and /statistics/items/* - gated on view_statistics
+    # like them, instead of any authenticated member being able to change
+    # it for everyone.
+    require_permission(current_user, "view_statistics")
     body = await request.json()
-    
+
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -5780,6 +5790,7 @@ async def ai_merge_similar_items(
 @api_router.get("/items/merge-mappings")
 async def get_merge_mappings(current_user: User = Depends(get_current_user)):
     """Връща текущите сливания на продукти"""
+    require_permission(current_user, "view_statistics")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -5799,8 +5810,9 @@ async def delete_merge_mapping(
     current_user: User = Depends(get_current_user)
 ):
     """Изтрива сливане на продукти"""
+    require_permission(current_user, "view_statistics")
     from urllib.parse import unquote
-    
+
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -6199,6 +6211,11 @@ class RecurringExpenseCreate(BaseModel):
 @api_router.get("/recurring-expenses")
 async def get_recurring_expenses(current_user: User = Depends(get_current_user)):
     """Get recurring expenses"""
+    # Same gate as the /budget endpoints this feature lives alongside in
+    # budget.tsx (which already hides the whole screen without
+    # manage_budget) - without it, a member lacking that permission could
+    # still call the API directly.
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -6218,6 +6235,7 @@ async def create_recurring_expense(
     current_user: User = Depends(get_current_user)
 ):
     """Create recurring expense"""
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
@@ -6246,6 +6264,7 @@ async def create_recurring_expense(
 @api_router.delete("/recurring-expenses/{expense_id}")
 async def delete_recurring_expense(expense_id: str, current_user: User = Depends(get_current_user)):
     """Delete recurring expense"""
+    require_permission(current_user, "manage_budget")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
