@@ -1195,8 +1195,11 @@ export default function StatsScreen() {
                   </View>
                 )}
 
-                {/* ROI Trend - owner or a delegated view_personal_investments viewer */}
-                {hasPermission('view_personal_investments') && roiTrend.length > 0 && (
+                {/* ROI Trend - owner or a delegated view_personal_investments
+                    viewer, but also gated on view_profit: roi_percent/profit
+                    come back null without it (see /roi/trend), and a null
+                    value would otherwise break the chart. */}
+                {hasPermission('view_personal_investments') && hasPermission('view_profit') && roiTrend.length > 0 && (
                   <View style={styles.chartContainer}>
                     <View style={styles.chartHeader}>
                       <Ionicons name="pulse" size={24} color={COLORS.primary} />

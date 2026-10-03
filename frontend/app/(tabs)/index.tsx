@@ -714,35 +714,47 @@ export default function HomeScreen() {
                   </View>
                   <View style={styles.roiStatItem}>
                     <Text style={styles.roiStatLabel}>{t('roi.totalProfit')}</Text>
-                    <Text style={[styles.roiStatValue, { color: roiData.total_profit >= 0 ? COLORS.success : COLORS.danger }]}>
-                      {roiData.total_profit.toFixed(2)} €
-                    </Text>
+                    {roiData.total_profit === null ? (
+                      <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
+                    ) : (
+                      <Text style={[styles.roiStatValue, { color: roiData.total_profit >= 0 ? COLORS.success : COLORS.danger }]}>
+                        {roiData.total_profit.toFixed(2)} €
+                      </Text>
+                    )}
                   </View>
                   <View style={styles.roiStatItem}>
                     <Text style={styles.roiStatLabel}>{t('roi.roiPercent')}</Text>
-                    <Text style={[styles.roiStatValue, { color: roiData.roi_percent >= 0 ? COLORS.success : COLORS.danger }]}>
-                      {roiData.roi_percent.toFixed(1)}%
-                    </Text>
+                    {roiData.roi_percent === null ? (
+                      <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
+                    ) : (
+                      <Text style={[styles.roiStatValue, { color: roiData.roi_percent >= 0 ? COLORS.success : COLORS.danger }]}>
+                        {roiData.roi_percent.toFixed(1)}%
+                      </Text>
+                    )}
                   </View>
                 </View>
 
-                {/* ROI Status Indicator */}
-                <View style={[
-                  styles.roiStatus,
-                  { backgroundColor: roiData.investment_covered ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }
-                ]}>
-                  <Ionicons 
-                    name={roiData.investment_covered ? "checkmark-circle" : "alert-circle"} 
-                    size={20} 
-                    color={roiData.investment_covered ? COLORS.success : COLORS.danger} 
-                  />
-                  <Text style={[
-                    styles.roiStatusText,
-                    { color: roiData.investment_covered ? COLORS.success : COLORS.danger }
+                {/* ROI Status Indicator - hidden entirely without view_profit,
+                    since a covered/not-covered verdict is itself derived from
+                    the profit figure this viewer isn't allowed to see. */}
+                {roiData.investment_covered !== null && (
+                  <View style={[
+                    styles.roiStatus,
+                    { backgroundColor: roiData.investment_covered ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }
                   ]}>
-                    {roiData.investment_covered ? t('roi.investmentCovered') : t('roi.investmentNotCovered')}
-                  </Text>
-                </View>
+                    <Ionicons
+                      name={roiData.investment_covered ? "checkmark-circle" : "alert-circle"}
+                      size={20}
+                      color={roiData.investment_covered ? COLORS.success : COLORS.danger}
+                    />
+                    <Text style={[
+                      styles.roiStatusText,
+                      { color: roiData.investment_covered ? COLORS.success : COLORS.danger }
+                    ]}>
+                      {roiData.investment_covered ? t('roi.investmentCovered') : t('roi.investmentNotCovered')}
+                    </Text>
+                  </View>
+                )}
 
                 {/* AI Insights */}
                 {roiData.ai_insights && roiData.ai_insights.length > 0 && (

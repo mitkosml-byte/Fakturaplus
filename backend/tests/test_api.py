@@ -339,6 +339,110 @@ def test_roles_invitations_permissions(client):
     r = client.get("/api/items/price-alerts", headers=plain_staff)
     assert r.status_code == 200  # deliberately NOT gated - used by the invoice-detail badge flow
 
+    r = client.get("/api/forecast/expenses", headers=plain_staff)
+    assert r.status_code == 403  # plain staff lacks view_statistics
+    r = client.get("/api/forecast/revenue", headers=plain_staff)
+    assert r.status_code == 403
+
+    # Financial-visibility redaction on /roi/analysis, /roi/trend and
+    # /forecast/expenses: view_personal_investments/view_statistics gate the
+    # endpoint itself, but pocket_money/off_book_expenses/profit stay
+    # independently gated by their own view_* permission, same convention
+    # as get_summary - zeroed out of every aggregate, not just blanked.
+    r = client.post("/api/personal-expenses", headers=owner, json={
+        "amount": 50, "description": "За тест на видимост", "expense_type": "investment", "category": "other",
+        "period_month": 9, "period_year": 2026,
+    })
+    assert r.status_code == 200
+    visibility_pe_id = r.json()["id"]
+
+    r = client.put(f"/api/auth/role/{staff_id}", headers=owner, json={
+        "role": "accountant",
+        "permissions": [
+            "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
+            "view_profit", "team_collaboration", "view_personal_investments",
+        ],
+    })
+    assert r.status_code == 200
+
+    r = client.get("/api/roi/analysis?month=9&year=2026", headers=owner)
+    assert r.status_code == 200
+    owner_roi = r.json()
+    assert owner_roi["total_revenue"] == 115  # fiscal_revenue(100) + pocket_money(15)
+    assert owner_roi["total_business_expense"] == 30  # off-book expense, no invoice left
+    assert owner_roi["total_profit"] == 85
+
+    r = client.get("/api/roi/analysis?month=9&year=2026", headers=staff)
+    assert r.status_code == 200
+    staff_roi = r.json()
+    # No view_pocket_money/view_off_book_expenses: both folded in as zero,
+    # not just blanked, so revenue/expense/profit stay internally coherent
+    # for exactly what this viewer may see - not the owner's real numbers.
+    assert staff_roi["total_revenue"] == 100
+    assert staff_roi["total_business_expense"] == 0
+    assert staff_roi["total_profit"] == 100  # has view_profit, so still shown
+    assert staff_roi["total_profit"] != owner_roi["total_profit"]
+
+    r = client.get("/api/roi/trend?months=2", headers=staff)
+    assert r.status_code == 200
+    assert r.json()["trend"][0]["profit"] == 100
+
+    # Now strip view_profit too - profit/ROI must disappear from every
+    # field AND from the ai_insights prose (no leaking the same figures via
+    # text once the structured fields are null).
+    r = client.put(f"/api/auth/role/{staff_id}", headers=owner, json={
+        "role": "accountant",
+        "permissions": [
+            "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
+            "team_collaboration", "view_personal_investments",
+        ],
+    })
+    assert r.status_code == 200
+
+    r = client.get("/api/roi/analysis?month=9&year=2026", headers=staff)
+    assert r.status_code == 200
+    no_profit_roi = r.json()
+    assert no_profit_roi["total_profit"] is None
+    assert no_profit_roi["roi_percent"] is None
+    assert no_profit_roi["is_profitable"] is None
+    assert no_profit_roi["investment_covered"] is None
+    assert no_profit_roi["ai_insights"] == ["🔒 Нямаш право да виждаш печалбата за избрания период"]
+
+    r = client.get("/api/roi/trend?months=2", headers=staff)
+    assert r.status_code == 200
+    no_profit_trend = r.json()["trend"]
+    assert no_profit_trend[0]["profit"] is None
+    assert no_profit_trend[0]["roi_percent"] is None
+
+    # The raw VAT-ledger Excel export must redact pocket_money too (same
+    # right as the other views above), not just the aggregated endpoints.
+    from io import BytesIO
+    from openpyxl import load_workbook
+    r = client.get("/api/export/vat-ledger/excel?start_date=2026-09-01&end_date=2026-09-30", headers=owner)
+    assert r.status_code == 200
+    owner_ws = load_workbook(BytesIO(r.content))["Дневник продажби"]
+    assert owner_ws.cell(row=5, column=9).value == 15  # pocket_money, visible to the owner
+    assert owner_ws.cell(row=5, column=10).value == 115  # total = fiscal_revenue + pocket_money
+
+    r = client.get("/api/export/vat-ledger/excel?start_date=2026-09-01&end_date=2026-09-30", headers=staff)
+    assert r.status_code == 200
+    staff_ws = load_workbook(BytesIO(r.content))["Дневник продажби"]
+    assert staff_ws.cell(row=5, column=9).value == 0  # no view_pocket_money -> redacted, not just blanked
+    assert staff_ws.cell(row=5, column=10).value == 100
+
+    # Off-book expense (30) must not leak into the expense-forecast
+    # aggregate for a viewer without view_off_book_expenses either.
+    r = client.get("/api/forecast/expenses", headers=owner)
+    assert r.status_code == 200
+    owner_hist = {e["month"]: e["amount"] for e in r.json()["historical"]}
+    r = client.get("/api/forecast/expenses", headers=staff)
+    assert r.status_code == 200
+    staff_hist = {e["month"]: e["amount"] for e in r.json()["historical"]}
+    assert owner_hist.get("2026-09", 0) - staff_hist.get("2026-09", 0) == 30
+
+    r = client.delete(f"/api/personal-expenses/{visibility_pe_id}", headers=owner)
+    assert r.status_code == 200
+
     # Owner removes the accountant - permissions must reset, not stay elevated.
     r = client.delete(f"/api/auth/users/{staff_id}", headers=owner)
     assert r.status_code == 200

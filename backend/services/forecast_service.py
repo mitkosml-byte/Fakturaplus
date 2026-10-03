@@ -40,9 +40,16 @@ class ForecastService:
     async def get_expense_forecast(
         self,
         company_id: str,
-        months_ahead: int = 3
+        months_ahead: int = 3,
+        include_off_book_expenses: bool = True
     ) -> Dict:
-        """Predict future expenses based on historical data"""
+        """Predict future expenses based on historical data.
+
+        include_off_book_expenses=False excludes db.expenses ("в канала")
+        from the monthly totals, for a caller whose viewer lacks
+        view_off_book_expenses - otherwise the forecast's avg_monthly/trend
+        would leak that data through an aggregate even though no raw record
+        is ever returned."""
         # Get historical data (last 6 months)
         six_months_ago = datetime.now(timezone.utc) - timedelta(days=180)
         six_months_ago_str = six_months_ago.strftime("%Y-%m-%d")
@@ -64,7 +71,7 @@ class ForecastService:
         expenses = await self.db.expenses.find(
             {"user_id": {"$in": user_ids}, "date": {"$gte": six_months_ago_str}},
             {"_id": 0, "date": 1, "amount": 1}
-        ).to_list(10000)
+        ).to_list(10000) if include_off_book_expenses else []
 
         # Payroll cost (gross + employer contributions + benefits) - usually
         # the most stable, predictable expense a business has

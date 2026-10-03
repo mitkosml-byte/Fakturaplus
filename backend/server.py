@@ -3717,7 +3717,17 @@ async def get_roi_analysis(
         "date": {"$gte": period_start, "$lt": period_end}
     }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
 
-    total_revenue = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
+    # Same redaction convention as get_summary: a viewer without
+    # view_personal_investments never reaches this endpoint at all, but the
+    # two sensitive-field permissions are orthogonal to it - someone can have
+    # view_personal_investments without view_pocket_money/view_off_book_expenses,
+    # so the raw totals are zeroed out of every aggregate below unless this
+    # viewer is also allowed to see that specific field.
+    visibility = get_financial_visibility(current_user)
+    total_fiscal_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues)
+    total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues)
+    effective_pocket_money = total_pocket_money if visibility["pocket_money"] else 0
+    total_revenue = total_fiscal_revenue + effective_pocket_money
 
     # Get business expenses (invoices + non-invoice expenses)
     invoices = await db.invoices.find({
@@ -3732,36 +3742,46 @@ async def get_roi_analysis(
         **scope,
         "date": {"$gte": period_start, "$lt": period_end}
     }, {"_id": 0, "amount": 1}).to_list(1000)
-    
-    total_business_expense = sum(i.get("total_amount", 0) for i in invoices) + sum(e.get("amount", 0) for e in business_expenses)
-    
-    # Calculate profit and ROI
+
+    total_invoice_expense = sum(i.get("total_amount", 0) for i in invoices)
+    total_off_book_expense = sum(e.get("amount", 0) for e in business_expenses)
+    effective_off_book_expense = total_off_book_expense if visibility["off_book_expenses"] else 0
+    total_business_expense = total_invoice_expense + effective_off_book_expense
+
+    # Calculate profit and ROI from the already-effective (not raw) totals
     total_profit = total_revenue - total_business_expense
-    
+
     # ROI = (Печалба / Лична инвестиция) * 100
     if total_personal > 0:
         roi_percent = (total_profit / total_personal) * 100
     else:
         roi_percent = 0 if total_profit <= 0 else 100
-    
+
     is_profitable = total_profit > 0
     investment_covered = total_profit >= total_personal
-    
-    # Generate AI insights. Each daily_revenue record is one day with
-    # turnover actually logged, so its count is a reasonable proxy for how
-    # much real history backs this period's numbers (a calendar month can
-    # be mostly empty early on, or sparsely filled for a seasonal business).
-    ai_insights = await generate_roi_insights(
-        total_personal=total_personal,
-        total_investment=total_investment,
-        total_revenue=total_revenue,
-        total_profit=total_profit,
-        roi_percent=roi_percent,
-        is_profitable=is_profitable,
-        investment_covered=investment_covered,
-        days_with_data=len(revenues),
-    )
-    
+
+    # Печалбата (и всичко изчислено пряко от нея - ROI, is_profitable,
+    # investment_covered, AI препоръките) е независимо скриваема по
+    # view_profit, както при get_summary - иначе зрител без това право би я
+    # видял изписана в текст през ai_insights, дори полетата по-долу да са null.
+    if visibility["profit"]:
+        # Generate AI insights. Each daily_revenue record is one day with
+        # turnover actually logged, so its count is a reasonable proxy for how
+        # much real history backs this period's numbers (a calendar month can
+        # be mostly empty early on, or sparsely filled for a seasonal business).
+        ai_insights = await generate_roi_insights(
+            total_personal=total_personal,
+            total_investment=total_investment,
+            total_revenue=total_revenue,
+            total_profit=total_profit,
+            roi_percent=roi_percent,
+            is_profitable=is_profitable,
+            investment_covered=investment_covered,
+            days_with_data=len(revenues),
+        )
+    else:
+        ai_insights = ["🔒 Нямаш право да виждаш печалбата за избрания период"]
+
     return {
         "period": {"month": target_month, "year": target_year},
         "period_start": period_start,
@@ -3770,10 +3790,10 @@ async def get_roi_analysis(
         "total_investment_only": round(total_investment, 2),
         "total_revenue": round(total_revenue, 2),
         "total_business_expense": round(total_business_expense, 2),
-        "total_profit": round(total_profit, 2),
-        "roi_percent": round(roi_percent, 1),
-        "is_profitable": is_profitable,
-        "investment_covered": investment_covered,
+        "total_profit": round(total_profit, 2) if visibility["profit"] else None,
+        "roi_percent": round(roi_percent, 1) if visibility["profit"] else None,
+        "is_profitable": is_profitable if visibility["profit"] else None,
+        "investment_covered": investment_covered if visibility["profit"] else None,
         "ai_insights": ai_insights
     }
 
@@ -3886,9 +3906,10 @@ async def get_roi_trend(
     require_permission(current_user, "view_personal_investments")
 
     company_id, scope = await get_company_scope(current_user)
+    visibility = get_financial_visibility(current_user)
     now = datetime.now(timezone.utc)
     trend_data = []
-    
+
     for i in range(months - 1, -1, -1):
         # Calculate target month
         target_month = now.month - i
@@ -3913,14 +3934,15 @@ async def get_roi_trend(
         }, {"_id": 0, "amount": 1}).to_list(1000) if company_id else []
         total_personal = sum(p.get("amount", 0) for p in personal)
         
-        # Revenue
+        # Revenue - effective pocket_money, same redaction as get_roi_analysis
         revenues = await db.daily_revenue.find({
             **scope,
             "date": {"$gte": period_start, "$lt": period_end}
         }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
-        total_revenue = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
+        effective_pocket_money = sum(r.get("pocket_money", 0) for r in revenues) if visibility["pocket_money"] else 0
+        total_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues) + effective_pocket_money
 
-        # Business expenses
+        # Business expenses - effective off-book expenses
         invoices = await db.invoices.find({
             **scope,
             "date": {
@@ -3933,22 +3955,27 @@ async def get_roi_trend(
             **scope,
             "date": {"$gte": period_start, "$lt": period_end}
         }, {"_id": 0, "amount": 1}).to_list(1000)
-        
-        total_expense = sum(i.get("total_amount", 0) for i in invoices) + sum(e.get("amount", 0) for e in expenses)
+
+        effective_off_book_expense = sum(e.get("amount", 0) for e in expenses) if visibility["off_book_expenses"] else 0
+        total_expense = sum(i.get("total_amount", 0) for i in invoices) + effective_off_book_expense
         total_profit = total_revenue - total_expense
-        
+
         roi = (total_profit / total_personal * 100) if total_personal > 0 else (0 if total_profit <= 0 else 100)
-        
+
+        # profit/roi_percent са независимо скриваеми по view_profit, както в
+        # get_roi_analysis - личната инвестиция (personal_investment) остава
+        # видима, защото целият /roi/trend endpoint вече изисква
+        # view_personal_investments за достъп.
         trend_data.append({
             "month": target_month,
             "year": target_year,
             "label": f"{target_month:02d}/{target_year}",
             "personal_investment": round(total_personal, 2),
             "revenue": round(total_revenue, 2),
-            "profit": round(total_profit, 2),
-            "roi_percent": round(roi, 1)
+            "profit": round(total_profit, 2) if visibility["profit"] else None,
+            "roi_percent": round(roi, 1) if visibility["profit"] else None
         })
-    
+
     return {"trend": trend_data, "months": months}
 
 # ===================== STATISTICS ENDPOINTS =====================
@@ -4723,6 +4750,14 @@ async def export_vat_ledger_excel(
     rev_query = dict(scope)
     rev_query["date"] = {"$gte": start_date, "$lte": end_date}
     sales = await db.daily_revenue.find(rev_query, {"_id": 0}).sort("date", 1).to_list(10000)
+
+    # Same redaction get_summary/get_chart_data apply to pocket_money - a
+    # raw export must never show a viewer a field the aggregated views
+    # already hide from them (e.g. an accountant with export_data but
+    # without view_pocket_money).
+    if not get_financial_visibility(current_user)["pocket_money"]:
+        for rev in sales:
+            rev["pocket_money"] = 0
 
     company_name = ""
     if company_id:
@@ -6217,27 +6252,35 @@ async def get_expense_forecast(
     months_ahead: int = 3,
     current_user: User = Depends(get_current_user)
 ):
-    """Get expense forecast"""
+    """Get expense forecast. Gated on view_statistics, matching the
+    frontend's own gate for the forecast card on the stats screen."""
+    require_permission(current_user, "view_statistics")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
-    
+
     if not company_id:
         return {"error": "No company"}
-    
-    return await forecast_service.get_expense_forecast(company_id, months_ahead)
+
+    visibility = get_financial_visibility(current_user)
+    return await forecast_service.get_expense_forecast(
+        company_id, months_ahead,
+        include_off_book_expenses=visibility["off_book_expenses"],
+    )
 
 @api_router.get("/forecast/revenue")
 async def get_revenue_forecast(
     months_ahead: int = 3,
     current_user: User = Depends(get_current_user)
 ):
-    """Get revenue forecast"""
+    """Get revenue forecast. Gated on view_statistics, matching the
+    frontend's own gate for the forecast card on the stats screen."""
+    require_permission(current_user, "view_statistics")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
-    
+
     if not company_id:
         return {"error": "No company"}
-    
+
     return await forecast_service.get_revenue_forecast(company_id, months_ahead)
 
 # ===================== PAYROLL / ВЕДОМОСТ ЗА ЗАПЛАТИ =====================
