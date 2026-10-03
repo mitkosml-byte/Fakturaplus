@@ -695,3 +695,135 @@ def test_scan_credits(client):
 
     r = client.get("/api/scan-credits/history/export", headers=owner)
     assert r.status_code == 200 and "spreadsheet" in r.headers.get("content-type", "")
+
+
+def test_cross_tenant_isolation(client):
+    """Second, independent audit pass: IDOR / company-scoping, not
+    roles/permissions. Two completely separate, freshly-created companies -
+    company Y's owner must never be able to read, modify, or delete
+    company X's records by guessing/reusing an id, nor act on company X's
+    user account, even though every call here is a legitimately
+    authenticated request with a real session.
+
+    Tenants are created directly against the DB (not via the rate-limited
+    POST /auth/register, which the rest of this module's tests already
+    use up to its 5/minute cap) - same shortcut test_scan_credits already
+    uses for its own setup."""
+    import asyncio
+    import uuid
+    from datetime import timedelta, timezone
+    import server
+
+    async def _make_tenant(label: str) -> tuple:
+        company = server.Company(name=f"{label} Co", eik=f"TEST{uuid.uuid4().hex[:9].upper()}")
+        await server.db.companies.insert_one(company.dict())
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        await server.db.users.insert_one({
+            "user_id": user_id,
+            "email": f"{label.lower()}_{TS}@test.com",
+            "name": f"{label} Owner",
+            "picture": None,
+            "role": "owner",
+            "permissions": server.resolve_permissions("owner", None),
+            "company_id": company.id,
+            "password_hash": None,
+            "auth_provider": "email",
+            "created_at": datetime.now(timezone.utc),
+        })
+        token = uuid.uuid4().hex
+        await server.db.user_sessions.insert_one({
+            "user_id": user_id,
+            "session_token": token,
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=1),
+            "created_at": datetime.now(timezone.utc),
+        })
+        return user_id, token
+
+    x_user_id, x_token = asyncio.run(_make_tenant("TenantX"))
+    _, y_token = asyncio.run(_make_tenant("TenantY"))
+    x = h(x_token)
+    y = h(y_token)
+
+    # Company X creates one record in each collection that has a
+    # by-id GET/PUT/DELETE endpoint.
+    r = client.post("/api/invoices", headers=x, json={
+        "supplier": "X Supplier", "invoice_number": "X-1",
+        "amount_without_vat": 100, "vat_amount": 20, "total_amount": 120, "date": "2026-09-01",
+    })
+    assert r.status_code == 200
+    x_invoice_id = r.json()["id"]
+
+    r = client.post("/api/daily-revenue", headers=x, json={"date": "2026-09-05", "fiscal_revenue": 50, "pocket_money": 5, "vat_rate_percent": 20})
+    assert r.status_code == 200
+
+    r = client.post("/api/expenses", headers=x, json={"description": "X разход", "amount": 10, "date": "2026-09-05"})
+    assert r.status_code == 200
+    x_expense_id = r.json()["id"]
+
+    r = client.post("/api/employees", headers=x, json={
+        "name": "X Служител", "position": "Продавач", "base_salary": 900, "agreement_type": "gross",
+    })
+    assert r.status_code == 200
+    x_employee_id = r.json()["id"]
+
+    r = client.post("/api/assets", headers=x, json={
+        "name": "X Актив", "category": "cat_iv", "acquisition_date": "2026-01-15",
+        "in_service_date": "2026-01-15", "acquisition_value": 1000,
+    })
+    assert r.status_code == 200
+    x_asset_id = r.json()["id"]
+
+    r = client.post("/api/calendar/events", headers=x, json={
+        "title": "X Event", "event_date": "2026-09-10", "visibility": "shared",
+    })
+    assert r.status_code == 200
+    x_event_id = r.json()["id"]
+
+    # Company Y must not see company X's record in its own list endpoints.
+    r = client.get("/api/invoices", headers=y)
+    assert r.status_code == 200 and all(inv["id"] != x_invoice_id for inv in r.json())
+    r = client.get("/api/employees", headers=y)
+    assert r.status_code == 200 and all(e["id"] != x_employee_id for e in r.json())
+    r = client.get("/api/assets", headers=y)
+    assert r.status_code == 200 and all(a["id"] != x_asset_id for a in r.json())
+
+    # Company Y must get a plain 404 (not the record, not a 403 that would
+    # at least confirm existence) when addressing company X's id directly.
+    r = client.get(f"/api/invoices/{x_invoice_id}", headers=y)
+    assert r.status_code == 404
+    r = client.put(f"/api/invoices/{x_invoice_id}", headers=y, json={"total_amount": 1})
+    assert r.status_code == 404
+    r = client.delete(f"/api/invoices/{x_invoice_id}", headers=y)
+    assert r.status_code == 404
+
+    r = client.delete(f"/api/expenses/{x_expense_id}", headers=y)
+    assert r.status_code == 404
+
+    r = client.put(f"/api/employees/{x_employee_id}", headers=y, json={"base_salary": 1})
+    assert r.status_code == 404
+    r = client.delete(f"/api/employees/{x_employee_id}", headers=y)
+    assert r.status_code == 404
+
+    r = client.put(f"/api/assets/{x_asset_id}", headers=y, json={"name": "hijacked"})
+    assert r.status_code == 404
+    r = client.delete(f"/api/assets/{x_asset_id}", headers=y)
+    assert r.status_code == 404
+
+    r = client.put(f"/api/calendar/events/{x_event_id}", headers=y, json={"title": "hijacked"})
+    assert r.status_code == 404
+    r = client.delete(f"/api/calendar/events/{x_event_id}", headers=y)
+    assert r.status_code == 404
+
+    # Company Y's owner must not be able to touch company X's user account
+    # either - changing their role or kicking them out of THEIR company.
+    r = client.put(f"/api/auth/role/{x_user_id}", headers=y, json={"role": "staff"})
+    assert r.status_code == 403
+    r = client.delete(f"/api/auth/users/{x_user_id}", headers=y)
+    assert r.status_code == 403
+
+    # And confirm the two companies' financial pictures never mix.
+    r = client.get("/api/statistics/summary?start_date=2026-09-01&end_date=2026-09-30", headers=y)
+    assert r.status_code == 200 and r.json()["total_fiscal_revenue"] == 0
+
+    r = client.get("/api/statistics/summary?start_date=2026-09-01&end_date=2026-09-30", headers=x)
+    assert r.status_code == 200 and r.json()["total_fiscal_revenue"] == 50
