@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
+import { COLORS } from '../theme/colors';
 
 // Surfaces unread price-increase alerts "loudly" as a blocking popup, on top
 // of their existing passive listing in Statistics -> Items. Re-checks
@@ -101,10 +102,10 @@ export function PriceAlertPopup() {
       <View style={styles.overlay}>
         <View style={styles.card}>
           <View style={styles.header}>
-            <Ionicons name="alert-circle" size={28} color="#EF4444" />
+            <Ionicons name="alert-circle" size={28} color={COLORS.danger} />
             <Text style={styles.title}>{t('priceAlertPopup.title')}</Text>
             <TouchableOpacity onPress={closePopup} style={styles.closeBtn}>
-              <Ionicons name="close" size={22} color="#64748B" />
+              <Ionicons name="close" size={22} color={COLORS.textMuted} />
             </TouchableOpacity>
           </View>
 
@@ -123,7 +124,7 @@ export function PriceAlertPopup() {
                 </View>
                 <View style={styles.alertPrices}>
                   <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
-                  <Ionicons name="arrow-forward" size={13} color="#64748B" />
+                  <Ionicons name="arrow-forward" size={13} color={COLORS.textMuted} />
                   <Text style={styles.alertNewPrice}>{alert.new_price.toFixed(2)}€</Text>
                 </View>
                 <View style={styles.changeBadge}>
@@ -161,7 +162,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   card: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 20,
     padding: 20,
     width: '100%',
@@ -187,14 +188,14 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 14,
   },
   list: {
     maxHeight: 320,
   },
   alertRow: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 12,
     marginBottom: 8,
@@ -212,7 +213,7 @@ const styles = StyleSheet.create({
   },
   alertSupplier: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 2,
   },
   alertPrices: {
@@ -222,13 +223,13 @@ const styles = StyleSheet.create({
   },
   alertOldPrice: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     textDecorationLine: 'line-through',
   },
   alertNewPrice: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#EF4444',
+    color: COLORS.danger,
   },
   changeBadge: {
     backgroundColor: '#EF444420',
@@ -239,11 +240,11 @@ const styles = StyleSheet.create({
   changeText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#EF4444',
+    color: COLORS.danger,
   },
   moreText: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     textAlign: 'center',
     marginTop: 4,
     marginBottom: 4,
@@ -258,10 +259,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
-    backgroundColor: '#334155',
+    backgroundColor: COLORS.border,
   },
   secondaryBtnText: {
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -270,7 +271,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
-    backgroundColor: '#EF4444',
+    backgroundColor: COLORS.danger,
   },
   primaryBtnText: {
     color: 'white',

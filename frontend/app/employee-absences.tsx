@@ -24,6 +24,7 @@ import { Employee, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType } from
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -259,24 +260,24 @@ export default function EmployeeAbsencesScreen() {
 
           <View style={styles.yearRow}>
             <TouchableOpacity onPress={() => setYear((y) => y - 1)} style={styles.yearArrow}>
-              <Ionicons name="chevron-back" size={18} color="#8B5CF6" />
+              <Ionicons name="chevron-back" size={18} color={COLORS.primary} />
             </TouchableOpacity>
             <Text style={styles.yearText}>{year}</Text>
             <TouchableOpacity onPress={() => setYear((y) => y + 1)} style={styles.yearArrow}>
-              <Ionicons name="chevron-forward" size={18} color="#8B5CF6" />
+              <Ionicons name="chevron-forward" size={18} color={COLORS.primary} />
             </TouchableOpacity>
           </View>
 
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : (
             <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }}>
               {viewMode === 'holiday' ? (
                 holidayWork.length === 0 ? (
                   <View style={styles.emptyContainer}>
-                    <Ionicons name="sunny-outline" size={48} color="#334155" />
+                    <Ionicons name="sunny-outline" size={48} color={COLORS.border} />
                     <Text style={styles.emptyText}>{t('absences.noHolidayWork')}</Text>
                   </View>
                 ) : (
@@ -293,7 +294,7 @@ export default function EmployeeAbsencesScreen() {
                 )
               ) : leave.length === 0 ? (
                 <View style={styles.emptyContainer}>
-                  <Ionicons name="airplane-outline" size={48} color="#334155" />
+                  <Ionicons name="airplane-outline" size={48} color={COLORS.border} />
                   <Text style={styles.emptyText}>{t('absences.noLeave')}</Text>
                 </View>
               ) : (
@@ -333,7 +334,7 @@ export default function EmployeeAbsencesScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('absences.addHolidayWork')}</Text>
               <TouchableOpacity onPress={() => setHolidayModalVisible(false)}>
-                <Ionicons name="close" size={26} color="#94A3B8" />
+                <Ionicons name="close" size={26} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
             <ScrollView style={{ maxHeight: 420 }}>
@@ -371,7 +372,7 @@ export default function EmployeeAbsencesScreen() {
               <TextInput
                 style={styles.textInput}
                 placeholder={t('absences.notePlaceholder')}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
                 value={holidayNote}
                 onChangeText={setHolidayNote}
               />
@@ -390,7 +391,7 @@ export default function EmployeeAbsencesScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('absences.addLeave')}</Text>
               <TouchableOpacity onPress={() => setLeaveModalVisible(false)}>
-                <Ionicons name="close" size={26} color="#94A3B8" />
+                <Ionicons name="close" size={26} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
             <ScrollView style={{ maxHeight: 420 }}>
@@ -425,14 +426,14 @@ export default function EmployeeAbsencesScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.fieldLabel}>{t('absences.startDate')}</Text>
                   <TouchableOpacity style={styles.dateInputButton} onPress={() => setLeaveStartPickerVisible(true)}>
-                    <Ionicons name="calendar" size={16} color="#8B5CF6" />
+                    <Ionicons name="calendar" size={16} color={COLORS.primary} />
                     <Text style={styles.dateInputText}>{format(leaveStart, 'd MMM yyyy', { locale: dateLocale })}</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.fieldLabel}>{t('absences.endDate')}</Text>
                   <TouchableOpacity style={styles.dateInputButton} onPress={() => setLeaveEndPickerVisible(true)}>
-                    <Ionicons name="calendar" size={16} color="#8B5CF6" />
+                    <Ionicons name="calendar" size={16} color={COLORS.primary} />
                     <Text style={styles.dateInputText}>{format(leaveEnd, 'd MMM yyyy', { locale: dateLocale })}</Text>
                   </TouchableOpacity>
                 </View>
@@ -463,7 +464,7 @@ export default function EmployeeAbsencesScreen() {
               <TextInput
                 style={styles.textInput}
                 placeholder={t('absences.notePlaceholder')}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
                 value={leaveNote}
                 onChangeText={setLeaveNote}
               />
@@ -482,7 +483,7 @@ export default function EmployeeAbsencesScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('absences.export')}</Text>
               <TouchableOpacity onPress={() => setExportModalVisible(false)}>
-                <Ionicons name="close" size={26} color="#94A3B8" />
+                <Ionicons name="close" size={26} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
             <Text style={styles.fieldLabel}>{t('absences.exportHint')}</Text>
@@ -490,14 +491,14 @@ export default function EmployeeAbsencesScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.fieldLabel}>{t('absences.startDate')}</Text>
                 <TouchableOpacity style={styles.dateInputButton} onPress={() => setExportStartPickerVisible(true)}>
-                  <Ionicons name="calendar" size={16} color="#8B5CF6" />
+                  <Ionicons name="calendar" size={16} color={COLORS.primary} />
                   <Text style={styles.dateInputText}>{format(exportStart, 'd MMM yyyy', { locale: dateLocale })}</Text>
                 </TouchableOpacity>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.fieldLabel}>{t('absences.endDate')}</Text>
                 <TouchableOpacity style={styles.dateInputButton} onPress={() => setExportEndPickerVisible(true)}>
-                  <Ionicons name="calendar" size={16} color="#8B5CF6" />
+                  <Ionicons name="calendar" size={16} color={COLORS.primary} />
                   <Text style={styles.dateInputText}>{format(exportEnd, 'd MMM yyyy', { locale: dateLocale })}</Text>
                 </TouchableOpacity>
               </View>
@@ -563,7 +564,7 @@ const styles = StyleSheet.create({
   },
   modeToggle: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 4,
     marginHorizontal: 16,
@@ -575,12 +576,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modeButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   modeButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   modeButtonTextActive: {
     color: 'white',
@@ -604,10 +605,10 @@ const styles = StyleSheet.create({
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   content: { flex: 1, paddingHorizontal: 16, marginTop: 8 },
   emptyContainer: { alignItems: 'center', marginTop: 60, gap: 10 },
-  emptyText: { color: '#64748B', fontSize: 14 },
-  emptyHint: { color: '#64748B', fontSize: 13, paddingVertical: 8 },
+  emptyText: { color: COLORS.textMuted, fontSize: 14 },
+  emptyHint: { color: COLORS.textMuted, fontSize: 13, paddingVertical: 8 },
   entryCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 14,
     padding: 14,
     marginBottom: 10,
@@ -625,15 +626,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   entryDate: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 12,
   },
   entryHolidayName: {
-    color: '#C4B5FD',
+    color: COLORS.primaryLight,
     fontSize: 13,
   },
   entryNote: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 12,
     marginTop: 4,
   },
@@ -650,7 +651,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(245, 158, 11, 0.15)',
   },
   leaveTypeBadgeText: {
-    color: '#E2E8F0',
+    color: COLORS.textLight,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -661,7 +662,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 4,
@@ -673,7 +674,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     maxHeight: '85%',
@@ -691,7 +692,7 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 8,
     marginTop: 6,
   },
@@ -705,17 +706,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   chipActive: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   chipText: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   chipTextActive: {
@@ -728,25 +729,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     padding: 10,
     marginBottom: 6,
   },
   holidayRowActive: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   holidayRowDate: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 12,
     fontWeight: '700',
     width: 50,
   },
   holidayRowName: {
-    color: '#E2E8F0',
+    color: COLORS.textLight,
     fontSize: 12,
     flex: 1,
   },
@@ -761,29 +762,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   dateInputText: {
     color: 'white',
     fontSize: 13,
   },
   textInput: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 12,
     color: 'white',
     fontSize: 14,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     marginBottom: 4,
   },
   saveButton: {
     flexDirection: 'row',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',

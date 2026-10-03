@@ -15,6 +15,7 @@ import { useTranslation } from '../src/i18n';
 import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFile';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 export default function ExportScreen() {
   const { t } = useTranslation();
@@ -84,7 +85,7 @@ export default function ExportScreen() {
           <View style={styles.ledgerCard}>
             <View style={styles.ledgerHeader}>
               <View style={[styles.iconContainer, { backgroundColor: 'rgba(139, 92, 246, 0.2)', marginRight: 12 }]}>
-                <Ionicons name="albums" size={28} color="#8B5CF6" />
+                <Ionicons name="albums" size={28} color={COLORS.primary} />
               </View>
               <View style={styles.cardContent}>
                 <Text style={styles.cardTitle}>{t('export.vatLedger')}</Text>
@@ -134,16 +135,16 @@ export default function ExportScreen() {
             disabled={loading !== null}
           >
             <View style={[styles.iconContainer, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
-              <Ionicons name="document-text" size={32} color="#10B981" />
+              <Ionicons name="document-text" size={32} color={COLORS.success} />
             </View>
             <View style={styles.cardContent}>
               <Text style={styles.cardTitle}>{t('export.excel')}</Text>
               <Text style={styles.cardDesc}>{t('export.excelDesc')}</Text>
             </View>
             {loading === 'excel' ? (
-              <ActivityIndicator color="#10B981" />
+              <ActivityIndicator color={COLORS.success} />
             ) : (
-              <Ionicons name="download-outline" size={24} color="#64748B" />
+              <Ionicons name="download-outline" size={24} color={COLORS.textMuted} />
             )}
           </TouchableOpacity>
 
@@ -154,28 +155,28 @@ export default function ExportScreen() {
             disabled={loading !== null}
           >
             <View style={[styles.iconContainer, { backgroundColor: 'rgba(239, 68, 68, 0.2)' }]}>
-              <Ionicons name="document" size={32} color="#EF4444" />
+              <Ionicons name="document" size={32} color={COLORS.danger} />
             </View>
             <View style={styles.cardContent}>
               <Text style={styles.cardTitle}>{t('export.pdf')}</Text>
               <Text style={styles.cardDesc}>{t('export.pdfDesc')}</Text>
             </View>
             {loading === 'pdf' ? (
-              <ActivityIndicator color="#EF4444" />
+              <ActivityIndicator color={COLORS.danger} />
             ) : (
-              <Ionicons name="download-outline" size={24} color="#64748B" />
+              <Ionicons name="download-outline" size={24} color={COLORS.textMuted} />
             )}
           </TouchableOpacity>
 
           <View style={styles.infoBox}>
-            <Ionicons name="information-circle" size={20} color="#8B5CF6" />
+            <Ionicons name="information-circle" size={20} color={COLORS.primary} />
             <Text style={styles.infoText}>{t('export.info')}</Text>
           </View>
 
           <TouchableOpacity style={styles.statsLinkCard} onPress={() => router.push('/(tabs)/stats')}>
-            <Ionicons name="stats-chart" size={20} color="#8B5CF6" />
+            <Ionicons name="stats-chart" size={20} color={COLORS.primary} />
             <Text style={styles.statsLinkText}>{t('export.statsExportHint')}</Text>
-            <Ionicons name="chevron-forward" size={18} color="#64748B" />
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -186,7 +187,7 @@ export default function ExportScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
   safeArea: {
     flex: 1,
@@ -197,7 +198,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
   },
   backButton: {
     padding: 8,
@@ -213,12 +214,12 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 24,
     textAlign: 'center',
   },
   ledgerCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
@@ -239,15 +240,15 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     alignItems: 'center',
   },
   ledgerPeriodChipActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   ledgerPeriodText: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   ledgerPeriodTextActive: {
@@ -258,7 +259,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 10,
     paddingVertical: 12,
   },
@@ -270,7 +271,7 @@ const styles = StyleSheet.create({
   exportCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
@@ -293,7 +294,7 @@ const styles = StyleSheet.create({
   },
   cardDesc: {
     fontSize: 13,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 4,
   },
   infoBox: {
@@ -307,14 +308,14 @@ const styles = StyleSheet.create({
   },
   infoText: {
     flex: 1,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 13,
     lineHeight: 20,
   },
   statsLinkCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 14,
     marginTop: 12,
@@ -322,7 +323,7 @@ const styles = StyleSheet.create({
   },
   statsLinkText: {
     flex: 1,
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
     fontSize: 13,
   },
 });

@@ -17,6 +17,7 @@ import {
   getPeriodBounds,
   formatPeriodLabel,
 } from '../utils/periodRange';
+import { COLORS } from '../theme/colors';
 
 interface PeriodNavigatorProps {
   state: PeriodState;
@@ -107,14 +108,14 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
       {state.mode === 'range' ? (
         <View style={styles.rangeRow}>
           <TouchableOpacity style={styles.rangeDateButton} onPress={() => setPickerOpenFor('start')}>
-            <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+            <Ionicons name="calendar-outline" size={16} color={COLORS.primary} />
             <Text style={styles.rangeDateText}>
               {state.rangeStart ? format(state.rangeStart, 'd MMM yyyy', { locale: dateLocale }) : '-'}
             </Text>
           </TouchableOpacity>
           <Text style={styles.rangeDash}>-</Text>
           <TouchableOpacity style={styles.rangeDateButton} onPress={() => setPickerOpenFor('end')}>
-            <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+            <Ionicons name="calendar-outline" size={16} color={COLORS.primary} />
             <Text style={styles.rangeDateText}>
               {state.rangeEnd ? format(state.rangeEnd, 'd MMM yyyy', { locale: dateLocale }) : '-'}
             </Text>
@@ -123,7 +124,7 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
       ) : (
         <View style={styles.navRow}>
           <TouchableOpacity style={styles.navButton} onPress={goPrev} accessibilityLabel={t('periodNav.previous')}>
-            <Ionicons name="chevron-back" size={20} color="#8B5CF6" />
+            <Ionicons name="chevron-back" size={20} color={COLORS.primary} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -133,7 +134,7 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
           >
             <View style={styles.labelRow}>
               <Text style={styles.label}>{label}</Text>
-              <Ionicons name="chevron-down" size={14} color="#64748B" />
+              <Ionicons name="chevron-down" size={14} color={COLORS.textMuted} />
             </View>
             {state.offset > 0 && (
               <TouchableOpacity onPress={goToday}>
@@ -148,7 +149,7 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
             disabled={state.offset === 0}
             accessibilityLabel={t('periodNav.next')}
           >
-            <Ionicons name="chevron-forward" size={20} color={state.offset === 0 ? '#334155' : '#8B5CF6'} />
+            <Ionicons name="chevron-forward" size={20} color={state.offset === 0 ? COLORS.border : COLORS.primary} />
           </TouchableOpacity>
         </View>
       )}
@@ -199,7 +200,7 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 8,
     marginBottom: 16,
@@ -216,10 +217,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   modeChipActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   modeChipText: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -250,7 +251,7 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
   },
   todayLink: {
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontSize: 12,
     fontWeight: '600',
     marginTop: 2,
@@ -265,7 +266,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 12,
@@ -276,6 +277,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   rangeDash: {
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
 });

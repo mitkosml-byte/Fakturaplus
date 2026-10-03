@@ -18,6 +18,7 @@ import { api } from '../src/services/api';
 import { NotificationSettings } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { getPushStatus, enablePushNotifications, disablePushNotifications } from '../src/utils/pushNotifications';
+import { COLORS } from '../src/theme/colors';
 
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -114,7 +115,7 @@ export default function NotificationsSettingsScreen() {
         <View style={styles.overlay}>
           <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           </SafeAreaView>
         </View>
@@ -138,7 +139,7 @@ export default function NotificationsSettingsScreen() {
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <View style={[styles.sectionIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-              <Ionicons name="alert-circle" size={24} color="#EF4444" />
+              <Ionicons name="alert-circle" size={24} color={COLORS.danger} />
             </View>
             <View style={styles.sectionTitleContainer}>
               <Text style={styles.sectionTitle}>{t('notifications.thresholdTitle')}</Text>
@@ -147,8 +148,8 @@ export default function NotificationsSettingsScreen() {
             <Switch
               value={thresholdEnabled}
               onValueChange={setThresholdEnabled}
-              trackColor={{ false: '#334155', true: '#8B5CF6' }}
-              thumbColor={thresholdEnabled ? 'white' : '#64748B'}
+              trackColor={{ false: COLORS.border, true: COLORS.primary }}
+              thumbColor={thresholdEnabled ? 'white' : COLORS.textMuted}
             />
           </View>
 
@@ -161,7 +162,7 @@ export default function NotificationsSettingsScreen() {
                 onChangeText={setThresholdAmount}
                 keyboardType="decimal-pad"
                 placeholder={t('notifications.thresholdAmountPlaceholder')}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
               <Text style={styles.inputHint}>
                 {t('notifications.thresholdHint')}
@@ -173,7 +174,7 @@ export default function NotificationsSettingsScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={[styles.sectionIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-              <Ionicons name="calendar" size={24} color="#8B5CF6" />
+              <Ionicons name="calendar" size={24} color={COLORS.primary} />
             </View>
             <View style={styles.sectionTitleContainer}>
               <Text style={styles.sectionTitle}>{t('notifications.periodicTitle')}</Text>
@@ -182,8 +183,8 @@ export default function NotificationsSettingsScreen() {
             <Switch
               value={periodicEnabled}
               onValueChange={setPeriodicEnabled}
-              trackColor={{ false: '#334155', true: '#8B5CF6' }}
-              thumbColor={periodicEnabled ? 'white' : '#64748B'}
+              trackColor={{ false: COLORS.border, true: COLORS.primary }}
+              thumbColor={periodicEnabled ? 'white' : COLORS.textMuted}
             />
           </View>
 
@@ -222,20 +223,20 @@ export default function NotificationsSettingsScreen() {
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                    <Ionicons name="notifications-circle" size={24} color="#10B981" />
+                    <Ionicons name="notifications-circle" size={24} color={COLORS.success} />
                   </View>
                   <View style={styles.sectionTitleContainer}>
                     <Text style={styles.sectionTitle}>{t('notifications.pushTitle')}</Text>
                     <Text style={styles.sectionSubtitle}>{t('notifications.pushSubtitle')}</Text>
                   </View>
                   {pushBusy ? (
-                    <ActivityIndicator color="#10B981" />
+                    <ActivityIndicator color={COLORS.success} />
                   ) : (
                     <Switch
                       value={pushEnabled}
                       onValueChange={handleTogglePush}
-                      trackColor={{ false: '#334155', true: '#10B981' }}
-                      thumbColor={pushEnabled ? 'white' : '#64748B'}
+                      trackColor={{ false: COLORS.border, true: COLORS.success }}
+                      thumbColor={pushEnabled ? 'white' : COLORS.textMuted}
                     />
                   )}
                 </View>
@@ -243,7 +244,7 @@ export default function NotificationsSettingsScreen() {
             )}
 
             <View style={styles.infoCard}>
-              <Ionicons name="information-circle" size={24} color="#64748B" />
+              <Ionicons name="information-circle" size={24} color={COLORS.textMuted} />
               <Text style={styles.infoText}>
                 {t('notifications.pushInfo')}
               </Text>
@@ -291,13 +292,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: COLORS.surface,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -311,7 +312,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   section: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -338,39 +339,39 @@ const styles = StyleSheet.create({
   },
   sectionSubtitle: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 2,
   },
   inputContainer: {
     marginTop: 16,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: COLORS.border,
   },
   inputLabel: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     color: 'white',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   inputHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 8,
   },
   datesContainer: {
     marginTop: 16,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: COLORS.border,
   },
   datesGrid: {
     flexDirection: 'row',
@@ -382,19 +383,19 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   dateButtonSelected: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   dateButtonText: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   dateButtonTextSelected: {
@@ -402,12 +403,12 @@ const styles = StyleSheet.create({
   },
   selectedDatesText: {
     fontSize: 12,
-    color: '#8B5CF6',
+    color: COLORS.primary,
     marginTop: 12,
   },
   infoCard: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     gap: 12,
@@ -416,16 +417,16 @@ const styles = StyleSheet.create({
   infoText: {
     flex: 1,
     fontSize: 13,
-    color: '#64748B',
+    color: COLORS.textMuted,
     lineHeight: 20,
   },
   footer: {
     padding: 16,
     borderTopWidth: 1,
-    borderTopColor: '#1E293B',
+    borderTopColor: COLORS.surface,
   },
   saveButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',

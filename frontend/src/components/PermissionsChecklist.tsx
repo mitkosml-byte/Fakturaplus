@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Switch } from 'react-native';
 import { useLanguageStore } from '../i18n';
 import { ROLE_CONFIGURABLE_PERMISSIONS, ConfigurableRole, getPermissionLabel } from '../utils/permissions';
+import { COLORS } from '../theme/colors';
 
 interface PermissionsChecklistProps {
   role: ConfigurableRole;
@@ -25,8 +26,8 @@ export function PermissionsChecklist({ role, selected, onToggle }: PermissionsCh
           <Switch
             value={selected.includes(permission)}
             onValueChange={() => onToggle(permission)}
-            trackColor={{ false: '#334155', true: '#8B5CF6' }}
-            thumbColor={selected.includes(permission) ? 'white' : '#64748B'}
+            trackColor={{ false: COLORS.border, true: COLORS.primary }}
+            thumbColor={selected.includes(permission) ? 'white' : COLORS.textMuted}
           />
         </View>
       ))}
@@ -36,7 +37,7 @@ export function PermissionsChecklist({ role, selected, onToggle }: PermissionsCh
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     paddingHorizontal: 14,
   },
@@ -46,11 +47,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: COLORS.surface,
   },
   label: {
     fontSize: 14,
-    color: '#E2E8F0',
+    color: COLORS.textLight,
     flex: 1,
     marginRight: 12,
   },

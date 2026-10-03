@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -69,7 +70,7 @@ export default function ProtocolsScreen() {
 
         {overdueCount > 0 && (
           <View style={styles.overdueBanner}>
-            <Ionicons name="alert-circle" size={20} color="#EF4444" />
+            <Ionicons name="alert-circle" size={20} color={COLORS.danger} />
             <Text style={styles.overdueBannerText}>
               {overdueCount} {overdueCount === 1 ? t('protocols.overdueSingular') : t('protocols.overduePlural')}
             </Text>
@@ -78,15 +79,15 @@ export default function ProtocolsScreen() {
 
         <ScrollView
           style={styles.content}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         >
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : protocols.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Ionicons name="document-text-outline" size={56} color="#334155" />
+              <Ionicons name="document-text-outline" size={56} color={COLORS.border} />
               <Text style={styles.emptyText}>{t('protocols.empty')}</Text>
               <Text style={styles.emptyHint}>{t('protocols.emptyHint')}</Text>
             </View>
@@ -109,7 +110,7 @@ export default function ProtocolsScreen() {
                     <Text style={styles.protocolMeta}>
                       {t('invoices.dateLabel')}: {format(new Date(inv.date), 'd MMM yyyy', { locale: dateLocale })}
                     </Text>
-                    <Text style={[styles.protocolMeta, overdue && { color: '#EF4444', fontWeight: '600' }]}>
+                    <Text style={[styles.protocolMeta, overdue && { color: COLORS.danger, fontWeight: '600' }]}>
                       {t('invoices.protocolDeadline')}: {format(deadline, 'd MMM yyyy', { locale: dateLocale })}
                     </Text>
                   </View>
@@ -131,7 +132,7 @@ export default function ProtocolsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
   safeArea: {
     flex: 1,
@@ -142,7 +143,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
   },
   backButton: {
     padding: 8,
@@ -161,7 +162,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   overdueBannerText: {
-    color: '#EF4444',
+    color: COLORS.danger,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -179,26 +180,26 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 16,
   },
   emptyHint: {
     fontSize: 13,
-    color: '#475569',
+    color: COLORS.borderLight,
     marginTop: 6,
     textAlign: 'center',
     paddingHorizontal: 24,
   },
   protocolCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 14,
     padding: 16,
     marginBottom: 12,
     borderLeftWidth: 3,
-    borderLeftColor: '#8B5CF6',
+    borderLeftColor: COLORS.primary,
   },
   protocolCardOverdue: {
-    borderLeftColor: '#EF4444',
+    borderLeftColor: COLORS.danger,
   },
   protocolCardHeader: {
     flexDirection: 'row',
@@ -209,7 +210,7 @@ const styles = StyleSheet.create({
   protocolNumber: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#C4B5FD',
+    color: COLORS.primaryLight,
   },
   overdueBadge: {
     backgroundColor: 'rgba(239, 68, 68, 0.2)',
@@ -218,7 +219,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   overdueBadgeText: {
-    color: '#EF4444',
+    color: COLORS.danger,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -236,23 +237,23 @@ const styles = StyleSheet.create({
   },
   protocolMeta: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   protocolAmountRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: COLORS.border,
     paddingTop: 10,
   },
   protocolAmountLabel: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   protocolAmountValue: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
 });

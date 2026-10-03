@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { api } from '../src/services/api';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -401,7 +402,7 @@ export default function HelpScreen() {
           <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
             {/* App Logo/Title */}
             <View style={styles.appInfo}>
-              <Ionicons name="receipt" size={48} color="#8B5CF6" />
+              <Ionicons name="receipt" size={48} color={COLORS.primary} />
               <Text style={styles.appTitle}>{t('help.appTitle')}</Text>
               <Text style={styles.appSubtitle}>{t('help.appSubtitle')}</Text>
               <Text style={styles.appVersion}>{t('help.version')} 1.0.0</Text>
@@ -411,7 +412,7 @@ export default function HelpScreen() {
             {helpSections.map((section, index) => (
               <View key={index} style={styles.section}>
                 <View style={styles.sectionHeader}>
-                  <Ionicons name={section.icon as any} size={24} color="#8B5CF6" />
+                  <Ionicons name={section.icon as any} size={24} color={COLORS.primary} />
                   <Text style={styles.sectionTitle}>{section.title}</Text>
                 </View>
                 <View style={styles.sectionContent}>
@@ -426,7 +427,7 @@ export default function HelpScreen() {
 
             {/* Contact/Support */}
             <View style={styles.supportCard}>
-              <Ionicons name="help-buoy" size={32} color="#10B981" />
+              <Ionicons name="help-buoy" size={32} color={COLORS.success} />
               <Text style={styles.supportTitle}>{t('help.needHelp')}</Text>
               <Text style={styles.supportText}>
                 {t('help.contactSupport')}
@@ -436,7 +437,7 @@ export default function HelpScreen() {
             {/* Feedback box */}
             <View style={styles.feedbackCard}>
               <View style={styles.feedbackHeader}>
-                <Ionicons name="chatbubble-ellipses" size={26} color="#8B5CF6" />
+                <Ionicons name="chatbubble-ellipses" size={26} color={COLORS.primary} />
                 <Text style={styles.feedbackTitle}>{t('feedback.title')}</Text>
               </View>
               <Text style={styles.feedbackIntro}>{t('feedback.intro')}</Text>
@@ -446,7 +447,7 @@ export default function HelpScreen() {
                   style={[styles.toggleButton, feedbackAnonymous && styles.toggleButtonActive]}
                   onPress={() => setFeedbackAnonymous(true)}
                 >
-                  <Ionicons name="eye-off-outline" size={16} color={feedbackAnonymous ? 'white' : '#94A3B8'} />
+                  <Ionicons name="eye-off-outline" size={16} color={feedbackAnonymous ? 'white' : COLORS.textSecondary} />
                   <Text style={[styles.toggleButtonText, feedbackAnonymous && styles.toggleButtonTextActive]}>
                     {t('feedback.anonymousLabel')}
                   </Text>
@@ -455,7 +456,7 @@ export default function HelpScreen() {
                   style={[styles.toggleButton, !feedbackAnonymous && styles.toggleButtonActive]}
                   onPress={() => setFeedbackAnonymous(false)}
                 >
-                  <Ionicons name="person-outline" size={16} color={!feedbackAnonymous ? 'white' : '#94A3B8'} />
+                  <Ionicons name="person-outline" size={16} color={!feedbackAnonymous ? 'white' : COLORS.textSecondary} />
                   <Text style={[styles.toggleButtonText, !feedbackAnonymous && styles.toggleButtonTextActive]}>
                     {t('feedback.namedLabel')}
                   </Text>
@@ -465,7 +466,7 @@ export default function HelpScreen() {
               <TextInput
                 style={styles.feedbackInput}
                 placeholder={t('feedback.placeholder')}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
                 value={feedbackMessage}
                 onChangeText={(v) => {
                   setFeedbackMessage(v);
@@ -526,7 +527,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: COLORS.border,
   },
   backButton: {
     padding: 8,
@@ -556,16 +557,16 @@ const styles = StyleSheet.create({
   },
   appSubtitle: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 4,
   },
   appVersion: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 8,
   },
   section: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     marginBottom: 12,
     overflow: 'hidden',
@@ -577,7 +578,7 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: 'rgba(139, 92, 246, 0.1)',
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: COLORS.border,
   },
   sectionTitle: {
     fontSize: 16,
@@ -589,7 +590,7 @@ const styles = StyleSheet.create({
   },
   sectionText: {
     fontSize: 14,
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
     lineHeight: 22,
     marginBottom: 8,
   },
@@ -605,18 +606,18 @@ const styles = StyleSheet.create({
   supportTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#10B981',
+    color: COLORS.success,
     marginTop: 12,
   },
   supportText: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 20,
   },
   feedbackCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginTop: 12,
@@ -636,7 +637,7 @@ const styles = StyleSheet.create({
   },
   feedbackIntro: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     lineHeight: 19,
     marginBottom: 16,
   },
@@ -653,27 +654,27 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   toggleButtonActive: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   toggleButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   toggleButtonTextActive: {
     color: 'white',
   },
   feedbackInput: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     padding: 12,
     color: 'white',
     fontSize: 14,
@@ -682,16 +683,16 @@ const styles = StyleSheet.create({
   },
   feedbackErrorText: {
     fontSize: 12,
-    color: '#EF4444',
+    color: COLORS.danger,
     marginBottom: 8,
   },
   feedbackSuccessText: {
     fontSize: 12,
-    color: '#10B981',
+    color: COLORS.success,
     marginBottom: 8,
   },
   feedbackSubmitButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',

@@ -1,4 +1,5 @@
 import type { Language } from '../i18n';
+import { COLORS } from '../theme/colors';
 
 const ROLE_NAMES: Record<string, { bg: string; en: string }> = {
   owner: { bg: 'Титуляр', en: 'Owner' },
@@ -8,10 +9,10 @@ const ROLE_NAMES: Record<string, { bg: string; en: string }> = {
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  owner: '#8B5CF6',
-  manager: '#3B82F6',
-  staff: '#64748B',
-  accountant: '#F59E0B',
+  owner: COLORS.primary,
+  manager: COLORS.info,
+  staff: COLORS.textMuted,
+  accountant: COLORS.warning,
 };
 
 export function getRoleName(role: string, language: Language): string {
@@ -19,5 +20,5 @@ export function getRoleName(role: string, language: Language): string {
 }
 
 export function getRoleColor(role: string): string {
-  return ROLE_COLORS[role] || '#64748B';
+  return ROLE_COLORS[role] || COLORS.textMuted;
 }

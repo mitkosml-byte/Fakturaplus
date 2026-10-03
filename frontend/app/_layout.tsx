@@ -8,6 +8,7 @@ import { StyleSheet, View } from 'react-native';
 import { OfflineBanner } from '../src/components/OfflineBanner';
 import { PriceAlertPopup } from '../src/components/PriceAlertPopup';
 import { OnboardingTutorial } from '../src/components/OnboardingTutorial';
+import { COLORS } from '../src/theme/colors';
 
 // Single source of truth for auth-based navigation. Screens (login.tsx,
 // the tabs layout) used to each run their own redirect effect; two
@@ -57,7 +58,7 @@ function AppShell() {
         <Stack
           screenOptions={{
             headerShown: false,
-            contentStyle: { backgroundColor: '#0F172A' },
+            contentStyle: { backgroundColor: COLORS.background },
           }}
         />
       </View>

@@ -21,6 +21,7 @@ import { PersonalExpense, PersonalExpenseType, PersonalExpenseCategory } from '.
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -30,9 +31,9 @@ const MONTH_NAMES_EN = ['January', 'February', 'March', 'April', 'May', 'June', 
 type PeriodPreset = 'all' | 'thisYear' | 'thisMonth' | 'lastMonth';
 
 const TYPE_COLORS: Record<PersonalExpenseType, string> = {
-  investment: '#EF4444',
-  recurring: '#8B5CF6',
-  one_time: '#F59E0B',
+  investment: COLORS.danger,
+  recurring: COLORS.primary,
+  one_time: COLORS.warning,
 };
 
 const CATEGORY_KEYS: Record<PersonalExpenseCategory, string> = {
@@ -205,9 +206,9 @@ export default function PersonalExpensesHistoryScreen() {
             style={styles.filtersToggle}
             onPress={() => setFiltersExpanded((prev) => !prev)}
           >
-            <Ionicons name="options-outline" size={16} color="#8B5CF6" />
+            <Ionicons name="options-outline" size={16} color={COLORS.primary} />
             <Text style={styles.filtersToggleText}>{t('invoices.filtersButton')}</Text>
-            <Ionicons name={filtersExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#8B5CF6" />
+            <Ionicons name={filtersExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.primary} />
           </TouchableOpacity>
 
           {filtersExpanded && (
@@ -274,19 +275,19 @@ export default function PersonalExpensesHistoryScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('roi.totalInvestment')}:</Text>
-              <Text style={[styles.summaryValue, { color: '#EF4444' }]}>{total.toFixed(2)} €</Text>
+              <Text style={[styles.summaryValue, { color: COLORS.danger }]}>{total.toFixed(2)} €</Text>
             </View>
           </View>
 
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : (
             <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 32 }}>
               {grouped.length === 0 && (
                 <View style={styles.emptyContainer}>
-                  <Ionicons name="wallet-outline" size={64} color="#334155" />
+                  <Ionicons name="wallet-outline" size={64} color={COLORS.border} />
                   <Text style={styles.emptyText}>{t('personal.noExpenses')}</Text>
                 </View>
               )}
@@ -324,7 +325,7 @@ export default function PersonalExpensesHistoryScreen() {
                           </View>
                           {isOwner && (
                             <TouchableOpacity onPress={() => handleDelete(expense)} hitSlop={8}>
-                              <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                              <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
                             </TouchableOpacity>
                           )}
                         </View>
@@ -355,7 +356,7 @@ export default function PersonalExpensesHistoryScreen() {
                     value={amount}
                     onChangeText={setAmount}
                     placeholder="0.00"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     keyboardType="decimal-pad"
                   />
 
@@ -365,7 +366,7 @@ export default function PersonalExpensesHistoryScreen() {
                     value={description}
                     onChangeText={setDescription}
                     placeholder={language === 'bg' ? 'напр. Наем, Заплати...' : 'e.g. Rent, Salaries...'}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
 
                   <Text style={styles.inputLabel}>{language === 'bg' ? 'Тип' : 'Type'}</Text>
@@ -421,13 +422,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: COLORS.surface,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -437,14 +438,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     marginHorizontal: 16,
     marginTop: 12,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  filtersToggleText: { fontSize: 13, color: '#8B5CF6', fontWeight: '600' },
+  filtersToggleText: { fontSize: 13, color: COLORS.primary, fontWeight: '600' },
   chipsRow: { marginTop: 10, height: 40, flexGrow: 0, flexShrink: 0 },
   chipsContent: { paddingHorizontal: 16, alignItems: 'center' },
   chipRowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -452,40 +453,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     marginRight: 8,
     flexShrink: 0,
   },
-  chipActive: { backgroundColor: '#8B5CF6' },
-  chipText: { fontSize: 13, color: '#94A3B8', fontWeight: '500' },
+  chipActive: { backgroundColor: COLORS.primary },
+  chipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
   chipTextActive: { color: 'white' },
   summaryBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     margin: 16,
     borderRadius: 12,
     padding: 12,
   },
   summaryItem: { alignItems: 'center' },
-  summaryLabel: { fontSize: 12, color: '#64748B' },
+  summaryLabel: { fontSize: 12, color: COLORS.textMuted },
   summaryValue: { fontSize: 16, fontWeight: 'bold', color: 'white', marginTop: 2 },
   content: { flex: 1, paddingHorizontal: 16 },
   emptyContainer: { alignItems: 'center', paddingVertical: 60 },
-  emptyText: { fontSize: 16, color: '#64748B', marginTop: 16 },
+  emptyText: { fontSize: 16, color: COLORS.textMuted, marginTop: 16 },
   monthGroup: { marginBottom: 18 },
   monthHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     paddingHorizontal: 4,
     paddingVertical: 8,
   },
-  monthHeaderTitle: { fontSize: 15, fontWeight: '700', color: '#C4B5FD' },
-  monthHeaderStats: { fontSize: 12, color: '#94A3B8' },
+  monthHeaderTitle: { fontSize: 15, fontWeight: '700', color: COLORS.primaryLight },
+  monthHeaderStats: { fontSize: 12, color: COLORS.textSecondary },
   expenseCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 14,
     padding: 14,
     marginTop: 8,
@@ -495,22 +496,22 @@ const styles = StyleSheet.create({
   expenseAmount: { fontSize: 15, fontWeight: 'bold' },
   expenseRowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
   badgeRow: { flexDirection: 'row', gap: 6 },
-  badge: { backgroundColor: '#0F172A', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  badge: { backgroundColor: COLORS.background, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   badgeText: { fontSize: 11, fontWeight: '600' },
-  badgeTextNeutral: { fontSize: 11, fontWeight: '600', color: '#94A3B8' },
-  expenseMeta: { fontSize: 12, color: '#64748B', marginTop: 8 },
+  badgeTextNeutral: { fontSize: 11, fontWeight: '600', color: COLORS.textSecondary },
+  expenseMeta: { fontSize: 12, color: COLORS.textMuted, marginTop: 8 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'flex-end' },
   modalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
     maxHeight: '90%',
   },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: 'white', marginBottom: 16 },
-  inputLabel: { fontSize: 13, color: '#94A3B8', marginBottom: 6, marginTop: 12 },
+  inputLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 6, marginTop: 12 },
   input: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -518,7 +519,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   saveButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
@@ -526,5 +527,5 @@ const styles = StyleSheet.create({
   },
   saveButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   cancelButton: { alignItems: 'center', paddingVertical: 14 },
-  cancelButtonText: { color: '#94A3B8', fontSize: 14 },
+  cancelButtonText: { color: COLORS.textSecondary, fontSize: 14 },
 });

@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { useLanguageStore } from '../src/i18n';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -100,7 +101,7 @@ export default function ForgotPasswordScreen() {
                 <View style={styles.section}>
                   <View style={styles.sectionHeader}>
                     <View style={[styles.sectionIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                      <Ionicons name="mail" size={24} color="#8B5CF6" />
+                      <Ionicons name="mail" size={24} color={COLORS.primary} />
                     </View>
                     <View style={styles.sectionTitleContainer}>
                       <Text style={styles.sectionTitle}>{t('Вашият имейл', 'Your email')}</Text>
@@ -115,7 +116,7 @@ export default function ForgotPasswordScreen() {
                     value={email}
                     onChangeText={setEmail}
                     placeholder="email@example.com"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     keyboardType="email-address"
                     autoCapitalize="none"
                     textContentType="username"
@@ -144,7 +145,7 @@ export default function ForgotPasswordScreen() {
                 <View style={styles.section}>
                   <View style={styles.sectionHeader}>
                     <View style={[styles.sectionIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                      <Ionicons name="key" size={24} color="#8B5CF6" />
+                      <Ionicons name="key" size={24} color={COLORS.primary} />
                     </View>
                     <View style={styles.sectionTitleContainer}>
                       <Text style={styles.sectionTitle}>{t('Код и нова парола', 'Code and new password')}</Text>
@@ -159,7 +160,7 @@ export default function ForgotPasswordScreen() {
                     value={email}
                     onChangeText={setEmail}
                     placeholder={t('Имейл', 'Email')}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     keyboardType="email-address"
                     autoCapitalize="none"
                   />
@@ -169,7 +170,7 @@ export default function ForgotPasswordScreen() {
                     value={code}
                     onChangeText={(v) => setCode(v.toUpperCase())}
                     placeholder="ABCD1234"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     autoCapitalize="characters"
                     autoCorrect={false}
                     maxLength={8}
@@ -180,7 +181,7 @@ export default function ForgotPasswordScreen() {
                     value={newPassword}
                     onChangeText={setNewPassword}
                     placeholder={t('Нова парола', 'New password')}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     secureTextEntry
                     textContentType="newPassword"
                     autoComplete="new-password"
@@ -223,20 +224,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: COLORS.surface,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
   title: { fontSize: 18, fontWeight: 'bold', color: 'white' },
   content: { flex: 1, padding: 16 },
   section: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -252,15 +253,15 @@ const styles = StyleSheet.create({
   },
   sectionTitleContainer: { flex: 1 },
   sectionTitle: { fontSize: 16, fontWeight: '600', color: 'white' },
-  sectionSubtitle: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  sectionSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   textInput: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     color: 'white',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     marginBottom: 12,
   },
   codeInput: {
@@ -270,7 +271,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   actionButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -278,5 +279,5 @@ const styles = StyleSheet.create({
   actionButtonDisabled: { opacity: 0.6 },
   actionButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   secondaryLink: { alignItems: 'center', marginTop: 16, padding: 4 },
-  secondaryLinkText: { color: '#8B5CF6', fontSize: 13, fontWeight: '500' },
+  secondaryLinkText: { color: COLORS.primary, fontSize: 13, fontWeight: '500' },
 });

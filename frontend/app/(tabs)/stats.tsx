@@ -23,6 +23,7 @@ import { Alert } from '../../src/utils/alert';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
+import { COLORS } from '../../src/theme/colors';
 
 const { width } = Dimensions.get('window');
 const chartWidth = width - 80;
@@ -30,9 +31,9 @@ const pieChartRadius = (width - 80) / 3;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 // Color palette for charts
-const CHART_COLORS = [
-  '#8B5CF6', '#10B981', '#F59E0B', '#EF4444', '#3B82F6',
-  '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16'
+const CHART_COLORS: string[] = [
+  COLORS.primary, COLORS.success, COLORS.warning, COLORS.danger, COLORS.info,
+  COLORS.pink, COLORS.teal, COLORS.orange, COLORS.indigo, COLORS.lime
 ];
 
 export default function StatsScreen() {
@@ -389,9 +390,9 @@ export default function StatsScreen() {
   const incomeBarData = chartData.map((item) => ({
     value: item.income,
     label: item.label,
-    frontColor: item.is_closed ? '#475569' : '#10B981',
+    frontColor: item.is_closed ? COLORS.borderLight : COLORS.success,
     topLabelComponent: () => (
-      <Text style={{ color: item.is_closed ? '#64748B' : '#10B981', fontSize: 10 }}>
+      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.success, fontSize: 10 }}>
         {item.income > 0 ? item.income.toFixed(0) : ''}
       </Text>
     ),
@@ -400,9 +401,9 @@ export default function StatsScreen() {
   const expenseBarData = chartData.map((item) => ({
     value: item.expense,
     label: item.label,
-    frontColor: item.is_closed ? '#475569' : '#EF4444',
+    frontColor: item.is_closed ? COLORS.borderLight : COLORS.danger,
     topLabelComponent: () => (
-      <Text style={{ color: item.is_closed ? '#64748B' : '#EF4444', fontSize: 10 }}>
+      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.danger, fontSize: 10 }}>
         {item.expense > 0 ? item.expense.toFixed(0) : ''}
       </Text>
     ),
@@ -435,8 +436,8 @@ export default function StatsScreen() {
     const isGood = higherIsBetter ? isUp : !isUp;
     return (
       <View style={styles.trendBadge}>
-        <Ionicons name={isUp ? 'arrow-up' : 'arrow-down'} size={11} color={isGood ? '#10B981' : '#EF4444'} />
-        <Text style={[styles.trendBadgeText, { color: isGood ? '#10B981' : '#EF4444' }]}>
+        <Ionicons name={isUp ? 'arrow-up' : 'arrow-down'} size={11} color={isGood ? COLORS.success : COLORS.danger} />
+        <Text style={[styles.trendBadgeText, { color: isGood ? COLORS.success : COLORS.danger }]}>
           {Math.abs(percent).toFixed(0)}%
         </Text>
       </View>
@@ -473,7 +474,7 @@ export default function StatsScreen() {
     if (othersTotal > 0) {
       data.push({
         value: othersTotal,
-        color: '#64748B',
+        color: COLORS.textMuted,
         text: '',
         shiftTextX: 0,
         shiftTextY: 0,
@@ -503,7 +504,7 @@ export default function StatsScreen() {
     return supplierDetail.monthly_trend.map(m => ({
       value: m.amount,
       label: m.month.substring(5),
-      dataPointColor: '#8B5CF6',
+      dataPointColor: COLORS.primary,
     }));
   };
 
@@ -514,19 +515,19 @@ export default function StatsScreen() {
         style={[styles.chartTypeButton, supplierChartType === 'pie' && styles.chartTypeButtonActive]}
         onPress={() => setSupplierChartType('pie')}
       >
-        <Ionicons name="pie-chart" size={18} color={supplierChartType === 'pie' ? 'white' : '#64748B'} />
+        <Ionicons name="pie-chart" size={18} color={supplierChartType === 'pie' ? 'white' : COLORS.textMuted} />
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.chartTypeButton, supplierChartType === 'bar' && styles.chartTypeButtonActive]}
         onPress={() => setSupplierChartType('bar')}
       >
-        <Ionicons name="bar-chart" size={18} color={supplierChartType === 'bar' ? 'white' : '#64748B'} />
+        <Ionicons name="bar-chart" size={18} color={supplierChartType === 'bar' ? 'white' : COLORS.textMuted} />
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.chartTypeButton, supplierChartType === 'line' && styles.chartTypeButtonActive]}
         onPress={() => setSupplierChartType('line')}
       >
-        <Ionicons name="trending-up" size={18} color={supplierChartType === 'line' ? 'white' : '#64748B'} />
+        <Ionicons name="trending-up" size={18} color={supplierChartType === 'line' ? 'white' : COLORS.textMuted} />
       </TouchableOpacity>
     </View>
   );
@@ -559,7 +560,7 @@ export default function StatsScreen() {
 
         {loadingDetail ? (
           <View style={styles.modalLoading}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
+            <ActivityIndicator size="large" color={COLORS.primary} />
           </View>
         ) : supplierDetail?.found ? (
           <ScrollView style={styles.modalContent}>
@@ -587,12 +588,12 @@ export default function StatsScreen() {
               
               <View style={styles.detailDates}>
                 <View style={styles.detailDateItem}>
-                  <Ionicons name="calendar-outline" size={16} color="#64748B" />
+                  <Ionicons name="calendar-outline" size={16} color={COLORS.textMuted} />
                   <Text style={styles.detailDateLabel}>{t('stats.firstDelivery')}: </Text>
                   <Text style={styles.detailDateValue}>{supplierDetail.overview?.first_delivery || t('stats.noValue')}</Text>
                 </View>
                 <View style={styles.detailDateItem}>
-                  <Ionicons name="time-outline" size={16} color="#64748B" />
+                  <Ionicons name="time-outline" size={16} color={COLORS.textMuted} />
                   <Text style={styles.detailDateLabel}>{t('stats.lastDelivery')}: </Text>
                   <Text style={styles.detailDateValue}>{supplierDetail.overview?.last_delivery || t('stats.noValue')}</Text>
                 </View>
@@ -605,11 +606,11 @@ export default function StatsScreen() {
                 <Ionicons 
                   name={supplierDetail.overview?.is_active ? "checkmark-circle" : "alert-circle"} 
                   size={16} 
-                  color={supplierDetail.overview?.is_active ? '#10B981' : '#EF4444'} 
+                  color={supplierDetail.overview?.is_active ? COLORS.success : COLORS.danger} 
                 />
                 <Text style={[
                   styles.statusText, 
-                  { color: supplierDetail.overview?.is_active ? '#10B981' : '#EF4444' }
+                  { color: supplierDetail.overview?.is_active ? COLORS.success : COLORS.danger }
                 ]}>
                   {supplierDetail.overview?.is_active ? t('stats.activeSupplier') : `${t('stats.inactiveSupplier')} (${supplierDetail.overview?.days_inactive} ${t('stats.days')})`}
                 </Text>
@@ -624,13 +625,13 @@ export default function StatsScreen() {
                   data={getSupplierLineData()}
                   width={chartWidth - 20}
                   height={150}
-                  color="#8B5CF6"
+                  color={COLORS.primary}
                   thickness={2}
-                  dataPointsColor="#8B5CF6"
-                  yAxisColor="#334155"
-                  xAxisColor="#334155"
-                  yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                  xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                  dataPointsColor={COLORS.primary}
+                  yAxisColor={COLORS.border}
+                  xAxisColor={COLORS.border}
+                  yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                  xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
                   hideRules
                   isAnimated
                   curved
@@ -642,7 +643,7 @@ export default function StatsScreen() {
             {supplierDetail.anomalies && supplierDetail.anomalies.length > 0 && (
               <View style={styles.detailCard}>
                 <View style={styles.anomalyHeader}>
-                  <Ionicons name="warning" size={20} color="#F59E0B" />
+                  <Ionicons name="warning" size={20} color={COLORS.warning} />
                   <Text style={styles.detailCardTitle}>{t('stats.anomalies')}</Text>
                 </View>
                 {supplierDetail.anomalies.map((anomaly, index) => (
@@ -680,7 +681,7 @@ export default function StatsScreen() {
           </ScrollView>
         ) : (
           <View style={styles.modalLoading}>
-            <Ionicons name="alert-circle-outline" size={48} color="#64748B" />
+            <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
             <Text style={styles.noDataText}>{t('stats.noSupplierData')}</Text>
           </View>
         )}
@@ -707,13 +708,13 @@ export default function StatsScreen() {
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle} numberOfLines={1}>{t('stats.compareTitle')}</Text>
             <TouchableOpacity onPress={() => { setCompareModalVisible(false); setCompareResult(null); }}>
-              <Ionicons name="close" size={28} color="#94A3B8" />
+              <Ionicons name="close" size={28} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
 
           {loadingCompare ? (
             <View style={styles.modalLoading}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : compareResult?.suppliers?.length ? (
             <ScrollView style={{ flex: 1, padding: 16 }}>
@@ -745,7 +746,7 @@ export default function StatsScreen() {
             </ScrollView>
           ) : (
             <View style={styles.modalLoading}>
-              <Ionicons name="alert-circle-outline" size={48} color="#64748B" />
+              <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
               <Text style={styles.noDataText}>{t('stats.noData')}</Text>
             </View>
           )}
@@ -760,7 +761,7 @@ export default function StatsScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
           <ScrollView
             style={styles.scrollView}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           >
             <View style={styles.header}>
               <View style={{ flex: 1 }}>
@@ -769,7 +770,7 @@ export default function StatsScreen() {
               </View>
               {hasPermission('export_data') && (
                 <TouchableOpacity style={styles.exportButton} onPress={handleExportStatisticsPdf}>
-                  <Ionicons name="download" size={22} color="#8B5CF6" />
+                  <Ionicons name="download" size={22} color={COLORS.primary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -780,7 +781,7 @@ export default function StatsScreen() {
                 style={[styles.tabButton, activeTab === 'overview' && styles.tabButtonActive]}
                 onPress={() => setActiveTab('overview')}
               >
-                <Ionicons name="bar-chart" size={16} color={activeTab === 'overview' ? 'white' : '#64748B'} />
+                <Ionicons name="bar-chart" size={16} color={activeTab === 'overview' ? 'white' : COLORS.textMuted} />
                 <Text style={[styles.tabButtonText, activeTab === 'overview' && styles.tabButtonTextActive]}>
                   {t('stats.overview')}
                 </Text>
@@ -791,7 +792,7 @@ export default function StatsScreen() {
                   style={[styles.tabButton, activeTab === 'suppliers' && styles.tabButtonActive]}
                   onPress={() => setActiveTab('suppliers')}
                 >
-                  <Ionicons name="business" size={16} color={activeTab === 'suppliers' ? 'white' : '#64748B'} />
+                  <Ionicons name="business" size={16} color={activeTab === 'suppliers' ? 'white' : COLORS.textMuted} />
                   <Text style={[styles.tabButtonText, activeTab === 'suppliers' && styles.tabButtonTextActive]}>
                     {t('stats.suppliers')}
                   </Text>
@@ -804,7 +805,7 @@ export default function StatsScreen() {
                   onPress={() => setActiveTab('items')}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="pricetags" size={16} color={activeTab === 'items' ? 'white' : '#64748B'} />
+                    <Ionicons name="pricetags" size={16} color={activeTab === 'items' ? 'white' : COLORS.textMuted} />
                     {unreadAlerts > 0 && (
                       <View style={styles.alertBadge}>
                         <Text style={styles.alertBadgeText}>{unreadAlerts}</Text>
@@ -842,7 +843,7 @@ export default function StatsScreen() {
                     week/month/year window definition in getChartData. */}
                 <View style={styles.avgTurnoverStatCard}>
                   <View style={styles.avgTurnoverStatHeader}>
-                    <Ionicons name="speedometer" size={24} color="#3B82F6" />
+                    <Ionicons name="speedometer" size={24} color={COLORS.info} />
                     <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
                   </View>
                   <Text style={styles.avgTurnoverStatValue}>
@@ -857,38 +858,38 @@ export default function StatsScreen() {
 
                 {/* Summary Cards */}
                 <View style={styles.summaryGrid}>
-                  <View style={[styles.summaryCard, { borderLeftColor: '#10B981' }]}>
-                    <Ionicons name="trending-up" size={24} color="#10B981" />
+                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.success }]}>
+                    <Ionicons name="trending-up" size={24} color={COLORS.success} />
                     <Text style={styles.cardLabel}>{t('stats.totalIncome')}</Text>
-                    <Text style={[styles.cardValue, { color: '#10B981' }]}>
+                    <Text style={[styles.cardValue, { color: COLORS.success }]}>
                       {summary?.total_income.toFixed(2) || '0.00'} €
                     </Text>
                     {renderTrendBadge(summary?.total_income, previousSummary?.total_income, true)}
                   </View>
-                  <View style={[styles.summaryCard, { borderLeftColor: '#EF4444' }]}>
-                    <Ionicons name="trending-down" size={24} color="#EF4444" />
+                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.danger }]}>
+                    <Ionicons name="trending-down" size={24} color={COLORS.danger} />
                     <Text style={styles.cardLabel}>{t('stats.totalExpense')}</Text>
-                    <Text style={[styles.cardValue, { color: '#EF4444' }]}>
+                    <Text style={[styles.cardValue, { color: COLORS.danger }]}>
                       {summary?.total_expense.toFixed(2) || '0.00'} €
                     </Text>
                     {renderTrendBadge(summary?.total_expense, previousSummary?.total_expense, false)}
                   </View>
-                  <View style={[styles.summaryCard, { borderLeftColor: '#8B5CF6' }]}>
-                    <Ionicons name="calculator" size={24} color="#8B5CF6" />
+                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.primary }]}>
+                    <Ionicons name="calculator" size={24} color={COLORS.primary} />
                     <Text style={styles.cardLabel}>{t('stats.vatToPay')}</Text>
-                    <Text style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
+                    <Text style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
                       {summary?.vat_to_pay.toFixed(2) || '0.00'} €
                     </Text>
                     {renderTrendBadge(summary?.vat_to_pay, previousSummary?.vat_to_pay, false)}
                   </View>
-                  <View style={[styles.summaryCard, { borderLeftColor: '#F59E0B' }]}>
-                    <Ionicons name="wallet" size={24} color="#F59E0B" />
+                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.warning }]}>
+                    <Ionicons name="wallet" size={24} color={COLORS.warning} />
                     <Text style={styles.cardLabel}>{t('stats.profitLabel')}</Text>
                     {summary && summary.profit === null ? (
-                      <Ionicons name="lock-closed" size={20} color="#64748B" style={{ marginVertical: 4 }} />
+                      <Ionicons name="lock-closed" size={20} color={COLORS.textMuted} style={{ marginVertical: 4 }} />
                     ) : (
                       <>
-                        <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+                        <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}>
                           {summary?.profit?.toFixed(2) || '0.00'} €
                         </Text>
                         {renderTrendBadge(summary?.profit, previousSummary?.profit, true)}
@@ -903,7 +904,7 @@ export default function StatsScreen() {
                   summary.financial_visibility.profit === false
                 ) && (
                   <View style={styles.restrictedNote}>
-                    <Ionicons name="information-circle-outline" size={14} color="#94A3B8" />
+                    <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
                     <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
                   </View>
                 )}
@@ -919,7 +920,7 @@ export default function StatsScreen() {
                       onPress={() => setChartPage((p) => Math.min(chartTotalPages - 1, p + 1))}
                       disabled={clampedChartPage >= chartTotalPages - 1}
                     >
-                      <Ionicons name="chevron-back" size={18} color={clampedChartPage >= chartTotalPages - 1 ? '#334155' : '#8B5CF6'} />
+                      <Ionicons name="chevron-back" size={18} color={clampedChartPage >= chartTotalPages - 1 ? COLORS.border : COLORS.primary} />
                     </TouchableOpacity>
                     <Text style={styles.chartNavLabel}>{chartRangeLabel}</Text>
                     <TouchableOpacity
@@ -928,7 +929,7 @@ export default function StatsScreen() {
                       onPress={() => setChartPage((p) => Math.max(0, p - 1))}
                       disabled={clampedChartPage === 0}
                     >
-                      <Ionicons name="chevron-forward" size={18} color={clampedChartPage === 0 ? '#334155' : '#8B5CF6'} />
+                      <Ionicons name="chevron-forward" size={18} color={clampedChartPage === 0 ? COLORS.border : COLORS.primary} />
                     </TouchableOpacity>
                   </View>
                 )}
@@ -936,7 +937,7 @@ export default function StatsScreen() {
                 {/* Income Chart */}
                 <View style={styles.chartContainer}>
                   <View style={styles.chartHeader}>
-                    <Ionicons name="arrow-up-circle" size={24} color="#10B981" />
+                    <Ionicons name="arrow-up-circle" size={24} color={COLORS.success} />
                     <Text style={styles.chartTitle}>{t('stats.income')}</Text>
                   </View>
                   {windowedIncomeBarData.length > 0 ? (() => {
@@ -973,11 +974,11 @@ export default function StatsScreen() {
                         endSpacing={spacing}
                         noOfSections={4}
                         barBorderRadius={4}
-                        frontColor="#10B981"
-                        yAxisColor="#334155"
-                        xAxisColor="#334155"
-                        yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                        xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                        frontColor={COLORS.success}
+                        yAxisColor={COLORS.border}
+                        xAxisColor={COLORS.border}
+                        yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                        xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
                         yAxisLabelWidth={yAxisLabelWidth}
                         hideRules
                         isAnimated
@@ -993,7 +994,7 @@ export default function StatsScreen() {
                 {/* Expense Chart */}
                 <View style={styles.chartContainer}>
                   <View style={styles.chartHeader}>
-                    <Ionicons name="arrow-down-circle" size={24} color="#EF4444" />
+                    <Ionicons name="arrow-down-circle" size={24} color={COLORS.danger} />
                     <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
                   </View>
                   {windowedExpenseBarData.length > 0 ? (() => {
@@ -1015,11 +1016,11 @@ export default function StatsScreen() {
                         endSpacing={spacing}
                         noOfSections={4}
                         barBorderRadius={4}
-                        frontColor="#EF4444"
-                        yAxisColor="#334155"
-                        xAxisColor="#334155"
-                        yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                        xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                        frontColor={COLORS.danger}
+                        yAxisColor={COLORS.border}
+                        xAxisColor={COLORS.border}
+                        yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                        xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
                         yAxisLabelWidth={yAxisLabelWidth}
                         hideRules
                         isAnimated
@@ -1039,13 +1040,13 @@ export default function StatsScreen() {
                   <View style={styles.vatRow}>
                     <View style={styles.vatItem}>
                       <Text style={styles.vatLabel}>{t('stats.vatFromSales')}</Text>
-                      <Text style={[styles.vatValue, { color: '#EF4444' }]}>
+                      <Text style={[styles.vatValue, { color: COLORS.danger }]}>
                         +{summary?.fiscal_vat.toFixed(2) || '0.00'} €
                       </Text>
                     </View>
                     <View style={styles.vatItem}>
                       <Text style={styles.vatLabel}>{t('stats.vatCredit')}</Text>
-                      <Text style={[styles.vatValue, { color: '#10B981' }]}>
+                      <Text style={[styles.vatValue, { color: COLORS.success }]}>
                         -{summary?.total_invoice_vat.toFixed(2) || '0.00'} €
                       </Text>
                     </View>
@@ -1053,7 +1054,7 @@ export default function StatsScreen() {
 
                   <View style={styles.vatTotal}>
                     <Text style={styles.vatTotalLabel}>{t('stats.vatToPay')}</Text>
-                    <Text style={[styles.vatTotalValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
+                    <Text style={[styles.vatTotalValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
                       {summary?.vat_to_pay.toFixed(2) || '0.00'} €
                     </Text>
                   </View>
@@ -1065,12 +1066,12 @@ export default function StatsScreen() {
                   
                   <View style={styles.statRow}>
                     <View style={styles.statItem}>
-                      <Ionicons name="receipt" size={20} color="#8B5CF6" />
+                      <Ionicons name="receipt" size={20} color={COLORS.primary} />
                       <Text style={styles.statLabel}>{t('stats.invoiceCount')}</Text>
                       <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
                     </View>
                     <View style={styles.statItem}>
-                      <Ionicons name="cash" size={20} color="#10B981" />
+                      <Ionicons name="cash" size={20} color={COLORS.success} />
                       <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
                       <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0} €</Text>
                     </View>
@@ -1078,19 +1079,19 @@ export default function StatsScreen() {
 
                   <View style={styles.statRow}>
                     <View style={styles.statItem}>
-                      <Ionicons name="wallet" size={20} color="#F59E0B" />
+                      <Ionicons name="wallet" size={20} color={COLORS.warning} />
                       <Text style={styles.statLabel}>{t('home.pocket')}</Text>
                       {summary && summary.total_pocket_money === null ? (
-                        <Ionicons name="lock-closed" size={16} color="#64748B" />
+                        <Ionicons name="lock-closed" size={16} color={COLORS.textMuted} />
                       ) : (
                         <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0} €</Text>
                       )}
                     </View>
                     <View style={styles.statItem}>
-                      <Ionicons name="remove-circle" size={20} color="#EF4444" />
+                      <Ionicons name="remove-circle" size={20} color={COLORS.danger} />
                       <Text style={styles.statLabel}>{t('stats.expensesNoInvoice')}</Text>
                       {summary && summary.total_non_invoice_expenses === null ? (
-                        <Ionicons name="lock-closed" size={16} color="#64748B" />
+                        <Ionicons name="lock-closed" size={16} color={COLORS.textMuted} />
                       ) : (
                         <Text style={styles.statValue}>{summary?.total_non_invoice_expenses?.toFixed(0) || 0} €</Text>
                       )}
@@ -1100,7 +1101,7 @@ export default function StatsScreen() {
                   {!!summary?.total_payroll_cost && (
                     <View style={styles.statRow}>
                       <View style={[styles.statItem, { flex: 1 }]}>
-                        <Ionicons name="people" size={20} color="#10B981" />
+                        <Ionicons name="people" size={20} color={COLORS.success} />
                         <Text style={styles.statLabel}>{t('payroll.totalCostThisMonth')}</Text>
                         <Text style={styles.statValue}>{summary.total_payroll_cost.toFixed(2)} €</Text>
                       </View>
@@ -1110,7 +1111,7 @@ export default function StatsScreen() {
                   {!!summary?.total_depreciation_expense && (
                     <View style={styles.statRow}>
                       <View style={[styles.statItem, { flex: 1 }]}>
-                        <Ionicons name="business" size={20} color="#F59E0B" />
+                        <Ionicons name="business" size={20} color={COLORS.warning} />
                         <Text style={styles.statLabel}>{t('assets.depreciationThisMonth')}</Text>
                         <Text style={styles.statValue}>{summary.total_depreciation_expense.toFixed(2)} €</Text>
                       </View>
@@ -1159,16 +1160,16 @@ export default function StatsScreen() {
                 {hasPermission('view_statistics') && (revenueForecast?.forecast?.length > 0 || expenseForecast?.forecast?.length > 0) && (
                   <View style={styles.forecastSection}>
                     <View style={styles.chartHeader}>
-                      <Ionicons name="analytics" size={22} color="#8B5CF6" />
+                      <Ionicons name="analytics" size={22} color={COLORS.primary} />
                       <Text style={styles.chartTitle}>{t('stats.forecastTitle')}</Text>
                     </View>
                     <Text style={styles.forecastHint}>{t('stats.forecastHint')}</Text>
                     <View style={styles.forecastRow}>
                       {revenueForecast?.forecast?.[0] && (
                         <View style={styles.forecastCard}>
-                          <Ionicons name="trending-up" size={20} color="#10B981" />
+                          <Ionicons name="trending-up" size={20} color={COLORS.success} />
                           <Text style={styles.forecastLabel}>{t('stats.forecastRevenue')}</Text>
-                          <Text style={[styles.forecastValue, { color: '#10B981' }]}>
+                          <Text style={[styles.forecastValue, { color: COLORS.success }]}>
                             {revenueForecast.forecast[0].predicted_amount.toFixed(0)} €
                           </Text>
                           <Text style={styles.forecastTrend}>
@@ -1179,9 +1180,9 @@ export default function StatsScreen() {
                       )}
                       {expenseForecast?.forecast?.[0] && (
                         <View style={styles.forecastCard}>
-                          <Ionicons name="trending-down" size={20} color="#EF4444" />
+                          <Ionicons name="trending-down" size={20} color={COLORS.danger} />
                           <Text style={styles.forecastLabel}>{t('stats.forecastExpense')}</Text>
-                          <Text style={[styles.forecastValue, { color: '#EF4444' }]}>
+                          <Text style={[styles.forecastValue, { color: COLORS.danger }]}>
                             {expenseForecast.forecast[0].predicted_amount.toFixed(0)} €
                           </Text>
                           <Text style={styles.forecastTrend}>
@@ -1198,20 +1199,20 @@ export default function StatsScreen() {
                 {hasPermission('view_personal_investments') && roiTrend.length > 0 && (
                   <View style={styles.chartContainer}>
                     <View style={styles.chartHeader}>
-                      <Ionicons name="pulse" size={24} color="#8B5CF6" />
+                      <Ionicons name="pulse" size={24} color={COLORS.primary} />
                       <Text style={styles.chartTitle}>{t('stats.roiTrendTitle')}</Text>
                     </View>
                     <LineChart
                       data={roiTrend.map((pt) => ({ value: pt.roi_percent, label: pt.label }))}
                       width={chartWidth}
                       height={180}
-                      color="#8B5CF6"
+                      color={COLORS.primary}
                       thickness={3}
-                      dataPointsColor="#8B5CF6"
-                      yAxisColor="#334155"
-                      xAxisColor="#334155"
-                      yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                      xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                      dataPointsColor={COLORS.primary}
+                      yAxisColor={COLORS.border}
+                      xAxisColor={COLORS.border}
+                      yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                      xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
                       noOfSections={4}
                       hideRules
                       isAnimated
@@ -1227,7 +1228,7 @@ export default function StatsScreen() {
               <View style={styles.suppliersContainer}>
                 {loadingSuppliers ? (
                   <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#8B5CF6" />
+                    <ActivityIndicator size="large" color={COLORS.primary} />
                     <Text style={styles.loadingText}>{t('stats.loadingData')}</Text>
                   </View>
                 ) : supplierOverview ? (
@@ -1235,7 +1236,7 @@ export default function StatsScreen() {
                     {/* Executive Summary */}
                     <View style={styles.executiveSummaryCard}>
                       <View style={styles.execSummaryHeader}>
-                        <Ionicons name="analytics" size={24} color="#8B5CF6" />
+                        <Ionicons name="analytics" size={24} color={COLORS.primary} />
                         <Text style={styles.execSummaryTitle}>{t('stats.executiveSummary')}</Text>
                       </View>
                       
@@ -1245,13 +1246,13 @@ export default function StatsScreen() {
                           <Text style={styles.execLabel}>{t('stats.totalSuppliers')}</Text>
                         </View>
                         <View style={styles.execItem}>
-                          <Text style={[styles.execValue, { color: '#10B981' }]}>
+                          <Text style={[styles.execValue, { color: COLORS.success }]}>
                             {supplierOverview.executive_summary.active_suppliers}
                           </Text>
                           <Text style={styles.execLabel}>{t('stats.activeSuppliers')}</Text>
                         </View>
                         <View style={styles.execItem}>
-                          <Text style={[styles.execValue, { color: '#EF4444' }]}>
+                          <Text style={[styles.execValue, { color: COLORS.danger }]}>
                             {supplierOverview.executive_summary.inactive_suppliers}
                           </Text>
                           <Text style={styles.execLabel}>{t('stats.inactiveSuppliers')}</Text>
@@ -1265,7 +1266,7 @@ export default function StatsScreen() {
                           <View style={styles.concentrationBar}>
                             <View style={[styles.concentrationFill, { 
                               width: `${Math.min(supplierOverview.executive_summary.top_3_concentration, 100)}%`,
-                              backgroundColor: supplierOverview.executive_summary.top_3_concentration > 70 ? '#EF4444' : '#10B981'
+                              backgroundColor: supplierOverview.executive_summary.top_3_concentration > 70 ? COLORS.danger : COLORS.success
                             }]} />
                           </View>
                           <Text style={styles.concentrationValue}>
@@ -1277,7 +1278,7 @@ export default function StatsScreen() {
                       {/* High dependency alert */}
                       {supplierOverview.executive_summary.high_dependency_count > 0 && (
                         <View style={styles.alertBanner}>
-                          <Ionicons name="warning" size={18} color="#F59E0B" />
+                          <Ionicons name="warning" size={18} color={COLORS.warning} />
                           <Text style={styles.alertText}>
                             {supplierOverview.executive_summary.high_dependency_count} {t('stats.highDependencyAlert')}
                           </Text>
@@ -1353,7 +1354,7 @@ export default function StatsScreen() {
                     {/* Chart Display */}
                     <View style={styles.chartContainer}>
                       <View style={styles.chartHeader}>
-                        <Ionicons name="trophy" size={24} color="#F59E0B" />
+                        <Ionicons name="trophy" size={24} color={COLORS.warning} />
                         <Text style={styles.chartTitle}>{t('stats.top10')}</Text>
                       </View>
                       
@@ -1419,10 +1420,10 @@ export default function StatsScreen() {
                         endSpacing={spacing}
                             noOfSections={4}
                             barBorderRadius={4}
-                            yAxisColor="#334155"
-                            xAxisColor="#334155"
-                            yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                            xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                            yAxisColor={COLORS.border}
+                            xAxisColor={COLORS.border}
+                            yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                            xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
                             yAxisLabelWidth={yAxisLabelWidth}
                             hideRules
                             isAnimated
@@ -1432,16 +1433,16 @@ export default function StatsScreen() {
                       
                       {supplierChartType === 'line' && getSupplierBarData().length > 0 && (
                         <LineChart
-                          data={getSupplierBarData().map(d => ({ value: d.value, label: d.label, dataPointColor: '#8B5CF6' }))}
+                          data={getSupplierBarData().map(d => ({ value: d.value, label: d.label, dataPointColor: COLORS.primary }))}
                           width={chartWidth}
                           height={200}
-                          color="#8B5CF6"
+                          color={COLORS.primary}
                           thickness={3}
-                          dataPointsColor="#8B5CF6"
-                          yAxisColor="#334155"
-                          xAxisColor="#334155"
-                          yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                          xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                          dataPointsColor={COLORS.primary}
+                          yAxisColor={COLORS.border}
+                          xAxisColor={COLORS.border}
+                          yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                          xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
                           hideRules
                           isAnimated
                           curved
@@ -1452,7 +1453,7 @@ export default function StatsScreen() {
                     {/* Top Suppliers List */}
                     <View style={styles.topSuppliersCard}>
                       <View style={styles.topSuppliersHeader}>
-                        <Ionicons name="list" size={24} color="#8B5CF6" />
+                        <Ionicons name="list" size={24} color={COLORS.primary} />
                         <Text style={[styles.topSuppliersTitle, { flex: 1 }]}>
                           {supplierRankingType === 'amount' ? t('stats.topByAmount') :
                            supplierRankingType === 'frequency' ? t('stats.topByFrequency') : t('stats.topByAvg')}
@@ -1461,7 +1462,7 @@ export default function StatsScreen() {
                           style={[styles.compareToggle, compareMode && styles.compareToggleActive]}
                           onPress={() => (compareMode ? exitCompareMode() : setCompareMode(true))}
                         >
-                          <Ionicons name="git-compare" size={14} color={compareMode ? 'white' : '#8B5CF6'} />
+                          <Ionicons name="git-compare" size={14} color={compareMode ? 'white' : COLORS.primary} />
                           <Text style={[styles.compareToggleText, compareMode && styles.compareToggleTextActive]}>
                             {t('stats.compare')}
                           </Text>
@@ -1485,14 +1486,14 @@ export default function StatsScreen() {
                                 <Ionicons
                                   name={isSelected ? 'checkbox' : 'square-outline'}
                                   size={20}
-                                  color={isSelected ? '#8B5CF6' : '#64748B'}
+                                  color={isSelected ? COLORS.primary : COLORS.textMuted}
                                   style={{ marginRight: 4 }}
                                 />
                               )}
                               <View style={styles.supplierRank}>
                                 <Text style={[
                                   styles.supplierRankText,
-                                  index < 3 && { color: index === 0 ? '#F59E0B' : index === 1 ? '#94A3B8' : '#CD7F32' }
+                                  index < 3 && { color: index === 0 ? COLORS.warning : index === 1 ? COLORS.textSecondary : COLORS.bronze }
                                 ]}>
                                   #{index + 1}
                                 </Text>
@@ -1512,13 +1513,13 @@ export default function StatsScreen() {
                                 <View style={styles.dependencyBadge}>
                                   <Text style={[
                                     styles.dependencyText,
-                                    supplier.dependency_percent > 30 && { color: '#EF4444' }
+                                    supplier.dependency_percent > 30 && { color: COLORS.danger }
                                   ]}>
                                     {supplier.dependency_percent.toFixed(0)}%
                                   </Text>
                                 </View>
                               </View>
-                              {!compareMode && <Ionicons name="chevron-forward" size={20} color="#64748B" />}
+                              {!compareMode && <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />}
                             </TouchableOpacity>
                           );
                         })
@@ -1540,7 +1541,7 @@ export default function StatsScreen() {
                     {supplierOverview.inactive_suppliers.length > 0 && (
                       <View style={styles.inactiveCard}>
                         <View style={styles.inactiveHeader}>
-                          <Ionicons name="time" size={24} color="#EF4444" />
+                          <Ionicons name="time" size={24} color={COLORS.danger} />
                           <Text style={styles.inactiveTitle}>{t('stats.inactiveSuppliers')}</Text>
                         </View>
                         {supplierOverview.inactive_suppliers.slice(0, 5).map((supplier, index) => (
@@ -1568,7 +1569,7 @@ export default function StatsScreen() {
                     {supplierOverview.high_dependency_alerts.length > 0 && (
                       <View style={styles.dependencyAlertCard}>
                         <View style={styles.dependencyAlertHeader}>
-                          <Ionicons name="warning" size={24} color="#F59E0B" />
+                          <Ionicons name="warning" size={24} color={COLORS.warning} />
                           <Text style={styles.dependencyAlertTitle}>{t('stats.highDependency')}</Text>
                         </View>
                         <Text style={styles.dependencyAlertDesc}>{t('stats.highDependencyDesc')}</Text>
@@ -1583,7 +1584,7 @@ export default function StatsScreen() {
                   </>
                 ) : (
                   <View style={styles.noDataContainer}>
-                    <Ionicons name="business-outline" size={48} color="#64748B" />
+                    <Ionicons name="business-outline" size={48} color={COLORS.textMuted} />
                     <Text style={styles.noDataText}>{t('stats.noSupplierData')}</Text>
                   </View>
                 )}
@@ -1594,7 +1595,7 @@ export default function StatsScreen() {
               <View style={styles.suppliersContainer}>
                 {loadingItems ? (
                   <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#8B5CF6" />
+                    <ActivityIndicator size="large" color={COLORS.primary} />
                     <Text style={styles.loadingText}>{t('stats.loadingData')}</Text>
                   </View>
                 ) : (
@@ -1603,7 +1604,7 @@ export default function StatsScreen() {
                     {priceAlerts.length > 0 && (
                       <View style={styles.priceAlertsCard}>
                         <View style={styles.priceAlertsHeader}>
-                          <Ionicons name="alert-circle" size={24} color="#EF4444" />
+                          <Ionicons name="alert-circle" size={24} color={COLORS.danger} />
                           <Text style={styles.priceAlertsTitle}>{t('stats.priceAlerts')}</Text>
                           {unreadAlerts > 0 && (
                             <View style={styles.alertCountBadge}>
@@ -1622,7 +1623,7 @@ export default function StatsScreen() {
                               <Text style={styles.alertSupplier}>{alert.supplier}</Text>
                               <View style={styles.alertPrices}>
                                 <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
-                                <Ionicons name="arrow-forward" size={14} color="#64748B" />
+                                <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
                                 <Text style={styles.alertNewPrice}>{alert.new_price.toFixed(2)}€</Text>
                                 <View style={styles.alertChangeBadge}>
                                   <Text style={styles.alertChangeText}>+{alert.change_percent}%</Text>
@@ -1635,14 +1636,14 @@ export default function StatsScreen() {
                                   style={styles.alertActionBtn}
                                   onPress={() => markAlertAsRead(alert.id)}
                                 >
-                                  <Ionicons name="checkmark" size={18} color="#10B981" />
+                                  <Ionicons name="checkmark" size={18} color={COLORS.success} />
                                 </TouchableOpacity>
                               )}
                               <TouchableOpacity 
                                 style={styles.alertActionBtn}
                                 onPress={() => dismissAlert(alert.id)}
                               >
-                                <Ionicons name="close" size={18} color="#EF4444" />
+                                <Ionicons name="close" size={18} color={COLORS.danger} />
                               </TouchableOpacity>
                             </View>
                           </View>
@@ -1674,7 +1675,7 @@ export default function StatsScreen() {
                     {/* Price Inflation Card */}
                     <View style={styles.inflationCard}>
                       <View style={styles.priceAlertsHeader}>
-                        <Ionicons name="analytics" size={24} color="#F59E0B" />
+                        <Ionicons name="analytics" size={24} color={COLORS.warning} />
                         <Text style={styles.inflationTitle}>{t('stats.priceInflation')}</Text>
                       </View>
 
@@ -1693,13 +1694,13 @@ export default function StatsScreen() {
                       </View>
 
                       {loadingInflation ? (
-                        <ActivityIndicator size="small" color="#F59E0B" style={{ marginVertical: 16 }} />
+                        <ActivityIndicator size="small" color={COLORS.warning} style={{ marginVertical: 16 }} />
                       ) : inflationData && inflationData.items_compared > 0 ? (
                         <>
                           <View style={styles.inflationHeadline}>
                             <Text style={[
                               styles.inflationHeadlineValue,
-                              { color: inflationData.overall_change_percent > 0 ? '#EF4444' : inflationData.overall_change_percent < 0 ? '#10B981' : '#94A3B8' }
+                              { color: inflationData.overall_change_percent > 0 ? COLORS.danger : inflationData.overall_change_percent < 0 ? COLORS.success : COLORS.textSecondary }
                             ]}>
                               {inflationData.overall_change_percent > 0 ? '+' : ''}{inflationData.overall_change_percent}%
                             </Text>
@@ -1715,7 +1716,7 @@ export default function StatsScreen() {
                             <Text style={styles.inflationToggleText}>
                               {inflationExpanded ? t('stats.inflationHideDetails') : t('stats.inflationShowDetails')}
                             </Text>
-                            <Ionicons name={inflationExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#F59E0B" />
+                            <Ionicons name={inflationExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.warning} />
                           </TouchableOpacity>
 
                           {inflationExpanded && inflationData.items.map((item: any) => (
@@ -1725,12 +1726,12 @@ export default function StatsScreen() {
                                 <Text style={styles.alertSupplier}>{item.supplier} • {item.purchase_count}x</Text>
                                 <View style={styles.alertPrices}>
                                   <Text style={styles.alertOldPrice}>{item.start_price.toFixed(2)}€</Text>
-                                  <Ionicons name="arrow-forward" size={14} color="#64748B" />
-                                  <Text style={[styles.alertNewPrice, { color: item.change_percent >= 0 ? '#EF4444' : '#10B981' }]}>
+                                  <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
+                                  <Text style={[styles.alertNewPrice, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>
                                     {item.end_price.toFixed(2)}€
                                   </Text>
                                   <View style={[styles.alertChangeBadge, { backgroundColor: item.change_percent >= 0 ? '#EF444420' : '#10B98120' }]}>
-                                    <Text style={[styles.alertChangeText, { color: item.change_percent >= 0 ? '#EF4444' : '#10B981' }]}>
+                                    <Text style={[styles.alertChangeText, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>
                                       {item.change_percent > 0 ? '+' : ''}{item.change_percent}%
                                     </Text>
                                   </View>
@@ -1775,7 +1776,7 @@ export default function StatsScreen() {
                     {/* Items Ranking List */}
                     <View style={styles.topSuppliersCard}>
                       <View style={styles.topSuppliersHeader}>
-                        <Ionicons name="pricetags" size={24} color="#8B5CF6" />
+                        <Ionicons name="pricetags" size={24} color={COLORS.primary} />
                         <Text style={styles.topSuppliersTitle}>
                           {itemRankingType === 'value' ? t('stats.topByValue') : 
                            itemRankingType === 'quantity' ? t('stats.topByQuantity') : t('stats.byFrequency')}
@@ -1792,7 +1793,7 @@ export default function StatsScreen() {
                             <View style={styles.supplierRank}>
                               <Text style={[
                                 styles.supplierRankText,
-                                index < 3 && { color: index === 0 ? '#F59E0B' : index === 1 ? '#94A3B8' : '#CD7F32' }
+                                index < 3 && { color: index === 0 ? COLORS.warning : index === 1 ? COLORS.textSecondary : COLORS.bronze }
                               ]}>
                                 #{index + 1}
                               </Text>
@@ -1815,22 +1816,22 @@ export default function StatsScreen() {
                                 <Ionicons 
                                   name={item.trend_percent > 0 ? "trending-up" : item.trend_percent < 0 ? "trending-down" : "remove"} 
                                   size={12} 
-                                  color={item.trend_percent > 5 ? '#EF4444' : item.trend_percent < -5 ? '#10B981' : '#64748B'} 
+                                  color={item.trend_percent > 5 ? COLORS.danger : item.trend_percent < -5 ? COLORS.success : COLORS.textMuted} 
                                 />
                                 <Text style={[
                                   styles.itemTrendText,
-                                  { color: item.trend_percent > 5 ? '#EF4444' : item.trend_percent < -5 ? '#10B981' : '#64748B' }
+                                  { color: item.trend_percent > 5 ? COLORS.danger : item.trend_percent < -5 ? COLORS.success : COLORS.textMuted }
                                 ]}>
                                   {item.trend_percent > 0 ? '+' : ''}{item.trend_percent.toFixed(0)}%
                                 </Text>
                               </View>
                             </View>
-                            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+                            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
                           </TouchableOpacity>
                         ))
                       ) : (
                         <View style={styles.noDataContainer}>
-                          <Ionicons name="pricetags-outline" size={48} color="#64748B" />
+                          <Ionicons name="pricetags-outline" size={48} color={COLORS.textMuted} />
                           <Text style={styles.noDataText}>{t('stats.noItems')}</Text>
                         </View>
                       )}
@@ -1840,7 +1841,7 @@ export default function StatsScreen() {
                     {itemStats?.price_trends?.length > 0 && (
                       <View style={styles.dependencyAlertCard}>
                         <View style={styles.dependencyAlertHeader}>
-                          <Ionicons name="trending-up" size={24} color="#F59E0B" />
+                          <Ionicons name="trending-up" size={24} color={COLORS.warning} />
                           <Text style={styles.dependencyAlertTitle}>{t('stats.priceTrends')}</Text>
                         </View>
                         <Text style={styles.dependencyAlertDesc}>
@@ -1856,7 +1857,7 @@ export default function StatsScreen() {
                             <View style={{ alignItems: 'flex-end' }}>
                               <Text style={[
                                 styles.dependencyAlertPercent,
-                                { color: item.trend_percent > 0 ? '#EF4444' : '#10B981' }
+                                { color: item.trend_percent > 0 ? COLORS.danger : COLORS.success }
                               ]}>
                                 {item.trend_percent > 0 ? '+' : ''}{item.trend_percent.toFixed(1)}%
                               </Text>
@@ -1910,7 +1911,7 @@ export default function StatsScreen() {
 
           {loadingItemDetail ? (
             <View style={styles.modalLoading}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : (
             <ScrollView style={styles.modalContent}>
@@ -1933,8 +1934,8 @@ export default function StatsScreen() {
                     </View>
                     <View style={styles.detailItem}>
                       <Text style={[styles.detailValue, { 
-                        color: itemPriceHistory.statistics.trend_percent > 5 ? '#EF4444' : 
-                               itemPriceHistory.statistics.trend_percent < -5 ? '#10B981' : '#8B5CF6'
+                        color: itemPriceHistory.statistics.trend_percent > 5 ? COLORS.danger : 
+                               itemPriceHistory.statistics.trend_percent < -5 ? COLORS.success : COLORS.primary
                       }]}>
                         {itemPriceHistory.statistics.trend_percent > 0 ? '+' : ''}{itemPriceHistory.statistics.trend_percent}%
                       </Text>
@@ -1952,17 +1953,17 @@ export default function StatsScreen() {
                     data={itemPriceHistory.history.slice(-10).map((h: any) => ({
                       value: h.unit_price,
                       label: h.date.substring(5),
-                      dataPointColor: '#8B5CF6',
+                      dataPointColor: COLORS.primary,
                     }))}
                     width={chartWidth - 20}
                     height={150}
-                    color="#8B5CF6"
+                    color={COLORS.primary}
                     thickness={2}
-                    dataPointsColor="#8B5CF6"
-                    yAxisColor="#334155"
-                    xAxisColor="#334155"
-                    yAxisTextStyle={{ color: '#64748B', fontSize: 10 }}
-                    xAxisLabelTextStyle={{ color: '#64748B', fontSize: 9 }}
+                    dataPointsColor={COLORS.primary}
+                    yAxisColor={COLORS.border}
+                    xAxisColor={COLORS.border}
+                    yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                    xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
                     hideRules
                     isAnimated
                     curved
@@ -1978,7 +1979,7 @@ export default function StatsScreen() {
                   {/* Recommendation */}
                   {itemBySupplier.recommendation && (
                     <View style={styles.recommendationBanner}>
-                      <Ionicons name="bulb" size={20} color="#10B981" />
+                      <Ionicons name="bulb" size={20} color={COLORS.success} />
                       <View style={{ flex: 1, marginLeft: 8 }}>
                         <Text style={styles.recommendationTitle}>{t('stats.bestSupplier')}</Text>
                         <Text style={styles.recommendationText}>
@@ -1996,7 +1997,7 @@ export default function StatsScreen() {
                       <View style={styles.supplierCompareRank}>
                         <Text style={[
                           styles.supplierCompareRankText,
-                          index === 0 && { color: '#10B981' }
+                          index === 0 && { color: COLORS.success }
                         ]}>
                           #{index + 1}
                         </Text>
@@ -2076,12 +2077,12 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 4,
   },
   periodSelector: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 4,
     marginBottom: 20,
@@ -2093,10 +2094,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   periodButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   periodButtonText: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 14,
     fontWeight: '500',
   },
@@ -2104,12 +2105,12 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   avgTurnoverStatCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#3B82F6',
+    borderColor: COLORS.info,
   },
   avgTurnoverStatHeader: {
     flexDirection: 'row',
@@ -2126,12 +2127,12 @@ const styles = StyleSheet.create({
   avgTurnoverStatValue: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#3B82F6',
+    color: COLORS.info,
     marginBottom: 4,
   },
   avgTurnoverStatSubtitle: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   summaryGrid: {
     flexDirection: 'row',
@@ -2141,14 +2142,14 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     width: '47%',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     borderLeftWidth: 4,
   },
   cardLabel: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 8,
   },
   cardValue: {
@@ -2165,7 +2166,7 @@ const styles = StyleSheet.create({
   },
   restrictedNoteText: {
     fontSize: 11,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     flexShrink: 1,
   },
   trendBadge: {
@@ -2179,7 +2180,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   chartContainer: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -2195,7 +2196,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -2205,7 +2206,7 @@ const styles = StyleSheet.create({
   chartNavLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     minWidth: 90,
     textAlign: 'center',
   },
@@ -2226,11 +2227,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   noDataText: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 14,
   },
   vatBreakdown: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -2248,13 +2249,13 @@ const styles = StyleSheet.create({
   },
   vatItem: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 12,
   },
   vatLabel: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 4,
   },
   vatValue: {
@@ -2262,7 +2263,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   vatTotal: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     padding: 16,
     flexDirection: 'row',
@@ -2280,7 +2281,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   additionalStats: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
   },
@@ -2291,14 +2292,14 @@ const styles = StyleSheet.create({
   },
   statItem: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
   },
   statLabel: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 8,
     textAlign: 'center',
   },
@@ -2309,7 +2310,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   top3Section: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginTop: 16,
@@ -2324,14 +2325,14 @@ const styles = StyleSheet.create({
   },
   top3ColumnTitle: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 8,
     textTransform: 'uppercase',
   },
   top3Item: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 10,
@@ -2341,13 +2342,13 @@ const styles = StyleSheet.create({
   top3Rank: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#8B5CF6',
+    color: COLORS.primary,
     width: 14,
   },
   top3Name: {
     flex: 1,
     fontSize: 12,
-    color: '#E2E8F0',
+    color: COLORS.textLight,
   },
   top3Value: {
     fontSize: 12,
@@ -2355,14 +2356,14 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   forecastSection: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginTop: 16,
   },
   forecastHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: -4,
     marginBottom: 12,
   },
@@ -2372,14 +2373,14 @@ const styles = StyleSheet.create({
   },
   forecastCard: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 14,
     alignItems: 'center',
   },
   forecastLabel: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 6,
     textAlign: 'center',
   },
@@ -2390,12 +2391,12 @@ const styles = StyleSheet.create({
   },
   forecastTrend: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 4,
   },
   tabSelector: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 4,
     marginBottom: 20,
@@ -2411,11 +2412,11 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   tabButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   tabButtonText: {
     fontSize: 14,
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontWeight: '500',
     textAlign: 'center',
   },
@@ -2430,13 +2431,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 12,
   },
   
   // Executive Summary
   executiveSummaryCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -2463,11 +2464,11 @@ const styles = StyleSheet.create({
   execValue: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   execLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 4,
   },
   concentrationRow: {
@@ -2480,13 +2481,13 @@ const styles = StyleSheet.create({
   },
   concentrationLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     width: 100,
   },
   concentrationBar: {
     flex: 1,
     height: 8,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 4,
     overflow: 'hidden',
   },
@@ -2510,14 +2511,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   alertText: {
-    color: '#F59E0B',
+    color: COLORS.warning,
     fontSize: 13,
     flex: 1,
   },
   
   // Supplier Totals
   supplierTotalsCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
@@ -2540,11 +2541,11 @@ const styles = StyleSheet.create({
   supplierTotalValue: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   supplierTotalLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 4,
   },
   
@@ -2556,7 +2557,7 @@ const styles = StyleSheet.create({
   chartTypeSelector: {
     flexDirection: 'row',
     alignSelf: 'flex-start',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 8,
     padding: 4,
   },
@@ -2565,11 +2566,11 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   chartTypeButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   rankingSelector: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 8,
     padding: 4,
   },
@@ -2581,10 +2582,10 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   rankingButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   rankingButtonText: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 12,
     fontWeight: '500',
   },
@@ -2606,7 +2607,7 @@ const styles = StyleSheet.create({
   },
   pieCenterLabel: {
     fontSize: 10,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   legendContainer: {
     marginTop: 16,
@@ -2629,14 +2630,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   legendValue: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 13,
     fontWeight: 'bold',
   },
   
   // Top Suppliers
   topSuppliersCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -2662,19 +2663,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(139, 92, 246, 0.15)',
   },
   compareToggleActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   compareToggleText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   compareToggleTextActive: {
     color: 'white',
   },
   compareHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 12,
   },
   compareFloatingButton: {
@@ -2682,7 +2683,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     paddingVertical: 14,
     marginTop: 12,
@@ -2693,7 +2694,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   compareCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 14,
     padding: 16,
     marginBottom: 12,
@@ -2711,7 +2712,7 @@ const styles = StyleSheet.create({
   },
   compareBarLabel: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   compareBarValue: {
     fontSize: 13,
@@ -2721,7 +2722,7 @@ const styles = StyleSheet.create({
   compareBarTrack: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     overflow: 'hidden',
     marginBottom: 12,
   },
@@ -2738,7 +2739,7 @@ const styles = StyleSheet.create({
   },
   compareStatLabel: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 2,
   },
   compareStatValue: {
@@ -2749,7 +2750,7 @@ const styles = StyleSheet.create({
   supplierItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
@@ -2761,7 +2762,7 @@ const styles = StyleSheet.create({
   supplierRankText: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   supplierInfo: {
     flex: 1,
@@ -2774,7 +2775,7 @@ const styles = StyleSheet.create({
   },
   supplierMeta: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 2,
   },
   supplierAmounts: {
@@ -2784,7 +2785,7 @@ const styles = StyleSheet.create({
   supplierAmount: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#10B981',
+    color: COLORS.success,
   },
   dependencyBadge: {
     backgroundColor: '#8B5CF620',
@@ -2795,18 +2796,18 @@ const styles = StyleSheet.create({
   },
   dependencyText: {
     fontSize: 10,
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontWeight: 'bold',
   },
   
   // Inactive Suppliers
   inactiveCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
     borderLeftWidth: 4,
-    borderLeftColor: '#EF4444',
+    borderLeftColor: COLORS.danger,
   },
   inactiveHeader: {
     flexDirection: 'row',
@@ -2817,13 +2818,13 @@ const styles = StyleSheet.create({
   inactiveTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#EF4444',
+    color: COLORS.danger,
   },
   inactiveItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 8,
     padding: 12,
     marginBottom: 8,
@@ -2835,7 +2836,7 @@ const styles = StyleSheet.create({
   },
   inactiveMeta: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 2,
   },
   inactiveDays: {
@@ -2844,21 +2845,21 @@ const styles = StyleSheet.create({
   inactiveDaysValue: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#EF4444',
+    color: COLORS.danger,
   },
   inactiveDaysLabel: {
     fontSize: 10,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   
   // High Dependency Alert
   dependencyAlertCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
     borderLeftWidth: 4,
-    borderLeftColor: '#F59E0B',
+    borderLeftColor: COLORS.warning,
   },
   dependencyAlertHeader: {
     flexDirection: 'row',
@@ -2869,11 +2870,11 @@ const styles = StyleSheet.create({
   dependencyAlertTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#F59E0B',
+    color: COLORS.warning,
   },
   dependencyAlertDesc: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 12,
   },
   dependencyAlertItem: {
@@ -2882,7 +2883,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: COLORS.border,
   },
   dependencyAlertName: {
     fontSize: 14,
@@ -2891,22 +2892,22 @@ const styles = StyleSheet.create({
   dependencyAlertPercent: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#F59E0B',
+    color: COLORS.warning,
   },
   
   // Modal Styles
   modalContainer: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: COLORS.border,
   },
   modalCloseButton: {
     padding: 8,
@@ -2930,7 +2931,7 @@ const styles = StyleSheet.create({
   
   // Detail Card
   detailCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -2948,7 +2949,7 @@ const styles = StyleSheet.create({
   },
   detailItem: {
     width: '47%',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
@@ -2956,11 +2957,11 @@ const styles = StyleSheet.create({
   detailValue: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   detailLabel: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 4,
   },
   detailDates: {
@@ -2974,7 +2975,7 @@ const styles = StyleSheet.create({
   },
   detailDateLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   detailDateValue: {
     fontSize: 12,
@@ -3006,7 +3007,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 8,
     padding: 12,
     marginBottom: 8,
@@ -3018,7 +3019,7 @@ const styles = StyleSheet.create({
   },
   anomalyDate: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   anomalyAmount: {
     alignItems: 'flex-end',
@@ -3026,11 +3027,11 @@ const styles = StyleSheet.create({
   anomalyValue: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#F59E0B',
+    color: COLORS.warning,
   },
   anomalyDeviation: {
     fontSize: 10,
-    color: '#EF4444',
+    color: COLORS.danger,
     fontWeight: 'bold',
   },
   
@@ -3041,7 +3042,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: COLORS.border,
   },
   recentInvoiceNumber: {
     fontSize: 14,
@@ -3050,12 +3051,12 @@ const styles = StyleSheet.create({
   },
   recentInvoiceDate: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   recentInvoiceAmount: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#10B981',
+    color: COLORS.success,
   },
   
   // Alert Badge on Tab
@@ -3063,7 +3064,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -5,
     right: -8,
-    backgroundColor: '#EF4444',
+    backgroundColor: COLORS.danger,
     borderRadius: 8,
     minWidth: 16,
     height: 16,
@@ -3078,12 +3079,12 @@ const styles = StyleSheet.create({
   
   // Price Alerts Card
   priceAlertsCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
     borderLeftWidth: 4,
-    borderLeftColor: '#EF4444',
+    borderLeftColor: COLORS.danger,
   },
   priceAlertsHeader: {
     flexDirection: 'row',
@@ -3094,11 +3095,11 @@ const styles = StyleSheet.create({
   priceAlertsTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#EF4444',
+    color: COLORS.danger,
     flex: 1,
   },
   alertCountBadge: {
-    backgroundColor: '#EF4444',
+    backgroundColor: COLORS.danger,
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -3111,14 +3112,14 @@ const styles = StyleSheet.create({
   alertItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 12,
     marginBottom: 8,
   },
   alertItemUnread: {
     borderLeftWidth: 3,
-    borderLeftColor: '#EF4444',
+    borderLeftColor: COLORS.danger,
   },
   alertInfo: {
     flex: 1,
@@ -3130,7 +3131,7 @@ const styles = StyleSheet.create({
   },
   alertSupplier: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 2,
   },
   alertPrices: {
@@ -3141,13 +3142,13 @@ const styles = StyleSheet.create({
   },
   alertOldPrice: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     textDecorationLine: 'line-through',
   },
   alertNewPrice: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#EF4444',
+    color: COLORS.danger,
   },
   alertChangeBadge: {
     backgroundColor: '#EF444420',
@@ -3158,7 +3159,7 @@ const styles = StyleSheet.create({
   alertChangeText: {
     fontSize: 10,
     fontWeight: 'bold',
-    color: '#EF4444',
+    color: COLORS.danger,
   },
   alertActions: {
     flexDirection: 'row',
@@ -3166,23 +3167,23 @@ const styles = StyleSheet.create({
   },
   alertActionBtn: {
     padding: 8,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 8,
   },
 
   // Price Inflation Card
   inflationCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
     borderLeftWidth: 4,
-    borderLeftColor: '#F59E0B',
+    borderLeftColor: COLORS.warning,
   },
   inflationTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#F59E0B',
+    color: COLORS.warning,
     flex: 1,
   },
   inflationHeadline: {
@@ -3195,7 +3196,7 @@ const styles = StyleSheet.create({
   },
   inflationHeadlineLabel: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 4,
     textAlign: 'center',
   },
@@ -3209,11 +3210,11 @@ const styles = StyleSheet.create({
   inflationToggleText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#F59E0B',
+    color: COLORS.warning,
   },
   inflationNoData: {
     fontSize: 13,
-    color: '#64748B',
+    color: COLORS.textMuted,
     textAlign: 'center',
     paddingVertical: 16,
   },
@@ -3223,7 +3224,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -3235,7 +3236,7 @@ const styles = StyleSheet.create({
   },
   itemAvgPrice: {
     fontSize: 10,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 2,
   },
   
@@ -3251,7 +3252,7 @@ const styles = StyleSheet.create({
   recommendationTitle: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#10B981',
+    color: COLORS.success,
   },
   recommendationText: {
     fontSize: 14,
@@ -3260,7 +3261,7 @@ const styles = StyleSheet.create({
   },
   recommendationSavings: {
     fontSize: 11,
-    color: '#10B981',
+    color: COLORS.success,
     marginTop: 4,
   },
   
@@ -3268,7 +3269,7 @@ const styles = StyleSheet.create({
   supplierCompareItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 12,
     marginBottom: 8,
@@ -3280,7 +3281,7 @@ const styles = StyleSheet.create({
   supplierCompareRankText: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   supplierCompareInfo: {
     flex: 1,
@@ -3293,7 +3294,7 @@ const styles = StyleSheet.create({
   },
   supplierCompareMeta: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 2,
   },
   supplierComparePrices: {
@@ -3302,10 +3303,10 @@ const styles = StyleSheet.create({
   supplierComparePrice: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   supplierComparePriceLabel: {
     fontSize: 10,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
 });

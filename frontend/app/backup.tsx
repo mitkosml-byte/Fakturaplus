@@ -21,6 +21,7 @@ import { format } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -209,7 +210,7 @@ export default function BackupScreen() {
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
           <SafeAreaView style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#10B981" />
+            <ActivityIndicator size="large" color={COLORS.success} />
           </SafeAreaView>
         </View>
       </ImageBackground>
@@ -235,14 +236,14 @@ export default function BackupScreen() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                colors={['#10B981']}
-                tintColor="#10B981"
+                colors={[COLORS.success]}
+                tintColor={COLORS.success}
               />
             }
           >
             {/* Info Card */}
             <View style={styles.infoCard}>
-              <Ionicons name="cloud-upload" size={32} color="#10B981" />
+              <Ionicons name="cloud-upload" size={32} color={COLORS.success} />
               <View style={styles.infoTextContainer}>
                 <Text style={styles.infoTitle}>{t('backup.infoTitle')}</Text>
                 <Text style={styles.infoDescription}>
@@ -258,7 +259,7 @@ export default function BackupScreen() {
               {backupStatus?.has_backup ? (
                 <>
                   <View style={styles.statusRow}>
-                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                    <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
                     <Text style={styles.statusText}>{t('backup.lastBackup')}:</Text>
                     <Text style={styles.statusValue}>
                       {backupStatus.last_backup_date 
@@ -270,17 +271,17 @@ export default function BackupScreen() {
                   {backupStatus.statistics && (
                     <View style={styles.statisticsContainer}>
                       <View style={styles.statItem}>
-                        <Ionicons name="document-text" size={18} color="#8B5CF6" />
+                        <Ionicons name="document-text" size={18} color={COLORS.primary} />
                         <Text style={styles.statValue}>{backupStatus.statistics.invoices}</Text>
                         <Text style={styles.statLabel}>{t('backup.invoices')}</Text>
                       </View>
                       <View style={styles.statItem}>
-                        <Ionicons name="cash" size={18} color="#10B981" />
+                        <Ionicons name="cash" size={18} color={COLORS.success} />
                         <Text style={styles.statValue}>{backupStatus.statistics.revenues}</Text>
                         <Text style={styles.statLabel}>{t('backup.revenues')}</Text>
                       </View>
                       <View style={styles.statItem}>
-                        <Ionicons name="cart" size={18} color="#EF4444" />
+                        <Ionicons name="cart" size={18} color={COLORS.danger} />
                         <Text style={styles.statValue}>{backupStatus.statistics.expenses}</Text>
                         <Text style={styles.statLabel}>{t('backup.expenses')}</Text>
                       </View>
@@ -289,7 +290,7 @@ export default function BackupScreen() {
                 </>
               ) : (
                 <View style={styles.statusRow}>
-                  <Ionicons name="alert-circle" size={20} color="#F59E0B" />
+                  <Ionicons name="alert-circle" size={20} color={COLORS.warning} />
                   <Text style={styles.statusText}>{t('backup.noBackup')}</Text>
                 </View>
               )}
@@ -390,7 +391,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: COLORS.border,
   },
   backButton: {
     padding: 8,
@@ -424,16 +425,16 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#10B981',
+    color: COLORS.success,
     marginBottom: 4,
   },
   infoDescription: {
     fontSize: 14,
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
     lineHeight: 20,
   },
   statusCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
@@ -452,7 +453,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   statusValue: {
     fontSize: 14,
@@ -465,7 +466,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: COLORS.border,
   },
   statItem: {
     alignItems: 'center',
@@ -478,7 +479,7 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   actionsContainer: {
     gap: 12,
@@ -493,10 +494,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   backupButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: COLORS.success,
   },
   restoreButton: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: COLORS.info,
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -507,7 +508,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   instructionsCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 32,
@@ -528,7 +529,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -540,7 +541,7 @@ const styles = StyleSheet.create({
   instructionText: {
     flex: 1,
     fontSize: 14,
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
     lineHeight: 20,
   },
 });

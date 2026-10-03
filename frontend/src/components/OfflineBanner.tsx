@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNetwork } from '../hooks/useNetwork';
 import { useLanguageStore } from '../i18n';
+import { COLORS } from '../theme/colors';
 
 export function OfflineBanner() {
   const { isOffline } = useNetwork();
@@ -12,7 +13,7 @@ export function OfflineBanner() {
 
   return (
     <View style={styles.container}>
-      <Ionicons name="cloud-offline" size={18} color="#FEF3C7" />
+      <Ionicons name="cloud-offline" size={18} color={COLORS.warningLight} />
       <Text style={styles.text}>
         {language === 'bg' 
           ? 'Няма връзка с интернет'
@@ -24,7 +25,7 @@ export function OfflineBanner() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#D97706',
+    backgroundColor: COLORS.warningDark,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -33,7 +34,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   text: {
-    color: '#FEF3C7',
+    color: COLORS.warningLight,
     fontSize: 13,
     fontWeight: '600',
   },

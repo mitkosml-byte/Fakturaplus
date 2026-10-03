@@ -31,6 +31,7 @@ import { ROLE_DEFAULT_PERMISSIONS, ConfigurableRole } from '../src/utils/permiss
 // so it's handled as a distinct branch wherever ConfigurableRole drives UI.
 type PickableRole = ConfigurableRole | 'owner';
 import { PermissionsChecklist } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -306,7 +307,7 @@ export default function UsersManagementScreen() {
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
           <SafeAreaView style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
+            <ActivityIndicator size="large" color={COLORS.primary} />
           </SafeAreaView>
         </View>
       </ImageBackground>
@@ -329,7 +330,7 @@ export default function UsersManagementScreen() {
               <View style={styles.headerRight} />
             </View>
             <View style={styles.noAccessContainer}>
-              <Ionicons name="lock-closed" size={64} color="#EF4444" />
+              <Ionicons name="lock-closed" size={64} color={COLORS.danger} />
               <Text style={styles.noAccessText}>
                 {language === 'bg' 
                   ? 'Само титулярят има достъп до тази секция'
@@ -357,7 +358,7 @@ export default function UsersManagementScreen() {
               {language === 'bg' ? 'Потребители' : 'Users'}
             </Text>
             <TouchableOpacity style={styles.addButton} onPress={() => setShowInviteModal(true)}>
-              <Ionicons name="person-add" size={24} color="#8B5CF6" />
+              <Ionicons name="person-add" size={24} color={COLORS.primary} />
             </TouchableOpacity>
           </View>
 
@@ -367,8 +368,8 @@ export default function UsersManagementScreen() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                colors={['#8B5CF6']}
-                tintColor="#8B5CF6"
+                colors={[COLORS.primary]}
+                tintColor={COLORS.primary}
               />
             }
           >
@@ -413,13 +414,13 @@ export default function UsersManagementScreen() {
                           style={styles.actionButton}
                           onPress={() => openEditAccess(user)}
                         >
-                          <Ionicons name="create" size={18} color="#8B5CF6" />
+                          <Ionicons name="create" size={18} color={COLORS.primary} />
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={styles.actionButton}
                           onPress={() => handleRemoveUser(user)}
                         >
-                          <Ionicons name="person-remove" size={18} color="#EF4444" />
+                          <Ionicons name="person-remove" size={18} color={COLORS.danger} />
                         </TouchableOpacity>
                       </View>
                     )}
@@ -480,7 +481,7 @@ export default function UsersManagementScreen() {
                 {pendingInvitations.map((invitation) => (
                   <View key={invitation.id} style={styles.invitationCard}>
                     <View style={styles.invitationInfo}>
-                      <Ionicons name="mail" size={20} color="#F59E0B" />
+                      <Ionicons name="mail" size={20} color={COLORS.warning} />
                       <View style={styles.invitationDetails}>
                         <Text style={styles.invitationContact}>
                           {invitation.email || invitation.phone}
@@ -500,7 +501,7 @@ export default function UsersManagementScreen() {
                         style={styles.cancelButton}
                         onPress={() => handleCancelInvitation(invitation.id)}
                       >
-                        <Ionicons name="close-circle" size={24} color="#EF4444" />
+                        <Ionicons name="close-circle" size={24} color={COLORS.danger} />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -520,7 +521,7 @@ export default function UsersManagementScreen() {
                     {language === 'bg' ? 'Покани потребител' : 'Invite User'}
                   </Text>
                   <TouchableOpacity onPress={() => setShowInviteModal(false)}>
-                    <Ionicons name="close" size={28} color="#94A3B8" />
+                    <Ionicons name="close" size={28} color={COLORS.textSecondary} />
                   </TouchableOpacity>
                 </View>
 
@@ -535,7 +536,7 @@ export default function UsersManagementScreen() {
                     value={inviteEmail}
                     onChangeText={setInviteEmail}
                     placeholder="user@example.com"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     keyboardType="email-address"
                     autoCapitalize="none"
                   />
@@ -554,7 +555,7 @@ export default function UsersManagementScreen() {
                     value={invitePhone}
                     onChangeText={setInvitePhone}
                     placeholder="+359 888 123456"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     keyboardType="phone-pad"
                   />
                 </View>
@@ -645,7 +646,7 @@ export default function UsersManagementScreen() {
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>{t('users.editAccess')}</Text>
                   <TouchableOpacity onPress={() => setEditingUser(null)}>
-                    <Ionicons name="close" size={28} color="#94A3B8" />
+                    <Ionicons name="close" size={28} color={COLORS.textSecondary} />
                   </TouchableOpacity>
                 </View>
 
@@ -736,7 +737,7 @@ export default function UsersManagementScreen() {
           <Modal visible={showCodeModal} animationType="fade" transparent>
             <View style={styles.modalOverlay}>
               <View style={styles.codeModalContent}>
-                <Ionicons name="checkmark-circle" size={64} color="#10B981" />
+                <Ionicons name="checkmark-circle" size={64} color={COLORS.success} />
                 <Text style={styles.codeModalTitle}>
                   {language === 'bg' ? 'Поканата е създадена!' : 'Invitation Created!'}
                 </Text>
@@ -752,13 +753,13 @@ export default function UsersManagementScreen() {
 
                 <View style={styles.codeActions}>
                   <TouchableOpacity style={styles.codeActionButton} onPress={handleCopyCode}>
-                    <Ionicons name="copy" size={20} color="#8B5CF6" />
+                    <Ionicons name="copy" size={20} color={COLORS.primary} />
                     <Text style={styles.codeActionText}>
                       {language === 'bg' ? 'Копирай' : 'Copy'}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.codeActionButton} onPress={handleShareCode}>
-                    <Ionicons name="share-social" size={20} color="#8B5CF6" />
+                    <Ionicons name="share-social" size={20} color={COLORS.primary} />
                     <Text style={styles.codeActionText}>
                       {language === 'bg' ? 'Сподели' : 'Share'}
                     </Text>
@@ -805,7 +806,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: COLORS.border,
   },
   backButton: {
     padding: 8,
@@ -857,7 +858,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -877,7 +878,7 @@ const styles = StyleSheet.create({
   },
   userEmail: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   userActions: {
     alignItems: 'flex-end',
@@ -928,7 +929,7 @@ const styles = StyleSheet.create({
   },
   invitationCode: {
     fontSize: 12,
-    color: '#F59E0B',
+    color: COLORS.warning,
     marginTop: 2,
   },
   invitationActions: {
@@ -951,7 +952,7 @@ const styles = StyleSheet.create({
   },
   ownerActionProgress: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 6,
   },
   ownerActionButtons: {
@@ -961,7 +962,7 @@ const styles = StyleSheet.create({
   },
   ownerActionApprove: {
     flex: 1,
-    backgroundColor: '#10B981',
+    backgroundColor: COLORS.success,
     borderRadius: 10,
     paddingVertical: 10,
     alignItems: 'center',
@@ -979,7 +980,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ownerActionRejectText: {
-    color: '#EF4444',
+    color: COLORS.danger,
     fontWeight: '600',
     fontSize: 13,
   },
@@ -991,7 +992,7 @@ const styles = StyleSheet.create({
   },
   noAccessText: {
     fontSize: 16,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     textAlign: 'center',
     marginTop: 16,
   },
@@ -1001,7 +1002,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
@@ -1012,7 +1013,7 @@ const styles = StyleSheet.create({
   },
   permissionsHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 10,
   },
   editingUserName: {
@@ -1022,7 +1023,7 @@ const styles = StyleSheet.create({
   },
   editingUserEmail: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 20,
   },
   modalHeader: {
@@ -1041,21 +1042,21 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     fontSize: 16,
     color: 'white',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   orText: {
     textAlign: 'center',
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginVertical: 8,
   },
   roleSelector: {
@@ -1066,26 +1067,26 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     borderRadius: 12,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   roleOptionActive: {
-    borderColor: '#8B5CF6',
+    borderColor: COLORS.primary,
     backgroundColor: 'rgba(139, 92, 246, 0.15)',
   },
   roleOptionText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   roleOptionTextActive: {
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   accountantHint: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 10,
     lineHeight: 17,
   },
@@ -1093,7 +1094,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     padding: 16,
     marginTop: 16,
@@ -1108,7 +1109,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   codeModalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 24,
     margin: 24,
     padding: 32,
@@ -1123,22 +1124,22 @@ const styles = StyleSheet.create({
   },
   codeModalSubtitle: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     textAlign: 'center',
     marginBottom: 24,
   },
   codeBox: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 24,
     borderWidth: 2,
-    borderColor: '#8B5CF6',
+    borderColor: COLORS.primary,
     borderStyle: 'dashed',
   },
   codeText: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#8B5CF6',
+    color: COLORS.primary,
     letterSpacing: 4,
   },
   codeActions: {
@@ -1158,13 +1159,13 @@ const styles = StyleSheet.create({
   codeActionText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   closeCodeButton: {
     marginTop: 24,
     padding: 16,
     paddingHorizontal: 48,
-    backgroundColor: '#334155',
+    backgroundColor: COLORS.border,
     borderRadius: 12,
   },
   closeCodeButtonText: {

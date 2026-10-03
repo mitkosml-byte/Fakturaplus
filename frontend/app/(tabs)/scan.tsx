@@ -22,6 +22,7 @@ import { api } from '../../src/services/api';
 import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod } from '../../src/types';
 import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
+import { COLORS } from '../../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -392,7 +393,7 @@ export default function ScanScreen() {
                 <View style={styles.scanOptions}>
               <TouchableOpacity style={styles.scanButton} onPress={handleTakePhoto}>
                 <View style={styles.scanIconContainer}>
-                  <Ionicons name="camera" size={48} color="#8B5CF6" />
+                  <Ionicons name="camera" size={48} color={COLORS.primary} />
                 </View>
                 <Text style={styles.scanButtonText}>{t('scan.takePhoto')}</Text>
                 <Text style={styles.scanButtonHint}>{language === 'bg' ? 'Използвай камерата' : 'Use the camera'}</Text>
@@ -400,7 +401,7 @@ export default function ScanScreen() {
 
               <TouchableOpacity style={styles.scanButton} onPress={handlePickImage}>
                 <View style={styles.scanIconContainer}>
-                  <Ionicons name="image" size={48} color="#8B5CF6" />
+                  <Ionicons name="image" size={48} color={COLORS.primary} />
                 </View>
                 <Text style={styles.scanButtonText}>{t('scan.fromGallery')}</Text>
                 <Text style={styles.scanButtonHint}>{language === 'bg' ? 'От галерията' : 'From gallery'}</Text>
@@ -411,12 +412,12 @@ export default function ScanScreen() {
           {capturedImages.length === 0 && scanMode === 'purchase' && (
             <View style={styles.tipsBox}>
               <View style={styles.tipsHeader}>
-                <Ionicons name="sparkles-outline" size={18} color="#8B5CF6" />
+                <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
                 <Text style={styles.tipsTitle}>{t('scan.tipsTitle')}</Text>
               </View>
               {[t('scan.tipSupplier'), t('scan.tipAmounts'), t('scan.tipItems'), t('scan.tipPayment')].map((tip, i) => (
                 <View key={i} style={styles.tipRow}>
-                  <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginTop: 2 }} />
+                  <Ionicons name="checkmark-circle" size={14} color={COLORS.success} style={{ marginTop: 2 }} />
                   <Text style={styles.tipText}>{tip}</Text>
                 </View>
               ))}
@@ -427,15 +428,15 @@ export default function ScanScreen() {
           {capturedImages.length === 0 && scanMode === 'sales' && (
             <View style={styles.tipsBox}>
               <View style={styles.tipsHeader}>
-                <Ionicons name="sparkles-outline" size={18} color="#8B5CF6" />
+                <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
                 <Text style={styles.tipsTitle}>{t('scan.salesTipsTitle')}</Text>
               </View>
               <View style={styles.tipRow}>
-                <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginTop: 2 }} />
+                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} style={{ marginTop: 2 }} />
                 <Text style={styles.tipText}>{t('scan.salesTip1')}</Text>
               </View>
               <View style={styles.tipRow}>
-                <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginTop: 2 }} />
+                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} style={{ marginTop: 2 }} />
                 <Text style={styles.tipText}>{t('scan.salesTip2')}</Text>
               </View>
               <Text style={styles.tipsFooter}>{t('scan.salesTipsFooter')}</Text>
@@ -475,16 +476,16 @@ export default function ScanScreen() {
                     disabled={isScanning}
                     accessibilityLabel={t('scan.addPage')}
                   >
-                    <Ionicons name="add" size={22} color="#8B5CF6" />
+                    <Ionicons name="add" size={22} color={COLORS.primary} />
                   </TouchableOpacity>
                 </ScrollView>
                 <View style={styles.pageActionsRow}>
                   <TouchableOpacity style={styles.addPageButton} onPress={handleTakePhoto} disabled={isScanning}>
-                    <Ionicons name="camera" size={16} color="#8B5CF6" />
+                    <Ionicons name="camera" size={16} color={COLORS.primary} />
                     <Text style={styles.addPageButtonText}>{t('scan.addPage')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.addPageButton} onPress={handlePickImage} disabled={isScanning}>
-                    <Ionicons name="image" size={16} color="#8B5CF6" />
+                    <Ionicons name="image" size={16} color={COLORS.primary} />
                     <Text style={styles.addPageButtonText}>{t('scan.fromGallery')}</Text>
                   </TouchableOpacity>
                 </View>
@@ -496,7 +497,7 @@ export default function ScanScreen() {
 
               {isScanning ? (
                 <View style={styles.scanningContainer}>
-                  <ActivityIndicator size="large" color="#8B5CF6" />
+                  <ActivityIndicator size="large" color={COLORS.primary} />
                   <Text style={styles.scanningText}>{t('scan.processing')}</Text>
                 </View>
               ) : (
@@ -512,7 +513,7 @@ export default function ScanScreen() {
                   {ocrCorrections.length > 0 && (
                     <View style={styles.correctionsContainer}>
                       <View style={styles.correctionsHeader}>
-                        <Ionicons name="sparkles" size={18} color="#10B981" />
+                        <Ionicons name="sparkles" size={18} color={COLORS.success} />
                         <Text style={styles.correctionsTitle}>
                           {language === 'bg' ? 'AI корекции' : 'AI Corrections'}
                         </Text>
@@ -526,7 +527,7 @@ export default function ScanScreen() {
                       </View>
                       {ocrCorrections.map((correction, index) => (
                         <View key={index} style={styles.correctionItem}>
-                          <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                          <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
                           <Text style={styles.correctionText}>{correction}</Text>
                         </View>
                       ))}
@@ -536,18 +537,18 @@ export default function ScanScreen() {
                   {scanMode === 'sales' ? (
                     <>
                       <View style={styles.protocolNote}>
-                        <Ionicons name="information-circle" size={16} color="#8B5CF6" />
+                        <Ionicons name="information-circle" size={16} color={COLORS.primary} />
                         <Text style={styles.protocolNoteText}>{t('scan.salesNote')}</Text>
                       </View>
 
                       <View style={styles.inputGroup}>
                         <Text style={styles.inputLabel}>{t('scan.issueDate')} *</Text>
                         <TouchableOpacity style={styles.dateInputButton} onPress={() => setDatePickerVisible(true)}>
-                          <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                          <Ionicons name="calendar" size={20} color={COLORS.primary} />
                           <Text style={styles.dateInputText}>
                             {format(invoiceDate, 'd MMMM yyyy', { locale: dateLocale })}
                           </Text>
-                          <Ionicons name="chevron-down" size={20} color="#64748B" />
+                          <Ionicons name="chevron-down" size={20} color={COLORS.textMuted} />
                         </TouchableOpacity>
                       </View>
 
@@ -559,7 +560,7 @@ export default function ScanScreen() {
                           onChangeText={setTotalAmount}
                           keyboardType="decimal-pad"
                           placeholder="0.00"
-                          placeholderTextColor="#64748B"
+                          placeholderTextColor={COLORS.textMuted}
                         />
                         <Text style={styles.eikWarningText}>{t('home.includesVAT')}</Text>
                       </View>
@@ -590,7 +591,7 @@ export default function ScanScreen() {
                       value={supplier}
                       onChangeText={setSupplier}
                       placeholder={language === 'bg' ? 'Име на фирмата' : 'Company name'}
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                     />
                   </View>
 
@@ -603,14 +604,14 @@ export default function ScanScreen() {
                         onChangeText={setSupplierEik}
                         keyboardType="number-pad"
                         placeholder="131071587"
-                        placeholderTextColor="#64748B"
+                        placeholderTextColor={COLORS.textMuted}
                         maxLength={13}
                       />
                       {eikCheck && (
                         <Ionicons
                           name={eikCheck.valid ? 'checkmark-circle' : 'alert-circle'}
                           size={22}
-                          color={eikCheck.valid ? '#10B981' : '#F59E0B'}
+                          color={eikCheck.valid ? COLORS.success : COLORS.warning}
                         />
                       )}
                     </View>
@@ -628,7 +629,7 @@ export default function ScanScreen() {
                       value={invoiceNumber}
                       onChangeText={setInvoiceNumber}
                       placeholder="0000000001"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                     />
                   </View>
 
@@ -639,15 +640,15 @@ export default function ScanScreen() {
                       style={[styles.dateInputButton, dateFoundByOcr === false && styles.dateInputButtonWarning]}
                       onPress={() => setDatePickerVisible(true)}
                     >
-                      <Ionicons name="calendar" size={20} color={dateFoundByOcr === false ? '#F59E0B' : '#8B5CF6'} />
+                      <Ionicons name="calendar" size={20} color={dateFoundByOcr === false ? COLORS.warning : COLORS.primary} />
                       <Text style={styles.dateInputText}>
                         {format(invoiceDate, 'd MMMM yyyy', { locale: dateLocale })}
                       </Text>
-                      <Ionicons name="chevron-down" size={20} color="#64748B" />
+                      <Ionicons name="chevron-down" size={20} color={COLORS.textMuted} />
                     </TouchableOpacity>
                     {dateFoundByOcr === false && (
                       <View style={styles.protocolNote}>
-                        <Ionicons name="alert-circle" size={16} color="#F59E0B" />
+                        <Ionicons name="alert-circle" size={16} color={COLORS.warning} />
                         <Text style={styles.protocolNoteText}>{t('scan.dateNotFoundNote')}</Text>
                       </View>
                     )}
@@ -676,7 +677,7 @@ export default function ScanScreen() {
                         onChangeText={setAmountWithoutVat}
                         keyboardType="decimal-pad"
                         placeholder="0.00"
-                        placeholderTextColor="#64748B"
+                        placeholderTextColor={COLORS.textMuted}
                       />
                     </View>
                     <View style={[styles.inputGroup, { flex: 1 }]}>
@@ -687,7 +688,7 @@ export default function ScanScreen() {
                         onChangeText={setVatAmount}
                         keyboardType="decimal-pad"
                         placeholder="0.00"
-                        placeholderTextColor="#64748B"
+                        placeholderTextColor={COLORS.textMuted}
                       />
                     </View>
                   </View>
@@ -700,7 +701,7 @@ export default function ScanScreen() {
                       onChangeText={setTotalAmount}
                       keyboardType="decimal-pad"
                       placeholder="0.00"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                     />
                   </View>
 
@@ -721,7 +722,7 @@ export default function ScanScreen() {
                     </View>
                     {vatTreatment === 'reverse_charge' && (
                       <View style={styles.protocolNote}>
-                        <Ionicons name="information-circle" size={16} color="#8B5CF6" />
+                        <Ionicons name="information-circle" size={16} color={COLORS.primary} />
                         <Text style={styles.protocolNoteText}>{t('scan.reverseChargeNote')}</Text>
                       </View>
                     )}
@@ -744,13 +745,13 @@ export default function ScanScreen() {
                     </View>
                     {!paymentMethod && paymentDueDate && (
                       <View style={styles.protocolNote}>
-                        <Ionicons name="information-circle" size={16} color="#8B5CF6" />
+                        <Ionicons name="information-circle" size={16} color={COLORS.primary} />
                         <Text style={styles.protocolNoteText}>{t('scan.paymentMethodNotDetectedNote')}</Text>
                       </View>
                     )}
                     {paymentMethod === 'cash' && (
                       <View style={styles.protocolNote}>
-                        <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                        <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
                         <Text style={styles.protocolNoteText}>{t('scan.cashAutoPaidNote')}</Text>
                       </View>
                     )}
@@ -759,13 +760,13 @@ export default function ScanScreen() {
                         style={[styles.dateInputButton, { marginTop: 10 }]}
                         onPress={() => setDueDatePickerVisible(true)}
                       >
-                        <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                        <Ionicons name="calendar" size={20} color={COLORS.primary} />
                         <Text style={styles.dateInputText}>
                           {paymentDueDate
                             ? format(paymentDueDate, 'd MMMM yyyy', { locale: dateLocale })
                             : t('scan.paymentDueDateDefault')}
                         </Text>
-                        <Ionicons name="chevron-down" size={20} color="#64748B" />
+                        <Ionicons name="chevron-down" size={20} color={COLORS.textMuted} />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -791,7 +792,7 @@ export default function ScanScreen() {
                         {language === 'bg' ? 'Продукти/артикули' : 'Products/items'}
                       </Text>
                       <TouchableOpacity style={styles.addItemButton} onPress={addItem}>
-                        <Ionicons name="add" size={18} color="#8B5CF6" />
+                        <Ionicons name="add" size={18} color={COLORS.primary} />
                         <Text style={styles.addItemButtonText}>
                           {language === 'bg' ? 'Добави' : 'Add'}
                         </Text>
@@ -812,7 +813,7 @@ export default function ScanScreen() {
                             value={item.name}
                             onChangeText={(v) => updateItem(index, { name: v })}
                             placeholder={language === 'bg' ? 'Име на продукта' : 'Product name'}
-                            placeholderTextColor="#64748B"
+                            placeholderTextColor={COLORS.textMuted}
                           />
                           <View style={styles.itemRowFields}>
                             <TextInput
@@ -821,14 +822,14 @@ export default function ScanScreen() {
                               onChangeText={(v) => updateItem(index, { quantity: v })}
                               keyboardType="decimal-pad"
                               placeholder={language === 'bg' ? 'Бр.' : 'Qty'}
-                              placeholderTextColor="#64748B"
+                              placeholderTextColor={COLORS.textMuted}
                             />
                             <TextInput
                               style={[styles.input, styles.itemSmallInput]}
                               value={item.unit}
                               onChangeText={(v) => updateItem(index, { unit: v })}
                               placeholder={language === 'bg' ? 'Мярка' : 'Unit'}
-                              placeholderTextColor="#64748B"
+                              placeholderTextColor={COLORS.textMuted}
                             />
                             <TextInput
                               style={[styles.input, styles.itemSmallInput]}
@@ -836,10 +837,10 @@ export default function ScanScreen() {
                               onChangeText={(v) => updateItem(index, { unit_price: v })}
                               keyboardType="decimal-pad"
                               placeholder={language === 'bg' ? 'Цена' : 'Price'}
-                              placeholderTextColor="#64748B"
+                              placeholderTextColor={COLORS.textMuted}
                             />
                             <TouchableOpacity style={styles.removeItemButton} onPress={() => removeItem(index)}>
-                              <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                              <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -854,7 +855,7 @@ export default function ScanScreen() {
                       value={notes}
                       onChangeText={setNotes}
                       placeholder={language === 'bg' ? 'Допълнителни бележки...' : 'Additional notes...'}
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                       multiline
                       numberOfLines={3}
                     />
@@ -918,12 +919,12 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 4,
   },
   modeToggle: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 4,
     marginBottom: 20,
@@ -935,12 +936,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modeButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   modeButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   modeButtonTextActive: {
     color: 'white',
@@ -951,12 +952,12 @@ const styles = StyleSheet.create({
   },
   scanButton: {
     flex: 1,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     borderStyle: 'dashed',
   },
   scanIconContainer: {
@@ -976,10 +977,10 @@ const styles = StyleSheet.create({
   },
   scanButtonHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   tipsBox: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginTop: 20,
@@ -1004,12 +1005,12 @@ const styles = StyleSheet.create({
   tipText: {
     flex: 1,
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     lineHeight: 19,
   },
   tipsFooter: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 4,
     fontStyle: 'italic',
   },
@@ -1017,13 +1018,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   imagePreview: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
   },
   pagesCountText: {
-    color: '#C4B5FD',
+    color: COLORS.primaryLight,
     fontSize: 13,
     fontWeight: '600',
     marginBottom: 10,
@@ -1039,9 +1040,9 @@ const styles = StyleSheet.create({
     width: 72,
     height: 96,
     borderRadius: 8,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   pageThumbBadge: {
     position: 'absolute',
@@ -1064,7 +1065,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#EF4444',
+    backgroundColor: COLORS.danger,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1073,7 +1074,7 @@ const styles = StyleSheet.create({
     height: 96,
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1094,7 +1095,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   addPageButtonText: {
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -1107,23 +1108,23 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   retakeText: {
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontSize: 14,
     fontWeight: '500',
   },
   scanningContainer: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 40,
     alignItems: 'center',
   },
   scanningText: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 16,
     fontSize: 16,
   },
   formContainer: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 32,
@@ -1136,7 +1137,7 @@ const styles = StyleSheet.create({
   },
   formHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 20,
   },
   inputGroup: {
@@ -1144,17 +1145,17 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     color: 'white',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   textArea: {
     height: 80,
@@ -1170,7 +1171,7 @@ const styles = StyleSheet.create({
   },
   eikWarningText: {
     fontSize: 12,
-    color: '#F59E0B',
+    color: COLORS.warning,
     marginTop: 6,
   },
   vatTreatmentGrid: {
@@ -1182,17 +1183,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   vatTreatmentChipActive: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   vatTreatmentChipText: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   vatTreatmentChipTextActive: {
@@ -1210,7 +1211,7 @@ const styles = StyleSheet.create({
   protocolNoteText: {
     flex: 1,
     fontSize: 12,
-    color: '#C4B5FD',
+    color: COLORS.primaryLight,
     lineHeight: 18,
   },
   row: {
@@ -1218,7 +1219,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   saveButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     padding: 16,
     flexDirection: 'row',
@@ -1238,15 +1239,15 @@ const styles = StyleSheet.create({
   dateInputButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     gap: 10,
   },
   dateInputButtonWarning: {
-    borderColor: '#F59E0B',
+    borderColor: COLORS.warning,
   },
   dateInputText: {
     flex: 1,
@@ -1270,13 +1271,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   correctionsTitle: {
-    color: '#10B981',
+    color: COLORS.success,
     fontSize: 14,
     fontWeight: '600',
     flex: 1,
   },
   confidenceBadge: {
-    backgroundColor: '#10B981',
+    backgroundColor: COLORS.success,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
@@ -1293,7 +1294,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   correctionText: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 12,
     flex: 1,
     lineHeight: 18,
@@ -1316,22 +1317,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(139, 92, 246, 0.15)',
   },
   addItemButtonText: {
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontSize: 13,
     fontWeight: '600',
   },
   itemsEmptyHint: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 13,
     marginTop: 8,
   },
   itemRow: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 12,
     marginTop: 10,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   itemNameInput: {
     marginBottom: 8,

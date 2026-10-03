@@ -18,6 +18,7 @@ import { Alert } from '../utils/alert';
 import { api } from '../services/api';
 import { ClosedDateException } from '../types';
 import { useTranslation } from '../i18n';
+import { COLORS } from '../theme/colors';
 
 // Python date.weekday() convention (0=Monday..6=Sunday) - matches the
 // backend's Company.closed_weekdays exactly, so this array can be sent
@@ -41,13 +42,13 @@ function jsDayToWeekday(jsDay: number): number {
 const CALENDAR_THEME = {
   backgroundColor: 'transparent',
   calendarBackground: 'transparent',
-  textSectionTitleColor: '#64748B',
-  dayTextColor: '#E2E8F0',
-  textDisabledColor: '#334155',
+  textSectionTitleColor: COLORS.textMuted,
+  dayTextColor: COLORS.textLight,
+  textDisabledColor: COLORS.border,
   monthTextColor: 'white',
-  arrowColor: '#8B5CF6',
-  todayTextColor: '#8B5CF6',
-  selectedDayBackgroundColor: '#8B5CF6',
+  arrowColor: COLORS.primary,
+  todayTextColor: COLORS.primary,
+  selectedDayBackgroundColor: COLORS.primary,
 };
 
 interface ClosedDaysCalendarProps {
@@ -133,15 +134,15 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
       if (exception) {
         marks[dateStr] = {
           customStyles: {
-            container: { backgroundColor: exception.closed ? '#EF4444' : '#10B981', borderRadius: 8 },
+            container: { backgroundColor: exception.closed ? COLORS.danger : COLORS.success, borderRadius: 8 },
             text: { color: 'white', fontWeight: '700' },
           },
         };
       } else if (closedWeekdays.includes(jsDayToWeekday(d.getDay()))) {
         marks[dateStr] = {
           customStyles: {
-            container: { backgroundColor: '#334155', borderRadius: 8 },
-            text: { color: '#94A3B8' },
+            container: { backgroundColor: COLORS.border, borderRadius: 8 },
+            text: { color: COLORS.textSecondary },
           },
         };
       }
@@ -197,9 +198,9 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
     <View>
       {collapsible && (
         <TouchableOpacity style={styles.collapsibleHeader} onPress={() => setExpanded((prev) => !prev)}>
-          <Ionicons name="calendar-outline" size={20} color="#8B5CF6" />
+          <Ionicons name="calendar-outline" size={20} color={COLORS.primary} />
           <Text style={styles.collapsibleHeaderTitle}>{t('closedDays.title')}</Text>
-          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color="#8B5CF6" />
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={COLORS.primary} />
         </TouchableOpacity>
       )}
 
@@ -210,7 +211,7 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
       {expanded && (
         loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
+            <ActivityIndicator size="large" color={COLORS.primary} />
           </View>
         ) : (
           <>
@@ -251,15 +252,15 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
               </View>
               <View style={styles.legendRow}>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#334155' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: COLORS.border }]} />
                   <Text style={styles.legendText}>{t('closedDays.legendWeekly')}</Text>
                 </View>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: COLORS.danger }]} />
                   <Text style={styles.legendText}>{t('closedDays.legendClosed')}</Text>
                 </View>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: COLORS.success }]} />
                   <Text style={styles.legendText}>{t('closedDays.legendOpen')}</Text>
                 </View>
               </View>
@@ -276,7 +277,7 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
                 {selectedDate ? format(new Date(`${selectedDate}T00:00:00`), 'd MMMM yyyy') : ''}
               </Text>
               <TouchableOpacity onPress={() => setDayModalVisible(false)}>
-                <Ionicons name="close" size={26} color="#94A3B8" />
+                <Ionicons name="close" size={26} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -293,7 +294,7 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
             <TextInput
               style={styles.labelInput}
               placeholder={t('closedDays.labelPlaceholder')}
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
               value={labelInput}
               onChangeText={setLabelInput}
             />
@@ -333,7 +334,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
   },
@@ -345,7 +346,7 @@ const styles = StyleSheet.create({
   },
   homeHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     lineHeight: 17,
     marginTop: 8,
     marginBottom: 8,
@@ -353,7 +354,7 @@ const styles = StyleSheet.create({
   },
   loadingContainer: { paddingVertical: 30, alignItems: 'center' },
   section: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -370,7 +371,7 @@ const styles = StyleSheet.create({
   },
   sectionHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 14,
     lineHeight: 18,
   },
@@ -384,24 +385,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   weekdayChipActive: {
-    backgroundColor: '#EF4444',
-    borderColor: '#EF4444',
+    backgroundColor: COLORS.danger,
+    borderColor: COLORS.danger,
   },
   weekdayChipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   weekdayChipTextActive: {
     color: 'white',
   },
   saveButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
@@ -433,7 +434,7 @@ const styles = StyleSheet.create({
   },
   legendText: {
     fontSize: 11,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   modalOverlay: {
     flex: 1,
@@ -442,7 +443,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
   },
@@ -459,17 +460,17 @@ const styles = StyleSheet.create({
   },
   modalStatusText: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 14,
   },
   labelInput: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 14,
     color: 'white',
     fontSize: 14,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     marginBottom: 14,
   },
   modalActionButton: {
@@ -482,10 +483,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   modalActionClosed: {
-    backgroundColor: '#EF4444',
+    backgroundColor: COLORS.danger,
   },
   modalActionOpen: {
-    backgroundColor: '#10B981',
+    backgroundColor: COLORS.success,
   },
   modalActionText: {
     color: 'white',
@@ -497,7 +498,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   modalRemoveText: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 13,
     fontWeight: '500',
   },

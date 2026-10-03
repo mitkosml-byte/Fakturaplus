@@ -21,6 +21,7 @@ import { Company } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -128,7 +129,7 @@ export default function CompanySettingsScreen() {
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
           <SafeAreaView style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
+            <ActivityIndicator size="large" color={COLORS.primary} />
           </SafeAreaView>
         </View>
       </ImageBackground>
@@ -165,14 +166,14 @@ export default function CompanySettingsScreen() {
                 <RefreshControl
                   refreshing={refreshing}
                   onRefresh={onRefresh}
-                  colors={['#8B5CF6']}
-                  tintColor="#8B5CF6"
+                  colors={[COLORS.primary]}
+                  tintColor={COLORS.primary}
                 />
               }
             >
               {/* Info Card */}
               <View style={styles.infoCard}>
-                <Ionicons name="business" size={24} color="#8B5CF6" />
+                <Ionicons name="business" size={24} color={COLORS.primary} />
                 <Text style={styles.infoText}>
                   {t('company.infoText')}
                 </Text>
@@ -188,11 +189,11 @@ export default function CompanySettingsScreen() {
                 onPress={() => router.push('/join-company')}
               >
                 <View style={styles.joinToggle}>
-                  <Ionicons name="people" size={20} color="#8B5CF6" />
+                  <Ionicons name="people" size={20} color={COLORS.primary} />
                   <Text style={styles.joinToggleText}>
                     {t('company.joinExisting')}
                   </Text>
-                  <Ionicons name="chevron-forward" size={20} color="#64748B" />
+                  <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
                 </View>
                 <Text style={styles.joinHint}>
                   {t('company.joinHint')}
@@ -212,7 +213,7 @@ export default function CompanySettingsScreen() {
                     value={name}
                     onChangeText={setName}
                     placeholder="My Company EOOD"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
 
@@ -223,7 +224,7 @@ export default function CompanySettingsScreen() {
                     value={eik}
                     onChangeText={setEik}
                     placeholder="123456789"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     keyboardType="number-pad"
                     editable={!company || !hasOtherUsers}
                   />
@@ -239,7 +240,7 @@ export default function CompanySettingsScreen() {
                     value={vatNumber}
                     onChangeText={setVatNumber}
                     placeholder="BG123456789"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
 
@@ -250,7 +251,7 @@ export default function CompanySettingsScreen() {
                     value={mol}
                     onChangeText={setMol}
                     placeholder="John Doe"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
 
@@ -262,7 +263,7 @@ export default function CompanySettingsScreen() {
                       value={address}
                       onChangeText={setAddress}
                       placeholder="Example St. 1"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                     />
                   </View>
                   <View style={[styles.inputGroup, { flex: 1 }]}>
@@ -272,7 +273,7 @@ export default function CompanySettingsScreen() {
                       value={city}
                       onChangeText={setCity}
                       placeholder="Sofia"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                     />
                   </View>
                 </View>
@@ -285,7 +286,7 @@ export default function CompanySettingsScreen() {
                       value={phone}
                       onChangeText={setPhone}
                       placeholder="+359 888 123456"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                       keyboardType="phone-pad"
                     />
                   </View>
@@ -296,7 +297,7 @@ export default function CompanySettingsScreen() {
                       value={email}
                       onChangeText={setEmail}
                       placeholder="office@company.com"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                       keyboardType="email-address"
                       autoCapitalize="none"
                     />
@@ -312,7 +313,7 @@ export default function CompanySettingsScreen() {
                     value={bankName}
                     onChangeText={setBankName}
                     placeholder="Bank name"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
 
@@ -323,7 +324,7 @@ export default function CompanySettingsScreen() {
                     value={bankIban}
                     onChangeText={setBankIban}
                     placeholder="BG12XXXX00001234567890"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     autoCapitalize="characters"
                   />
                 </View>
@@ -377,7 +378,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: COLORS.border,
   },
   backButton: {
     padding: 8,
@@ -408,11 +409,11 @@ const styles = StyleSheet.create({
   infoText: {
     flex: 1,
     fontSize: 14,
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
     lineHeight: 20,
   },
   joinSection: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     marginBottom: 20,
     padding: 16,
@@ -430,11 +431,11 @@ const styles = StyleSheet.create({
   },
   joinHint: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 8,
   },
   formContainer: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 32,
@@ -448,7 +449,7 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 16,
     marginBottom: 12,
   },
@@ -457,21 +458,21 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     color: 'white',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   inputHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 6,
   },
   row: {
@@ -480,7 +481,7 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     flexDirection: 'row',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',

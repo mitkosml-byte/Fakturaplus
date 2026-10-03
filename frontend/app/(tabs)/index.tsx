@@ -28,6 +28,7 @@ import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
+import { COLORS } from '../../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -425,7 +426,7 @@ export default function HomeScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
           <ScrollView
             style={styles.scrollView}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           >
             {/* Header */}
             <View style={styles.header}>
@@ -434,7 +435,7 @@ export default function HomeScreen() {
                 <Text style={styles.date}>{today}</Text>
               </View>
               <View style={styles.headerIcon}>
-                <Ionicons name="receipt" size={28} color="#8B5CF6" />
+                <Ionicons name="receipt" size={28} color={COLORS.primary} />
               </View>
             </View>
 
@@ -444,20 +445,20 @@ export default function HomeScreen() {
             <View style={styles.summaryContainer}>
               <View style={[styles.summaryCard, styles.incomeCard]}>
                 <View style={styles.cardIcon}>
-                  <Ionicons name="trending-up" size={24} color="#10B981" />
+                  <Ionicons name="trending-up" size={24} color={COLORS.success} />
                 </View>
                 <Text style={styles.cardLabel}>{t('home.totalIncome')}</Text>
-                <Text style={[styles.cardValue, { color: '#10B981' }]}>
+                <Text style={[styles.cardValue, { color: COLORS.success }]}>
                   {summary?.total_income.toFixed(2) || '0.00'} €
                 </Text>
               </View>
 
               <View style={[styles.summaryCard, styles.expenseCard]}>
                 <View style={styles.cardIcon}>
-                  <Ionicons name="trending-down" size={24} color="#EF4444" />
+                  <Ionicons name="trending-down" size={24} color={COLORS.danger} />
             </View>
             <Text style={styles.cardLabel}>{t('home.totalExpenses')}</Text>
-            <Text style={[styles.cardValue, { color: '#EF4444' }]}>
+            <Text style={[styles.cardValue, { color: COLORS.danger }]}>
               {summary?.total_expense.toFixed(2) || '0.00'} €
             </Text>
           </View>
@@ -467,20 +468,20 @@ export default function HomeScreen() {
         <View style={styles.summaryContainer}>
           <View style={[styles.summaryCard, styles.cashCard]}>
             <View style={styles.cardIcon}>
-              <Ionicons name="cash-outline" size={24} color="#10B981" />
+              <Ionicons name="cash-outline" size={24} color={COLORS.success} />
             </View>
             <Text style={styles.cardLabel}>{t('home.cashRevenue')}</Text>
-            <Text style={[styles.cardValue, { color: '#10B981' }]}>
+            <Text style={[styles.cardValue, { color: COLORS.success }]}>
               {(summary?.total_cash_revenue || 0).toFixed(2)} €
             </Text>
           </View>
 
           <View style={[styles.summaryCard, styles.cardCard]}>
             <View style={styles.cardIcon}>
-              <Ionicons name="card-outline" size={24} color="#3B82F6" />
+              <Ionicons name="card-outline" size={24} color={COLORS.info} />
             </View>
             <Text style={styles.cardLabel}>{t('home.cardRevenue')}</Text>
-            <Text style={[styles.cardValue, { color: '#3B82F6' }]}>
+            <Text style={[styles.cardValue, { color: COLORS.info }]}>
               {(summary?.total_card_revenue || 0).toFixed(2)} €
             </Text>
           </View>
@@ -489,10 +490,10 @@ export default function HomeScreen() {
         {/* VAT Card */}
         <View style={styles.vatCard}>
           <View style={styles.vatHeader}>
-            <Ionicons name="calculator" size={24} color="#8B5CF6" />
+            <Ionicons name="calculator" size={24} color={COLORS.primary} />
             <Text style={styles.vatTitle}>{t('home.vatToPay')}</Text>
           </View>
-          <Text style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? '#EF4444' : '#10B981' }]}>
+          <Text style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
             {(summary?.vat_to_pay || 0).toFixed(2)} €
           </Text>
           <View style={styles.vatDetails}>
@@ -519,12 +520,12 @@ export default function HomeScreen() {
               <Ionicons
                 name={(summary?.overdue_invoice_count || 0) > 0 ? 'alert-circle' : 'time-outline'}
                 size={24}
-                color={(summary?.overdue_invoice_count || 0) > 0 ? '#EF4444' : '#F59E0B'}
+                color={(summary?.overdue_invoice_count || 0) > 0 ? COLORS.danger : COLORS.warning}
               />
               <Text style={styles.unpaidTitle}>{t('home.unpaidInvoices')}</Text>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </View>
-            <Text style={[styles.unpaidValue, { color: (summary?.overdue_invoice_count || 0) > 0 ? '#EF4444' : '#F59E0B' }]}>
+            <Text style={[styles.unpaidValue, { color: (summary?.overdue_invoice_count || 0) > 0 ? COLORS.danger : COLORS.warning }]}>
               {(summary?.total_unpaid_amount || 0).toFixed(2)} €
             </Text>
             <Text style={styles.unpaidSubtitle}>
@@ -547,9 +548,9 @@ export default function HomeScreen() {
           activeOpacity={0.8}
         >
           <View style={styles.avgTurnoverHeader}>
-            <Ionicons name="speedometer" size={24} color="#3B82F6" />
+            <Ionicons name="speedometer" size={24} color={COLORS.info} />
             <Text style={styles.avgTurnoverTitle}>{t('home.avgDailyTurnover')}</Text>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </View>
           <Text style={styles.avgTurnoverValue}>
             {(((summary?.total_income || 0)) / openDaysThisMonth).toFixed(2)} €
@@ -580,7 +581,7 @@ export default function HomeScreen() {
           </View>
           <View style={styles.statItem}>
             {summary && summary.total_pocket_money === null ? (
-              <Ionicons name="lock-closed" size={18} color="#64748B" style={{ marginBottom: 4 }} />
+              <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
             ) : (
               <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0}</Text>
             )}
@@ -588,9 +589,9 @@ export default function HomeScreen() {
           </View>
           <View style={styles.statItem}>
             {summary && summary.profit === null ? (
-              <Ionicons name="lock-closed" size={18} color="#64748B" style={{ marginBottom: 4 }} />
+              <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
             ) : (
-              <Text style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+              <Text style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}>
                 {summary?.profit?.toFixed(0) || 0}
               </Text>
             )}
@@ -604,7 +605,7 @@ export default function HomeScreen() {
           summary.financial_visibility.profit === false
         ) && (
           <View style={styles.restrictedNote}>
-            <Ionicons name="information-circle-outline" size={14} color="#94A3B8" />
+            <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
             <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
           </View>
         )}
@@ -617,7 +618,7 @@ export default function HomeScreen() {
           <View style={styles.actionsContainer}>
             {hasPermission('add_revenue') && (
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+                style={[styles.actionButton, { backgroundColor: COLORS.success }]}
                 onPress={() => {
                   setRevenueDate(getDefaultActionDate());
                   setRevenueModalVisible(true);
@@ -630,7 +631,7 @@ export default function HomeScreen() {
 
             {hasPermission('add_expenses') && (
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#F59E0B' }]}
+                style={[styles.actionButton, { backgroundColor: COLORS.warning }]}
                 onPress={() => {
                   setExpenseDate(getDefaultActionDate());
                   setExpenseModalVisible(true);
@@ -647,13 +648,13 @@ export default function HomeScreen() {
           <View style={styles.importLinksRow}>
             {hasPermission('add_revenue') && (
               <TouchableOpacity style={styles.importLink} onPress={() => setImportRevenueModalVisible(true)}>
-                <Ionicons name="cloud-upload-outline" size={14} color="#8B5CF6" />
+                <Ionicons name="cloud-upload-outline" size={14} color={COLORS.primary} />
                 <Text style={styles.importLinkText}>{t('home.importRevenueHistory')}</Text>
               </TouchableOpacity>
             )}
             {hasPermission('add_expenses') && (
               <TouchableOpacity style={styles.importLink} onPress={() => setImportExpenseModalVisible(true)}>
-                <Ionicons name="cloud-upload-outline" size={14} color="#8B5CF6" />
+                <Ionicons name="cloud-upload-outline" size={14} color={COLORS.primary} />
                 <Text style={styles.importLinkText}>{t('home.importExpensesHistory')}</Text>
               </TouchableOpacity>
             )}
@@ -667,7 +668,7 @@ export default function HomeScreen() {
           <View style={styles.roiSection}>
             <View style={styles.roiHeader}>
               <View style={styles.roiTitleRow}>
-                <Ionicons name="person-circle" size={24} color="#8B5CF6" />
+                <Ionicons name="person-circle" size={24} color={COLORS.primary} />
                 <View style={{ flexShrink: 1 }}>
                   <Text style={styles.roiTitle} numberOfLines={1}>{t('personal.title')}</Text>
                   <Text style={styles.roiPeriodLabel} numberOfLines={1}>
@@ -680,7 +681,7 @@ export default function HomeScreen() {
                   style={styles.historyPersonalButton}
                   onPress={() => router.push('/personal-expenses')}
                 >
-                  <Ionicons name="time-outline" size={18} color="#94A3B8" />
+                  <Ionicons name="time-outline" size={18} color={COLORS.textSecondary} />
                   <Text style={styles.historyPersonalText}>{t('personal.history')}</Text>
                 </TouchableOpacity>
                 {isOwner && (
@@ -688,7 +689,7 @@ export default function HomeScreen() {
                     style={styles.addPersonalButton}
                     onPress={() => setPersonalExpenseModalVisible(true)}
                   >
-                    <Ionicons name="add-circle" size={20} color="#8B5CF6" />
+                    <Ionicons name="add-circle" size={20} color={COLORS.primary} />
                     <Text style={styles.addPersonalText}>{t('personal.addExpense')}</Text>
                   </TouchableOpacity>
                 )}
@@ -696,26 +697,26 @@ export default function HomeScreen() {
             </View>
 
             {loadingRoi ? (
-              <ActivityIndicator size="small" color="#8B5CF6" style={{ marginVertical: 20 }} />
+              <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 20 }} />
             ) : roiData ? (
               <>
                 {/* ROI Stats */}
                 <View style={styles.roiStats}>
                   <View style={styles.roiStatItem}>
                     <Text style={styles.roiStatLabel}>{t('roi.totalInvestment')}</Text>
-                    <Text style={[styles.roiStatValue, { color: '#EF4444' }]}>
+                    <Text style={[styles.roiStatValue, { color: COLORS.danger }]}>
                       {roiData.total_personal_investment.toFixed(2)} €
                     </Text>
                   </View>
                   <View style={styles.roiStatItem}>
                     <Text style={styles.roiStatLabel}>{t('roi.totalProfit')}</Text>
-                    <Text style={[styles.roiStatValue, { color: roiData.total_profit >= 0 ? '#10B981' : '#EF4444' }]}>
+                    <Text style={[styles.roiStatValue, { color: roiData.total_profit >= 0 ? COLORS.success : COLORS.danger }]}>
                       {roiData.total_profit.toFixed(2)} €
                     </Text>
                   </View>
                   <View style={styles.roiStatItem}>
                     <Text style={styles.roiStatLabel}>{t('roi.roiPercent')}</Text>
-                    <Text style={[styles.roiStatValue, { color: roiData.roi_percent >= 0 ? '#10B981' : '#EF4444' }]}>
+                    <Text style={[styles.roiStatValue, { color: roiData.roi_percent >= 0 ? COLORS.success : COLORS.danger }]}>
                       {roiData.roi_percent.toFixed(1)}%
                     </Text>
                   </View>
@@ -729,11 +730,11 @@ export default function HomeScreen() {
                   <Ionicons 
                     name={roiData.investment_covered ? "checkmark-circle" : "alert-circle"} 
                     size={20} 
-                    color={roiData.investment_covered ? '#10B981' : '#EF4444'} 
+                    color={roiData.investment_covered ? COLORS.success : COLORS.danger} 
                   />
                   <Text style={[
                     styles.roiStatusText,
-                    { color: roiData.investment_covered ? '#10B981' : '#EF4444' }
+                    { color: roiData.investment_covered ? COLORS.success : COLORS.danger }
                   ]}>
                     {roiData.investment_covered ? t('roi.investmentCovered') : t('roi.investmentNotCovered')}
                   </Text>
@@ -767,13 +768,13 @@ export default function HomeScreen() {
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{t('personal.addExpense')}</Text>
                 <TouchableOpacity onPress={() => setPersonalExpenseModalVisible(false)}>
-                  <Ionicons name="close" size={28} color="#94A3B8" />
+                  <Ionicons name="close" size={28} color={COLORS.textSecondary} />
                 </TouchableOpacity>
               </View>
 
               <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.editNoticeBanner}>
-                <Ionicons name="information-circle" size={18} color="#8B5CF6" />
+                <Ionicons name="information-circle" size={18} color={COLORS.primary} />
                 <Text style={styles.editNoticeText}>
                   {t('personal.periodNotice').replace(
                     '{period}',
@@ -787,7 +788,7 @@ export default function HomeScreen() {
                 <TextInput
                   style={styles.input}
                   placeholder="0.00"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={COLORS.textMuted}
                   keyboardType="decimal-pad"
                   value={personalAmount}
                   onChangeText={setPersonalAmount}
@@ -799,7 +800,7 @@ export default function HomeScreen() {
                 <TextInput
                   style={styles.input}
                   placeholder={language === 'bg' ? 'напр. Наем, Заплати...' : 'e.g. Rent, Salaries...'}
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={COLORS.textMuted}
                   value={personalDescription}
                   onChangeText={setPersonalDescription}
                 />
@@ -877,7 +878,7 @@ export default function HomeScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('home.dailyRevenue')}</Text>
               <TouchableOpacity onPress={closeRevenueModal}>
-                <Ionicons name="close" size={28} color="#94A3B8" />
+                <Ionicons name="close" size={28} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -890,13 +891,13 @@ export default function HomeScreen() {
                   style={styles.dateButton} 
                   onPress={() => setRevenueDate(subDays(revenueDate, 1))}
                 >
-                  <Ionicons name="chevron-back" size={24} color="#8B5CF6" />
+                  <Ionicons name="chevron-back" size={24} color={COLORS.primary} />
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={styles.dateDisplay}
                   onPress={() => setRevenueDatePickerVisible(true)}
                 >
-                  <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                  <Ionicons name="calendar" size={20} color={COLORS.primary} />
                   <Text style={styles.dateText}>
                     {format(revenueDate, 'd MMMM yyyy', { locale: dateLocale })}
                   </Text>
@@ -905,7 +906,7 @@ export default function HomeScreen() {
                   style={styles.dateButton} 
                   onPress={() => setRevenueDate(addDays(revenueDate, 1))}
                 >
-                  <Ionicons name="chevron-forward" size={24} color="#8B5CF6" />
+                  <Ionicons name="chevron-forward" size={24} color={COLORS.primary} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -928,14 +929,14 @@ export default function HomeScreen() {
             {/* Explains the edit-in-place semantics up front, since it's not
                 the obvious default for a "add revenue" form. */}
             <View style={styles.editNoticeBanner}>
-              <Ionicons name="information-circle" size={18} color="#8B5CF6" />
+              <Ionicons name="information-circle" size={18} color={COLORS.primary} />
               <Text style={styles.editNoticeText}>{t('home.editInPlaceNotice')}</Text>
             </View>
 
             {ocrAdditionNote && (
               <View style={[styles.editNoticeBanner, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
-                <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                <Text style={[styles.editNoticeText, { color: '#6EE7B7' }]}>{ocrAdditionNote}</Text>
+                <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+                <Text style={[styles.editNoticeText, { color: COLORS.successLight }]}>{ocrAdditionNote}</Text>
               </View>
             )}
 
@@ -947,7 +948,7 @@ export default function HomeScreen() {
                 onChangeText={setFiscalRevenue}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
               <Text style={styles.inputHint}>{t('home.includesVAT')}</Text>
             </View>
@@ -960,7 +961,7 @@ export default function HomeScreen() {
                 onChangeText={setCardRevenue}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
               <Text style={styles.inputHint}>{t('home.cardRevenueHint')}</Text>
             </View>
@@ -991,7 +992,7 @@ export default function HomeScreen() {
                 onChangeText={setPocketMoney}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
               <Text style={styles.inputHint}>{t('home.excludesVAT')}</Text>
             </View>
@@ -1014,7 +1015,7 @@ export default function HomeScreen() {
                 setExpenseModalVisible(false);
                 setExpenseDate(getDefaultActionDate());
               }}>
-                <Ionicons name="close" size={28} color="#94A3B8" />
+                <Ionicons name="close" size={28} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -1027,13 +1028,13 @@ export default function HomeScreen() {
                     style={styles.dateButton} 
                     onPress={() => setExpenseDate(subDays(expenseDate, 1))}
                   >
-                    <Ionicons name="chevron-back" size={24} color="#8B5CF6" />
+                    <Ionicons name="chevron-back" size={24} color={COLORS.primary} />
                   </TouchableOpacity>
                   <TouchableOpacity 
                     style={styles.dateDisplay}
                     onPress={() => setExpenseDatePickerVisible(true)}
                   >
-                    <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                    <Ionicons name="calendar" size={20} color={COLORS.primary} />
                     <Text style={styles.dateText}>
                       {format(expenseDate, 'd MMMM yyyy', { locale: dateLocale })}
                     </Text>
@@ -1042,7 +1043,7 @@ export default function HomeScreen() {
                     style={styles.dateButton} 
                     onPress={() => setExpenseDate(addDays(expenseDate, 1))}
                   >
-                    <Ionicons name="chevron-forward" size={24} color="#8B5CF6" />
+                    <Ionicons name="chevron-forward" size={24} color={COLORS.primary} />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1070,7 +1071,7 @@ export default function HomeScreen() {
                 
                 {loadingExpenses ? (
                   <View style={styles.loadingContainer}>
-                    <ActivityIndicator color="#F59E0B" />
+                    <ActivityIndicator color={COLORS.warning} />
                   </View>
                 ) : dayExpenses.length > 0 ? (
                   <>
@@ -1086,7 +1087,7 @@ export default function HomeScreen() {
                             style={styles.expenseDeleteButton}
                             onPress={() => handleDeleteExpense(expense.id)}
                           >
-                            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                            <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -1114,7 +1115,7 @@ export default function HomeScreen() {
                     value={expenseDescription}
                     onChangeText={setExpenseDescription}
                     placeholder={t('expenses.placeholder')}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
 
@@ -1126,11 +1127,11 @@ export default function HomeScreen() {
                     onChangeText={setExpenseAmount}
                     keyboardType="decimal-pad"
                     placeholder="0.00"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
 
-                <TouchableOpacity style={[styles.submitButton, { backgroundColor: '#F59E0B' }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
+                <TouchableOpacity style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
                   {isSubmittingForm ? <ActivityIndicator color="white" /> : (
                     <>
                       <Ionicons name="add-circle" size={20} color="white" />
@@ -1202,7 +1203,7 @@ const styles = StyleSheet.create({
   },
   date: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 4,
   },
   headerIcon: {
@@ -1220,36 +1221,36 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     flex: 1,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
   },
   incomeCard: {
     borderLeftWidth: 4,
-    borderLeftColor: '#10B981',
+    borderLeftColor: COLORS.success,
   },
   expenseCard: {
     borderLeftWidth: 4,
-    borderLeftColor: '#EF4444',
+    borderLeftColor: COLORS.danger,
   },
   cashCard: {
     borderLeftWidth: 4,
-    borderLeftColor: '#10B981',
+    borderLeftColor: COLORS.success,
   },
   cardCard: {
     borderLeftWidth: 4,
-    borderLeftColor: '#3B82F6',
+    borderLeftColor: COLORS.info,
   },
   unpaidCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#F59E0B',
+    borderColor: COLORS.warning,
   },
   unpaidCardOverdue: {
-    borderColor: '#EF4444',
+    borderColor: COLORS.danger,
   },
   unpaidHeader: {
     flexDirection: 'row',
@@ -1270,7 +1271,7 @@ const styles = StyleSheet.create({
   },
   unpaidSubtitle: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   cardIcon: {
     width: 40,
@@ -1283,7 +1284,7 @@ const styles = StyleSheet.create({
   },
   cardLabel: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 4,
   },
   cardValue: {
@@ -1291,12 +1292,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   vatCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#8B5CF6',
+    borderColor: COLORS.primary,
   },
   vatHeader: {
     flexDirection: 'row',
@@ -1316,7 +1317,7 @@ const styles = StyleSheet.create({
   },
   vatDetails: {
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: COLORS.border,
     paddingTop: 12,
   },
   vatDetailRow: {
@@ -1326,20 +1327,20 @@ const styles = StyleSheet.create({
   },
   vatDetailLabel: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   vatDetailValue: {
     fontSize: 13,
-    color: '#E2E8F0',
+    color: COLORS.textLight,
     fontWeight: '500',
   },
   avgTurnoverCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#3B82F6',
+    borderColor: COLORS.info,
   },
   avgTurnoverHeader: {
     flexDirection: 'row',
@@ -1356,12 +1357,12 @@ const styles = StyleSheet.create({
   avgTurnoverValue: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#3B82F6',
+    color: COLORS.info,
     marginBottom: 4,
   },
   avgTurnoverSubtitle: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   statsGrid: {
     flexDirection: 'row',
@@ -1371,7 +1372,7 @@ const styles = StyleSheet.create({
   },
   statItem: {
     width: '47%',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -1383,7 +1384,7 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 4,
   },
   restrictedNote: {
@@ -1396,7 +1397,7 @@ const styles = StyleSheet.create({
   },
   restrictedNoteText: {
     fontSize: 11,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     flexShrink: 1,
   },
   actionsContainer: {
@@ -1418,7 +1419,7 @@ const styles = StyleSheet.create({
   },
   importLinkText: {
     fontSize: 12,
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontWeight: '500',
   },
   actionButton: {
@@ -1441,7 +1442,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
@@ -1462,21 +1463,21 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     color: 'white',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   inputHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 6,
   },
   vatRateRow: {
@@ -1487,18 +1488,18 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   vatRateChipActive: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   vatRateChipText: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   vatRateChipTextActive: {
@@ -1518,11 +1519,11 @@ const styles = StyleSheet.create({
   editNoticeText: {
     flex: 1,
     fontSize: 12,
-    color: '#C4B5FD',
+    color: COLORS.primaryLight,
     lineHeight: 17,
   },
   submitButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -1537,10 +1538,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     overflow: 'hidden',
   },
   dateButton: {
@@ -1576,14 +1577,14 @@ const styles = StyleSheet.create({
   dayExpensesTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#F59E0B',
+    color: COLORS.warning,
     marginBottom: 12,
   },
   expenseItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     padding: 12,
     borderRadius: 8,
     marginBottom: 8,
@@ -1596,7 +1597,7 @@ const styles = StyleSheet.create({
   },
   expenseItemIndex: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     width: 20,
   },
   expenseItemDescription: {
@@ -1612,7 +1613,7 @@ const styles = StyleSheet.create({
   expenseItemAmount: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#F59E0B',
+    color: COLORS.warning,
   },
   expenseDeleteButton: {
     padding: 4,
@@ -1628,16 +1629,16 @@ const styles = StyleSheet.create({
   expensesTotalLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   expensesTotalValue: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#F59E0B',
+    color: COLORS.warning,
   },
   noExpensesText: {
     fontSize: 14,
-    color: '#64748B',
+    color: COLORS.textMuted,
     textAlign: 'center',
     paddingVertical: 8,
   },
@@ -1671,12 +1672,12 @@ const styles = StyleSheet.create({
   roiTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#8B5CF6',
+    color: COLORS.primary,
     flexShrink: 1,
   },
   roiPeriodLabel: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     textTransform: 'capitalize',
     marginTop: 1,
   },
@@ -1696,7 +1697,7 @@ const styles = StyleSheet.create({
   },
   addPersonalText: {
     fontSize: 12,
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontWeight: '600',
   },
   historyPersonalButton: {
@@ -1710,7 +1711,7 @@ const styles = StyleSheet.create({
   },
   historyPersonalText: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '600',
   },
   roiStats: {
@@ -1724,7 +1725,7 @@ const styles = StyleSheet.create({
   },
   roiStatLabel: {
     fontSize: 11,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 4,
   },
   roiStatValue: {
@@ -1752,12 +1753,12 @@ const styles = StyleSheet.create({
   aiInsightsTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#8B5CF6',
+    color: COLORS.primary,
     marginBottom: 10,
   },
   aiInsightText: {
     fontSize: 13,
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
     lineHeight: 20,
     marginBottom: 6,
   },
@@ -1767,12 +1768,12 @@ const styles = StyleSheet.create({
   },
   noRoiDataText: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 4,
   },
   noRoiDataSubtext: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   typeSelector: {
     flexDirection: 'row',
@@ -1783,15 +1784,15 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     alignItems: 'center',
   },
   typeButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   typeButtonText: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   typeButtonTextActive: {
@@ -1804,15 +1805,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 20,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     marginRight: 8,
   },
   categoryChipActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   categoryChipText: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   categoryChipTextActive: {
     color: 'white',

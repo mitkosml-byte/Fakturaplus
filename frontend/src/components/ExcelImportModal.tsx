@@ -7,6 +7,7 @@ import { downloadAndShareFile } from '../utils/downloadFile';
 import { Alert } from '../utils/alert';
 import { useTranslation } from '../i18n';
 import { ImportEntity, ImportPreviewResult } from '../types';
+import { COLORS } from '../theme/colors';
 
 interface FieldConfig {
   key: string;
@@ -105,7 +106,7 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
             <TouchableOpacity onPress={handleClose}>
-              <Ionicons name="close" size={28} color="#94A3B8" />
+              <Ionicons name="close" size={28} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -113,7 +114,7 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
             {step === 'pick' && (
               <View>
                 <TouchableOpacity style={styles.actionButton} onPress={handleDownloadTemplate}>
-                  <Ionicons name="download-outline" size={20} color="#8B5CF6" />
+                  <Ionicons name="download-outline" size={20} color={COLORS.primary} />
                   <Text style={styles.actionButtonText}>{t('import.downloadTemplate')}</Text>
                 </TouchableOpacity>
                 <Text style={styles.hint}>{t('import.downloadTemplateHint')}</Text>
@@ -127,7 +128,7 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
 
             {step === 'loading' && (
               <View style={styles.centerBox}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
+                <ActivityIndicator size="large" color={COLORS.primary} />
                 <Text style={styles.hint}>{t('import.analyzing')}</Text>
               </View>
             )}
@@ -140,11 +141,11 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
                     <Text style={styles.summaryLabel}>{t('import.totalRows')}</Text>
                   </View>
                   <View style={styles.summaryTile}>
-                    <Text style={[styles.summaryNumber, { color: '#10B981' }]}>{preview.valid_count}</Text>
+                    <Text style={[styles.summaryNumber, { color: COLORS.success }]}>{preview.valid_count}</Text>
                     <Text style={styles.summaryLabel}>{t('import.validRows')}</Text>
                   </View>
                   <View style={styles.summaryTile}>
-                    <Text style={[styles.summaryNumber, preview.error_count > 0 && { color: '#EF4444' }]}>
+                    <Text style={[styles.summaryNumber, preview.error_count > 0 && { color: COLORS.danger }]}>
                       {preview.error_count}
                     </Text>
                     <Text style={styles.summaryLabel}>{t('import.errorRows')}</Text>
@@ -157,7 +158,7 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
                       <Ionicons
                         name={row.status === 'ok' ? 'checkmark-circle' : 'close-circle'}
                         size={16}
-                        color={row.status === 'ok' ? '#10B981' : '#EF4444'}
+                        color={row.status === 'ok' ? COLORS.success : COLORS.danger}
                       />
                       <Text style={styles.rowCardNumber}>{t('import.row')} {row.row_number}</Text>
                     </View>
@@ -195,14 +196,14 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
 
             {step === 'committing' && (
               <View style={styles.centerBox}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
+                <ActivityIndicator size="large" color={COLORS.primary} />
                 <Text style={styles.hint}>{t('import.importing')}</Text>
               </View>
             )}
 
             {step === 'done' && commitSummary && (
               <View style={styles.centerBox}>
-                <Ionicons name="checkmark-circle" size={48} color="#10B981" />
+                <Ionicons name="checkmark-circle" size={48} color={COLORS.success} />
                 <Text style={styles.doneText}>
                   {t('import.doneSummary').replace('{imported}', String(commitSummary.imported))}
                 </Text>
@@ -232,7 +233,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   content: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 24,
     padding: 20,
     width: '100%',
@@ -257,21 +258,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     padding: 14,
     marginBottom: 8,
   },
   actionButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   primaryButton: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
     marginTop: 16,
   },
   primaryButtonText: {
@@ -283,12 +284,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   secondaryButtonText: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 13,
   },
   hint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 8,
     lineHeight: 17,
   },
@@ -303,7 +304,7 @@ const styles = StyleSheet.create({
   },
   summaryTile: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     paddingVertical: 10,
     alignItems: 'center',
@@ -315,19 +316,19 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 11,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 2,
   },
   rowCard: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 10,
     marginBottom: 8,
     borderLeftWidth: 3,
-    borderLeftColor: '#10B981',
+    borderLeftColor: COLORS.success,
   },
   rowCardError: {
-    borderLeftColor: '#EF4444',
+    borderLeftColor: COLORS.danger,
   },
   rowCardHeader: {
     flexDirection: 'row',
@@ -338,7 +339,7 @@ const styles = StyleSheet.create({
   rowCardNumber: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   rowCardDetail: {
     fontSize: 12,
@@ -346,12 +347,12 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 12,
-    color: '#EF4444',
+    color: COLORS.danger,
     marginTop: 2,
   },
   warningText: {
     fontSize: 12,
-    color: '#F59E0B',
+    color: COLORS.warning,
     marginTop: 2,
   },
   doneText: {

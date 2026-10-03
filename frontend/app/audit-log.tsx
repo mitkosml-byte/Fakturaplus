@@ -15,6 +15,7 @@ import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 type ActionFilter = 'all' | 'create' | 'update' | 'delete' | 'export';
 
@@ -30,10 +31,10 @@ interface AuditLogEntry {
 }
 
 const ACTION_ICONS: Record<string, { name: any; color: string }> = {
-  create: { name: 'add-circle', color: '#10B981' },
-  update: { name: 'create', color: '#F59E0B' },
-  delete: { name: 'trash', color: '#EF4444' },
-  export: { name: 'download', color: '#3B82F6' },
+  create: { name: 'add-circle', color: COLORS.success },
+  update: { name: 'create', color: COLORS.warning },
+  delete: { name: 'trash', color: COLORS.danger },
+  export: { name: 'download', color: COLORS.info },
 };
 
 export default function AuditLogScreen() {
@@ -142,17 +143,17 @@ export default function AuditLogScreen() {
 
         <ScrollView
           style={styles.content}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         >
           {!loading && logs.length === 0 && (
             <View style={styles.emptyContainer}>
-              <Ionicons name="document-text-outline" size={56} color="#334155" />
+              <Ionicons name="document-text-outline" size={56} color={COLORS.border} />
               <Text style={styles.emptyText}>{t('auditLog.empty')}</Text>
             </View>
           )}
 
           {logs.map((entry) => {
-            const icon = ACTION_ICONS[entry.action] || { name: 'ellipse', color: '#64748B' };
+            const icon = ACTION_ICONS[entry.action] || { name: 'ellipse', color: COLORS.textMuted };
             return (
               <View key={entry.id} style={styles.logRow}>
                 <View style={[styles.logIcon, { backgroundColor: `${icon.color}20` }]}>
@@ -178,7 +179,7 @@ export default function AuditLogScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
   safeArea: {
     flex: 1,
@@ -189,7 +190,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
   },
   backButton: {
     padding: 8,
@@ -213,16 +214,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     marginRight: 8,
     flexShrink: 0,
   },
   filterChipActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   filterChipText: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   filterChipTextActive: {
@@ -238,13 +239,13 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 16,
   },
   logRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,
@@ -262,7 +263,7 @@ const styles = StyleSheet.create({
   },
   logSummary: {
     fontSize: 14,
-    color: '#E2E8F0',
+    color: COLORS.textLight,
     lineHeight: 20,
   },
   logUser: {
@@ -271,7 +272,7 @@ const styles = StyleSheet.create({
   },
   logTimestamp: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 4,
   },
 });

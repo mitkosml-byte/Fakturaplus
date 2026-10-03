@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useLanguageStore } from '../i18n';
+import { COLORS } from '../theme/colors';
 
 interface LoadingScreenProps {
   message?: string;
@@ -11,7 +12,7 @@ export function LoadingScreen({ message }: LoadingScreenProps) {
   
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color="#8B5CF6" />
+      <ActivityIndicator size="large" color={COLORS.primary} />
       <Text style={styles.text}>
         {message || (language === 'bg' ? 'Зареждане...' : 'Loading...')}
       </Text>
@@ -32,7 +33,7 @@ export function LoadingOverlay({ visible, message }: LoadingOverlayProps) {
   return (
     <View style={styles.overlay}>
       <View style={styles.overlayContent}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
+        <ActivityIndicator size="large" color={COLORS.primary} />
         <Text style={styles.overlayText}>
           {message || (language === 'bg' ? 'Моля, изчакайте...' : 'Please wait...')}
         </Text>
@@ -46,12 +47,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
   text: {
     marginTop: 16,
     fontSize: 16,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -61,7 +62,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   overlayContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     padding: 32,
     borderRadius: 16,
     alignItems: 'center',
@@ -69,6 +70,6 @@ const styles = StyleSheet.create({
   overlayText: {
     marginTop: 16,
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
 });

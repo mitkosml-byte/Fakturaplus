@@ -19,6 +19,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
+import { COLORS } from '../src/theme/colors';
 
 export default function BudgetScreen() {
   const { t } = useTranslation();
@@ -156,9 +157,9 @@ export default function BudgetScreen() {
   };
 
   const getProgressColor = (percent: number) => {
-    if (percent >= 100) return '#EF4444';
-    if (percent >= 80) return '#F59E0B';
-    return '#10B981';
+    if (percent >= 100) return COLORS.danger;
+    if (percent >= 80) return COLORS.warning;
+    return COLORS.success;
   };
 
   if (!hasPermission('manage_budget')) {
@@ -189,12 +190,12 @@ export default function BudgetScreen() {
 
         <ScrollView
           style={styles.content}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         >
           {/* Current Month Budget */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Ionicons name="wallet" size={24} color="#8B5CF6" />
+              <Ionicons name="wallet" size={24} color={COLORS.primary} />
               <Text style={styles.sectionTitle}>{t('budget.monthlyBudget')}</Text>
             </View>
 
@@ -205,7 +206,7 @@ export default function BudgetScreen() {
                     {new Date().toLocaleDateString('bg-BG', { month: 'long', year: 'numeric' })}
                   </Text>
                   <TouchableOpacity onPress={openBudgetModal}>
-                    <Ionicons name="settings-outline" size={20} color="#64748B" />
+                    <Ionicons name="settings-outline" size={20} color={COLORS.textMuted} />
                   </TouchableOpacity>
                 </View>
                 
@@ -229,13 +230,13 @@ export default function BudgetScreen() {
                 <View style={styles.budgetStats}>
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.spent')}</Text>
-                    <Text style={[styles.budgetStatValue, { color: '#EF4444' }]}>
+                    <Text style={[styles.budgetStatValue, { color: COLORS.danger }]}>
                       {budgetStatus.total_spent.toFixed(2)} €
                     </Text>
                   </View>
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.remaining')}</Text>
-                    <Text style={[styles.budgetStatValue, { color: '#10B981' }]}>
+                    <Text style={[styles.budgetStatValue, { color: COLORS.success }]}>
                       {budgetStatus.remaining.toFixed(2)} €
                     </Text>
                   </View>
@@ -249,21 +250,21 @@ export default function BudgetScreen() {
                 
                 {budgetStatus.is_exceeded && (
                   <View style={styles.alertBanner}>
-                    <Ionicons name="warning" size={20} color="#EF4444" />
+                    <Ionicons name="warning" size={20} color={COLORS.danger} />
                     <Text style={styles.alertText}>{t('budget.exceeded')}</Text>
                   </View>
                 )}
                 
                 {budgetStatus.is_alert && !budgetStatus.is_exceeded && (
                   <View style={[styles.alertBanner, { backgroundColor: '#F59E0B20' }]}>
-                    <Ionicons name="alert-circle" size={20} color="#F59E0B" />
-                    <Text style={[styles.alertText, { color: '#F59E0B' }]}>{t('budget.nearLimit')}</Text>
+                    <Ionicons name="alert-circle" size={20} color={COLORS.warning} />
+                    <Text style={[styles.alertText, { color: COLORS.warning }]}>{t('budget.nearLimit')}</Text>
                   </View>
                 )}
               </View>
             ) : (
               <TouchableOpacity style={styles.noBudgetCard} onPress={openBudgetModal}>
-                <Ionicons name="add-circle-outline" size={48} color="#64748B" />
+                <Ionicons name="add-circle-outline" size={48} color={COLORS.textMuted} />
                 <Text style={styles.noBudgetText}>{t('budget.noBudget')}</Text>
                 <Text style={styles.noBudgetHint}>{t('budget.tapToCreate')}</Text>
               </TouchableOpacity>
@@ -273,7 +274,7 @@ export default function BudgetScreen() {
           {/* Recurring Expenses */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Ionicons name="repeat" size={24} color="#10B981" />
+              <Ionicons name="repeat" size={24} color={COLORS.success} />
               <Text style={styles.sectionTitle}>{t('budget.recurring')}</Text>
               <TouchableOpacity
                 style={styles.addButton}
@@ -295,7 +296,7 @@ export default function BudgetScreen() {
                   </View>
                   <Text style={styles.recurringAmount}>{expense.amount.toFixed(2)} €</Text>
                   <TouchableOpacity onPress={() => deleteRecurring(expense.id)}>
-                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                    <Ionicons name="trash-outline" size={20} color={COLORS.danger} />
                   </TouchableOpacity>
                 </View>
               ))
@@ -323,7 +324,7 @@ export default function BudgetScreen() {
               onChangeText={setBudgetLimit}
               keyboardType="decimal-pad"
               placeholder="0.00"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
             
             <Text style={styles.inputLabel}>{t('budget.alertAt')}</Text>
@@ -333,7 +334,7 @@ export default function BudgetScreen() {
               onChangeText={setAlertThreshold}
               keyboardType="number-pad"
               placeholder="80"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
             
             <View style={styles.modalButtons}>
@@ -363,7 +364,7 @@ export default function BudgetScreen() {
               value={recurringDesc}
               onChangeText={setRecurringDesc}
               placeholder={t('budget.descPlaceholder')}
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
             
             <Text style={styles.inputLabel}>{t('budget.amount')}</Text>
@@ -373,7 +374,7 @@ export default function BudgetScreen() {
               onChangeText={setRecurringAmount}
               keyboardType="decimal-pad"
               placeholder="0.00"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
             
             <Text style={styles.inputLabel}>{t('budget.dayOfMonth')}</Text>
@@ -383,7 +384,7 @@ export default function BudgetScreen() {
               onChangeText={setRecurringDay}
               keyboardType="number-pad"
               placeholder="1-28"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
             
             <View style={styles.modalButtons}>
@@ -419,19 +420,19 @@ export default function BudgetScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
   safeArea: {
     flex: 1,
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingText: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 16,
   },
   header: {
@@ -440,7 +441,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
   },
   backButton: {
     padding: 8,
@@ -470,12 +471,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   addButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 20,
     padding: 6,
   },
   budgetCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
   },
@@ -500,7 +501,7 @@ const styles = StyleSheet.create({
   progressBar: {
     flex: 1,
     height: 12,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 6,
     overflow: 'hidden',
   },
@@ -523,7 +524,7 @@ const styles = StyleSheet.create({
   },
   budgetStatLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 4,
   },
   budgetStatValue: {
@@ -541,17 +542,17 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   alertText: {
-    color: '#EF4444',
+    color: COLORS.danger,
     fontSize: 14,
     fontWeight: '500',
   },
   noBudgetCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 40,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     borderStyle: 'dashed',
   },
   noBudgetText: {
@@ -561,14 +562,14 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   noBudgetHint: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 14,
     marginTop: 4,
   },
   recurringItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 8,
@@ -582,24 +583,24 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   recurringDay: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 12,
     marginTop: 4,
   },
   recurringAmount: {
-    color: '#F59E0B',
+    color: COLORS.warning,
     fontSize: 16,
     fontWeight: 'bold',
     marginRight: 12,
   },
   emptyRecurring: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 24,
     alignItems: 'center',
   },
   emptyText: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 14,
   },
   modalOverlay: {
@@ -609,7 +610,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 20,
     padding: 24,
     width: '85%',
@@ -623,12 +624,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   inputLabel: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 14,
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 14,
     color: 'white',
@@ -644,7 +645,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 14,
     borderRadius: 10,
-    backgroundColor: '#334155',
+    backgroundColor: COLORS.border,
     alignItems: 'center',
   },
   modalCancelText: {
@@ -656,7 +657,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 14,
     borderRadius: 10,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     alignItems: 'center',
   },
   modalSaveText: {

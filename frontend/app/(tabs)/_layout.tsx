@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Platform, View, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../../src/i18n';
+import { COLORS } from '../../src/theme/colors';
 
 // Left-to-right order of the tab bar, used to resolve which tab a swipe
 // should land on and to know a swipe's direction relative to it.
@@ -83,15 +84,15 @@ export default function TabsLayout() {
             },
           }),
           tabBarStyle: {
-            backgroundColor: '#1E293B',
-            borderTopColor: '#334155',
+            backgroundColor: COLORS.surface,
+            borderTopColor: COLORS.border,
             borderTopWidth: 1,
             height: 70 + Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 0),
             paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 0),
             paddingTop: 8,
           },
-          tabBarActiveTintColor: '#8B5CF6',
-          tabBarInactiveTintColor: '#64748B',
+          tabBarActiveTintColor: COLORS.primary,
+          tabBarInactiveTintColor: COLORS.textMuted,
           tabBarLabelStyle: {
             fontSize: 11,
             fontWeight: '600',
@@ -158,11 +159,11 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#8B5CF6',
+    shadowColor: COLORS.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 8,

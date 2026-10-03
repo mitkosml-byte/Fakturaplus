@@ -21,6 +21,7 @@ import { useTranslation, useLanguageStore, Language } from '../../src/i18n';
 import { api } from '../../src/services/api';
 import { Company, CompanyMembership } from '../../src/types';
 import { getRoleName as sharedGetRoleName, getRoleColor } from '../../src/utils/roles';
+import { COLORS } from '../../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -152,8 +153,8 @@ export default function ProfileScreen() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                colors={['#8B5CF6']}
-                tintColor="#8B5CF6"
+                colors={[COLORS.primary]}
+                tintColor={COLORS.primary}
               />
             }
           >
@@ -164,7 +165,7 @@ export default function ProfileScreen() {
                 onPress={handleLogout}
                 accessibilityLabel={t('profile.logout')}
               >
-                <Ionicons name="log-out-outline" size={22} color="#EF4444" />
+                <Ionicons name="log-out-outline" size={22} color={COLORS.danger} />
               </TouchableOpacity>
             </View>
 
@@ -173,9 +174,9 @@ export default function ProfileScreen() {
                 jump between companies you already have. */}
             {company && (
               <TouchableOpacity style={styles.companyBanner} onPress={() => setShowSwitcherModal(true)} accessibilityLabel={t('companySwitcher.switchCompany')}>
-                <Ionicons name="business" size={20} color="#8B5CF6" />
+                <Ionicons name="business" size={20} color={COLORS.primary} />
                 <Text style={styles.companyName}>{company.name}</Text>
-                <Ionicons name="swap-horizontal" size={18} color="#8B5CF6" />
+                <Ionicons name="swap-horizontal" size={18} color={COLORS.primary} />
               </TouchableOpacity>
             )}
 
@@ -186,7 +187,7 @@ export default function ProfileScreen() {
                   <Image source={{ uri: user.picture }} style={styles.avatar} />
                 ) : (
                   <View style={styles.avatarPlaceholder}>
-                    <Ionicons name="person" size={40} color="#8B5CF6" />
+                    <Ionicons name="person" size={40} color={COLORS.primary} />
                   </View>
                 )}
               </View>
@@ -212,13 +213,13 @@ export default function ProfileScreen() {
           {hasPermission('manage_users') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/users-management')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
-                <Ionicons name="people" size={20} color="#EC4899" />
+                <Ionicons name="people" size={20} color={COLORS.pink} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{language === 'bg' ? 'Потребители' : 'Users'}</Text>
                 <Text style={styles.menuSubtitle}>{language === 'bg' ? 'Управление и покани' : 'Manage & invite'}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -226,7 +227,7 @@ export default function ProfileScreen() {
           {(hasPermission('manage_company') || !company) && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/company-settings')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-                <Ionicons name="business" size={20} color="#3B82F6" />
+                <Ionicons name="business" size={20} color={COLORS.info} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.company')}</Text>
@@ -236,13 +237,13 @@ export default function ProfileScreen() {
                     : (language === 'bg' ? 'Създайте фирма или се присъединете по покана' : 'Create a company or join by invitation')}
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/account-security')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-              <Ionicons name="lock-closed" size={20} color="#10B981" />
+              <Ionicons name="lock-closed" size={20} color={COLORS.success} />
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>{language === 'bg' ? 'Акаунт и сигурност' : 'Account & Security'}</Text>
@@ -252,44 +253,44 @@ export default function ProfileScreen() {
                   : (language === 'bg' ? 'Задайте парола за вход с имейл' : 'Set a password for email login')}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-              <Ionicons name="notifications" size={20} color="#8B5CF6" />
+              <Ionicons name="notifications" size={20} color={COLORS.primary} />
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>{t('profile.notifications')}</Text>
               <Text style={styles.menuSubtitle}>{t('profile.vatNotifications')}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
 
           {/* Team collaboration: shared calendar + messages (owner/manager/accountant) */}
           {hasPermission('team_collaboration') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/calendar')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                <Ionicons name="calendar" size={20} color={COLORS.primary} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.calendar')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.calendarDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
           {hasPermission('team_collaboration') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/messages')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Ionicons name="chatbubbles" size={20} color="#10B981" />
+                <Ionicons name="chatbubbles" size={20} color={COLORS.success} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.messages')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.messagesDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -297,13 +298,13 @@ export default function ProfileScreen() {
           {hasPermission('manage_company') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/closed-days')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-                <Ionicons name="calendar-outline" size={20} color="#EF4444" />
+                <Ionicons name="calendar-outline" size={20} color={COLORS.danger} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.closedDays')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.closedDaysDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -311,13 +312,13 @@ export default function ProfileScreen() {
           {hasPermission('manage_budget') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/budget')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                <Ionicons name="wallet" size={20} color="#8B5CF6" />
+                <Ionicons name="wallet" size={20} color={COLORS.primary} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.budget')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.budgetDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -325,13 +326,13 @@ export default function ProfileScreen() {
           {hasPermission('manage_budget') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/payroll')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Ionicons name="people" size={20} color="#10B981" />
+                <Ionicons name="people" size={20} color={COLORS.success} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('payroll.title')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.payrollDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -339,13 +340,13 @@ export default function ProfileScreen() {
           {hasPermission('manage_budget') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/employee-absences')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-                <Ionicons name="sunny" size={20} color="#F59E0B" />
+                <Ionicons name="sunny" size={20} color={COLORS.warning} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('absences.title')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.absencesDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -353,13 +354,13 @@ export default function ProfileScreen() {
           {hasPermission('manage_budget') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/assets')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-                <Ionicons name="business" size={20} color="#F59E0B" />
+                <Ionicons name="business" size={20} color={COLORS.warning} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('assets.title')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.assetsDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -367,13 +368,13 @@ export default function ProfileScreen() {
           {hasPermission('view_audit_log') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/audit-log')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
-                <Ionicons name="list" size={20} color="#6366F1" />
+                <Ionicons name="list" size={20} color={COLORS.indigo} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.auditLog')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.auditLogDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -381,13 +382,13 @@ export default function ProfileScreen() {
           {hasPermission('view_statistics') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/protocols')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                <Ionicons name="document-text" size={20} color="#8B5CF6" />
+                <Ionicons name="document-text" size={20} color={COLORS.primary} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.protocols')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.protocolsDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -395,13 +396,13 @@ export default function ProfileScreen() {
           {hasPermission('export_data') && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/export')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
-                <Ionicons name="download" size={20} color="#EC4899" />
+                <Ionicons name="download" size={20} color={COLORS.pink} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.export')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.exportDesc')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
@@ -409,25 +410,25 @@ export default function ProfileScreen() {
           {isOwner && (
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/backup')}>
               <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Ionicons name="cloud-upload" size={20} color="#10B981" />
+                <Ionicons name="cloud-upload" size={20} color={COLORS.success} />
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>{t('profile.backup')}</Text>
                 <Text style={styles.menuSubtitle}>{t('profile.backupRestore')}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#64748B" />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           )}
 
           <TouchableOpacity style={styles.menuItem} onPress={() => setShowLanguageModal(true)}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-              <Ionicons name="language" size={20} color="#F59E0B" />
+              <Ionicons name="language" size={20} color={COLORS.warning} />
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>{t('profile.language')}</Text>
               <Text style={styles.menuSubtitle}>{language === 'bg' ? '🇧🇬 Български' : '🇬🇧 English'}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
         </View>
 
@@ -436,41 +437,41 @@ export default function ProfileScreen() {
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/help')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
-              <Ionicons name="help-circle" size={20} color="#6366F1" />
+              <Ionicons name="help-circle" size={20} color={COLORS.indigo} />
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>{t('profile.help')}</Text>
               <Text style={styles.menuSubtitle}>{t('profile.howToUse')}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/privacy-policy')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-              <Ionicons name="shield-checkmark" size={20} color="#10B981" />
+              <Ionicons name="shield-checkmark" size={20} color={COLORS.success} />
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>{language === 'bg' ? 'Поверителност' : 'Privacy Policy'}</Text>
               <Text style={styles.menuSubtitle}>{language === 'bg' ? 'Защита на данните' : 'Data protection'}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/terms-of-service')}>
             <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-              <Ionicons name="document-text" size={20} color="#F59E0B" />
+              <Ionicons name="document-text" size={20} color={COLORS.warning} />
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>{language === 'bg' ? 'Условия' : 'Terms of Service'}</Text>
               <Text style={styles.menuSubtitle}>{language === 'bg' ? 'Правила за ползване' : 'Usage rules'}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#64748B" />
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
         </View>
 
             {/* Logout Button */}
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Ionicons name="log-out" size={20} color="#EF4444" />
+              <Ionicons name="log-out" size={20} color={COLORS.danger} />
               <Text style={styles.logoutText}>{t('profile.logout')}</Text>
             </TouchableOpacity>
 
@@ -500,7 +501,7 @@ export default function ProfileScreen() {
             >
               <Text style={styles.languageFlag}>🇧🇬</Text>
               <Text style={styles.languageText}>Български</Text>
-              {language === 'bg' && <Ionicons name="checkmark-circle" size={24} color="#8B5CF6" />}
+              {language === 'bg' && <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />}
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -509,7 +510,7 @@ export default function ProfileScreen() {
             >
               <Text style={styles.languageFlag}>🇬🇧</Text>
               <Text style={styles.languageText}>English</Text>
-              {language === 'en' && <Ionicons name="checkmark-circle" size={24} color="#8B5CF6" />}
+              {language === 'en' && <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />}
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -545,7 +546,7 @@ export default function ProfileScreen() {
                 disabled={!!switching}
               >
                 <View style={styles.switcherOptionIcon}>
-                  <Ionicons name="business" size={18} color={m.is_active ? '#8B5CF6' : '#94A3B8'} />
+                  <Ionicons name="business" size={18} color={m.is_active ? COLORS.primary : COLORS.textSecondary} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.switcherOptionName}>{m.company_name}</Text>
@@ -554,9 +555,9 @@ export default function ProfileScreen() {
                   </Text>
                 </View>
                 {switching === m.company_id ? (
-                  <ActivityIndicator size="small" color="#8B5CF6" />
+                  <ActivityIndicator size="small" color={COLORS.primary} />
                 ) : m.is_active ? (
-                  <Ionicons name="checkmark-circle" size={22} color="#8B5CF6" />
+                  <Ionicons name="checkmark-circle" size={22} color={COLORS.primary} />
                 ) : null}
               </TouchableOpacity>
             ))}
@@ -566,7 +567,7 @@ export default function ProfileScreen() {
               onPress={() => { setShowSwitcherModal(false); setShowNewCompanyModal(true); }}
             >
               <View style={styles.switcherOptionIcon}>
-                <Ionicons name="add-circle-outline" size={18} color="#10B981" />
+                <Ionicons name="add-circle-outline" size={18} color={COLORS.success} />
               </View>
               <Text style={styles.switcherAddOptionText}>{t('companySwitcher.addAnother')}</Text>
             </TouchableOpacity>
@@ -605,7 +606,7 @@ export default function ProfileScreen() {
               value={newCompanyName}
               onChangeText={setNewCompanyName}
               placeholder={t('company.name')}
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
 
             <Text style={styles.newCompanyLabel}>{t('company.eik')}</Text>
@@ -614,7 +615,7 @@ export default function ProfileScreen() {
               value={newCompanyEik}
               onChangeText={setNewCompanyEik}
               placeholder={t('company.eik')}
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
               keyboardType="number-pad"
             />
 
@@ -689,11 +690,11 @@ const styles = StyleSheet.create({
   companyName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#8B5CF6',
+    color: COLORS.primary,
     flex: 1,
   },
   userCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 20,
     padding: 24,
     alignItems: 'center',
@@ -707,7 +708,7 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     borderWidth: 3,
-    borderColor: '#8B5CF6',
+    borderColor: COLORS.primary,
   },
   avatarPlaceholder: {
     width: 80,
@@ -717,7 +718,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
-    borderColor: '#8B5CF6',
+    borderColor: COLORS.primary,
   },
   userName: {
     fontSize: 20,
@@ -727,13 +728,13 @@ const styles = StyleSheet.create({
   },
   userEmail: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 12,
   },
   roleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -741,18 +742,18 @@ const styles = StyleSheet.create({
   },
   roleText: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontWeight: '500',
   },
   roleTextAccountant: {
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   menuSection: {
     marginBottom: 24,
   },
   menuSectionTitle: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontWeight: '600',
     marginBottom: 12,
     marginLeft: 4,
@@ -761,7 +762,7 @@ const styles = StyleSheet.create({
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 8,
@@ -784,7 +785,7 @@ const styles = StyleSheet.create({
   },
   menuSubtitle: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 2,
   },
   logoutButton: {
@@ -799,7 +800,7 @@ const styles = StyleSheet.create({
   logoutText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#EF4444',
+    color: COLORS.danger,
   },
   
   // Language Modal Styles
@@ -810,7 +811,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   languageModalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 20,
     padding: 24,
     width: '85%',
@@ -826,7 +827,7 @@ const styles = StyleSheet.create({
   languageOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -835,7 +836,7 @@ const styles = StyleSheet.create({
   languageOptionActive: {
     backgroundColor: 'rgba(139, 92, 246, 0.2)',
     borderWidth: 2,
-    borderColor: '#8B5CF6',
+    borderColor: COLORS.primary,
   },
   languageFlag: {
     fontSize: 28,
@@ -853,10 +854,10 @@ const styles = StyleSheet.create({
   },
   languageModalCancelText: {
     fontSize: 16,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   switcherModalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 20,
     padding: 24,
     width: '90%',
@@ -865,7 +866,7 @@ const styles = StyleSheet.create({
   switcherOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 14,
     marginBottom: 10,
@@ -909,20 +910,20 @@ const styles = StyleSheet.create({
   switcherAddOptionText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#10B981',
+    color: COLORS.success,
   },
   newCompanyHint: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 16,
   },
   newCompanyLabel: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 6,
   },
   newCompanyInput: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -931,7 +932,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   newCompanySubmit: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',

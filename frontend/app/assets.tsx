@@ -25,6 +25,7 @@ import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
+import { COLORS } from '../src/theme/colors';
 
 const CATEGORY_SHORT_LABELS: Record<AssetCategory, string> = {
   cat_i: 'I · Сгради',
@@ -37,9 +38,9 @@ const CATEGORY_SHORT_LABELS: Record<AssetCategory, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  active: '#10B981',
-  fully_depreciated: '#64748B',
-  disposed: '#EF4444',
+  active: COLORS.success,
+  fully_depreciated: COLORS.textMuted,
+  disposed: COLORS.danger,
 };
 
 const emptyAssetForm = () => ({
@@ -279,7 +280,7 @@ export default function AssetsScreen() {
 
         <ScrollView
           style={styles.content}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F59E0B" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.warning} />}
         >
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{t('assets.summaryTitle')} ({summary?.active_count || 0})</Text>
@@ -290,11 +291,11 @@ export default function AssetsScreen() {
 
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#F59E0B" />
+              <ActivityIndicator size="large" color={COLORS.warning} />
             </View>
           ) : assets.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Ionicons name="business-outline" size={56} color="#334155" />
+              <Ionicons name="business-outline" size={56} color={COLORS.border} />
               <Text style={styles.emptyText}>{t('assets.noAssets')}</Text>
               <Text style={styles.emptyHint}>{t('assets.noAssetsHint')}</Text>
             </View>
@@ -303,7 +304,7 @@ export default function AssetsScreen() {
               <TouchableOpacity key={asset.id} style={styles.assetCard} onPress={() => openEditAsset(asset)}>
                 <View style={styles.assetCardMain}>
                   <View style={styles.assetAvatar}>
-                    <Ionicons name="business" size={20} color="#F59E0B" />
+                    <Ionicons name="business" size={20} color={COLORS.warning} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.assetName}>{asset.name}</Text>
@@ -347,7 +348,7 @@ export default function AssetsScreen() {
                 value={assetForm.name}
                 onChangeText={(v) => setAssetForm((p) => ({ ...p, name: v }))}
                 placeholder={t('assets.namePlaceholder')}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
 
               <Text style={styles.inputLabel}>{t('assets.category')}</Text>
@@ -375,14 +376,14 @@ export default function AssetsScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.inputLabel}>{t('assets.acquisitionDate')}</Text>
                   <TouchableOpacity style={styles.dateInputButton} onPress={() => setAcqDatePickerVisible(true)}>
-                    <Ionicons name="calendar" size={16} color="#F59E0B" />
+                    <Ionicons name="calendar" size={16} color={COLORS.warning} />
                     <Text style={styles.dateInputText}>{format(acquisitionDate, 'd.MM.yyyy')}</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.inputLabel}>{t('assets.inServiceDate')}</Text>
                   <TouchableOpacity style={styles.dateInputButton} onPress={() => setServiceDatePickerVisible(true)}>
-                    <Ionicons name="calendar" size={16} color="#F59E0B" />
+                    <Ionicons name="calendar" size={16} color={COLORS.warning} />
                     <Text style={styles.dateInputText}>{format(inServiceDate, 'd.MM.yyyy')}</Text>
                   </TouchableOpacity>
                 </View>
@@ -416,7 +417,7 @@ export default function AssetsScreen() {
                 onChangeText={(v) => setAssetForm((p) => ({ ...p, acquisition_value: v }))}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
               <Text style={styles.lowValueHint}>{t('assets.lowValueHint')}</Text>
 
@@ -426,7 +427,7 @@ export default function AssetsScreen() {
                 value={assetForm.annual_depreciation_rate_percent}
                 onChangeText={(v) => setAssetForm((p) => ({ ...p, annual_depreciation_rate_percent: v }))}
                 keyboardType="decimal-pad"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
               <Text style={styles.fieldHint}>{t('assets.depreciationRateHint')}</Text>
 
@@ -436,7 +437,7 @@ export default function AssetsScreen() {
                 value={assetForm.responsible_person}
                 onChangeText={(v) => setAssetForm((p) => ({ ...p, responsible_person: v }))}
                 placeholder={t('assets.responsiblePersonPlaceholder')}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
 
               <Text style={styles.inputLabel}>{t('assets.notes')}</Text>
@@ -444,11 +445,11 @@ export default function AssetsScreen() {
                 style={styles.input}
                 value={assetForm.notes}
                 onChangeText={(v) => setAssetForm((p) => ({ ...p, notes: v }))}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
 
               <TouchableOpacity style={styles.attachButton} onPress={pickAssetImage}>
-                <Ionicons name="image-outline" size={18} color="#F59E0B" />
+                <Ionicons name="image-outline" size={18} color={COLORS.warning} />
                 <Text style={styles.attachButtonText}>
                   {assetImage ? t('assets.photoAttached') : t('assets.attachPhoto')}
                 </Text>
@@ -478,14 +479,14 @@ export default function AssetsScreen() {
 
               {editingAsset && editingAsset.status !== 'disposed' && (
                 <TouchableOpacity style={styles.disposeButton} onPress={openDispose}>
-                  <Ionicons name="archive-outline" size={16} color="#F59E0B" />
+                  <Ionicons name="archive-outline" size={16} color={COLORS.warning} />
                   <Text style={styles.disposeButtonText}>{t('assets.dispose')}</Text>
                 </TouchableOpacity>
               )}
 
               {editingAsset && (
                 <TouchableOpacity style={styles.deleteAssetButton} onPress={() => deleteAsset(editingAsset)}>
-                  <Ionicons name="trash" size={16} color="#EF4444" />
+                  <Ionicons name="trash" size={16} color={COLORS.danger} />
                   <Text style={styles.deleteAssetText}>{t('assets.deleteAsset')}</Text>
                 </TouchableOpacity>
               )}
@@ -502,7 +503,7 @@ export default function AssetsScreen() {
 
             <Text style={styles.inputLabel}>{t('assets.disposalDate')}</Text>
             <TouchableOpacity style={styles.dateInputButton} onPress={() => setDisposalDatePickerVisible(true)}>
-              <Ionicons name="calendar" size={16} color="#F59E0B" />
+              <Ionicons name="calendar" size={16} color={COLORS.warning} />
               <Text style={styles.dateInputText}>{format(disposalDate, 'd.MM.yyyy')}</Text>
             </TouchableOpacity>
             <DateTimePickerModal
@@ -522,7 +523,7 @@ export default function AssetsScreen() {
               value={disposalReason}
               onChangeText={setDisposalReason}
               placeholder={t('assets.disposalReasonPlaceholder')}
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
 
             <View style={styles.modalButtons}>
@@ -554,7 +555,7 @@ export default function AssetsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A' },
+  container: { flex: 1, backgroundColor: COLORS.background },
   safeArea: { flex: 1 },
   header: {
     flexDirection: 'row',
@@ -562,7 +563,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
   },
   backButton: { padding: 8, width: 40 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: 'white' },
@@ -570,26 +571,26 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 12,
     marginBottom: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 14,
     padding: 16,
     alignItems: 'center',
   },
-  summaryLabel: { fontSize: 12, color: '#94A3B8' },
-  summaryValue: { fontSize: 24, fontWeight: 'bold', color: '#F59E0B', marginTop: 4 },
+  summaryLabel: { fontSize: 12, color: COLORS.textSecondary },
+  summaryValue: { fontSize: 24, fontWeight: 'bold', color: COLORS.warning, marginTop: 4 },
   summaryRow: { flexDirection: 'row', marginTop: 14, width: '100%' },
   summarySubItem: { flex: 1, alignItems: 'center' },
-  summarySubLabel: { fontSize: 10, color: '#64748B', textAlign: 'center' },
+  summarySubLabel: { fontSize: 10, color: COLORS.textMuted, textAlign: 'center' },
   summarySubValue: { fontSize: 13, fontWeight: '600', color: 'white', marginTop: 2 },
   content: { flex: 1, paddingHorizontal: 16 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: 'white' },
-  addButton: { backgroundColor: '#F59E0B', borderRadius: 20, padding: 6 },
+  addButton: { backgroundColor: COLORS.warning, borderRadius: 20, padding: 6 },
   loadingContainer: { paddingVertical: 40, alignItems: 'center' },
   emptyContainer: { alignItems: 'center', paddingVertical: 50 },
-  emptyText: { fontSize: 16, color: '#64748B', marginTop: 14 },
-  emptyHint: { fontSize: 13, color: '#475569', marginTop: 6, textAlign: 'center', paddingHorizontal: 24 },
-  assetCard: { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, marginBottom: 12 },
+  emptyText: { fontSize: 16, color: COLORS.textMuted, marginTop: 14 },
+  emptyHint: { fontSize: 13, color: COLORS.borderLight, marginTop: 6, textAlign: 'center', paddingHorizontal: 24 },
+  assetCard: { backgroundColor: COLORS.surface, borderRadius: 14, padding: 14, marginBottom: 12 },
   assetCardMain: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
   assetAvatar: {
     width: 40, height: 40, borderRadius: 20,
@@ -597,49 +598,49 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   assetName: { fontSize: 16, fontWeight: '600', color: 'white' },
-  assetMeta: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
+  assetMeta: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
   statusBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   statusBadgeText: { fontSize: 10, fontWeight: '600' },
-  assetFigures: { flexDirection: 'row', backgroundColor: '#0F172A', borderRadius: 10, padding: 12 },
+  assetFigures: { flexDirection: 'row', backgroundColor: COLORS.background, borderRadius: 10, padding: 12 },
   assetFigureItem: { flex: 1 },
-  assetFigureLabel: { fontSize: 11, color: '#94A3B8' },
+  assetFigureLabel: { fontSize: 11, color: COLORS.textSecondary },
   assetFigureValue: { fontSize: 14, fontWeight: '600', color: 'white', marginTop: 2 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#1E293B', borderRadius: 20, padding: 22 },
+  modalContent: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 22 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: 'white', textAlign: 'center' },
-  inputLabel: { fontSize: 13, color: '#94A3B8', marginBottom: 6, marginTop: 12 },
-  input: { backgroundColor: '#0F172A', borderRadius: 10, padding: 12, color: 'white', fontSize: 15 },
+  inputLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 6, marginTop: 12 },
+  input: { backgroundColor: COLORS.background, borderRadius: 10, padding: 12, color: 'white', fontSize: 15 },
   row2: { flexDirection: 'row', gap: 12 },
   categoryRow: { marginTop: 2, height: 40, flexGrow: 0, flexShrink: 0 },
   categoryRowContent: { alignItems: 'center', gap: 8 },
-  categoryChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: '#0F172A' },
-  categoryChipActive: { backgroundColor: '#F59E0B' },
-  categoryChipText: { fontSize: 12, color: '#94A3B8', fontWeight: '500' },
+  categoryChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: COLORS.background },
+  categoryChipActive: { backgroundColor: COLORS.warning },
+  categoryChipText: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '500' },
   categoryChipTextActive: { color: 'white' },
-  categoryFullLabel: { fontSize: 11, color: '#64748B', marginTop: 8, lineHeight: 15 },
+  categoryFullLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: 8, lineHeight: 15 },
   dateInputButton: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#0F172A', borderRadius: 10, padding: 12,
+    backgroundColor: COLORS.background, borderRadius: 10, padding: 12,
   },
   dateInputText: { color: 'white', fontSize: 13 },
-  lowValueHint: { fontSize: 11, color: '#64748B', marginTop: 6, lineHeight: 15 },
-  fieldHint: { fontSize: 11, color: '#64748B', marginTop: 6 },
+  lowValueHint: { fontSize: 11, color: COLORS.textMuted, marginTop: 6, lineHeight: 15 },
+  fieldHint: { fontSize: 11, color: COLORS.textMuted, marginTop: 6 },
   attachButton: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, alignSelf: 'flex-start' },
-  attachButtonText: { fontSize: 13, color: '#F59E0B', fontWeight: '500' },
-  previewCard: { backgroundColor: '#0F172A', borderRadius: 12, padding: 14, marginTop: 16 },
+  attachButtonText: { fontSize: 13, color: COLORS.warning, fontWeight: '500' },
+  previewCard: { backgroundColor: COLORS.background, borderRadius: 12, padding: 14, marginTop: 16 },
   previewRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  previewRowHighlight: { borderTopWidth: 1, borderTopColor: '#334155', paddingTop: 8, marginTop: 4, marginBottom: 0 },
-  previewLabel: { fontSize: 12, color: '#94A3B8' },
+  previewRowHighlight: { borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 8, marginTop: 4, marginBottom: 0 },
+  previewLabel: { fontSize: 12, color: COLORS.textSecondary },
   previewValue: { fontSize: 13, color: 'white', fontWeight: '500' },
   previewLabelBold: { fontSize: 13, color: 'white', fontWeight: '700' },
   previewValueBold: { fontSize: 15, color: 'white', fontWeight: '700' },
   modalButtons: { flexDirection: 'row', gap: 12, marginTop: 20 },
-  modalCancelBtn: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: '#334155', alignItems: 'center' },
+  modalCancelBtn: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: COLORS.border, alignItems: 'center' },
   modalCancelText: { color: 'white', fontSize: 15, fontWeight: '500' },
-  modalSaveBtn: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: '#F59E0B', alignItems: 'center' },
+  modalSaveBtn: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: COLORS.warning, alignItems: 'center' },
   modalSaveText: { color: 'white', fontSize: 15, fontWeight: '600' },
   disposeButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14, padding: 10 },
-  disposeButtonText: { color: '#F59E0B', fontSize: 13, fontWeight: '500' },
+  disposeButtonText: { color: COLORS.warning, fontSize: 13, fontWeight: '500' },
   deleteAssetButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4, padding: 10 },
-  deleteAssetText: { color: '#EF4444', fontSize: 13, fontWeight: '500' },
+  deleteAssetText: { color: COLORS.danger, fontSize: 13, fontWeight: '500' },
 });

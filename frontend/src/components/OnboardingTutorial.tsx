@@ -6,6 +6,7 @@ import { useSegments, usePathname, useRouter } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { useOnboardingStore } from '../stores/onboardingStore';
+import { COLORS } from '../theme/colors';
 
 // Non-intrusive, one-time product tour: auto-opens the first time a given
 // user logs in (see useOnboardingStore.checkAndMaybeOpen). The small floating
@@ -90,11 +91,11 @@ export function OnboardingTutorial() {
         <View style={styles.overlay}>
           <View style={styles.card}>
             <TouchableOpacity style={styles.closeBtn} onPress={finish}>
-              <Ionicons name="close" size={22} color="#64748B" />
+              <Ionicons name="close" size={22} color={COLORS.textMuted} />
             </TouchableOpacity>
 
             <View style={styles.iconCircle}>
-              <Ionicons name={current.icon as any} size={32} color="#8B5CF6" />
+              <Ionicons name={current.icon as any} size={32} color={COLORS.primary} />
             </View>
 
             <Text style={styles.title}>{t(current.titleKey)}</Text>
@@ -156,7 +157,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   card: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 20,
     padding: 24,
     width: '100%',
@@ -190,7 +191,7 @@ const styles = StyleSheet.create({
   },
   text: {
     fontSize: 14,
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
     textAlign: 'center',
     lineHeight: 21,
     marginBottom: 18,
@@ -204,15 +205,15 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#334155',
+    backgroundColor: COLORS.border,
   },
   dotActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     width: 16,
   },
   stepCounter: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 18,
   },
   actions: {
@@ -225,10 +226,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
-    backgroundColor: '#334155',
+    backgroundColor: COLORS.border,
   },
   secondaryBtnText: {
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -237,7 +238,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   primaryBtnText: {
     color: 'white',

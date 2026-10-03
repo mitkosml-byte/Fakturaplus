@@ -16,6 +16,7 @@ import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -86,7 +87,7 @@ export default function AccountSecurityScreen() {
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <View style={[styles.sectionIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                  <Ionicons name="lock-closed" size={24} color="#8B5CF6" />
+                  <Ionicons name="lock-closed" size={24} color={COLORS.primary} />
                 </View>
                 <View style={styles.sectionTitleContainer}>
                   <Text style={styles.sectionTitle}>
@@ -110,10 +111,10 @@ export default function AccountSecurityScreen() {
                       onChangeText={setCurrentPassword}
                       secureTextEntry={!showCurrent}
                       placeholder="••••••••"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                     />
                     <TouchableOpacity onPress={() => setShowCurrent(!showCurrent)}>
-                      <Ionicons name={showCurrent ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748B" />
+                      <Ionicons name={showCurrent ? 'eye-off-outline' : 'eye-outline'} size={20} color={COLORS.textMuted} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -128,10 +129,10 @@ export default function AccountSecurityScreen() {
                     onChangeText={setNewPassword}
                     secureTextEntry={!showNew}
                     placeholder="••••••••"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                   <TouchableOpacity onPress={() => setShowNew(!showNew)}>
-                    <Ionicons name={showNew ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748B" />
+                    <Ionicons name={showNew ? 'eye-off-outline' : 'eye-outline'} size={20} color={COLORS.textMuted} />
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.inputHint}>
@@ -147,16 +148,16 @@ export default function AccountSecurityScreen() {
                   onChangeText={setConfirmPassword}
                   secureTextEntry={!showNew}
                   placeholder="••••••••"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={COLORS.textMuted}
                 />
               </View>
             </View>
 
             <View style={styles.infoCard}>
-              <Ionicons name="information-circle" size={24} color="#64748B" />
+              <Ionicons name="information-circle" size={24} color={COLORS.textMuted} />
               <Text style={styles.infoText}>
                 {t('Имейлът за вход е ', 'Login email is ')}
-                <Text style={{ color: '#E2E8F0', fontWeight: '600' }}>{user?.email}</Text>
+                <Text style={{ color: COLORS.textLight, fontWeight: '600' }}>{user?.email}</Text>
                 {t('. Смяната на имейл не е налична в момента.', '. Changing the email is not available yet.')}
               </Text>
             </View>
@@ -193,20 +194,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: COLORS.surface,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
   title: { fontSize: 18, fontWeight: 'bold', color: 'white' },
   content: { flex: 1, padding: 16 },
   section: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -222,22 +223,22 @@ const styles = StyleSheet.create({
   },
   sectionTitleContainer: { flex: 1 },
   sectionTitle: { fontSize: 16, fontWeight: '600', color: 'white' },
-  sectionSubtitle: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  sectionSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   inputContainer: {
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: COLORS.border,
   },
-  inputLabel: { fontSize: 14, color: '#94A3B8', marginBottom: 8 },
+  inputLabel: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 8 },
   passwordRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   passwordInput: {
     flex: 1,
@@ -246,25 +247,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   fullWidthInput: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
-  inputHint: { fontSize: 12, color: '#64748B', marginTop: 8 },
+  inputHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 8 },
   infoCard: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     gap: 12,
     marginBottom: 16,
   },
-  infoText: { flex: 1, fontSize: 13, color: '#64748B', lineHeight: 20 },
-  footer: { padding: 16, borderTopWidth: 1, borderTopColor: '#1E293B' },
+  infoText: { flex: 1, fontSize: 13, color: COLORS.textMuted, lineHeight: 20 },
+  footer: { padding: 16, borderTopWidth: 1, borderTopColor: COLORS.surface },
   saveButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',

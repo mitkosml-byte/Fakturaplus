@@ -20,6 +20,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
 import { getPushStatus } from '../src/utils/pushNotifications';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -112,15 +113,15 @@ export default function MessagesScreen() {
 
           {pushHintVisible && (
             <TouchableOpacity style={styles.pushBanner} onPress={() => router.push('/notifications-settings')}>
-              <Ionicons name="notifications-outline" size={18} color="#8B5CF6" />
+              <Ionicons name="notifications-outline" size={18} color={COLORS.primary} />
               <Text style={styles.pushBannerText}>{t('messages.enablePushHint')}</Text>
-              <Ionicons name="chevron-forward" size={16} color="#8B5CF6" />
+              <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
             </TouchableOpacity>
           )}
 
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : (
             <FlatList
@@ -130,7 +131,7 @@ export default function MessagesScreen() {
               renderItem={({ item }) => (
                 <TouchableOpacity style={styles.conversationRow} onPress={() => openThread(item)}>
                   <View style={styles.avatar}>
-                    <Ionicons name={item.conversation_id.startsWith('team:') ? 'people' : 'person'} size={22} color="#8B5CF6" />
+                    <Ionicons name={item.conversation_id.startsWith('team:') ? 'people' : 'person'} size={22} color={COLORS.primary} />
                   </View>
                   <View style={styles.conversationInfo}>
                     <View style={styles.conversationTopRow}>
@@ -154,7 +155,7 @@ export default function MessagesScreen() {
               )}
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
-                  <Ionicons name="chatbubbles-outline" size={64} color="#334155" />
+                  <Ionicons name="chatbubbles-outline" size={64} color={COLORS.border} />
                   <Text style={styles.emptyText}>{t('messages.noConversations')}</Text>
                 </View>
               }
@@ -166,7 +167,7 @@ export default function MessagesScreen() {
               <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>{t('messages.newDm')}</Text>
                 {membersLoading ? (
-                  <ActivityIndicator color="#8B5CF6" />
+                  <ActivityIndicator color={COLORS.primary} />
                 ) : (
                   <FlatList
                     data={members}
@@ -175,7 +176,7 @@ export default function MessagesScreen() {
                     renderItem={({ item }) => (
                       <TouchableOpacity style={styles.memberRow} onPress={() => startDm(item)}>
                         <View style={styles.avatar}>
-                          <Ionicons name="person" size={18} color="#8B5CF6" />
+                          <Ionicons name="person" size={18} color={COLORS.primary} />
                         </View>
                         <Text style={styles.memberName}>{item.name}</Text>
                       </TouchableOpacity>
@@ -206,13 +207,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: COLORS.surface,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -228,13 +229,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  pushBannerText: { flex: 1, fontSize: 13, color: '#C4B5FD', fontWeight: '500' },
+  pushBannerText: { flex: 1, fontSize: 13, color: COLORS.primaryLight, fontWeight: '500' },
   emptyContainer: { alignItems: 'center', paddingVertical: 60 },
-  emptyText: { fontSize: 16, color: '#64748B', marginTop: 16 },
+  emptyText: { fontSize: 16, color: COLORS.textMuted, marginTop: 16 },
   conversationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 14,
     padding: 12,
     marginBottom: 8,
@@ -251,13 +252,13 @@ const styles = StyleSheet.create({
   conversationInfo: { flex: 1 },
   conversationTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   conversationName: { fontSize: 15, fontWeight: '600', color: 'white', flex: 1, marginRight: 8 },
-  conversationTime: { fontSize: 11, color: '#64748B' },
-  conversationPreview: { fontSize: 13, color: '#94A3B8', marginTop: 2 },
+  conversationTime: { fontSize: 11, color: COLORS.textMuted },
+  conversationPreview: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
   unreadBadge: {
     minWidth: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 6,
@@ -271,7 +272,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   modalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 24,
     padding: 24,
     width: '100%',
@@ -281,5 +282,5 @@ const styles = StyleSheet.create({
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   memberName: { fontSize: 15, color: 'white' },
   cancelButton: { alignItems: 'center', paddingVertical: 14, marginTop: 8 },
-  cancelButtonText: { color: '#94A3B8', fontSize: 14 },
+  cancelButtonText: { color: COLORS.textSecondary, fontSize: 14 },
 });

@@ -23,6 +23,7 @@ import { CalendarEvent } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -190,13 +191,13 @@ export default function CalendarScreen() {
 
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : (
             <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 32 }}>
               {grouped.length === 0 && (
                 <View style={styles.emptyContainer}>
-                  <Ionicons name="calendar-outline" size={64} color="#334155" />
+                  <Ionicons name="calendar-outline" size={64} color={COLORS.border} />
                   <Text style={styles.emptyText}>{t('calendar.noEvents')}</Text>
                 </View>
               )}
@@ -212,7 +213,7 @@ export default function CalendarScreen() {
                           <Ionicons
                             name={ev.visibility === 'shared' ? 'people' : 'person'}
                             size={16}
-                            color={ev.visibility === 'shared' ? '#10B981' : '#8B5CF6'}
+                            color={ev.visibility === 'shared' ? COLORS.success : COLORS.primary}
                           />
                           <Text style={styles.eventTitle} numberOfLines={1}>{ev.title}</Text>
                         </View>
@@ -227,7 +228,7 @@ export default function CalendarScreen() {
                           {ev.reminder_minutes_before ? ` · 🔔` : ''}
                         </Text>
                         <TouchableOpacity onPress={() => handleDelete(ev)} hitSlop={8}>
-                          <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                          <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
                         </TouchableOpacity>
                       </View>
                     </TouchableOpacity>
@@ -254,7 +255,7 @@ export default function CalendarScreen() {
                     value={title}
                     onChangeText={setTitle}
                     placeholder={t('calendar.eventTitlePlaceholder')}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
 
                   <Text style={styles.inputLabel}>{t('calendar.eventDescription')}</Text>
@@ -263,25 +264,25 @@ export default function CalendarScreen() {
                     value={description}
                     onChangeText={setDescription}
                     placeholder={t('calendar.eventDescriptionPlaceholder')}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     multiline
                   />
 
                   <Text style={styles.inputLabel}>{t('calendar.eventDate')}</Text>
                   <TouchableOpacity style={styles.pickerButton} onPress={() => setDatePickerVisible(true)}>
-                    <Ionicons name="calendar-outline" size={18} color="#8B5CF6" />
+                    <Ionicons name="calendar-outline" size={18} color={COLORS.primary} />
                     <Text style={styles.pickerButtonText}>{format(eventDate, 'd MMM yyyy', { locale: dateLocale })}</Text>
                   </TouchableOpacity>
 
                   <View style={styles.rowBetween}>
                     <Text style={styles.inputLabel}>{t('calendar.specificTime')}</Text>
                     <TouchableOpacity onPress={() => setHasTime((v) => !v)}>
-                      <Ionicons name={hasTime ? 'checkbox' : 'square-outline'} size={22} color="#8B5CF6" />
+                      <Ionicons name={hasTime ? 'checkbox' : 'square-outline'} size={22} color={COLORS.primary} />
                     </TouchableOpacity>
                   </View>
                   {hasTime && (
                     <TouchableOpacity style={styles.pickerButton} onPress={() => setTimePickerVisible(true)}>
-                      <Ionicons name="time-outline" size={18} color="#8B5CF6" />
+                      <Ionicons name="time-outline" size={18} color={COLORS.primary} />
                       <Text style={styles.pickerButtonText}>{format(eventTime, 'HH:mm')}</Text>
                     </TouchableOpacity>
                   )}
@@ -367,30 +368,30 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: COLORS.surface,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
   title: { fontSize: 18, fontWeight: 'bold', color: 'white' },
   content: { flex: 1, padding: 16 },
   emptyContainer: { alignItems: 'center', paddingVertical: 60 },
-  emptyText: { fontSize: 16, color: '#64748B', marginTop: 16 },
+  emptyText: { fontSize: 16, color: COLORS.textMuted, marginTop: 16 },
   dayGroup: { marginBottom: 18 },
   dayHeader: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#C4B5FD',
+    color: COLORS.primaryLight,
     textTransform: 'capitalize',
     marginBottom: 8,
   },
   eventCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 14,
     padding: 14,
     marginBottom: 8,
@@ -402,31 +403,31 @@ const styles = StyleSheet.create({
   },
   eventTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   eventTitle: { fontSize: 15, fontWeight: '600', color: 'white', flex: 1 },
-  eventTime: { fontSize: 13, color: '#94A3B8', marginLeft: 8 },
-  eventDescription: { fontSize: 13, color: '#94A3B8', marginTop: 6 },
+  eventTime: { fontSize: 13, color: COLORS.textSecondary, marginLeft: 8 },
+  eventDescription: { fontSize: 13, color: COLORS.textSecondary, marginTop: 6 },
   eventFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 8,
   },
-  eventMeta: { fontSize: 12, color: '#64748B' },
+  eventMeta: { fontSize: 12, color: COLORS.textMuted },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
     maxHeight: '90%',
   },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: 'white', marginBottom: 16 },
-  inputLabel: { fontSize: 13, color: '#94A3B8', marginBottom: 6, marginTop: 12 },
+  inputLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 6, marginTop: 12 },
   input: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -437,7 +438,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -449,13 +450,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
-  chipActive: { backgroundColor: '#8B5CF6' },
-  chipText: { fontSize: 13, color: '#94A3B8', fontWeight: '500' },
+  chipActive: { backgroundColor: COLORS.primary },
+  chipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
   chipTextActive: { color: 'white' },
   saveButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
@@ -463,5 +464,5 @@ const styles = StyleSheet.create({
   },
   saveButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   cancelButton: { alignItems: 'center', paddingVertical: 14 },
-  cancelButtonText: { color: '#94A3B8', fontSize: 14 },
+  cancelButtonText: { color: COLORS.textSecondary, fontSize: 14 },
 });

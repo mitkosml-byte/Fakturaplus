@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useLanguageStore } from '../i18n';
+import { COLORS } from '../theme/colors';
 
 // Shown in place of a whole screen when the signed-in user's role lacks the
 // permission that screen requires - a direct-URL visit (or a stale menu
@@ -16,7 +17,7 @@ export function AccessDenied() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.content}>
         <View style={styles.iconContainer}>
-          <Ionicons name="lock-closed" size={48} color="#64748B" />
+          <Ionicons name="lock-closed" size={48} color={COLORS.textMuted} />
         </View>
         <Text style={styles.title}>{language === 'bg' ? 'Нямате достъп' : 'Access denied'}</Text>
         <Text style={styles.subtitle}>
@@ -33,7 +34,7 @@ export function AccessDenied() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A' },
+  container: { flex: 1, backgroundColor: COLORS.background },
   content: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
   iconContainer: {
     width: 80,
@@ -44,8 +45,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  title: { fontSize: 18, fontWeight: '600', color: '#E2E8F0', marginBottom: 8, textAlign: 'center' },
-  subtitle: { fontSize: 14, color: '#94A3B8', textAlign: 'center', marginBottom: 24, lineHeight: 20 },
-  button: { paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#8B5CF6', borderRadius: 12 },
+  title: { fontSize: 18, fontWeight: '600', color: COLORS.textLight, marginBottom: 8, textAlign: 'center' },
+  subtitle: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+  button: { paddingHorizontal: 24, paddingVertical: 12, backgroundColor: COLORS.primary, borderRadius: 12 },
   buttonText: { fontSize: 14, fontWeight: '600', color: 'white' },
 });

@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { format, parse } from 'date-fns';
+import { COLORS } from '../theme/colors';
 
 interface AppDateTimePickerProps {
   isVisible: boolean;
@@ -107,7 +108,7 @@ export default function AppDateTimePicker({
 }
 
 const webInputStyle: React.CSSProperties = {
-  backgroundColor: '#0F172A',
+  backgroundColor: COLORS.background,
   color: 'white',
   border: '1px solid #334155',
   borderRadius: 10,
@@ -127,7 +128,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   card: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     width: '100%',
@@ -145,10 +146,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   confirmButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   cancelText: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '600',
   },
   confirmText: {

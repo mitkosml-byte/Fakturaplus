@@ -27,6 +27,7 @@ import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
+import { COLORS } from '../../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -371,7 +372,7 @@ export default function InvoicesScreen() {
       >
         <View style={styles.invoiceRowTop}>
           <View style={styles.supplierContainer}>
-            <Ionicons name="business" size={18} color="#8B5CF6" />
+            <Ionicons name="business" size={18} color={COLORS.primary} />
             <Text style={styles.supplierName} numberOfLines={1}>{item.supplier}</Text>
           </View>
           <View style={styles.invoiceRowTopRight}>
@@ -386,7 +387,7 @@ export default function InvoicesScreen() {
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel={t('invoices.deleteInvoice')}
             >
-              <Ionicons name="close-circle" size={20} color="#64748B" />
+              <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           </View>
         </View>
@@ -400,14 +401,14 @@ export default function InvoicesScreen() {
             <View style={styles.compactBadgeRow}>
               {eikIssue && (
                 <View style={styles.compactBadge}>
-                  <Ionicons name="alert-circle" size={11} color="#F59E0B" />
+                  <Ionicons name="alert-circle" size={11} color={COLORS.warning} />
                   <Text style={styles.compactBadgeText}>{t('invoices.missingEik')}</Text>
                 </View>
               )}
               {isUnpaid && (
                 <View style={[styles.compactBadge, overdue && styles.overdueBadge]}>
-                  <Ionicons name={overdue ? 'alert-circle' : (isPartial ? 'pie-chart-outline' : 'time-outline')} size={11} color={overdue ? '#EF4444' : '#F59E0B'} />
-                  <Text style={[styles.compactBadgeText, overdue && { color: '#EF4444' }]}>
+                  <Ionicons name={overdue ? 'alert-circle' : (isPartial ? 'pie-chart-outline' : 'time-outline')} size={11} color={overdue ? COLORS.danger : COLORS.warning} />
+                  <Text style={[styles.compactBadgeText, overdue && { color: COLORS.danger }]}>
                     {statusLabel}{isPartial ? ` (${(item.total_amount - item.paid_amount).toFixed(2)} €)` : ''}
                   </Text>
                 </View>
@@ -473,28 +474,28 @@ export default function InvoicesScreen() {
             <Text style={styles.title}>{t('invoices.title')}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity style={styles.exportButton} onPress={() => setImportModalVisible(true)} accessibilityLabel={t('import.button')}>
-                <Ionicons name="cloud-upload-outline" size={24} color="#8B5CF6" />
+                <Ionicons name="cloud-upload-outline" size={24} color={COLORS.primary} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.exportButton} onPress={() => setExportModalVisible(true)}>
-                <Ionicons name="download" size={24} color="#8B5CF6" />
+                <Ionicons name="download" size={24} color={COLORS.primary} />
               </TouchableOpacity>
             </View>
           </View>
 
           {/* Search */}
           <View style={styles.searchContainer}>
-            <Ionicons name="search" size={20} color="#64748B" />
+            <Ionicons name="search" size={20} color={COLORS.textMuted} />
             <TextInput
               style={styles.searchInput}
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholder={t('invoices.searchPlaceholder')}
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
               onSubmitEditing={loadInvoices}
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => { setSearchQuery(''); loadInvoices(); }}>
-                <Ionicons name="close-circle" size={20} color="#64748B" />
+                <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
               </TouchableOpacity>
             )}
           </View>
@@ -505,12 +506,12 @@ export default function InvoicesScreen() {
             style={styles.filtersToggle}
             onPress={() => setFiltersExpanded((prev) => !prev)}
           >
-            <Ionicons name="options-outline" size={16} color="#8B5CF6" />
+            <Ionicons name="options-outline" size={16} color={COLORS.primary} />
             <Text style={styles.filtersToggleText}>
               {t('invoices.filtersButton')}
               {activeFilterCount > 0 ? ` · ${activeFilterCount} ${t('invoices.filtersActive')}` : ''}
             </Text>
-            <Ionicons name={filtersExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#8B5CF6" />
+            <Ionicons name={filtersExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.primary} />
           </TouchableOpacity>
 
           {filtersExpanded && (
@@ -538,13 +539,13 @@ export default function InvoicesScreen() {
               {periodPreset === 'custom' && (
                 <View style={styles.customRangeRow}>
                   <TouchableOpacity style={styles.customRangeButton} onPress={() => setStartPickerVisible(true)}>
-                    <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+                    <Ionicons name="calendar-outline" size={16} color={COLORS.primary} />
                     <Text style={styles.customRangeButtonText}>
                       {t('invoices.periodFrom')}: {format(customStartDate, 'd MMM yyyy', { locale: dateLocale })}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.customRangeButton} onPress={() => setEndPickerVisible(true)}>
-                    <Ionicons name="calendar-outline" size={16} color="#8B5CF6" />
+                    <Ionicons name="calendar-outline" size={16} color={COLORS.primary} />
                     <Text style={styles.customRangeButtonText}>
                       {t('invoices.periodTo')}: {format(customEndDate, 'd MMM yyyy', { locale: dateLocale })}
                     </Text>
@@ -600,7 +601,7 @@ export default function InvoicesScreen() {
               style={[styles.eikBanner, showOnlyEikIssues && styles.eikBannerActive]}
               onPress={() => setShowOnlyEikIssues((prev) => !prev)}
             >
-              <Ionicons name="alert-circle" size={18} color="#F59E0B" />
+              <Ionicons name="alert-circle" size={18} color={COLORS.warning} />
               <Text style={styles.eikBannerText}>
                 {eikIssueCount} {eikIssueCount === 1 ? t('invoices.missingEikSingular') : t('invoices.missingEikPlural')}
               </Text>
@@ -622,7 +623,7 @@ export default function InvoicesScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('invoices.total')}:</Text>
-              <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>{totalAmount.toFixed(2)} €</Text>
+              <Text style={[styles.summaryValue, { color: COLORS.primary }]}>{totalAmount.toFixed(2)} €</Text>
             </View>
           </View>
 
@@ -635,11 +636,11 @@ export default function InvoicesScreen() {
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
             refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
             }
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
-                <Ionicons name="document-text-outline" size={64} color="#334155" />
+                <Ionicons name="document-text-outline" size={64} color={COLORS.border} />
                 <Text style={styles.emptyText}>{t('invoices.noInvoices')}</Text>
                 <Text style={styles.emptyHint}>{t('invoices.scanFirst')}</Text>
               </View>
@@ -654,7 +655,7 @@ export default function InvoicesScreen() {
 
             <TouchableOpacity style={styles.exportOption} onPress={() => handleExport('excel')}>
               <View style={[styles.exportIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Ionicons name="document" size={24} color="#10B981" />
+                <Ionicons name="document" size={24} color={COLORS.success} />
               </View>
               <View>
                 <Text style={styles.exportOptionTitle}>{t('invoices.excelTitle')}</Text>
@@ -664,7 +665,7 @@ export default function InvoicesScreen() {
 
             <TouchableOpacity style={styles.exportOption} onPress={() => handleExport('pdf')}>
               <View style={[styles.exportIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-                <Ionicons name="document-text" size={24} color="#EF4444" />
+                <Ionicons name="document-text" size={24} color={COLORS.danger} />
               </View>
               <View>
                 <Text style={styles.exportOptionTitle}>PDF</Text>
@@ -701,11 +702,11 @@ export default function InvoicesScreen() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
                 {!editMode && selectedInvoice && (
                   <TouchableOpacity onPress={() => startEditInvoice(selectedInvoice)} accessibilityLabel={t('invoices.editInvoice')}>
-                    <Ionicons name="pencil" size={22} color="#8B5CF6" />
+                    <Ionicons name="pencil" size={22} color={COLORS.primary} />
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity onPress={() => (editMode ? setEditMode(false) : setSelectedInvoice(null))}>
-                  <Ionicons name="close" size={28} color="#94A3B8" />
+                  <Ionicons name="close" size={28} color={COLORS.textSecondary} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -718,7 +719,7 @@ export default function InvoicesScreen() {
                     style={styles.input}
                     value={editSupplier}
                     onChangeText={setEditSupplier}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
 
@@ -730,7 +731,7 @@ export default function InvoicesScreen() {
                     onChangeText={setEditSupplierEik}
                     keyboardType="number-pad"
                     placeholder="131071587"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     maxLength={13}
                   />
                 </View>
@@ -741,18 +742,18 @@ export default function InvoicesScreen() {
                     style={styles.input}
                     value={editInvoiceNumber}
                     onChangeText={setEditInvoiceNumber}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>{t('invoices.dateLabel')} *</Text>
                   <TouchableOpacity style={styles.dateInputButton} onPress={() => setEditDatePickerVisible(true)}>
-                    <Ionicons name="calendar" size={20} color="#8B5CF6" />
+                    <Ionicons name="calendar" size={20} color={COLORS.primary} />
                     <Text style={styles.dateInputText}>
                       {format(editDate, 'd MMMM yyyy', { locale: dateLocale })}
                     </Text>
-                    <Ionicons name="chevron-down" size={20} color="#64748B" />
+                    <Ionicons name="chevron-down" size={20} color={COLORS.textMuted} />
                   </TouchableOpacity>
                 </View>
                 <DateTimePickerModal
@@ -775,7 +776,7 @@ export default function InvoicesScreen() {
                       onChangeText={setEditAmountWithoutVat}
                       keyboardType="decimal-pad"
                       placeholder="0.00"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                     />
                   </View>
                   <View style={[styles.inputGroup, { flex: 1 }]}>
@@ -786,7 +787,7 @@ export default function InvoicesScreen() {
                       onChangeText={setEditVatAmount}
                       keyboardType="decimal-pad"
                       placeholder="0.00"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                     />
                   </View>
                 </View>
@@ -822,7 +823,7 @@ export default function InvoicesScreen() {
                     value={editNotes}
                     onChangeText={setEditNotes}
                     multiline
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
 
@@ -860,12 +861,12 @@ export default function InvoicesScreen() {
                   const overdue = deadline.getTime() < Date.now();
                   return (
                     <View style={[styles.protocolBanner, overdue && styles.protocolBannerOverdue]}>
-                      <Ionicons name={overdue ? 'alert-circle' : 'document-text'} size={18} color={overdue ? '#EF4444' : '#8B5CF6'} />
+                      <Ionicons name={overdue ? 'alert-circle' : 'document-text'} size={18} color={overdue ? COLORS.danger : COLORS.primary} />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.protocolBannerTitle}>
                           {t('scan.protocolAssigned')} {selectedInvoice.protocol_number || '—'}
                         </Text>
-                        <Text style={[styles.protocolBannerDeadline, overdue && { color: '#EF4444' }]}>
+                        <Text style={[styles.protocolBannerDeadline, overdue && { color: COLORS.danger }]}>
                           {t('invoices.protocolDeadline')}: {formatDate(deadline.toISOString())}
                           {overdue ? ` (${t('invoices.protocolOverdue')})` : ''}
                         </Text>
@@ -913,7 +914,7 @@ export default function InvoicesScreen() {
                       {selectedInvoice.payment_method === 'bank_transfer' && (
                         <>
                           {selectedInvoice.payment_due_date && !selectedInvoice.is_paid && (
-                            <Text style={[styles.paymentDueText, overdue && { color: '#EF4444' }]}>
+                            <Text style={[styles.paymentDueText, overdue && { color: COLORS.danger }]}>
                               {overdue ? t('invoices.overdueSince') : t('invoices.paymentDueDate')}: {formatDate(selectedInvoice.payment_due_date)}
                             </Text>
                           )}
@@ -950,7 +951,7 @@ export default function InvoicesScreen() {
                                 ? `${t('invoices.paidOn')} ${formatDate(selectedInvoice.paid_at)}`
                                 : t('invoices.markFullyPaid')}
                             </Text>
-                            {updatingPayment && <ActivityIndicator size="small" color="#8B5CF6" />}
+                            {updatingPayment && <ActivityIndicator size="small" color={COLORS.primary} />}
                           </TouchableOpacity>
 
                           {!selectedInvoice.is_paid && (
@@ -959,7 +960,7 @@ export default function InvoicesScreen() {
                               onPress={() => openPaymentModal(selectedInvoice)}
                               disabled={updatingPayment}
                             >
-                              <Ionicons name="cash-outline" size={16} color="#8B5CF6" />
+                              <Ionicons name="cash-outline" size={16} color={COLORS.primary} />
                               <Text style={styles.recordPaymentButtonText}>
                                 {selectedInvoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
                               </Text>
@@ -982,7 +983,7 @@ export default function InvoicesScreen() {
                     <View style={styles.itemsSection}>
                       <View style={styles.itemsSectionHeader}>
                         <Text style={styles.detailSectionLabel}>{t('invoices.items')}</Text>
-                        {loadingInvoiceAlerts && <ActivityIndicator size="small" color="#64748B" />}
+                        {loadingInvoiceAlerts && <ActivityIndicator size="small" color={COLORS.textMuted} />}
                       </View>
 
                       <View style={styles.itemsTableHeader}>
@@ -1001,7 +1002,7 @@ export default function InvoicesScreen() {
                               <Text style={styles.itemRowName} numberOfLines={2}>{item.name}</Text>
                               {alert && (
                                 <View style={styles.itemPriceAlertBadge}>
-                                  <Ionicons name="trending-up" size={11} color="#EF4444" />
+                                  <Ionicons name="trending-up" size={11} color={COLORS.danger} />
                                   <Text style={styles.itemPriceAlertText}>
                                     +{alert.change_percent}% {t('invoices.vsLastPurchase')}
                                   </Text>
@@ -1027,7 +1028,7 @@ export default function InvoicesScreen() {
                       </View>
                       {mismatch && (
                         <View style={styles.itemsMismatchNote}>
-                          <Ionicons name="alert-circle-outline" size={14} color="#F59E0B" />
+                          <Ionicons name="alert-circle-outline" size={14} color={COLORS.warning} />
                           <Text style={styles.itemsMismatchText}>{t('invoices.itemsMismatch')}</Text>
                         </View>
                       )}
@@ -1039,7 +1040,7 @@ export default function InvoicesScreen() {
                   <View style={styles.detailSection}>
                     <Text style={styles.detailSectionLabel}>{t('invoices.scannedPages')}</Text>
                     {loadingScannedPages ? (
-                      <ActivityIndicator size="small" color="#64748B" style={{ marginTop: 8 }} />
+                      <ActivityIndicator size="small" color={COLORS.textMuted} style={{ marginTop: 8 }} />
                     ) : (
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
                         {scannedPages.map((uri, index) => (
@@ -1075,7 +1076,7 @@ export default function InvoicesScreen() {
                     handleDeleteInvoice(selectedInvoice.id);
                   }}
                 >
-                  <Ionicons name="trash" size={20} color="#EF4444" />
+                  <Ionicons name="trash" size={20} color={COLORS.danger} />
                   <Text style={styles.deleteButtonText}>{t('invoices.deleteInvoice')}</Text>
                 </TouchableOpacity>
               </ScrollView>
@@ -1109,7 +1110,7 @@ export default function InvoicesScreen() {
                     disabled={viewerPageIndex === 0}
                     onPress={() => setViewerPageIndex((i) => (i !== null ? Math.max(0, i - 1) : i))}
                   >
-                    <Ionicons name="chevron-back" size={24} color={viewerPageIndex === 0 ? '#475569' : 'white'} />
+                    <Ionicons name="chevron-back" size={24} color={viewerPageIndex === 0 ? COLORS.borderLight : 'white'} />
                   </TouchableOpacity>
                   <Text style={styles.pageViewerNavText}>{viewerPageIndex + 1} / {scannedPages.length}</Text>
                   <TouchableOpacity
@@ -1117,7 +1118,7 @@ export default function InvoicesScreen() {
                     disabled={viewerPageIndex === scannedPages.length - 1}
                     onPress={() => setViewerPageIndex((i) => (i !== null ? Math.min(scannedPages.length - 1, i + 1) : i))}
                   >
-                    <Ionicons name="chevron-forward" size={24} color={viewerPageIndex === scannedPages.length - 1 ? '#475569' : 'white'} />
+                    <Ionicons name="chevron-forward" size={24} color={viewerPageIndex === scannedPages.length - 1 ? COLORS.borderLight : 'white'} />
                   </TouchableOpacity>
                 </View>
               )}
@@ -1137,14 +1138,14 @@ export default function InvoicesScreen() {
                 {selectedInvoice && selectedInvoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
               </Text>
               <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
-                <Ionicons name="close" size={28} color="#94A3B8" />
+                <Ionicons name="close" size={28} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
 
             {selectedInvoice && (
               <>
                 <View style={styles.editNoticeBanner}>
-                  <Ionicons name="information-circle" size={18} color="#8B5CF6" />
+                  <Ionicons name="information-circle" size={18} color={COLORS.primary} />
                   <Text style={styles.editNoticeText}>{t('invoices.paidAmountEditNotice')}</Text>
                 </View>
 
@@ -1156,7 +1157,7 @@ export default function InvoicesScreen() {
                     onChangeText={setPaymentAmountInput}
                     keyboardType="decimal-pad"
                     placeholder="0.00"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     autoFocus
                   />
                   <Text style={styles.inputHint}>
@@ -1211,7 +1212,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     marginHorizontal: 16,
     borderRadius: 12,
     paddingHorizontal: 16,
@@ -1228,7 +1229,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     marginHorizontal: 16,
     marginTop: 12,
     borderRadius: 20,
@@ -1237,7 +1238,7 @@ const styles = StyleSheet.create({
   },
   filtersToggleText: {
     fontSize: 13,
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontWeight: '600',
   },
   periodChipsRow: {
@@ -1254,16 +1255,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     marginRight: 8,
     flexShrink: 0,
   },
   periodChipActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   periodChipText: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   periodChipTextActive: {
@@ -1280,20 +1281,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
   customRangeButtonText: {
     fontSize: 12,
-    color: '#E2E8F0',
+    color: COLORS.textLight,
   },
   monthHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     paddingHorizontal: 16,
     paddingVertical: 10,
     marginTop: 4,
@@ -1301,17 +1302,17 @@ const styles = StyleSheet.create({
   monthHeaderTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#C4B5FD',
+    color: COLORS.primaryLight,
     textTransform: 'capitalize',
   },
   monthHeaderStats: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   summaryBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     margin: 16,
     borderRadius: 12,
     padding: 12,
@@ -1321,7 +1322,7 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   summaryValue: {
     fontSize: 16,
@@ -1334,7 +1335,7 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
   invoiceCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -1348,7 +1349,7 @@ const styles = StyleSheet.create({
   totalValueCompact: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#8B5CF6',
+    color: COLORS.primary,
     marginLeft: 8,
   },
   invoiceRowTopRight: {
@@ -1368,7 +1369,7 @@ const styles = StyleSheet.create({
   },
   invoiceMeta: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     flexShrink: 1,
   },
   compactBadgeRow: {
@@ -1388,7 +1389,7 @@ const styles = StyleSheet.create({
   compactBadgeText: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#F59E0B',
+    color: COLORS.warning,
   },
   overdueBadge: {
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
@@ -1410,12 +1411,12 @@ const styles = StyleSheet.create({
   eikBannerText: {
     flex: 1,
     fontSize: 13,
-    color: '#F59E0B',
+    color: COLORS.warning,
     fontWeight: '600',
   },
   eikBannerAction: {
     fontSize: 12,
-    color: '#F59E0B',
+    color: COLORS.warning,
     fontWeight: '700',
     textDecorationLine: 'underline',
   },
@@ -1437,12 +1438,12 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 18,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 16,
   },
   emptyHint: {
     fontSize: 14,
-    color: '#475569',
+    color: COLORS.borderLight,
     marginTop: 8,
   },
   modalOverlay: {
@@ -1453,14 +1454,14 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   modalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 24,
     padding: 24,
     width: '100%',
     maxWidth: 340,
   },
   detailModalContent: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 24,
     padding: 24,
     width: '100%',
@@ -1494,7 +1495,7 @@ const styles = StyleSheet.create({
   editNoticeText: {
     flex: 1,
     fontSize: 12,
-    color: '#C4B5FD',
+    color: COLORS.primaryLight,
     lineHeight: 16,
   },
   inputGroup: {
@@ -1502,14 +1503,14 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 6,
   },
   input: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
@@ -1517,11 +1518,11 @@ const styles = StyleSheet.create({
   },
   inputHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 6,
   },
   submitButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
@@ -1534,11 +1535,11 @@ const styles = StyleSheet.create({
   dateInputButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     gap: 10,
   },
   dateInputText: {
@@ -1555,17 +1556,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   vatTreatmentChipActive: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   vatTreatmentChipText: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   vatTreatmentChipTextActive: {
@@ -1582,10 +1583,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
-    backgroundColor: '#334155',
+    backgroundColor: COLORS.border,
   },
   editCancelButtonText: {
-    color: '#E2E8F0',
+    color: COLORS.textLight,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1593,7 +1594,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     marginBottom: 12,
     gap: 16,
@@ -1612,7 +1613,7 @@ const styles = StyleSheet.create({
   },
   exportOptionHint: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginTop: 2,
   },
   cancelButton: {
@@ -1621,7 +1622,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   cancelButtonText: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 16,
   },
   detailSection: {
@@ -1635,9 +1636,9 @@ const styles = StyleSheet.create({
     width: 72,
     height: 96,
     borderRadius: 8,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   scannedPageBadge: {
     position: 'absolute',
@@ -1703,12 +1704,12 @@ const styles = StyleSheet.create({
   },
   protocolBannerDeadline: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 2,
   },
   detailSectionLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 4,
   },
   detailSectionValue: {
@@ -1720,31 +1721,31 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   totalSection: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
   },
   totalSectionLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginBottom: 4,
   },
   totalSectionValue: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   paymentSection: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 14,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   paymentSectionOverdue: {
-    borderColor: '#EF4444',
+    borderColor: COLORS.danger,
   },
   paymentSectionHeader: {
     flexDirection: 'row',
@@ -1755,7 +1756,7 @@ const styles = StyleSheet.create({
   paymentMethodTag: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#8B5CF6',
+    color: COLORS.primary,
     backgroundColor: 'rgba(139, 92, 246, 0.15)',
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -1763,7 +1764,7 @@ const styles = StyleSheet.create({
   },
   paymentDueText: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginBottom: 10,
   },
   paidCheckboxRow: {
@@ -1776,13 +1777,13 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#64748B',
+    borderColor: COLORS.textMuted,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxChecked: {
-    backgroundColor: '#10B981',
-    borderColor: '#10B981',
+    backgroundColor: COLORS.success,
+    borderColor: COLORS.success,
   },
   paidCheckboxLabel: {
     fontSize: 14,
@@ -1799,19 +1800,19 @@ const styles = StyleSheet.create({
   },
   paymentRemainingText: {
     fontSize: 12,
-    color: '#F59E0B',
+    color: COLORS.warning,
     marginTop: 2,
     marginBottom: 6,
   },
   paymentProgressBar: {
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#334155',
+    backgroundColor: COLORS.border,
     overflow: 'hidden',
   },
   paymentProgressBarFill: {
     height: '100%',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 3,
   },
   recordPaymentButton: {
@@ -1824,7 +1825,7 @@ const styles = StyleSheet.create({
   recordPaymentButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#8B5CF6',
+    color: COLORS.primary,
   },
   itemsSection: {
     marginBottom: 16,
@@ -1839,12 +1840,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingBottom: 6,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: COLORS.border,
     marginBottom: 4,
   },
   itemsTableHeaderText: {
     fontSize: 11,
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontWeight: '600',
   },
   itemsColRight: {
@@ -1853,7 +1854,7 @@ const styles = StyleSheet.create({
   itemRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 10,
     marginBottom: 6,
@@ -1866,7 +1867,7 @@ const styles = StyleSheet.create({
   },
   itemRowValue: {
     fontSize: 13,
-    color: '#CBD5E1',
+    color: COLORS.textSubtle,
   },
   itemRowTotal: {
     fontWeight: '600',
@@ -1880,7 +1881,7 @@ const styles = StyleSheet.create({
   },
   itemPriceAlertText: {
     fontSize: 10,
-    color: '#EF4444',
+    color: COLORS.danger,
     fontWeight: '600',
   },
   itemsSumRow: {
@@ -1891,11 +1892,11 @@ const styles = StyleSheet.create({
   },
   itemsSumLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   itemsSumValue: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontWeight: '600',
   },
   itemsMismatchNote: {
@@ -1907,7 +1908,7 @@ const styles = StyleSheet.create({
   },
   itemsMismatchText: {
     fontSize: 11,
-    color: '#F59E0B',
+    color: COLORS.warning,
     flex: 1,
   },
   deleteButton: {
@@ -1919,7 +1920,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   deleteButtonText: {
-    color: '#EF4444',
+    color: COLORS.danger,
     fontSize: 14,
     fontWeight: '500',
   },

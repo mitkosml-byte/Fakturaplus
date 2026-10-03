@@ -24,6 +24,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
+import { COLORS } from '../src/theme/colors';
 
 const emptyEmployeeForm = () => ({
   name: '',
@@ -333,13 +334,13 @@ export default function PayrollScreen() {
 
         <View style={styles.monthSelector}>
           <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.monthArrow}>
-            <Ionicons name="chevron-back" size={22} color="#8B5CF6" />
+            <Ionicons name="chevron-back" size={22} color={COLORS.primary} />
           </TouchableOpacity>
           <Text style={styles.monthLabel}>
             {format(selectedMonth, 'LLLL yyyy', { locale: dateLocale })}
           </Text>
           <TouchableOpacity onPress={() => changeMonth(1)} style={styles.monthArrow}>
-            <Ionicons name="chevron-forward" size={22} color="#8B5CF6" />
+            <Ionicons name="chevron-forward" size={22} color={COLORS.primary} />
           </TouchableOpacity>
         </View>
 
@@ -350,7 +351,7 @@ export default function PayrollScreen() {
 
         <ScrollView
           style={styles.content}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         >
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{t('payroll.employees')}</Text>
@@ -361,11 +362,11 @@ export default function PayrollScreen() {
 
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : employees.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Ionicons name="people-outline" size={56} color="#334155" />
+              <Ionicons name="people-outline" size={56} color={COLORS.border} />
               <Text style={styles.emptyText}>{t('payroll.noEmployees')}</Text>
               <Text style={styles.emptyHint}>{t('payroll.noEmployeesHint')}</Text>
             </View>
@@ -376,7 +377,7 @@ export default function PayrollScreen() {
                 <View key={emp.id} style={styles.employeeCard}>
                   <TouchableOpacity style={styles.employeeCardMain} onPress={() => openEditEmployee(emp)}>
                     <View style={styles.employeeAvatar}>
-                      <Ionicons name="person" size={20} color="#8B5CF6" />
+                      <Ionicons name="person" size={20} color={COLORS.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.employeeName}>{emp.name}</Text>
@@ -395,10 +396,10 @@ export default function PayrollScreen() {
                       </View>
                       <View style={styles.entrySummaryRow}>
                         <Text style={styles.entrySummaryLabel}>{t('payroll.totalEmployerCost')}</Text>
-                        <Text style={[styles.entrySummaryValue, { color: '#8B5CF6' }]}>{entry.total_employer_cost.toFixed(2)} €</Text>
+                        <Text style={[styles.entrySummaryValue, { color: COLORS.primary }]}>{entry.total_employer_cost.toFixed(2)} €</Text>
                       </View>
                       <TouchableOpacity style={styles.deleteEntryButton} onPress={() => deletePayrollEntry(entry)}>
-                        <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                        <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
                         <Text style={styles.deleteEntryText}>{t('payroll.removeEntry')}</Text>
                       </TouchableOpacity>
                     </View>
@@ -429,7 +430,7 @@ export default function PayrollScreen() {
                 value={employeeForm.name}
                 onChangeText={(v) => setEmployeeForm((p) => ({ ...p, name: v }))}
                 placeholder={t('payroll.namePlaceholder')}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
 
               <Text style={styles.inputLabel}>{t('payroll.position')}</Text>
@@ -438,7 +439,7 @@ export default function PayrollScreen() {
                 value={employeeForm.position}
                 onChangeText={(v) => setEmployeeForm((p) => ({ ...p, position: v }))}
                 placeholder={t('payroll.positionPlaceholder')}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
 
               <Text style={styles.inputLabel}>{t('payroll.agreementType')}</Text>
@@ -470,7 +471,7 @@ export default function PayrollScreen() {
                 onChangeText={(v) => setEmployeeForm((p) => ({ ...p, base_salary: v }))}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
 
               <View style={styles.row2}>
@@ -482,7 +483,7 @@ export default function PayrollScreen() {
                     onChangeText={(v) => setEmployeeForm((p) => ({ ...p, food_vouchers: v }))}
                     keyboardType="decimal-pad"
                     placeholder="0.00"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
                 <View style={{ flex: 1 }}>
@@ -493,7 +494,7 @@ export default function PayrollScreen() {
                     onChangeText={(v) => setEmployeeForm((p) => ({ ...p, additional_insurance: v }))}
                     keyboardType="decimal-pad"
                     placeholder="0.00"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
               </View>
@@ -509,7 +510,7 @@ export default function PayrollScreen() {
 
               {editingEmployee && (
                 <TouchableOpacity style={styles.deleteEmployeeButton} onPress={() => deleteEmployee(editingEmployee)}>
-                  <Ionicons name="trash" size={16} color="#EF4444" />
+                  <Ionicons name="trash" size={16} color={COLORS.danger} />
                   <Text style={styles.deleteEmployeeText}>{t('payroll.deleteEmployee')}</Text>
                 </TouchableOpacity>
               )}
@@ -534,7 +535,7 @@ export default function PayrollScreen() {
                 value={overrideAmount}
                 onChangeText={setOverrideAmount}
                 keyboardType="decimal-pad"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
 
               <Text style={styles.inputLabel}>{t('payroll.bonus')}</Text>
@@ -544,11 +545,11 @@ export default function PayrollScreen() {
                 onChangeText={setBonusAmount}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
               />
 
               <TouchableOpacity style={styles.attachButton} onPress={pickPayrollImage}>
-                <Ionicons name="image-outline" size={18} color="#8B5CF6" />
+                <Ionicons name="image-outline" size={18} color={COLORS.primary} />
                 <Text style={styles.attachButtonText}>
                   {payrollImage ? t('payroll.photoAttached') : t('payroll.attachPhoto')}
                 </Text>
@@ -556,7 +557,7 @@ export default function PayrollScreen() {
 
               <View style={styles.previewCard}>
                 {previewLoading ? (
-                  <ActivityIndicator color="#8B5CF6" />
+                  <ActivityIndicator color={COLORS.primary} />
                 ) : preview ? (
                   <>
                     <View style={styles.previewRow}>
@@ -565,11 +566,11 @@ export default function PayrollScreen() {
                     </View>
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.employeeContributions')}</Text>
-                      <Text style={[styles.previewValue, { color: '#EF4444' }]}>-{preview.employee_contributions.toFixed(2)} €</Text>
+                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{preview.employee_contributions.toFixed(2)} €</Text>
                     </View>
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.incomeTax')}</Text>
-                      <Text style={[styles.previewValue, { color: '#EF4444' }]}>-{preview.income_tax.toFixed(2)} €</Text>
+                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{preview.income_tax.toFixed(2)} €</Text>
                     </View>
                     <View style={[styles.previewRow, styles.previewRowHighlight]}>
                       <Text style={styles.previewLabelBold}>{t('payroll.netAmount')}</Text>
@@ -582,7 +583,7 @@ export default function PayrollScreen() {
                     </View>
                     <View style={[styles.previewRow, styles.previewRowHighlight]}>
                       <Text style={styles.previewLabelBold}>{t('payroll.totalEmployerCost')}</Text>
-                      <Text style={[styles.previewValueBold, { color: '#8B5CF6' }]}>{preview.total_employer_cost.toFixed(2)} €</Text>
+                      <Text style={[styles.previewValueBold, { color: COLORS.primary }]}>{preview.total_employer_cost.toFixed(2)} €</Text>
                     </View>
                   </>
                 ) : null}
@@ -614,7 +615,7 @@ export default function PayrollScreen() {
               value={ratesForm.employee_rate_percent}
               onChangeText={(v) => setRatesForm((p) => ({ ...p, employee_rate_percent: v }))}
               keyboardType="decimal-pad"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
 
             <Text style={styles.inputLabel}>{t('payroll.employerRate')}</Text>
@@ -623,7 +624,7 @@ export default function PayrollScreen() {
               value={ratesForm.employer_rate_percent}
               onChangeText={(v) => setRatesForm((p) => ({ ...p, employer_rate_percent: v }))}
               keyboardType="decimal-pad"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
 
             <Text style={styles.inputLabel}>{t('payroll.incomeTaxRate')}</Text>
@@ -632,7 +633,7 @@ export default function PayrollScreen() {
               value={ratesForm.income_tax_percent}
               onChangeText={(v) => setRatesForm((p) => ({ ...p, income_tax_percent: v }))}
               keyboardType="decimal-pad"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={COLORS.textMuted}
             />
 
             <View style={styles.row2}>
@@ -643,7 +644,7 @@ export default function PayrollScreen() {
                   value={ratesForm.min_insurance_income}
                   onChangeText={(v) => setRatesForm((p) => ({ ...p, min_insurance_income: v }))}
                   keyboardType="decimal-pad"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={COLORS.textMuted}
                 />
               </View>
               <View style={{ flex: 1 }}>
@@ -653,7 +654,7 @@ export default function PayrollScreen() {
                   value={ratesForm.max_insurance_income}
                   onChangeText={(v) => setRatesForm((p) => ({ ...p, max_insurance_income: v }))}
                   keyboardType="decimal-pad"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={COLORS.textMuted}
                 />
               </View>
             </View>
@@ -686,7 +687,7 @@ export default function PayrollScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A' },
+  container: { flex: 1, backgroundColor: COLORS.background },
   safeArea: { flex: 1 },
   header: {
     flexDirection: 'row',
@@ -694,7 +695,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
   },
   backButton: { padding: 8 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: 'white' },
@@ -710,22 +711,22 @@ const styles = StyleSheet.create({
   totalCostCard: {
     marginHorizontal: 16,
     marginBottom: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 14,
     padding: 16,
     alignItems: 'center',
   },
-  totalCostLabel: { fontSize: 12, color: '#94A3B8' },
-  totalCostValue: { fontSize: 24, fontWeight: 'bold', color: '#8B5CF6', marginTop: 4 },
+  totalCostLabel: { fontSize: 12, color: COLORS.textSecondary },
+  totalCostValue: { fontSize: 24, fontWeight: 'bold', color: COLORS.primary, marginTop: 4 },
   content: { flex: 1, paddingHorizontal: 16 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: 'white' },
-  addButton: { backgroundColor: '#8B5CF6', borderRadius: 20, padding: 6 },
+  addButton: { backgroundColor: COLORS.primary, borderRadius: 20, padding: 6 },
   loadingContainer: { paddingVertical: 40, alignItems: 'center' },
   emptyContainer: { alignItems: 'center', paddingVertical: 50 },
-  emptyText: { fontSize: 16, color: '#64748B', marginTop: 14 },
-  emptyHint: { fontSize: 13, color: '#475569', marginTop: 6, textAlign: 'center', paddingHorizontal: 24 },
-  employeeCard: { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, marginBottom: 12 },
+  emptyText: { fontSize: 16, color: COLORS.textMuted, marginTop: 14 },
+  emptyHint: { fontSize: 13, color: COLORS.borderLight, marginTop: 6, textAlign: 'center', paddingHorizontal: 24 },
+  employeeCard: { backgroundColor: COLORS.surface, borderRadius: 14, padding: 14, marginBottom: 12 },
   employeeCardMain: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
   employeeAvatar: {
     width: 40, height: 40, borderRadius: 20,
@@ -733,46 +734,46 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   employeeName: { fontSize: 16, fontWeight: '600', color: 'white' },
-  employeePosition: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
+  employeePosition: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
   processButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    backgroundColor: '#8B5CF6', borderRadius: 10, paddingVertical: 10,
+    backgroundColor: COLORS.primary, borderRadius: 10, paddingVertical: 10,
   },
   processButtonText: { color: 'white', fontSize: 13, fontWeight: '600' },
-  entrySummary: { backgroundColor: '#0F172A', borderRadius: 10, padding: 12 },
+  entrySummary: { backgroundColor: COLORS.background, borderRadius: 10, padding: 12 },
   entrySummaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  entrySummaryLabel: { fontSize: 12, color: '#94A3B8' },
+  entrySummaryLabel: { fontSize: 12, color: COLORS.textSecondary },
   entrySummaryValue: { fontSize: 13, fontWeight: '600', color: 'white' },
   deleteEntryButton: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, alignSelf: 'flex-start' },
-  deleteEntryText: { fontSize: 11, color: '#EF4444' },
+  deleteEntryText: { fontSize: 11, color: COLORS.danger },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#1E293B', borderRadius: 20, padding: 22 },
+  modalContent: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 22 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: 'white', textAlign: 'center' },
-  modalSubtitle: { fontSize: 13, color: '#94A3B8', textAlign: 'center', marginTop: 2, marginBottom: 12, textTransform: 'capitalize' },
-  inputLabel: { fontSize: 13, color: '#94A3B8', marginBottom: 6, marginTop: 12 },
-  input: { backgroundColor: '#0F172A', borderRadius: 10, padding: 12, color: 'white', fontSize: 15 },
+  modalSubtitle: { fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', marginTop: 2, marginBottom: 12, textTransform: 'capitalize' },
+  inputLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 6, marginTop: 12 },
+  input: { backgroundColor: COLORS.background, borderRadius: 10, padding: 12, color: 'white', fontSize: 15 },
   row2: { flexDirection: 'row', gap: 12 },
   agreementRow: { flexDirection: 'row', gap: 10 },
-  agreementChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#0F172A', alignItems: 'center' },
-  agreementChipActive: { backgroundColor: '#8B5CF6' },
-  agreementChipText: { fontSize: 13, color: '#94A3B8', fontWeight: '500' },
+  agreementChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.background, alignItems: 'center' },
+  agreementChipActive: { backgroundColor: COLORS.primary },
+  agreementChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
   agreementChipTextActive: { color: 'white' },
   attachButton: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, alignSelf: 'flex-start' },
-  attachButtonText: { fontSize: 13, color: '#8B5CF6', fontWeight: '500' },
-  previewCard: { backgroundColor: '#0F172A', borderRadius: 12, padding: 14, marginTop: 16, minHeight: 60 },
+  attachButtonText: { fontSize: 13, color: COLORS.primary, fontWeight: '500' },
+  previewCard: { backgroundColor: COLORS.background, borderRadius: 12, padding: 14, marginTop: 16, minHeight: 60 },
   previewRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  previewRowHighlight: { borderTopWidth: 1, borderTopColor: '#334155', paddingTop: 8, marginTop: 4 },
-  previewLabel: { fontSize: 12, color: '#94A3B8' },
+  previewRowHighlight: { borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 8, marginTop: 4 },
+  previewLabel: { fontSize: 12, color: COLORS.textSecondary },
   previewValue: { fontSize: 13, color: 'white', fontWeight: '500' },
   previewLabelBold: { fontSize: 13, color: 'white', fontWeight: '700' },
   previewValueBold: { fontSize: 15, color: 'white', fontWeight: '700' },
   previewDivider: { height: 10 },
   modalButtons: { flexDirection: 'row', gap: 12, marginTop: 20 },
-  modalCancelBtn: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: '#334155', alignItems: 'center' },
+  modalCancelBtn: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: COLORS.border, alignItems: 'center' },
   modalCancelText: { color: 'white', fontSize: 15, fontWeight: '500' },
-  modalSaveBtn: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: '#8B5CF6', alignItems: 'center' },
+  modalSaveBtn: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: COLORS.primary, alignItems: 'center' },
   modalSaveText: { color: 'white', fontSize: 15, fontWeight: '600' },
   deleteEmployeeButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14, padding: 10 },
-  deleteEmployeeText: { color: '#EF4444', fontSize: 13, fontWeight: '500' },
-  ratesDisclaimer: { fontSize: 12, color: '#F59E0B', textAlign: 'center', marginTop: 8, lineHeight: 17 },
+  deleteEmployeeText: { color: COLORS.danger, fontSize: 13, fontWeight: '500' },
+  ratesDisclaimer: { fontSize: 12, color: COLORS.warning, textAlign: 'center', marginTop: 8, lineHeight: 17 },
 });

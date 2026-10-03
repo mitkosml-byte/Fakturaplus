@@ -18,6 +18,7 @@ import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -69,7 +70,7 @@ export default function JoinCompanyScreen() {
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                    <Ionicons name="key" size={24} color="#8B5CF6" />
+                    <Ionicons name="key" size={24} color={COLORS.primary} />
                   </View>
                   <View style={styles.sectionTitleContainer}>
                     <Text style={styles.sectionTitle}>{t('Код за покана', 'Invitation code')}</Text>
@@ -84,7 +85,7 @@ export default function JoinCompanyScreen() {
                   value={code}
                   onChangeText={(v) => setCode(v.toUpperCase())}
                   placeholder="ABCD1234"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={COLORS.textMuted}
                   autoCapitalize="characters"
                   autoCorrect={false}
                   maxLength={8}
@@ -92,7 +93,7 @@ export default function JoinCompanyScreen() {
               </View>
 
               <View style={styles.infoCard}>
-                <Ionicons name="information-circle" size={24} color="#64748B" />
+                <Ionicons name="information-circle" size={24} color={COLORS.textMuted} />
                 <Text style={styles.infoText}>
                   {t(
                     'Кодовете за покана са валидни 7 дни и могат да бъдат използвани само от имейла, за който са издадени (ако е зададен такъв).',
@@ -132,20 +133,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: COLORS.surface,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
   title: { fontSize: 18, fontWeight: 'bold', color: 'white' },
   content: { flex: 1, padding: 16 },
   section: {
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -161,9 +162,9 @@ const styles = StyleSheet.create({
   },
   sectionTitleContainer: { flex: 1 },
   sectionTitle: { fontSize: 16, fontWeight: '600', color: 'white' },
-  sectionSubtitle: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  sectionSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   codeInput: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
     borderRadius: 12,
     padding: 16,
     color: 'white',
@@ -172,20 +173,20 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   infoCard: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     gap: 12,
     marginBottom: 16,
   },
-  infoText: { flex: 1, fontSize: 13, color: '#64748B', lineHeight: 20 },
-  footer: { padding: 16, borderTopWidth: 1, borderTopColor: '#1E293B' },
+  infoText: { flex: 1, fontSize: 13, color: COLORS.textMuted, lineHeight: 20 },
+  footer: { padding: 16, borderTopWidth: 1, borderTopColor: COLORS.surface },
   joinButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',

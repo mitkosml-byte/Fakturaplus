@@ -21,6 +21,7 @@ import { Message } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied } from '../src/components';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -112,7 +113,7 @@ export default function MessageThreadScreen() {
           >
             {loading ? (
               <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
+                <ActivityIndicator size="large" color={COLORS.primary} />
               </View>
             ) : (
               <FlatList
@@ -147,7 +148,7 @@ export default function MessageThreadScreen() {
                 value={text}
                 onChangeText={setText}
                 placeholder={t('messages.typeMessage')}
-                placeholderTextColor="#64748B"
+                placeholderTextColor={COLORS.textMuted}
                 multiline
                 onSubmitEditing={handleSend}
               />
@@ -173,19 +174,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: COLORS.surface,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
   title: { fontSize: 18, fontWeight: 'bold', color: 'white', flex: 1, textAlign: 'center', marginHorizontal: 8 },
   emptyContainer: { alignItems: 'center', paddingVertical: 60 },
-  emptyText: { fontSize: 14, color: '#64748B' },
+  emptyText: { fontSize: 14, color: COLORS.textMuted },
   bubbleRow: { flexDirection: 'row', marginBottom: 10 },
   bubbleRowMine: { justifyContent: 'flex-end' },
   bubbleRowTheirs: { justifyContent: 'flex-start' },
@@ -195,9 +196,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  bubbleMine: { backgroundColor: '#8B5CF6', borderBottomRightRadius: 4 },
-  bubbleTheirs: { backgroundColor: '#1E293B', borderBottomLeftRadius: 4 },
-  bubbleSender: { fontSize: 11, fontWeight: '700', color: '#C4B5FD', marginBottom: 2 },
+  bubbleMine: { backgroundColor: COLORS.primary, borderBottomRightRadius: 4 },
+  bubbleTheirs: { backgroundColor: COLORS.surface, borderBottomLeftRadius: 4 },
+  bubbleSender: { fontSize: 11, fontWeight: '700', color: COLORS.primaryLight, marginBottom: 2 },
   bubbleText: { fontSize: 15, color: 'white' },
   bubbleTime: { fontSize: 10, color: 'rgba(255,255,255,0.6)', marginTop: 4, alignSelf: 'flex-end' },
   inputRow: {
@@ -206,11 +207,11 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 12,
     borderTopWidth: 1,
-    borderTopColor: '#1E293B',
+    borderTopColor: COLORS.surface,
   },
   input: {
     flex: 1,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.surface,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -222,7 +223,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },

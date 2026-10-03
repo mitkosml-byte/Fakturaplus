@@ -11,6 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLanguageStore, useTranslation } from '../src/i18n';
 import { api } from '../src/services/api';
 import { setStoredToken } from '../src/utils/tokenStorage';
+import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -92,7 +93,7 @@ export default function LoginScreen() {
   if (isLoading || isProcessing) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
+        <ActivityIndicator size="large" color={COLORS.primary} />
         <Text style={styles.loadingText}>{t('common.loading')}</Text>
       </View>
     );
@@ -164,11 +165,11 @@ export default function LoginScreen() {
               <View style={styles.formContainer}>
                 {authMode === 'register' && (
                   <View style={styles.inputContainer}>
-                    <Ionicons name="person-outline" size={20} color="#64748B" style={styles.inputIcon} />
+                    <Ionicons name="person-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
                       placeholder={language === 'bg' ? 'Име' : 'Name'}
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                       value={name}
                       onChangeText={setName}
                       autoCapitalize="words"
@@ -179,11 +180,11 @@ export default function LoginScreen() {
                 )}
                 
                 <View style={styles.inputContainer}>
-                  <Ionicons name="mail-outline" size={20} color="#64748B" style={styles.inputIcon} />
+                  <Ionicons name="mail-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder={language === 'bg' ? 'Имейл' : 'Email'}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     value={email}
                     onChangeText={setEmail}
                     keyboardType="email-address"
@@ -194,11 +195,11 @@ export default function LoginScreen() {
                 </View>
 
                 <View style={styles.inputContainer}>
-                  <Ionicons name="lock-closed-outline" size={20} color="#64748B" style={styles.inputIcon} />
+                  <Ionicons name="lock-closed-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder={language === 'bg' ? 'Парола' : 'Password'}
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={COLORS.textMuted}
                     value={password}
                     onChangeText={setPassword}
                     secureTextEntry={!showPassword}
@@ -206,7 +207,7 @@ export default function LoginScreen() {
                     autoComplete={authMode === 'register' ? 'new-password' : 'password'}
                   />
                   <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                    <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748B" />
+                    <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={COLORS.textMuted} />
                   </TouchableOpacity>
                 </View>
 
@@ -220,7 +221,7 @@ export default function LoginScreen() {
 
                 {authMode === 'login' && (
                   <TouchableOpacity onPress={() => setAuthMode('register')} style={styles.newUserHint}>
-                    <Ionicons name="information-circle-outline" size={16} color="#8B5CF6" />
+                    <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} />
                     <Text style={styles.newUserHintText}>
                       {language === 'bg'
                         ? 'Получихте покана или сте нов потребител? Регистрирайте се тук'
@@ -231,7 +232,7 @@ export default function LoginScreen() {
 
                 {authMode === 'register' && !showInviteCode && (
                   <TouchableOpacity onPress={() => setShowInviteCode(true)} style={styles.inviteCodeToggle}>
-                    <Ionicons name="key-outline" size={16} color="#8B5CF6" />
+                    <Ionicons name="key-outline" size={16} color={COLORS.primary} />
                     <Text style={styles.inviteCodeToggleText}>
                       {language === 'bg' ? 'Имате код за покана? (по избор)' : 'Have an invitation code? (optional)'}
                     </Text>
@@ -240,11 +241,11 @@ export default function LoginScreen() {
 
                 {authMode === 'register' && showInviteCode && (
                   <View style={styles.inputContainer}>
-                    <Ionicons name="key-outline" size={20} color="#64748B" style={styles.inputIcon} />
+                    <Ionicons name="key-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
                       placeholder={language === 'bg' ? 'Код за покана (по избор)' : 'Invitation code (optional)'}
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={COLORS.textMuted}
                       value={inviteCode}
                       onChangeText={(v) => setInviteCode(v.toUpperCase())}
                       autoCapitalize="characters"
@@ -290,7 +291,7 @@ function FeatureItem({ icon, text }: { icon: string; text: string }) {
   return (
     <View style={styles.featureItem}>
       <View style={styles.featureIcon}>
-        <Ionicons name={icon as any} size={20} color="#8B5CF6" />
+        <Ionicons name={icon as any} size={20} color={COLORS.primary} />
       </View>
       <Text style={styles.featureText}>{text}</Text>
     </View>
@@ -300,7 +301,7 @@ function FeatureItem({ icon, text }: { icon: string; text: string }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
   gradient: {
     flex: 1,
@@ -324,10 +325,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   langButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   langButtonText: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -338,10 +339,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
   loadingText: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     marginTop: 16,
     fontSize: 16,
   },
@@ -369,7 +370,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 16,
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
   },
   authToggle: {
     flexDirection: 'row',
@@ -387,12 +388,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   authToggleButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: COLORS.primary,
   },
   authToggleText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#64748B',
+    color: COLORS.textMuted,
   },
   authToggleTextActive: {
     color: 'white',
@@ -410,7 +411,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   inputIcon: {
     marginRight: 12,
@@ -420,7 +421,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   forgotPasswordText: {
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontSize: 13,
     fontWeight: '500',
   },
@@ -433,7 +434,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   newUserHintText: {
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontSize: 13,
     fontWeight: '500',
     textAlign: 'center',
@@ -446,7 +447,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   inviteCodeToggleText: {
-    color: '#8B5CF6',
+    color: COLORS.primary,
     fontSize: 13,
     fontWeight: '500',
   },
@@ -457,7 +458,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   emailButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: COLORS.success,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -489,7 +490,7 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: 16,
-    color: '#E2E8F0',
+    color: COLORS.textLight,
   },
   legalLinks: {
     flexDirection: 'row',
@@ -497,15 +498,15 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   legalLink: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 12,
   },
   legalDot: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     marginHorizontal: 8,
   },
   disclaimer: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 12,
     marginTop: 32,
     textAlign: 'center',
