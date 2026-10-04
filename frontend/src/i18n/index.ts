@@ -3269,6 +3269,35 @@ export const translations: Translations = {
   'messages.newDm': { bg: 'Ново лично съобщение', en: 'New direct message' },
   'messages.noMembers': { bg: 'Няма колеги с достъп до тази функция', en: 'No teammates with access to this feature' },
   'messages.enablePushHint': { bg: 'Включете известията, за да не пропускате съобщения', en: 'Enable notifications so you don\'t miss messages' },
+
+  // Account & Security screen
+  'accountSecurity.title': { bg: 'Акаунт и сигурност', en: 'Account & Security' },
+  'accountSecurity.enterCurrentPassword': { bg: 'Въведете текущата си парола', en: 'Enter your current password' },
+  'accountSecurity.passwordMinLength': { bg: 'Паролата трябва да е поне 8 символа', en: 'Password must be at least 8 characters' },
+  'accountSecurity.passwordComplexity': { bg: 'Паролата трябва да съдържа буква и цифра', en: 'Password must contain a letter and a digit' },
+  'accountSecurity.passwordsDontMatch': { bg: 'Паролите не съвпадат', en: 'Passwords do not match' },
+  'accountSecurity.passwordChanged': { bg: 'Паролата е сменена успешно', en: 'Password changed successfully' },
+  'accountSecurity.passwordSet': { bg: 'Паролата е зададена успешно. Вече можете да влизате и с имейл.', en: 'Password set successfully. You can now also log in with email.' },
+  'accountSecurity.changePassword': { bg: 'Смяна на парола', en: 'Change Password' },
+  'accountSecurity.setPassword': { bg: 'Задаване на парола', en: 'Set Password' },
+  'accountSecurity.updatePasswordHint': { bg: 'Актуализирайте паролата за вход', en: 'Update your login password' },
+  'accountSecurity.googleSetPasswordHint': { bg: 'Влизате с Google. Задайте парола, за да можете да влизате и с имейл.', en: 'You sign in with Google. Set a password to also log in with email.' },
+  'accountSecurity.currentPassword': { bg: 'Текуща парола', en: 'Current password' },
+  'accountSecurity.newPassword': { bg: 'Нова парола', en: 'New password' },
+  'accountSecurity.passwordHint': { bg: 'Поне 8 символа, с буква и цифра', en: 'At least 8 characters, with a letter and a digit' },
+  'accountSecurity.confirmNewPassword': { bg: 'Потвърди нова парола', en: 'Confirm new password' },
+  'accountSecurity.loginEmailIs': { bg: 'Имейлът за вход е ', en: 'Login email is ' },
+  'accountSecurity.emailChangeUnavailable': { bg: '. Смяната на имейл не е налична в момента.', en: '. Changing the email is not available yet.' },
+  'accountSecurity.changePasswordButton': { bg: 'Смени паролата', en: 'Change password' },
+  'accountSecurity.setPasswordButton': { bg: 'Задай парола', en: 'Set password' },
+
+  // Join Company screen
+  'joinCompany.title': { bg: 'Присъединяване по покана', en: 'Join by Invitation' },
+  'joinCompany.enterCode': { bg: 'Въведете код за покана', en: 'Enter an invitation code' },
+  'joinCompany.invitationCode': { bg: 'Код за покана', en: 'Invitation code' },
+  'joinCompany.receiveCodeHint': { bg: 'Получавате го от собственика на фирмата', en: 'You receive this from the company owner' },
+  'joinCompany.join': { bg: 'Присъедини се', en: 'Join' },
+  'joinCompany.codeValidityHint': { bg: 'Кодовете за покана са валидни 7 дни и могат да бъдат използвани само от имейла, за който са издадени (ако е зададен такъв).', en: 'Invitation codes are valid for 7 days and can only be used by the email they were issued to (if one was specified).' },
 };
 
 // Zustand store for language

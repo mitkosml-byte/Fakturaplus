@@ -16,7 +16,7 @@ import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
-import { useLanguageStore } from '../src/i18n';
+import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
@@ -25,7 +25,7 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 
 export default function AccountSecurityScreen() {
   const router = useRouter();
-  const { language } = useLanguageStore();
+  const { t } = useTranslation();
   const { user, refreshUser } = useAuth();
   const hasPassword = !!user?.has_password;
 
@@ -36,23 +36,21 @@ export default function AccountSecurityScreen() {
   const [showNew, setShowNew] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const t = (bg: string, en: string) => (language === 'bg' ? bg : en);
-
   const handleSave = async () => {
     if (hasPassword && !currentPassword.trim()) {
-      Alert.alert(t('Грешка', 'Error'), t('Въведете текущата си парола', 'Enter your current password'));
+      Alert.alert(t('common.error'), t('accountSecurity.enterCurrentPassword'));
       return;
     }
     if (newPassword.length < 8) {
-      Alert.alert(t('Грешка', 'Error'), t('Паролата трябва да е поне 8 символа', 'Password must be at least 8 characters'));
+      Alert.alert(t('common.error'), t('accountSecurity.passwordMinLength'));
       return;
     }
     if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
-      Alert.alert(t('Грешка', 'Error'), t('Паролата трябва да съдържа буква и цифра', 'Password must contain a letter and a digit'));
+      Alert.alert(t('common.error'), t('accountSecurity.passwordComplexity'));
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert(t('Грешка', 'Error'), t('Паролите не съвпадат', 'Passwords do not match'));
+      Alert.alert(t('common.error'), t('accountSecurity.passwordsDontMatch'));
       return;
     }
 
@@ -63,12 +61,12 @@ export default function AccountSecurityScreen() {
       Haptics.success();
       Toast.success(
         hasPassword
-          ? t('Паролата е сменена успешно', 'Password changed successfully')
-          : t('Паролата е зададена успешно. Вече можете да влизате и с имейл.', 'Password set successfully. You can now also log in with email.')
+          ? t('accountSecurity.passwordChanged')
+          : t('accountSecurity.passwordSet')
       );
       router.back();
     } catch (error: any) {
-      Alert.alert(t('Грешка', 'Error'), error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setSaving(false);
     }
@@ -83,7 +81,7 @@ export default function AccountSecurityScreen() {
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
-            <Text style={styles.title}>{t('Акаунт и сигурност', 'Account & Security')}</Text>
+            <Text style={styles.title}>{t('accountSecurity.title')}</Text>
             <View style={{ width: 40 }} />
           </View>
 
@@ -95,19 +93,19 @@ export default function AccountSecurityScreen() {
                 </View>
                 <View style={styles.sectionTitleContainer}>
                   <Text style={styles.sectionTitle}>
-                    {hasPassword ? t('Смяна на парола', 'Change Password') : t('Задаване на парола', 'Set Password')}
+                    {hasPassword ? t('accountSecurity.changePassword') : t('accountSecurity.setPassword')}
                   </Text>
                   <Text style={styles.sectionSubtitle}>
                     {hasPassword
-                      ? t('Актуализирайте паролата за вход', 'Update your login password')
-                      : t('Влизате с Google. Задайте парола, за да можете да влизате и с имейл.', 'You sign in with Google. Set a password to also log in with email.')}
+                      ? t('accountSecurity.updatePasswordHint')
+                      : t('accountSecurity.googleSetPasswordHint')}
                   </Text>
                 </View>
               </View>
 
               {hasPassword && (
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>{t('Текуща парола', 'Current password')}</Text>
+                  <Text style={styles.inputLabel}>{t('accountSecurity.currentPassword')}</Text>
                   <View style={styles.passwordRow}>
                     <TextInput
                       style={styles.passwordInput}
@@ -125,7 +123,7 @@ export default function AccountSecurityScreen() {
               )}
 
               <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>{t('Нова парола', 'New password')}</Text>
+                <Text style={styles.inputLabel}>{t('accountSecurity.newPassword')}</Text>
                 <View style={styles.passwordRow}>
                   <TextInput
                     style={styles.passwordInput}
@@ -140,12 +138,12 @@ export default function AccountSecurityScreen() {
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.inputHint}>
-                  {t('Поне 8 символа, с буква и цифра', 'At least 8 characters, with a letter and a digit')}
+                  {t('accountSecurity.passwordHint')}
                 </Text>
               </View>
 
               <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>{t('Потвърди нова парола', 'Confirm new password')}</Text>
+                <Text style={styles.inputLabel}>{t('accountSecurity.confirmNewPassword')}</Text>
                 <TextInput
                   style={[styles.passwordInput, styles.fullWidthInput]}
                   value={confirmPassword}
@@ -160,9 +158,9 @@ export default function AccountSecurityScreen() {
             <View style={styles.infoCard}>
               <Ionicons name="information-circle" size={24} color={COLORS.textMuted} />
               <Text style={styles.infoText}>
-                {t('Имейлът за вход е ', 'Login email is ')}
+                {t('accountSecurity.loginEmailIs')}
                 <Text style={{ color: COLORS.textLight, fontWeight: '600' }}>{user?.email}</Text>
-                {t('. Смяната на имейл не е налична в момента.', '. Changing the email is not available yet.')}
+                {t('accountSecurity.emailChangeUnavailable')}
               </Text>
             </View>
           </ScrollView>
@@ -177,7 +175,7 @@ export default function AccountSecurityScreen() {
                 <ActivityIndicator color="white" />
               ) : (
                 <Text style={styles.saveButtonText}>
-                  {hasPassword ? t('Смени паролата', 'Change password') : t('Задай парола', 'Set password')}
+                  {hasPassword ? t('accountSecurity.changePasswordButton') : t('accountSecurity.setPasswordButton')}
                 </Text>
               )}
             </TouchableOpacity>

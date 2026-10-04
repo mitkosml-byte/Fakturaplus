@@ -18,7 +18,7 @@ import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
-import { useLanguageStore } from '../src/i18n';
+import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
@@ -27,18 +27,16 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 
 export default function JoinCompanyScreen() {
   const router = useRouter();
-  const { language } = useLanguageStore();
+  const { t } = useTranslation();
   const { refreshUser } = useAuth();
 
   const [code, setCode] = useState('');
   const [joining, setJoining] = useState(false);
 
-  const t = (bg: string, en: string) => (language === 'bg' ? bg : en);
-
   const handleJoin = async () => {
     const trimmed = code.trim().toUpperCase();
     if (!trimmed) {
-      Alert.alert(t('Грешка', 'Error'), t('Въведете код за покана', 'Enter an invitation code'));
+      Alert.alert(t('common.error'), t('joinCompany.enterCode'));
       return;
     }
 
@@ -50,7 +48,7 @@ export default function JoinCompanyScreen() {
       Toast.success(result.message);
       router.replace('/(tabs)/profile');
     } catch (error: any) {
-      Alert.alert(t('Грешка', 'Error'), error.message);
+      Alert.alert(t('common.error'), error.message);
     } finally {
       setJoining(false);
     }
@@ -65,7 +63,7 @@ export default function JoinCompanyScreen() {
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
-            <Text style={styles.title}>{t('Присъединяване по покана', 'Join by Invitation')}</Text>
+            <Text style={styles.title}>{t('joinCompany.title')}</Text>
             <View style={{ width: 40 }} />
           </View>
 
@@ -77,9 +75,9 @@ export default function JoinCompanyScreen() {
                     <Ionicons name="key" size={24} color={COLORS.primary} />
                   </View>
                   <View style={styles.sectionTitleContainer}>
-                    <Text style={styles.sectionTitle}>{t('Код за покана', 'Invitation code')}</Text>
+                    <Text style={styles.sectionTitle}>{t('joinCompany.invitationCode')}</Text>
                     <Text style={styles.sectionSubtitle}>
-                      {t('Получавате го от собственика на фирмата', 'You receive this from the company owner')}
+                      {t('joinCompany.receiveCodeHint')}
                     </Text>
                   </View>
                 </View>
@@ -99,10 +97,7 @@ export default function JoinCompanyScreen() {
               <View style={styles.infoCard}>
                 <Ionicons name="information-circle" size={24} color={COLORS.textMuted} />
                 <Text style={styles.infoText}>
-                  {t(
-                    'Кодовете за покана са валидни 7 дни и могат да бъдат използвани само от имейла, за който са издадени (ако е зададен такъв).',
-                    'Invitation codes are valid for 7 days and can only be used by the email they were issued to (if one was specified).'
-                  )}
+                  {t('joinCompany.codeValidityHint')}
                 </Text>
               </View>
             </ScrollView>
@@ -116,7 +111,7 @@ export default function JoinCompanyScreen() {
                 {joining ? (
                   <ActivityIndicator color="white" />
                 ) : (
-                  <Text style={styles.joinButtonText}>{t('Присъедини се', 'Join')}</Text>
+                  <Text style={styles.joinButtonText}>{t('joinCompany.join')}</Text>
                 )}
               </TouchableOpacity>
             </View>
