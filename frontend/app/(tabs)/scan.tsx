@@ -16,9 +16,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../../src/utils/alert';
+import { Toast } from '../../src/utils/toast';
+import { Haptics } from '../../src/utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
-import { ScanCreditsReloadButton } from '../../src/components';
+import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
 import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod } from '../../src/types';
 import { format, parse } from 'date-fns';
@@ -162,6 +164,10 @@ export default function ScanScreen() {
       });
 
       if (!result.canceled && result.assets[0].base64) {
+        // OCR reveal choreography, step 1: confirm the capture itself with
+        // a light haptic the instant the shutter fires - no delay waiting
+        // on the network/OCR call that follows.
+        Haptics.success();
         await addPage(`data:image/jpeg;base64,${result.assets[0].base64}`);
       }
     } catch (error) {
@@ -302,10 +308,11 @@ export default function ScanScreen() {
         payment_method: paymentMethod || undefined,
         payment_due_date: paymentMethod === 'bank_transfer' && paymentDueDate ? paymentDueDate.toISOString() : undefined,
       });
+      Haptics.success();
       if (saved.protocol_number) {
-        Alert.alert(t('common.success'), `${t('msg.invoiceSaved')}\n\n${t('scan.protocolAssigned')} ${saved.protocol_number}`);
+        Toast.success(`${t('msg.invoiceSaved')} · ${t('scan.protocolAssigned')} ${saved.protocol_number}`);
       } else {
-        Alert.alert(t('common.success'), t('msg.invoiceSaved'));
+        Toast.success(t('msg.invoiceSaved'));
       }
       resetForm();
     } catch (error: any) {
@@ -527,7 +534,7 @@ export default function ScanScreen() {
                   </Text>
 
                   {/* AI Corrections Info */}
-                  {ocrCorrections.length > 0 && (
+                  <Expandable expanded={ocrCorrections.length > 0}>
                     <View style={styles.correctionsContainer}>
                       <View style={styles.correctionsHeader}>
                         <Ionicons name="sparkles" size={18} color={COLORS.success} />
@@ -549,7 +556,7 @@ export default function ScanScreen() {
                         </View>
                       ))}
                     </View>
-                  )}
+                  </Expandable>
 
                   {scanMode === 'sales' ? (
                     <>
@@ -601,7 +608,7 @@ export default function ScanScreen() {
                     </>
                   ) : (
                     <>
-                  <View style={styles.inputGroup}>
+                  <StaggerReveal index={0} style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.supplier')} *</Text>
                     <TextInput
                       style={styles.input}
@@ -610,9 +617,9 @@ export default function ScanScreen() {
                       placeholder={t('scan.companyNamePlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                     />
-                  </View>
+                  </StaggerReveal>
 
-                  <View style={styles.inputGroup}>
+                  <StaggerReveal index={1} style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.supplierEik')}</Text>
                     <View style={styles.eikInputRow}>
                       <TextInput
@@ -637,9 +644,9 @@ export default function ScanScreen() {
                         {eikCheck.reason === 'checksum' ? t('scan.eikInvalidChecksum') : t('scan.eikInvalidFormat')}
                       </Text>
                     )}
-                  </View>
+                  </StaggerReveal>
 
-                  <View style={styles.inputGroup}>
+                  <StaggerReveal index={2} style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.invoiceNumber')} *</Text>
                     <TextInput
                       style={styles.input}
@@ -648,10 +655,10 @@ export default function ScanScreen() {
                       placeholder="0000000001"
                       placeholderTextColor={COLORS.textMuted}
                     />
-                  </View>
+                  </StaggerReveal>
 
                   {/* Date of Issue */}
-                  <View style={styles.inputGroup}>
+                  <StaggerReveal index={3} style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.issueDate')} *</Text>
                     <TouchableOpacity
                       style={[styles.dateInputButton, dateFoundByOcr === false && styles.dateInputButtonWarning]}
@@ -669,7 +676,7 @@ export default function ScanScreen() {
                         <Text style={styles.protocolNoteText}>{t('scan.dateNotFoundNote')}</Text>
                       </View>
                     )}
-                  </View>
+                  </StaggerReveal>
 
                   <DateTimePickerModal
                     isVisible={isDatePickerVisible}
@@ -685,7 +692,7 @@ export default function ScanScreen() {
                     locale={language}
                   />
 
-                  <View style={styles.row}>
+                  <StaggerReveal index={4} style={styles.row}>
                     <View style={[styles.inputGroup, { flex: 1 }]}>
                       <Text style={styles.inputLabel}>{t('scan.amountWithoutVAT')}</Text>
                       <TextInput
@@ -708,9 +715,9 @@ export default function ScanScreen() {
                         placeholderTextColor={COLORS.textMuted}
                       />
                     </View>
-                  </View>
+                  </StaggerReveal>
 
-                  <View style={styles.inputGroup}>
+                  <StaggerReveal index={5} style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.totalAmount')} *</Text>
                     <TextInput
                       style={styles.input}
@@ -720,9 +727,9 @@ export default function ScanScreen() {
                       placeholder="0.00"
                       placeholderTextColor={COLORS.textMuted}
                     />
-                  </View>
+                  </StaggerReveal>
 
-                  <View style={styles.inputGroup}>
+                  <StaggerReveal index={6} style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.vatTreatment')}</Text>
                     <View style={styles.vatTreatmentGrid}>
                       {(['standard_20', 'reduced_9', 'zero_rate', 'exempt', 'reverse_charge', 'outside_scope'] as VatTreatment[]).map((option) => (
@@ -743,7 +750,7 @@ export default function ScanScreen() {
                         <Text style={styles.protocolNoteText}>{t('scan.reverseChargeNote')}</Text>
                       </View>
                     )}
-                  </View>
+                  </StaggerReveal>
 
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
@@ -878,7 +885,7 @@ export default function ScanScreen() {
                     </>
                   )}
 
-                  <TouchableOpacity
+                  <PressableScale
                     style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
                     onPress={scanMode === 'sales' ? handleAddToRevenue : handleSaveInvoice}
                     disabled={isSaving}
@@ -893,7 +900,7 @@ export default function ScanScreen() {
                         </Text>
                       </>
                     )}
-                  </TouchableOpacity>
+                  </PressableScale>
                 </View>
               )}
             </View>

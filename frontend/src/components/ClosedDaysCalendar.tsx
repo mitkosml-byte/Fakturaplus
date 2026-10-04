@@ -15,10 +15,13 @@ import { useFocusEffect } from 'expo-router';
 import { Calendar, DateData } from 'react-native-calendars';
 import { format } from 'date-fns';
 import { Alert } from '../utils/alert';
+import { Toast } from '../utils/toast';
+import { Haptics } from '../utils/haptics';
 import { api } from '../services/api';
 import { ClosedDateException } from '../types';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
+import { PressableScale } from './PressableScale';
 
 // Python date.weekday() convention (0=Monday..6=Sunday) - matches the
 // backend's Company.closed_weekdays exactly, so this array can be sent
@@ -103,7 +106,8 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
     setSaving(true);
     try {
       await api.updateCompany({ closed_weekdays: closedWeekdays });
-      Alert.alert(t('common.success'), t('closedDays.weeklySaved'));
+      Haptics.success();
+      Toast.success(t('closedDays.weeklySaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -234,9 +238,9 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
                   );
                 })}
               </View>
-              <TouchableOpacity style={styles.saveButton} onPress={saveWeeklyPattern} disabled={saving}>
+              <PressableScale style={styles.saveButton} onPress={saveWeeklyPattern} disabled={saving}>
                 {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-              </TouchableOpacity>
+              </PressableScale>
             </View>
 
             <View style={[styles.section, collapsible && styles.sectionCompact]}>

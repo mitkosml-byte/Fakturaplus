@@ -17,9 +17,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useAuth } from '../../src/contexts/AuthContext';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
+import { Toast } from '../../src/utils/toast';
+import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
 import { Invoice, VatTreatment } from '../../src/types';
 import { validateEikFormat } from '../../src/utils/eik';
@@ -27,10 +30,17 @@ import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
-import { ScanCreditsBadge } from '../../src/components';
+import { ScanCreditsBadge, Expandable, PressableScale, CountUp, SkeletonRow, AnimatedEmptyIcon } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
+import { DURATION, EASING } from '../../src/theme/motion';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
+
+// Module-scope so it isn't recreated every render - SectionList itself
+// has no Reanimated-provided Animated wrapper (unlike FlatList/ScrollView),
+// so one is built here to drive the header's scroll-linked animation below.
+const AnimatedSectionList = Animated.createAnimatedComponent(SectionList) as unknown as typeof SectionList;
 
 type PeriodPreset = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'thisYear' | 'custom';
 
@@ -71,10 +81,27 @@ function getPeriodRange(
 export default function InvoicesScreen() {
   const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
+  const { hasPermission } = useAuth();
+  const router = useRouter();
   const params = useLocalSearchParams<{ paymentFilter?: string }>();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  // Header shrinks/fades as the list scrolls past it, same treatment as
+  // the Statistics screen - see its comment for why it's clamped.
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
+  const headerAnimatedStyle = useAnimatedStyle(() => {
+    const progress = interpolate(scrollY.value, [0, 90], [0, 1], Extrapolation.CLAMP);
+    return {
+      opacity: interpolate(progress, [0, 1], [1, 0.4]),
+      transform: [{ scale: interpolate(progress, [0, 1], [1, 0.92]) }],
+    };
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
@@ -92,6 +119,16 @@ export default function InvoicesScreen() {
   const [showOnlyEikIssues, setShowOnlyEikIssues] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'partial' | 'overdue'>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const chevronRotation = useSharedValue(0);
+  useEffect(() => {
+    chevronRotation.value = withTiming(filtersExpanded ? 180 : 0, {
+      duration: DURATION.deliberate,
+      easing: EASING.standard,
+    });
+  }, [filtersExpanded]);
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${chevronRotation.value}deg` }],
+  }));
 
   // Lets the Home dashboard's unpaid-invoices reminder deep-link straight
   // into this filter instead of always landing on "all".
@@ -133,6 +170,8 @@ export default function InvoicesScreen() {
       setInvoices(data);
     } catch (error) {
       console.error('Error loading invoices:', error);
+    } finally {
+      setInitialLoading(false);
     }
   }, [searchQuery, periodPreset, customStartDate, customEndDate, paymentFilter]);
 
@@ -270,6 +309,8 @@ export default function InvoicesScreen() {
       });
       applyInvoiceUpdate(updated);
       setEditMode(false);
+      Haptics.success();
+      Toast.success(t('common.saved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -277,15 +318,20 @@ export default function InvoicesScreen() {
     }
   };
 
+  // Optimistic UI (Motion Design Audit, Phase A - the roadmap's highest-
+  // leverage item): the checkbox flips the instant it's tapped instead of
+  // waiting on the round trip, and only rolls back if the request actually
+  // fails. A toggle this small has nothing worth a loading spinner for.
   const handleTogglePaid = async (invoice: Invoice) => {
-    setUpdatingPayment(true);
+    const optimistic: Invoice = { ...invoice, is_paid: !invoice.is_paid };
+    applyInvoiceUpdate(optimistic);
+    if (optimistic.is_paid) Haptics.success();
     try {
-      const updated = await api.updateInvoice(invoice.id, { is_paid: !invoice.is_paid });
+      const updated = await api.updateInvoice(invoice.id, { is_paid: optimistic.is_paid });
       applyInvoiceUpdate(updated);
     } catch (error: any) {
+      applyInvoiceUpdate(invoice);
       Alert.alert(t('common.error'), error.message);
-    } finally {
-      setUpdatingPayment(false);
     }
   };
 
@@ -310,6 +356,7 @@ export default function InvoicesScreen() {
       const updated = await api.updateInvoice(selectedInvoice.id, { paid_amount: amount });
       applyInvoiceUpdate(updated);
       setPaymentModalVisible(false);
+      Haptics.success();
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -317,19 +364,33 @@ export default function InvoicesScreen() {
     }
   };
 
-  const handleDeleteInvoice = async (id: string) => {
+  // Reverted the immediate-delete + 4s-undo-toast pattern (Motion Design
+  // Audit #19): a timed toast gives no real protection for a rare,
+  // irreversible financial action - miss the window (easy to do - the row
+  // is already gone, nothing holds your attention) and the invoice is
+  // simply gone. A blocking confirm costs one deliberate tap but can't be
+  // missed by accident, which matters far more here than the frame of
+  // friction it adds. A second, admin-gated safety net (restore from the
+  // audit log) covers the rest - see the audit-log screen.
+  const handleDeleteInvoice = (id: string) => {
+    const target = invoices.find((inv) => inv.id === id);
+    if (!target) return;
+
     Alert.alert(
-      t('invoices.delete'),
+      t('common.delete'),
       t('invoices.deleteConfirm'),
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
-          text: t('common.delete'),
+          text: t('invoices.deleteInvoice'),
           style: 'destructive',
           onPress: async () => {
             try {
               await api.deleteInvoice(id);
-              loadInvoices();
+              Haptics.destructive();
+              setInvoices((prev) => prev.filter((inv) => inv.id !== id));
+              if (selectedInvoice?.id === id) setSelectedInvoice(null);
+              Toast.success(t('invoices.deletedUndo'));
             } catch (error: any) {
               Alert.alert(t('common.error'), error.message);
             }
@@ -471,7 +532,7 @@ export default function InvoicesScreen() {
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
-          <View style={styles.header}>
+          <Animated.View style={[styles.header, headerAnimatedStyle]}>
             <Text style={styles.title}>{t('invoices.title')}</Text>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
               <ScanCreditsBadge />
@@ -482,7 +543,19 @@ export default function InvoicesScreen() {
                 <Ionicons name="download" size={24} color={COLORS.primary} />
               </TouchableOpacity>
             </View>
-          </View>
+          </Animated.View>
+
+          {/* Admin-only safety net for the confirm dialog above: whoever
+              holds restore_deleted_data can undo a delete after the fact
+              too, from the full snapshot kept on that invoice's audit log
+              entry - see restore_audit_entry in the backend. */}
+          {hasPermission('restore_deleted_data') && (
+            <TouchableOpacity style={styles.restoreHintBanner} onPress={() => router.push('/audit-log')}>
+              <Ionicons name="time-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.restoreHintText}>{t('invoices.restoreDeletedHint')}</Text>
+              <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+            </TouchableOpacity>
+          )}
 
           {/* Search */}
           <View style={styles.searchContainer}>
@@ -513,10 +586,12 @@ export default function InvoicesScreen() {
               {t('invoices.filtersButton')}
               {activeFilterCount > 0 ? ` · ${activeFilterCount} ${t('invoices.filtersActive')}` : ''}
             </Text>
-            <Ionicons name={filtersExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.primary} />
+            <Animated.View style={chevronStyle}>
+              <Ionicons name="chevron-down" size={16} color={COLORS.primary} />
+            </Animated.View>
           </TouchableOpacity>
 
-          {filtersExpanded && (
+          <Expandable expanded={filtersExpanded}>
             <>
               {/* Period filter */}
               <ScrollView
@@ -595,7 +670,7 @@ export default function InvoicesScreen() {
                 ))}
               </ScrollView>
             </>
-          )}
+          </Expandable>
 
           {/* ЕИК issues banner */}
           {eikIssueCount > 0 && (
@@ -625,29 +700,47 @@ export default function InvoicesScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('invoices.total')}:</Text>
-              <Text style={[styles.summaryValue, { color: COLORS.primary }]}>{totalAmount.toFixed(2)} €</Text>
+              <CountUp
+                value={totalAmount}
+                formatter={(n) => `${n.toFixed(2)} €`}
+                style={[styles.summaryValue, { color: COLORS.primary }]}
+              />
             </View>
           </View>
 
-          {/* List */}
-          <SectionList
+          {/* List - a handful of skeleton rows while the first page is
+              still loading, instead of briefly flashing the "no invoices"
+              empty state for data that just hasn't arrived yet. */}
+          {initialLoading && invoices.length === 0 ? (
+            <View style={styles.listContent}>
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+            </View>
+          ) : (
+          <AnimatedSectionList
             sections={sections}
             renderItem={renderInvoice}
             renderSectionHeader={renderSectionHeader}
             stickySectionHeadersEnabled
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item: Invoice) => item.id}
             contentContainerStyle={styles.listContent}
+            onScroll={scrollHandler}
+            scrollEventThrottle={16}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
             }
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
-                <Ionicons name="document-text-outline" size={64} color={COLORS.border} />
+                <AnimatedEmptyIcon name="document-text-outline" size={64} color={COLORS.border} />
                 <Text style={styles.emptyText}>{t('invoices.noInvoices')}</Text>
                 <Text style={styles.emptyHint}>{t('invoices.scanFirst')}</Text>
               </View>
             }
           />
+          )}
 
           {/* Export Modal */}
       <Modal visible={exportModalVisible} animationType="fade" transparent>
@@ -833,9 +926,9 @@ export default function InvoicesScreen() {
                   <TouchableOpacity style={styles.editCancelButton} onPress={() => setEditMode(false)} disabled={savingEdit}>
                     <Text style={styles.editCancelButtonText}>{t('common.cancel')}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.submitButton, { flex: 1 }]} onPress={handleSaveEditedInvoice} disabled={savingEdit}>
+                  <PressableScale style={[styles.submitButton, { flex: 1 }]} onPress={handleSaveEditedInvoice} disabled={savingEdit}>
                     {savingEdit ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
+                  </PressableScale>
                 </View>
               </ScrollView>
             )}
@@ -1071,7 +1164,7 @@ export default function InvoicesScreen() {
                   </View>
                 )}
 
-                <TouchableOpacity
+                <PressableScale
                   style={styles.deleteButton}
                   onPress={() => {
                     setSelectedInvoice(null);
@@ -1080,7 +1173,7 @@ export default function InvoicesScreen() {
                 >
                   <Ionicons name="trash" size={20} color={COLORS.danger} />
                   <Text style={styles.deleteButtonText}>{t('invoices.deleteInvoice')}</Text>
-                </TouchableOpacity>
+                </PressableScale>
               </ScrollView>
             )}
           </View>
@@ -1219,6 +1312,23 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     gap: 12,
+  },
+  restoreHintBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  restoreHintText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '500',
   },
   searchInput: {
     flex: 1,

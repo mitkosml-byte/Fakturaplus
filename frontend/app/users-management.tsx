@@ -17,6 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { User, Invitation, OwnerAction } from '../src/types';
 import { useAuth } from '../src/contexts/AuthContext';
@@ -30,7 +32,7 @@ import { ROLE_DEFAULT_PERMISSIONS, ConfigurableRole } from '../src/utils/permiss
 // ROLE_PERMISSIONS in backend/server.py) - never checklist-configurable -
 // so it's handled as a distinct branch wherever ConfigurableRole drives UI.
 type PickableRole = ConfigurableRole | 'owner';
-import { PermissionsChecklist } from '../src/components';
+import { PermissionsChecklist, ScreenEnter, BottomSheet, RoleBadge, PressableScale } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -218,7 +220,8 @@ export default function UsersManagementScreen() {
       if (result.status === 'pending_approval') {
         Alert.alert(t('users.approvalRequired'), result.message);
       } else {
-        Alert.alert(t('common.success'), t('users.accessUpdated'));
+        Toast.success(t('users.accessUpdated'));
+        Haptics.notify();
       }
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
@@ -320,6 +323,7 @@ export default function UsersManagementScreen() {
   const pendingInvitations = invitations.filter(i => i.status === 'pending');
 
   return (
+    <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -376,11 +380,12 @@ export default function UsersManagementScreen() {
                   </View>
                   
                   <View style={styles.userActions}>
-                    <View style={[styles.roleBadge, { backgroundColor: getRoleColor(user.role) + '20' }]}>
-                      <Text style={[styles.roleText, { color: getRoleColor(user.role) }]}>
-                        {getRoleName(user.role)}
-                      </Text>
-                    </View>
+                    <RoleBadge
+                      label={getRoleName(user.role)}
+                      color={getRoleColor(user.role)}
+                      style={[styles.roleBadge, { backgroundColor: getRoleColor(user.role) + '20' }]}
+                      textStyle={[styles.roleText, { color: getRoleColor(user.role) }]}
+                    />
                     
                     {user.user_id !== currentUser?.user_id && (
                       <View style={styles.actionButtons}>
@@ -487,8 +492,7 @@ export default function UsersManagementScreen() {
           </ScrollView>
 
           {/* Invite Modal */}
-          <Modal visible={showInviteModal} animationType="slide" transparent>
-            <View style={styles.modalOverlay}>
+          <BottomSheet visible={showInviteModal} onClose={() => setShowInviteModal(false)}>
               <View style={[styles.modalContent, styles.modalContentScrollable]}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>
@@ -592,7 +596,7 @@ export default function UsersManagementScreen() {
                   </View>
                 )}
 
-                <TouchableOpacity
+                <PressableScale
                   style={[styles.inviteButton, inviting && styles.buttonDisabled]}
                   onPress={handleInvite}
                   disabled={inviting}
@@ -607,15 +611,13 @@ export default function UsersManagementScreen() {
                       </Text>
                     </>
                   )}
-                </TouchableOpacity>
+                </PressableScale>
                 </ScrollView>
               </View>
-            </View>
-          </Modal>
+          </BottomSheet>
 
           {/* Edit Access Modal - role + permissions checklist for an existing member */}
-          <Modal visible={!!editingUser} animationType="slide" transparent>
-            <View style={styles.modalOverlay}>
+          <BottomSheet visible={!!editingUser} onClose={() => setEditingUser(null)}>
               <View style={[styles.modalContent, styles.modalContentScrollable]}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>{t('users.editAccess')}</Text>
@@ -689,7 +691,7 @@ export default function UsersManagementScreen() {
                         </View>
                       )}
 
-                      <TouchableOpacity
+                      <PressableScale
                         style={[styles.inviteButton, savingAccess && styles.buttonDisabled]}
                         onPress={handleSaveAccess}
                         disabled={savingAccess}
@@ -699,13 +701,12 @@ export default function UsersManagementScreen() {
                         ) : (
                           <Text style={styles.inviteButtonText}>{t('users.saveChanges')}</Text>
                         )}
-                      </TouchableOpacity>
+                      </PressableScale>
                     </>
                   )}
                 </ScrollView>
               </View>
-            </View>
-          </Modal>
+          </BottomSheet>
 
           {/* Invitation Code Modal */}
           <Modal visible={showCodeModal} animationType="fade" transparent>
@@ -752,6 +753,7 @@ export default function UsersManagementScreen() {
         </SafeAreaView>
       </View>
     </ImageBackground>
+    </ScreenEnter>
   );
 }
 

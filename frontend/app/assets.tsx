@@ -23,7 +23,7 @@ import { FixedAsset, AssetCategory, AssetCategoryInfo, AssetsSummary } from '../
 import { format } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
 
@@ -247,6 +247,7 @@ export default function AssetsScreen() {
   }
 
   return (
+    <ScreenEnter>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
@@ -551,6 +552,7 @@ export default function AssetsScreen() {
         onImported={loadData}
       />
     </View>
+    </ScreenEnter>
   );
 }
 

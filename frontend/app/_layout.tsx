@@ -7,7 +7,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
 import { OfflineBanner } from '../src/components/OfflineBanner';
 import { PriceAlertPopup } from '../src/components/PriceAlertPopup';
+import { WalletAlertPopup } from '../src/components/WalletAlertPopup';
 import { OnboardingTutorial } from '../src/components/OnboardingTutorial';
+import { ToastHost } from '../src/components/ToastHost';
+import { useLanguageStore } from '../src/i18n';
 import { COLORS } from '../src/theme/colors';
 
 // Single source of truth for auth-based navigation. Screens (login.tsx,
@@ -48,19 +51,32 @@ function useProtectedRoute() {
 
 function AppShell() {
   useProtectedRoute();
+
+  // Restores the saved language preference once per app boot - previously
+  // only login.tsx's mount effect did this, so a logged-in user landing
+  // directly on any other route (a refresh, a deep link, a resumed native
+  // session) never saw it restored and silently fell back to Bulgarian.
+  const loadLanguage = useLanguageStore((state) => state.loadLanguage);
+  useEffect(() => {
+    loadLanguage();
+  }, [loadLanguage]);
+
   return (
     <>
       <StatusBar style="light" />
       <View style={styles.container}>
         <OfflineBanner />
         <PriceAlertPopup />
+        <WalletAlertPopup />
         <OnboardingTutorial />
         <Stack
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: COLORS.background },
+            animation: 'slide_from_right',
           }}
         />
+        <ToastHost />
       </View>
     </>
   );

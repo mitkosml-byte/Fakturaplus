@@ -15,14 +15,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import Svg, { Circle } from 'react-native-svg';
 import { SimpleSlider } from '../src/components/SimpleSlider';
 import { Alert } from '../src/utils/alert';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { downloadAndShareFile } from '../src/utils/downloadFile';
 import { ScanBalance, ScanPackage, ScanTransaction } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
+import { ScreenEnter, ScanCreditsRing } from '../src/components';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -34,8 +36,7 @@ const PACKAGE_NAME_KEYS: Record<string, string> = {
   business: 'scanCredits.packageNameBusiness',
 };
 
-const RING_RADIUS = 36;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+const LAST_FREE_REMAINING_KEY = 'scan_credits_last_free_remaining';
 
 function openCheckout(url: string) {
   if (Platform.OS === 'web') {
@@ -53,6 +54,11 @@ export default function ScanCreditsScreen() {
 
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState<ScanBalance | null>(null);
+  // Sharpened #22 - null on first paint (ring shows its true value
+  // instantly, nothing to animate from); a number once we know what this
+  // screen last showed, so a change since then (a purchase landing, a
+  // scan being spent) animates as a delta instead of a jump.
+  const [ringAnimateFrom, setRingAnimateFrom] = useState<number | null>(null);
   const [packages, setPackages] = useState<ScanPackage[]>([]);
   const [history, setHistory] = useState<ScanTransaction[]>([]);
   const [buyingId, setBuyingId] = useState<string | null>(null);
@@ -70,6 +76,11 @@ export default function ScanCreditsScreen() {
         api.getScanPackages(),
         api.getScanCreditsHistory(),
       ]);
+      const storedRaw = await AsyncStorage.getItem(LAST_FREE_REMAINING_KEY);
+      const stored = storedRaw !== null ? parseInt(storedRaw, 10) : null;
+      setRingAnimateFrom(stored !== null && stored !== balanceData.free_remaining ? stored : null);
+      if (stored !== null && balanceData.free_remaining > stored) Haptics.success();
+      await AsyncStorage.setItem(LAST_FREE_REMAINING_KEY, String(balanceData.free_remaining));
       setBalance(balanceData);
       setPackages(packagesData);
       setHistory(historyData);
@@ -189,6 +200,7 @@ export default function ScanCreditsScreen() {
   const autoReloadPackage = packages.find(p => p.id === balance.auto_reload_package_id);
 
   return (
+    <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -204,21 +216,13 @@ export default function ScanCreditsScreen() {
             {/* Balance card */}
             <View style={styles.card}>
               <View style={styles.balanceRow}>
-                <View style={styles.ringWrapper}>
-                  <Svg width={84} height={84} viewBox="0 0 84 84">
-                    <Circle cx={42} cy={42} r={RING_RADIUS} fill="none" stroke={COLORS.border} strokeWidth={8} />
-                    <Circle
-                      cx={42} cy={42} r={RING_RADIUS} fill="none" stroke={ringColor} strokeWidth={8}
-                      strokeLinecap="round" strokeDasharray={RING_CIRCUMFERENCE}
-                      strokeDashoffset={RING_CIRCUMFERENCE * (1 - freeFraction)}
-                      rotation={-90} origin="42, 42"
-                    />
-                  </Svg>
-                  <View style={styles.ringTextWrap}>
-                    <Text style={styles.ringNumber}>{balance.free_remaining}/{balance.free_quota}</Text>
-                    <Text style={styles.ringLabel}>{t('scanCredits.freeLabel')}</Text>
-                  </View>
-                </View>
+                <ScanCreditsRing
+                  remaining={balance.free_remaining}
+                  quota={balance.free_quota}
+                  color={ringColor}
+                  label={t('scanCredits.freeLabel')}
+                  animateFrom={ringAnimateFrom}
+                />
                 <View style={styles.balanceInfo}>
                   <Text style={styles.balanceTotal}>{balance.total_remaining}</Text>
                   <Text style={styles.balanceTotalLabel}>{t('scanCredits.totalRemaining')}</Text>
@@ -398,6 +402,7 @@ export default function ScanCreditsScreen() {
         </View>
       </Modal>
     </ImageBackground>
+    </ScreenEnter>
   );
 }
 

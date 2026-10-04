@@ -14,10 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { NotificationSettings } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { getPushStatus, enablePushNotifications, disablePushNotifications } from '../src/utils/pushNotifications';
+import { ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -92,7 +95,8 @@ export default function NotificationsSettingsScreen() {
         periodic_enabled: periodicEnabled,
         periodic_dates: selectedDates,
       });
-      Alert.alert(t('common.success'), t('notifications.saved'));
+      Haptics.success();
+      Toast.success(t('notifications.saved'));
       router.back();
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
@@ -124,6 +128,7 @@ export default function NotificationsSettingsScreen() {
   }
 
   return (
+    <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -267,6 +272,7 @@ export default function NotificationsSettingsScreen() {
         </SafeAreaView>
       </View>
     </ImageBackground>
+    </ScreenEnter>
   );
 }
 

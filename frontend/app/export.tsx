@@ -11,10 +11,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { useTranslation } from '../src/i18n';
 import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFile';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 export default function ExportScreen() {
@@ -29,7 +31,8 @@ export default function ExportScreen() {
     try {
       const { shared } = await downloadAndShareFile(endpoint, filename);
       if (!shared) {
-        Alert.alert(t('common.success'), t('export.fileSaved'));
+        Haptics.success();
+        Toast.success(t('export.fileSaved'));
       }
     } catch (error) {
       console.error('Export error:', error);
@@ -67,6 +70,7 @@ export default function ExportScreen() {
   }
 
   return (
+    <ScreenEnter>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {/* Header */}
@@ -181,6 +185,7 @@ export default function ExportScreen() {
         </View>
       </SafeAreaView>
     </View>
+    </ScreenEnter>
   );
 }
 

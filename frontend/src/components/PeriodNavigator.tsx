@@ -18,6 +18,7 @@ import {
   formatPeriodLabel,
 } from '../utils/periodRange';
 import { COLORS } from '../theme/colors';
+import { ChipTabs } from './ChipTabs';
 
 interface PeriodNavigatorProps {
   state: PeriodState;
@@ -92,17 +93,11 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
   return (
     <View style={styles.container}>
       <View style={styles.modeRow}>
-        {MODES.map((m) => (
-          <TouchableOpacity
-            key={m}
-            style={[styles.modeChip, state.mode === m && styles.modeChipActive]}
-            onPress={() => selectMode(m)}
-          >
-            <Text style={[styles.modeChipText, state.mode === m && styles.modeChipTextActive]}>
-              {modeLabel(m)}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        <ChipTabs
+          active={state.mode}
+          onChange={selectMode}
+          options={MODES.map((m) => ({ key: m, label: modeLabel(m) }))}
+        />
       </View>
 
       {state.mode === 'range' ? (

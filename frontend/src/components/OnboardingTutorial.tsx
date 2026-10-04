@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { useOnboardingStore } from '../stores/onboardingStore';
 import { COLORS } from '../theme/colors';
+import { ModalBlurBackdrop } from './ModalBlurBackdrop';
 
 // Non-intrusive, one-time product tour: auto-opens the first time a given
 // user logs in (see useOnboardingStore.checkAndMaybeOpen). The small floating
@@ -89,6 +90,7 @@ export function OnboardingTutorial() {
 
       <Modal visible={isVisible} animationType="fade" transparent onRequestClose={finish}>
         <View style={styles.overlay}>
+          <ModalBlurBackdrop />
           <View style={styles.card}>
             <TouchableOpacity style={styles.closeBtn} onPress={finish}>
               <Ionicons name="close" size={22} color={COLORS.textMuted} />
@@ -151,7 +153,6 @@ const styles = StyleSheet.create({
   },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,

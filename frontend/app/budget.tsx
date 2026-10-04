@@ -14,10 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter, PressableScale, CountUp, Skeleton, SkeletonRow, AnimatedEmptyIcon } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
 
@@ -98,7 +100,8 @@ export default function BudgetScreen() {
         expense_limit: parseFloat(budgetLimit),
         alert_threshold: parseFloat(alertThreshold)
       });
-      Alert.alert(t('common.success'), t('budget.saved'));
+      Haptics.success();
+      Toast.success(t('budget.saved'));
       setShowBudgetModal(false);
       loadData();
     } catch (error) {
@@ -121,7 +124,8 @@ export default function BudgetScreen() {
         amount: parseFloat(recurringAmount),
         day_of_month: parseInt(recurringDay)
       });
-      Alert.alert(t('common.success'), t('budget.recurringCreated'));
+      Haptics.success();
+      Toast.success(t('budget.recurringCreated'));
       setShowRecurringModal(false);
       setRecurringDesc('');
       setRecurringAmount('');
@@ -167,14 +171,35 @@ export default function BudgetScreen() {
   }
 
   if (loading) {
+    // Mirrors the real header + budget-card + recurring-expenses shape
+    // below, so the screen doesn't jump layout once data arrives - just a
+    // centered "Loading..." text used to tell the user nothing about what
+    // was coming.
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>{t('common.loading')}...</Text>
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+              <Ionicons name="arrow-back" size={24} color="white" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>{t('budget.title')}</Text>
+            <View style={styles.backButton} />
+          </View>
+          <View style={styles.content}>
+            <Skeleton width="50%" height={14} style={{ marginBottom: 16 }} />
+            <Skeleton height={140} borderRadius={16} style={{ marginBottom: 24 }} />
+            <Skeleton width="60%" height={14} style={{ marginBottom: 12 }} />
+            <SkeletonRow />
+            <SkeletonRow />
+            <SkeletonRow />
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
 
   return (
+    <ScreenEnter>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {/* Header */}
@@ -230,21 +255,27 @@ export default function BudgetScreen() {
                 <View style={styles.budgetStats}>
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.spent')}</Text>
-                    <Text style={[styles.budgetStatValue, { color: COLORS.danger }]}>
-                      {budgetStatus.total_spent.toFixed(2)} €
-                    </Text>
+                    <CountUp
+                      value={budgetStatus.total_spent}
+                      formatter={(n) => `${n.toFixed(2)} €`}
+                      style={[styles.budgetStatValue, { color: COLORS.danger }]}
+                    />
                   </View>
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.remaining')}</Text>
-                    <Text style={[styles.budgetStatValue, { color: COLORS.success }]}>
-                      {budgetStatus.remaining.toFixed(2)} €
-                    </Text>
+                    <CountUp
+                      value={budgetStatus.remaining}
+                      formatter={(n) => `${n.toFixed(2)} €`}
+                      style={[styles.budgetStatValue, { color: COLORS.success }]}
+                    />
                   </View>
                   <View style={styles.budgetStat}>
                     <Text style={styles.budgetStatLabel}>{t('budget.limit')}</Text>
-                    <Text style={styles.budgetStatValue}>
-                      {budgetStatus.expense_limit.toFixed(2)} €
-                    </Text>
+                    <CountUp
+                      value={budgetStatus.expense_limit}
+                      formatter={(n) => `${n.toFixed(2)} €`}
+                      style={styles.budgetStatValue}
+                    />
                   </View>
                 </View>
                 
@@ -264,7 +295,7 @@ export default function BudgetScreen() {
               </View>
             ) : (
               <TouchableOpacity style={styles.noBudgetCard} onPress={openBudgetModal}>
-                <Ionicons name="add-circle-outline" size={48} color={COLORS.textMuted} />
+                <AnimatedEmptyIcon name="add-circle-outline" size={48} />
                 <Text style={styles.noBudgetText}>{t('budget.noBudget')}</Text>
                 <Text style={styles.noBudgetHint}>{t('budget.tapToCreate')}</Text>
               </TouchableOpacity>
@@ -344,9 +375,9 @@ export default function BudgetScreen() {
               >
                 <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveBudget} disabled={savingBudget}>
+              <PressableScale style={styles.modalSaveBtn} onPress={saveBudget} disabled={savingBudget}>
                 {savingBudget ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
-              </TouchableOpacity>
+              </PressableScale>
             </View>
           </View>
         </View>
@@ -394,9 +425,9 @@ export default function BudgetScreen() {
               >
                 <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveRecurringExpense} disabled={savingRecurring}>
+              <PressableScale style={styles.modalSaveBtn} onPress={saveRecurringExpense} disabled={savingRecurring}>
                 {savingRecurring ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
-              </TouchableOpacity>
+              </PressableScale>
             </View>
           </View>
         </View>
@@ -414,6 +445,7 @@ export default function BudgetScreen() {
         onImported={loadData}
       />
     </View>
+    </ScreenEnter>
   );
 }
 

@@ -22,8 +22,10 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { Alert } from '../../src/utils/alert';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
+import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
+import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, interpolate, Extrapolation } from 'react-native-reanimated';
 
 const { width } = Dimensions.get('window');
 const chartWidth = width - 80;
@@ -43,6 +45,22 @@ export default function StatsScreen() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
+
+  // Header shrinks/fades as the page scrolls past it - a calm, premium
+  // reaction to scroll instead of the title just sitting there inert.
+  // Clamped to the header's own scroll distance (~90px), so it settles
+  // once fully scrolled past rather than continuing to shrink forever.
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
+  const headerAnimatedStyle = useAnimatedStyle(() => {
+    const progress = interpolate(scrollY.value, [0, 90], [0, 1], Extrapolation.CLAMP);
+    return {
+      opacity: interpolate(progress, [0, 1], [1, 0.4]),
+      transform: [{ scale: interpolate(progress, [0, 1], [1, 0.92]) }],
+    };
+  });
 
   // Lets other screens (e.g. the Home dashboard's average-turnover card)
   // deep-link straight into a specific period here instead of always
@@ -759,11 +777,13 @@ export default function StatsScreen() {
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
-          <ScrollView
+          <Animated.ScrollView
             style={styles.scrollView}
+            onScroll={scrollHandler}
+            scrollEventThrottle={16}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           >
-            <View style={styles.header}>
+            <Animated.View style={[styles.header, headerAnimatedStyle]}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.title}>{t('stats.title')}</Text>
                 <Text style={styles.subtitle}>{t('stats.subtitle')}</Text>
@@ -773,67 +793,37 @@ export default function StatsScreen() {
                   <Ionicons name="download" size={22} color={COLORS.primary} />
                 </TouchableOpacity>
               )}
-            </View>
+            </Animated.View>
 
             {/* Tab Selector */}
-            <View style={styles.tabSelector}>
-              <TouchableOpacity
-                style={[styles.tabButton, activeTab === 'overview' && styles.tabButtonActive]}
-                onPress={() => setActiveTab('overview')}
-              >
-                <Ionicons name="bar-chart" size={16} color={activeTab === 'overview' ? 'white' : COLORS.textMuted} />
-                <Text style={[styles.tabButtonText, activeTab === 'overview' && styles.tabButtonTextActive]}>
-                  {t('stats.overview')}
-                </Text>
-              </TouchableOpacity>
-              {/* Suppliers tab - Only for Owner/Manager */}
-              {hasPermission('view_statistics') && (
-                <TouchableOpacity
-                  style={[styles.tabButton, activeTab === 'suppliers' && styles.tabButtonActive]}
-                  onPress={() => setActiveTab('suppliers')}
-                >
-                  <Ionicons name="business" size={16} color={activeTab === 'suppliers' ? 'white' : COLORS.textMuted} />
-                  <Text style={[styles.tabButtonText, activeTab === 'suppliers' && styles.tabButtonTextActive]}>
-                    {t('stats.suppliers')}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              {/* Items tab - Only for Owner/Manager */}
-              {hasPermission('view_statistics') && (
-                <TouchableOpacity
-                  style={[styles.tabButton, activeTab === 'items' && styles.tabButtonActive]}
-                  onPress={() => setActiveTab('items')}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="pricetags" size={16} color={activeTab === 'items' ? 'white' : COLORS.textMuted} />
-                    {unreadAlerts > 0 && (
-                      <View style={styles.alertBadge}>
-                        <Text style={styles.alertBadgeText}>{unreadAlerts}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={[styles.tabButtonText, activeTab === 'items' && styles.tabButtonTextActive]}>
-                    {t('stats.items')}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <ChipTabs
+              active={activeTab}
+              onChange={setActiveTab}
+              options={[
+                { key: 'overview', label: t('stats.overview'), icon: 'bar-chart' },
+                // Suppliers/Items tabs - Only for Owner/Manager
+                ...(hasPermission('view_statistics')
+                  ? [{ key: 'suppliers' as const, label: t('stats.suppliers'), icon: 'business' as const }]
+                  : []),
+                ...(hasPermission('view_statistics')
+                  ? [{ key: 'items' as const, label: t('stats.items'), icon: 'pricetags' as const, badge: unreadAlerts }]
+                  : []),
+              ]}
+            />
 
             {activeTab === 'overview' ? (
               <>
                 {/* Period Selector */}
-                <View style={styles.periodSelector}>
-                  {(['week', 'month', 'year'] as const).map((p) => (
-                    <TouchableOpacity
-                      key={p}
-                      style={[styles.periodButton, period === p && styles.periodButtonActive]}
-                      onPress={() => setPeriod(p)}
-                    >
-                      <Text style={[styles.periodButtonText, period === p && styles.periodButtonTextActive]}>
-                        {p === 'week' ? t('stats.week') : p === 'month' ? t('stats.month') : t('stats.year')}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                <View style={styles.periodSelectorWrap}>
+                  <ChipTabs
+                    active={period}
+                    onChange={setPeriod}
+                    options={[
+                      { key: 'week', label: t('stats.week') },
+                      { key: 'month', label: t('stats.month') },
+                      { key: 'year', label: t('stats.year') },
+                    ]}
+                  />
                 </View>
 
                 {/* Average Daily Turnover - reacts to the same period selector above,
@@ -846,9 +836,11 @@ export default function StatsScreen() {
                     <Ionicons name="speedometer" size={24} color={COLORS.info} />
                     <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
                   </View>
-                  <Text style={styles.avgTurnoverStatValue}>
-                    {(chartData.reduce((sum, d) => sum + d.income, 0) / openDaysInWindow).toFixed(2)} €
-                  </Text>
+                  <CountUp
+                    value={chartData.reduce((sum, d) => sum + d.income, 0) / openDaysInWindow}
+                    formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
+                    style={styles.avgTurnoverStatValue}
+                  />
                   <Text style={styles.avgTurnoverStatSubtitle}>
                     {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysInWindow))}
                   </Text>
@@ -856,30 +848,46 @@ export default function StatsScreen() {
 
                 <PeriodNavigator state={summaryPeriodState} onChange={setSummaryPeriodState} />
 
-                {/* Summary Cards */}
+                {/* Summary Cards - a skeleton stand-in until the first real
+                    summary lands, so the grid never briefly shows "0.00 €"
+                    for data that just hasn't arrived yet. */}
+                {!summary ? (
+                  <View style={styles.summaryGrid}>
+                    <SkeletonStat style={styles.summaryCard} />
+                    <SkeletonStat style={styles.summaryCard} />
+                    <SkeletonStat style={styles.summaryCard} />
+                    <SkeletonStat style={styles.summaryCard} />
+                  </View>
+                ) : (
                 <View style={styles.summaryGrid}>
                   <View style={[styles.summaryCard, { borderLeftColor: COLORS.success }]}>
                     <Ionicons name="trending-up" size={24} color={COLORS.success} />
                     <Text style={styles.cardLabel}>{t('stats.totalIncome')}</Text>
-                    <Text style={[styles.cardValue, { color: COLORS.success }]}>
-                      {summary?.total_income.toFixed(2) || '0.00'} €
-                    </Text>
+                    <CountUp
+                      value={summary?.total_income || 0}
+                      formatter={(n) => `${n.toFixed(2)} €`}
+                      style={[styles.cardValue, { color: COLORS.success }]}
+                    />
                     {renderTrendBadge(summary?.total_income, previousSummary?.total_income, true)}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: COLORS.danger }]}>
                     <Ionicons name="trending-down" size={24} color={COLORS.danger} />
                     <Text style={styles.cardLabel}>{t('stats.totalExpense')}</Text>
-                    <Text style={[styles.cardValue, { color: COLORS.danger }]}>
-                      {summary?.total_expense.toFixed(2) || '0.00'} €
-                    </Text>
+                    <CountUp
+                      value={summary?.total_expense || 0}
+                      formatter={(n) => `${n.toFixed(2)} €`}
+                      style={[styles.cardValue, { color: COLORS.danger }]}
+                    />
                     {renderTrendBadge(summary?.total_expense, previousSummary?.total_expense, false)}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: COLORS.primary }]}>
                     <Ionicons name="calculator" size={24} color={COLORS.primary} />
                     <Text style={styles.cardLabel}>{t('stats.vatToPay')}</Text>
-                    <Text style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
-                      {summary?.vat_to_pay.toFixed(2) || '0.00'} €
-                    </Text>
+                    <CountUp
+                      value={summary?.vat_to_pay || 0}
+                      formatter={(n) => `${n.toFixed(2)} €`}
+                      style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}
+                    />
                     {renderTrendBadge(summary?.vat_to_pay, previousSummary?.vat_to_pay, false)}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: COLORS.warning }]}>
@@ -889,14 +897,17 @@ export default function StatsScreen() {
                       <Ionicons name="lock-closed" size={20} color={COLORS.textMuted} style={{ marginVertical: 4 }} />
                     ) : (
                       <>
-                        <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}>
-                          {summary?.profit?.toFixed(2) || '0.00'} €
-                        </Text>
+                        <CountUp
+                          value={summary?.profit || 0}
+                          formatter={(n) => `${n.toFixed(2)} €`}
+                          style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
+                        />
                         {renderTrendBadge(summary?.profit, previousSummary?.profit, true)}
                       </>
                     )}
                   </View>
                 </View>
+                )}
 
                 {summary?.financial_visibility && (
                   summary.financial_visibility.pocket_money === false ||
@@ -1235,7 +1246,7 @@ export default function StatsScreen() {
                     <Text style={styles.loadingText}>{t('stats.loadingData')}</Text>
                   </View>
                 ) : supplierOverview ? (
-                  <>
+                  <FadeIn>
                     {/* Executive Summary */}
                     <View style={styles.executiveSummaryCard}>
                       <View style={styles.execSummaryHeader}>
@@ -1584,7 +1595,7 @@ export default function StatsScreen() {
                         ))}
                       </View>
                     )}
-                  </>
+                  </FadeIn>
                 ) : (
                   <View style={styles.noDataContainer}>
                     <Ionicons name="business-outline" size={48} color={COLORS.textMuted} />
@@ -1602,7 +1613,7 @@ export default function StatsScreen() {
                     <Text style={styles.loadingText}>{t('stats.loadingData')}</Text>
                   </View>
                 ) : (
-                  <>
+                  <FadeIn>
                     {/* Price Alerts Section */}
                     {priceAlerts.length > 0 && (
                       <View style={styles.priceAlertsCard}>
@@ -1870,12 +1881,12 @@ export default function StatsScreen() {
                         ))}
                       </View>
                     )}
-                  </>
+                  </FadeIn>
                 )}
                 <View style={{ height: 40 }} />
               </View>
             ) : null}
-          </ScrollView>
+          </Animated.ScrollView>
         </SafeAreaView>
       </View>
       
@@ -2083,11 +2094,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 4,
   },
-  periodSelector: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 4,
+  periodSelectorWrap: {
     marginBottom: 20,
   },
   periodButton: {

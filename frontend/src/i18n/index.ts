@@ -857,7 +857,15 @@ export const translations: Translations = {
     bg: 'Сигурни ли сте, че искате да изтриете тази фактура?',
     en: 'Are you sure you want to delete this invoice?',
   },
-  
+  'invoices.deletedUndo': {
+    bg: 'Фактурата е изтрита',
+    en: 'Invoice deleted',
+  },
+  'invoices.restoreDeletedHint': {
+    bg: 'Изтрихте фактура по грешка? Възстановете я от Дневника на действията',
+    en: 'Deleted an invoice by mistake? Restore it from the audit log',
+  },
+
   // Statistics Screen
   'stats.title': {
     bg: 'Статистики',
@@ -994,6 +1002,26 @@ export const translations: Translations = {
   'profile.settings': {
     bg: 'Настройки',
     en: 'Settings',
+  },
+  'profile.category.company': {
+    bg: 'Фирма и екип',
+    en: 'Company & Team',
+  },
+  'profile.category.accounting': {
+    bg: 'Счетоводство',
+    en: 'Accounting',
+  },
+  'profile.category.security': {
+    bg: 'Сигурност',
+    en: 'Security',
+  },
+  'profile.category.settings': {
+    bg: 'Настройки',
+    en: 'Settings',
+  },
+  'profile.category.support': {
+    bg: 'Поддръжка',
+    en: 'Support',
   },
   'profile.users': {
     bg: 'Потребители',
@@ -1152,6 +1180,18 @@ export const translations: Translations = {
   'common.close': {
     bg: 'Затвори',
     en: 'Close',
+  },
+  'common.undo': {
+    bg: 'Отмяна',
+    en: 'Undo',
+  },
+  'common.saved': {
+    bg: 'Промените са запазени',
+    en: 'Changes saved',
+  },
+  'common.required': {
+    bg: 'Задължително поле',
+    en: 'Required field',
   },
   'msg.downloadFailed': {
     bg: 'Не можах да изтегля файла',
@@ -2549,7 +2589,175 @@ export const translations: Translations = {
     bg: 'Сигурни ли сте, че искате да изтриете този разход?',
     en: 'Are you sure you want to delete this expense?',
   },
-  
+
+  // Personal Wallet (Лично тефтерче) - household spending tracked out of
+  // company funds, distinct from "personal" above (money put INTO the
+  // business).
+  'wallet.tabInvestments': {
+    bg: 'Инвестиции',
+    en: 'Investments',
+  },
+  'wallet.tabWallet': {
+    bg: 'Тефтерче',
+    en: 'Wallet',
+  },
+  'wallet.title': {
+    bg: 'Лично тефтерче',
+    en: 'Personal wallet',
+  },
+  'wallet.subtitle': {
+    bg: 'Лични разходи от фирмените пари',
+    en: 'Personal spending out of company funds',
+  },
+  'wallet.safeToSpend': {
+    bg: 'Безопасно за теглене',
+    en: 'Safe to spend',
+  },
+  'wallet.safeToSpendHint': {
+    bg: 'Печалба за месеца минус вече изтегленото минус предстоящи задължения',
+    en: "This month's profit minus what's already withdrawn minus upcoming obligations",
+  },
+  'wallet.spentThisMonth': {
+    bg: 'Изтеглено този месец',
+    en: 'Withdrawn this month',
+  },
+  'wallet.ofProfit': {
+    bg: 'от печалбата',
+    en: 'of profit',
+  },
+  'wallet.statusOk': {
+    bg: 'В норма',
+    en: 'On track',
+  },
+  'wallet.statusWarning': {
+    bg: 'Внимание',
+    en: 'Caution',
+  },
+  'wallet.statusDanger': {
+    bg: 'Риск от преразход',
+    en: 'Overspend risk',
+  },
+  'wallet.addEntry': {
+    bg: 'Добави разход',
+    en: 'Add expense',
+  },
+  'wallet.editEntry': {
+    bg: 'Коригирай разход',
+    en: 'Edit expense',
+  },
+  'wallet.category': {
+    bg: 'Категория',
+    en: 'Category',
+  },
+  'wallet.categoryLoan': {
+    bg: 'Кредит',
+    en: 'Loan',
+  },
+  'wallet.categoryLease': {
+    bg: 'Лизинг',
+    en: 'Lease',
+  },
+  'wallet.categoryUtility': {
+    bg: 'Комунални',
+    en: 'Utilities',
+  },
+  'wallet.categoryInsurance': {
+    bg: 'Застраховка',
+    en: 'Insurance',
+  },
+  'wallet.categorySubscription': {
+    bg: 'Абонамент',
+    en: 'Subscription',
+  },
+  'wallet.categoryDaily': {
+    bg: 'Ежедневни',
+    en: 'Daily',
+  },
+  'wallet.categoryOneOff': {
+    bg: 'Еднократно',
+    en: 'One-off',
+  },
+  'wallet.isRecurring': {
+    bg: 'Повтарящ се разход',
+    en: 'Recurring expense',
+  },
+  'wallet.nextDueDate': {
+    bg: 'Дата на следващо плащане',
+    en: 'Next due date',
+  },
+  'wallet.byCategory': {
+    bg: 'По категория',
+    en: 'By category',
+  },
+  'wallet.needsVsWants': {
+    bg: 'Нужди срещу желания',
+    en: 'Needs vs. wants',
+  },
+  'wallet.needs': {
+    bg: 'Нужди (кредити, лизинг, комунални)',
+    en: 'Needs (loans, lease, utilities)',
+  },
+  'wallet.wants': {
+    bg: 'Желания (абонаменти, ежедневни)',
+    en: 'Wants (subscriptions, daily)',
+  },
+  'wallet.vsLastMonth': {
+    bg: 'спрямо миналия месец',
+    en: 'vs. last month',
+  },
+  'wallet.upcoming': {
+    bg: 'Предстоящи плащания',
+    en: 'Upcoming payments',
+  },
+  'wallet.advice': {
+    bg: 'Съвети',
+    en: 'Advice',
+  },
+  'wallet.settings': {
+    bg: 'Настройки на алармата',
+    en: 'Alert settings',
+  },
+  'wallet.alertThreshold': {
+    bg: 'Праг за аларма (% от печалбата)',
+    en: 'Alert threshold (% of profit)',
+  },
+  'wallet.saveThreshold': {
+    bg: 'Запази прага',
+    en: 'Save threshold',
+  },
+  'wallet.thresholdSaved': {
+    bg: 'Прагът е запазен',
+    en: 'Threshold saved',
+  },
+  'wallet.noEntries': {
+    bg: 'Няма въведени лични разходи',
+    en: 'No personal expenses recorded',
+  },
+  'wallet.noEntriesHint': {
+    bg: 'Добавете първия разход, за да започне проследяването',
+    en: 'Add your first expense to start tracking',
+  },
+  'wallet.deleteConfirm': {
+    bg: 'Сигурни ли сте, че искате да изтриете този запис?',
+    en: 'Are you sure you want to delete this entry?',
+  },
+  'wallet.entrySaved': {
+    bg: 'Записът е запазен',
+    en: 'Entry saved',
+  },
+  'wallet.entryDeleted': {
+    bg: 'Записът е изтрит',
+    en: 'Entry deleted',
+  },
+  'wallet.homeTeaserTitle': {
+    bg: 'Лично тефтерче',
+    en: 'Personal wallet',
+  },
+  'wallet.homeTeaserOpen': {
+    bg: 'Отвори тефтерчето',
+    en: 'Open wallet',
+  },
+
   // ROI
   'roi.title': {
     bg: 'ROI Анализ',
@@ -2841,6 +3049,10 @@ export const translations: Translations = {
     bg: 'Всички',
     en: 'All',
   },
+  'auditLog.searchPlaceholder': {
+    bg: 'Търси по потребител, доставчик или номер...',
+    en: 'Search by user, supplier or number...',
+  },
   'auditLog.actionCreate': {
     bg: 'Създадена',
     en: 'Created',
@@ -2864,6 +3076,26 @@ export const translations: Translations = {
   'auditLog.entityInvoices': {
     bg: 'фактури',
     en: 'invoices',
+  },
+  'auditLog.restore': {
+    bg: 'Възстанови',
+    en: 'Restore',
+  },
+  'auditLog.restored': {
+    bg: 'Възстановена',
+    en: 'Restored',
+  },
+  'auditLog.restoreConfirmTitle': {
+    bg: 'Възстановяване на фактура',
+    en: 'Restore invoice',
+  },
+  'auditLog.restoreConfirmMessage': {
+    bg: 'Фактурата ще бъде добавена отново, точно както е била преди изтриването.',
+    en: 'The invoice will be added back exactly as it was before it was deleted.',
+  },
+  'auditLog.restoreSuccess': {
+    bg: 'Фактурата е възстановена',
+    en: 'Invoice restored',
   },
   'profile.export': {
     bg: 'Експорт',
@@ -3233,6 +3465,35 @@ export const translations: Translations = {
   'messages.newDm': { bg: 'Ново лично съобщение', en: 'New direct message' },
   'messages.noMembers': { bg: 'Няма колеги с достъп до тази функция', en: 'No teammates with access to this feature' },
   'messages.enablePushHint': { bg: 'Включете известията, за да не пропускате съобщения', en: 'Enable notifications so you don\'t miss messages' },
+
+  // Account & Security screen
+  'accountSecurity.title': { bg: 'Акаунт и сигурност', en: 'Account & Security' },
+  'accountSecurity.enterCurrentPassword': { bg: 'Въведете текущата си парола', en: 'Enter your current password' },
+  'accountSecurity.passwordMinLength': { bg: 'Паролата трябва да е поне 8 символа', en: 'Password must be at least 8 characters' },
+  'accountSecurity.passwordComplexity': { bg: 'Паролата трябва да съдържа буква и цифра', en: 'Password must contain a letter and a digit' },
+  'accountSecurity.passwordsDontMatch': { bg: 'Паролите не съвпадат', en: 'Passwords do not match' },
+  'accountSecurity.passwordChanged': { bg: 'Паролата е сменена успешно', en: 'Password changed successfully' },
+  'accountSecurity.passwordSet': { bg: 'Паролата е зададена успешно. Вече можете да влизате и с имейл.', en: 'Password set successfully. You can now also log in with email.' },
+  'accountSecurity.changePassword': { bg: 'Смяна на парола', en: 'Change Password' },
+  'accountSecurity.setPassword': { bg: 'Задаване на парола', en: 'Set Password' },
+  'accountSecurity.updatePasswordHint': { bg: 'Актуализирайте паролата за вход', en: 'Update your login password' },
+  'accountSecurity.googleSetPasswordHint': { bg: 'Влизате с Google. Задайте парола, за да можете да влизате и с имейл.', en: 'You sign in with Google. Set a password to also log in with email.' },
+  'accountSecurity.currentPassword': { bg: 'Текуща парола', en: 'Current password' },
+  'accountSecurity.newPassword': { bg: 'Нова парола', en: 'New password' },
+  'accountSecurity.passwordHint': { bg: 'Поне 8 символа, с буква и цифра', en: 'At least 8 characters, with a letter and a digit' },
+  'accountSecurity.confirmNewPassword': { bg: 'Потвърди нова парола', en: 'Confirm new password' },
+  'accountSecurity.loginEmailIs': { bg: 'Имейлът за вход е ', en: 'Login email is ' },
+  'accountSecurity.emailChangeUnavailable': { bg: '. Смяната на имейл не е налична в момента.', en: '. Changing the email is not available yet.' },
+  'accountSecurity.changePasswordButton': { bg: 'Смени паролата', en: 'Change password' },
+  'accountSecurity.setPasswordButton': { bg: 'Задай парола', en: 'Set password' },
+
+  // Join Company screen
+  'joinCompany.title': { bg: 'Присъединяване по покана', en: 'Join by Invitation' },
+  'joinCompany.enterCode': { bg: 'Въведете код за покана', en: 'Enter an invitation code' },
+  'joinCompany.invitationCode': { bg: 'Код за покана', en: 'Invitation code' },
+  'joinCompany.receiveCodeHint': { bg: 'Получавате го от собственика на фирмата', en: 'You receive this from the company owner' },
+  'joinCompany.join': { bg: 'Присъедини се', en: 'Join' },
+  'joinCompany.codeValidityHint': { bg: 'Кодовете за покана са валидни 7 дни и могат да бъдат използвани само от имейла, за който са издадени (ако е зададен такъв).', en: 'Invitation codes are valid for 7 days and can only be used by the email they were issued to (if one was specified).' },
 };
 
 // Zustand store for language

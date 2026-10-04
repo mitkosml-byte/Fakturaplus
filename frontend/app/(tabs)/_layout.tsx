@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Platform, View, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../../src/i18n';
+import { AnimatedTabIcon } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
 
 // Left-to-right order of the tab bar, used to resolve which tab a swipe
@@ -103,8 +104,10 @@ export default function TabsLayout() {
           name="index"
           options={{
             title: t('nav.home'),
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="home" size={24} color={color} />
+            tabBarIcon: ({ color, focused }) => (
+              <AnimatedTabIcon focused={focused}>
+                <Ionicons name="home" size={24} color={color} />
+              </AnimatedTabIcon>
             ),
           }}
         />
@@ -112,10 +115,12 @@ export default function TabsLayout() {
           name="scan"
           options={{
             title: t('nav.scan'),
-            tabBarIcon: ({ color, size }) => (
-              <View style={styles.scanButton}>
-                <Ionicons name="scan" size={28} color="white" />
-              </View>
+            tabBarIcon: ({ focused }) => (
+              <AnimatedTabIcon focused={focused}>
+                <View style={styles.scanButton}>
+                  <Ionicons name="scan" size={28} color="white" />
+                </View>
+              </AnimatedTabIcon>
             ),
           }}
         />
@@ -123,8 +128,10 @@ export default function TabsLayout() {
           name="invoices"
           options={{
             title: t('nav.invoices'),
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="document-text" size={24} color={color} />
+            tabBarIcon: ({ color, focused }) => (
+              <AnimatedTabIcon focused={focused}>
+                <Ionicons name="document-text" size={24} color={color} />
+              </AnimatedTabIcon>
             ),
           }}
         />
@@ -132,8 +139,10 @@ export default function TabsLayout() {
           name="stats"
           options={{
             title: t('nav.stats'),
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="stats-chart" size={24} color={color} />
+            tabBarIcon: ({ color, focused }) => (
+              <AnimatedTabIcon focused={focused}>
+                <Ionicons name="stats-chart" size={24} color={color} />
+              </AnimatedTabIcon>
             ),
           }}
         />
@@ -141,8 +150,10 @@ export default function TabsLayout() {
           name="profile"
           options={{
             title: t('nav.profile'),
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="person" size={24} color={color} />
+            tabBarIcon: ({ color, focused }) => (
+              <AnimatedTabIcon focused={focused}>
+                <Ionicons name="person" size={24} color={color} />
+              </AnimatedTabIcon>
             ),
           }}
         />

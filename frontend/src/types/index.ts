@@ -619,6 +619,47 @@ export interface PersonalExpense {
   created_at: string;
 }
 
+export type PersonalWalletCategory =
+  | 'loan' | 'lease' | 'utility' | 'insurance' | 'subscription' | 'daily' | 'one_off';
+
+export interface PersonalWalletEntry {
+  id: string;
+  user_id: string;
+  company_id: string;
+  category: PersonalWalletCategory;
+  description: string;
+  amount: number;
+  date: string;
+  is_recurring: boolean;
+  next_due_date?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface PersonalWalletUpcoming {
+  description: string;
+  amount: number;
+  next_due_date: string;
+  category: PersonalWalletCategory;
+}
+
+export interface PersonalWalletSummary {
+  period: { start: string; end: string };
+  total_spent: number;
+  prev_month_total_spent: number;
+  category_totals: Partial<Record<PersonalWalletCategory, number>>;
+  needs_total: number;
+  wants_total: number;
+  profit_this_month: number;
+  safe_to_spend: number;
+  threshold_percent: number;
+  spent_percent_of_profit: number | null;
+  status: 'ok' | 'warning' | 'danger';
+  upcoming: PersonalWalletUpcoming[];
+  advice: string[];
+}
+
 // Scan credits - see ScanCreditService on the backend. The app's only
 // metered feature: everything else stays free, AI invoice scanning is
 // paid for beyond a small free monthly quota, shared company-wide.

@@ -470,6 +470,50 @@ class PersonalExpenseCreate(BaseModel):
     project_name: Optional[str] = None
     notes: Optional[str] = None
 
+class PersonalWalletCategory(str, Enum):
+    LOAN = "loan"                  # Кредит
+    LEASE = "lease"                # Лизинг
+    UTILITY = "utility"            # Комунални
+    INSURANCE = "insurance"        # Застраховка
+    SUBSCRIPTION = "subscription"  # Абонамент
+    DAILY = "daily"                # Ежедневни
+    ONE_OFF = "one_off"            # Еднократно
+
+class PersonalWalletEntry(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    company_id: str
+    category: PersonalWalletCategory
+    description: str
+    amount: float
+    date: str
+    is_recurring: bool = False
+    next_due_date: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: Optional[datetime] = None
+
+class PersonalWalletEntryCreate(BaseModel):
+    category: PersonalWalletCategory
+    description: str
+    amount: float = Field(gt=0)
+    date: str
+    is_recurring: bool = False
+    next_due_date: Optional[str] = None
+    notes: Optional[str] = None
+
+class PersonalWalletEntryUpdate(BaseModel):
+    category: Optional[PersonalWalletCategory] = None
+    description: Optional[str] = None
+    amount: Optional[float] = Field(default=None, gt=0)
+    date: Optional[str] = None
+    is_recurring: Optional[bool] = None
+    next_due_date: Optional[str] = None
+    notes: Optional[str] = None
+
+class PersonalWalletSettingsUpdate(BaseModel):
+    alert_threshold_percent: float = Field(gt=0, le=200)
+
 class ROIAnalysis(BaseModel):
     period_start: str
     period_end: str
@@ -645,7 +689,8 @@ ROLE_PERMISSIONS = {
         "manage_users", "manage_company", "view_audit_log", "manage_budget",
         "export_data", "view_statistics", "manage_invoices", "add_revenue", "add_expenses",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
-        "team_collaboration", "manage_billing",
+        "team_collaboration", "manage_billing", "restore_deleted_data",
+        "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
     },
     "manager": {
         "manage_budget", "export_data", "view_statistics", "manage_invoices",
@@ -677,7 +722,8 @@ _STAFF_LIKE_CONFIGURABLE = {
     "view_audit_log", "manage_budget", "export_data", "view_statistics",
     "manage_invoices", "add_revenue", "add_expenses",
     "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
-    "team_collaboration",
+    "team_collaboration", "restore_deleted_data",
+    "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
 }
 
 # The four sensitive-data-field permissions, used by sanitize_user's
@@ -694,7 +740,7 @@ _SENSITIVE_FIELD_PERMISSIONS = {
 # inspecting the stored list - is the only way to tell "never touched since
 # this version" apart from "deliberately configured to have none of the new
 # permissions").
-PERMISSIONS_SCHEMA_VERSION = 3
+PERMISSIONS_SCHEMA_VERSION = 5
 
 # Permissions introduced after PERMISSIONS_SCHEMA_VERSION 1, keyed by the
 # version that added them - see sanitize_user's migration branch below,
@@ -704,6 +750,8 @@ PERMISSIONS_SCHEMA_VERSION = 3
 _PERMISSIONS_ADDED_AT_VERSION = {
     2: _SENSITIVE_FIELD_PERMISSIONS,
     3: {"team_collaboration"},
+    4: {"restore_deleted_data"},
+    5: {"view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet"},
 }
 
 ROLE_CONFIGURABLE_PERMISSIONS = {
@@ -713,7 +761,8 @@ ROLE_CONFIGURABLE_PERMISSIONS = {
     "accountant": {
         "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
-        "team_collaboration",
+        "team_collaboration", "restore_deleted_data",
+        "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
     },
 }
 
@@ -3432,10 +3481,61 @@ async def delete_invoice(invoice_id: str, current_user: User = Depends(get_curre
         entity_type="invoice",
         entity_id=invoice_id,
         company_id=company_id,
-        details={"supplier": invoice.get("supplier"), "invoice_number": invoice.get("invoice_number"), "total_amount": invoice.get("total_amount")} if invoice else None
+        # invoice_snapshot keeps the full document (not just the display
+        # summary below) so a holder of restore_deleted_data can undo an
+        # accidental delete from the audit log - see restore_audit_entry.
+        details={
+            "supplier": invoice.get("supplier"), "invoice_number": invoice.get("invoice_number"),
+            "total_amount": invoice.get("total_amount"),
+            "invoice_snapshot": invoice, "restored": False,
+        } if invoice else None
     )
 
     return {"message": "Фактурата е изтрита"}
+
+@api_router.post("/audit-logs/{log_id}/restore")
+async def restore_audit_entry(log_id: str, current_user: User = Depends(get_current_user)):
+    """Restores an invoice deleted earlier, from the full snapshot kept on
+    its own audit log entry. Deliberately separate from manage_invoices -
+    undoing someone else's delete (possibly days later) is a sensitive,
+    infrequent admin action, not routine invoice work, so it is gated on
+    its own permission the owner grants explicitly (see restore_deleted_data
+    in ROLE_PERMISSIONS)."""
+    require_permission(current_user, "restore_deleted_data")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+
+    log_entry = await db.audit_logs.find_one({"id": log_id, "company_id": company_id})
+    if not log_entry:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    if log_entry.get("action") != "delete" or log_entry.get("entity_type") != "invoice":
+        raise HTTPException(status_code=400, detail="Това действие не може да бъде възстановено")
+
+    details = log_entry.get("details") or {}
+    if details.get("restored"):
+        raise HTTPException(status_code=400, detail="Вече е възстановена")
+    snapshot = details.get("invoice_snapshot")
+    if not snapshot:
+        raise HTTPException(status_code=400, detail="Няма запазени данни за възстановяване на тази фактура")
+
+    if await db.invoices.find_one({"id": snapshot["id"]}, {"_id": 1}):
+        raise HTTPException(status_code=400, detail="Вече съществува фактура с това ID")
+
+    await db.invoices.insert_one(dict(snapshot))
+    await db.audit_logs.update_one({"id": log_id}, {"$set": {"details.restored": True}})
+
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="restore",
+        entity_type="invoice",
+        entity_id=snapshot.get("id"),
+        company_id=company_id,
+        details={"supplier": snapshot.get("supplier"), "invoice_number": snapshot.get("invoice_number"), "total_amount": snapshot.get("total_amount")}
+    )
+
+    return {"message": "Фактурата е възстановена"}
 
 # ===================== DAILY REVENUE ENDPOINTS =====================
 
@@ -3989,6 +4089,353 @@ async def get_roi_trend(
 
     return {"trend": trend_data, "months": months}
 
+# ===================== PERSONAL WALLET (Лично тефтерче) =====================
+# A household-finance ledger for money the owner withdraws FROM the company
+# for personal spending (loans, leasing, utilities, subscriptions, daily
+# life...) - the mirror image of PersonalExpense above, which tracks money
+# the owner puts INTO the company. Company-scoped like every other
+# collection here, gated by its own three-tier permission (view/add/manage)
+# so the owner can delegate exactly as much trust as they choose - e.g. a
+# spouse who may log spending but not edit the history.
+
+WALLET_NEEDS_CATEGORIES = {
+    PersonalWalletCategory.LOAN, PersonalWalletCategory.LEASE,
+    PersonalWalletCategory.UTILITY, PersonalWalletCategory.INSURANCE,
+}
+WALLET_WANTS_CATEGORIES = {
+    PersonalWalletCategory.SUBSCRIPTION, PersonalWalletCategory.DAILY, PersonalWalletCategory.ONE_OFF,
+}
+
+def _month_bounds(dt: datetime) -> tuple:
+    """Same inclusive-end-of-month convention as get_summary, reused here
+    so 'this month' means the same thing across the whole app."""
+    start = dt.replace(day=1).strftime("%Y-%m-%d")
+    if dt.month == 12:
+        last_day = dt.replace(year=dt.year + 1, month=1, day=1) - timedelta(days=1)
+    else:
+        last_day = dt.replace(month=dt.month + 1, day=1) - timedelta(days=1)
+    return start, last_day.strftime("%Y-%m-%d")
+
+async def _compute_month_profit(company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str) -> float:
+    """Minimal standalone re-derivation of get_summary's profit formula for
+    one month, used so this module doesn't need get_summary's full
+    permission-redaction machinery - whoever reaches these endpoints already
+    holds a personal-wallet permission, which implies the owner trusts them
+    with exactly this level of financial detail."""
+    date_query = {"$gte": start_date, "$lte": end_date}
+    revenues = await db.daily_revenue.find(
+        {**scope, "date": date_query}, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}
+    ).to_list(1000)
+    invoices = await db.invoices.find(
+        {**scope, "date": {
+            "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
+            "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
+        }}, {"_id": 0, "total_amount": 1}
+    ).to_list(1000)
+    expenses = await db.expenses.find(
+        {**scope, "date": date_query}, {"_id": 0, "amount": 1}
+    ).to_list(1000)
+    payroll_cost = await get_payroll_cost_for_period(company_id, user_id, start_date, end_date)
+    depreciation_cost = await get_depreciation_cost_for_period(company_id, user_id, start_date, end_date)
+
+    total_income = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
+    total_expense = (
+        sum(i.get("total_amount", 0) for i in invoices)
+        + sum(e.get("amount", 0) for e in expenses)
+        + payroll_cost + depreciation_cost
+    )
+    return total_income - total_expense
+
+def generate_wallet_advice(
+    total_spent: float,
+    needs_total: float,
+    wants_total: float,
+    category_totals: dict,
+    last_month_category_totals: dict,
+    profit_this_month: float,
+    safe_to_spend: float,
+    threshold_percent: float,
+    spent_percent_of_profit: Optional[float],
+    upcoming: list,
+) -> List[str]:
+    """Deterministic personal-finance advice - no AI call, so it's free and
+    instant. Each rule is a standard piece of household-finance guidance
+    (the 50/30 needs/wants split, a fixed-obligations ceiling, a reserve
+    reminder...) applied to this company's own numbers."""
+    advice: List[str] = []
+
+    if total_spent == 0:
+        advice.append("📊 Няма въведени лични разходи за този месец все още")
+        return advice
+
+    # The main alert - mirrors Home's existing PriceAlertPopup threshold pattern.
+    if spent_percent_of_profit is not None:
+        if spent_percent_of_profit >= threshold_percent:
+            advice.append(
+                f"🔴 Личните тегления вече са {spent_percent_of_profit:.0f}% от печалбата за месеца "
+                f"(праг {threshold_percent:.0f}%) - рискувате да вкарате фирмата в преразход"
+            )
+        elif spent_percent_of_profit >= threshold_percent * 0.6:
+            advice.append(
+                f"🟡 Личните тегления достигнаха {spent_percent_of_profit:.0f}% от печалбата - "
+                "следете внимателно до края на месеца"
+            )
+        else:
+            advice.append(f"✅ Личните тегления са {spent_percent_of_profit:.0f}% от печалбата - в норма")
+
+    # 50/30 needs-vs-wants split (standard 50/30/20 framework, minus the
+    # savings leg - this ledger doesn't track savings separately).
+    if total_spent > 0:
+        needs_pct = needs_total / total_spent * 100
+        wants_pct = wants_total / total_spent * 100
+        if needs_pct > 65:
+            advice.append(
+                f"⚠️ Фиксираните задължения (кредити, лизинг, комунални) са {needs_pct:.0f}% от "
+                "личните разходи - при повечето бюджети здравословният дял е около 50%"
+            )
+        if wants_pct > 40:
+            advice.append(
+                f"📊 Променливите/необвързващи разходи са {wants_pct:.0f}% от тефтерчето - "
+                "има пространство за съкращаване, ако месецът натежи"
+            )
+
+    # Category trend spikes vs last month.
+    for category, amount in category_totals.items():
+        prev = last_month_category_totals.get(category, 0)
+        if prev > 20 and amount > prev * 1.2:
+            growth = (amount - prev) / prev * 100
+            advice.append(f"📈 Разходите за „{category}“ са нараснали с {growth:.0f}% спрямо миналия месец")
+
+    # Reserve reminder - only when things look healthy, so it doesn't pile
+    # onto someone already in the red.
+    if spent_percent_of_profit is not None and spent_percent_of_profit < threshold_percent * 0.6:
+        advice.append("💡 Обмислете да заделяте поне 10% от личните средства като резерв, преди да похарчите останалото")
+
+    # Upcoming recurring obligations that would eat into what's still safe to spend.
+    for item in upcoming:
+        note = f"📅 Предстои плащане „{item['description']}“ ({item['amount']:.2f} €) на {item['next_due_date']}"
+        if safe_to_spend - item["amount"] < 0:
+            note += " - текущото „безопасно за теглене“ не го покрива"
+        advice.append(note)
+
+    return advice
+
+@api_router.post("/personal-wallet/entries")
+async def create_personal_wallet_entry(
+    entry: PersonalWalletEntryCreate,
+    current_user: User = Depends(get_current_user)
+):
+    require_permission(current_user, "add_personal_wallet_entries")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Няма свързана фирма")
+
+    entry_obj = PersonalWalletEntry(
+        user_id=current_user.user_id,
+        company_id=company_id,
+        category=entry.category,
+        description=entry.description,
+        amount=entry.amount,
+        date=entry.date,
+        is_recurring=entry.is_recurring,
+        next_due_date=entry.next_due_date,
+        notes=entry.notes,
+    )
+    await db.personal_wallet_entries.insert_one(entry_obj.dict())
+
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name,
+        action="create", entity_type="personal_wallet", entity_id=entry_obj.id,
+        company_id=company_id,
+        details={"category": entry.category.value, "amount": entry.amount, "description": entry.description},
+    )
+    return {"message": "Разходът е записан", "id": entry_obj.id}
+
+@api_router.get("/personal-wallet/entries")
+async def get_personal_wallet_entries(
+    category: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    require_permission(current_user, "view_personal_wallet")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"entries": []}
+
+    query: dict = {"company_id": company_id}
+    if category:
+        query["category"] = category
+    if start_date or end_date:
+        query["date"] = {}
+        if start_date:
+            query["date"]["$gte"] = start_date
+        if end_date:
+            query["date"]["$lte"] = end_date
+
+    entries = await db.personal_wallet_entries.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    return {"entries": entries}
+
+@api_router.put("/personal-wallet/entries/{entry_id}")
+async def update_personal_wallet_entry(
+    entry_id: str,
+    update: PersonalWalletEntryUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    require_permission(current_user, "manage_personal_wallet")
+    company_id, _ = await get_company_scope(current_user)
+    existing = await db.personal_wallet_entries.find_one({"id": entry_id, "company_id": company_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+
+    update_data = {k: (v.value if hasattr(v, "value") else v) for k, v in update.dict(exclude_unset=True).items()}
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    await db.personal_wallet_entries.update_one({"id": entry_id, "company_id": company_id}, {"$set": update_data})
+
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name,
+        action="update", entity_type="personal_wallet", entity_id=entry_id,
+        company_id=company_id, details={k: v for k, v in update_data.items() if k != "updated_at"},
+    )
+    entry = await db.personal_wallet_entries.find_one({"id": entry_id}, {"_id": 0})
+    return PersonalWalletEntry(**entry)
+
+@api_router.delete("/personal-wallet/entries/{entry_id}")
+async def delete_personal_wallet_entry(entry_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_personal_wallet")
+    company_id, _ = await get_company_scope(current_user)
+    existing = await db.personal_wallet_entries.find_one({"id": entry_id, "company_id": company_id})
+    result = await db.personal_wallet_entries.delete_one({"id": entry_id, "company_id": company_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name,
+        action="delete", entity_type="personal_wallet", entity_id=entry_id,
+        company_id=company_id,
+        details={"category": existing.get("category"), "amount": existing.get("amount"), "description": existing.get("description")} if existing else None,
+    )
+    return {"message": "Записът е изтрит"}
+
+@api_router.get("/personal-wallet/settings")
+async def get_personal_wallet_settings(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "view_personal_wallet")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"alert_threshold_percent": 80.0}
+    settings = await db.personal_wallet_settings.find_one({"company_id": company_id}, {"_id": 0})
+    return {"alert_threshold_percent": settings.get("alert_threshold_percent", 80.0) if settings else 80.0}
+
+@api_router.put("/personal-wallet/settings")
+async def update_personal_wallet_settings(
+    update: PersonalWalletSettingsUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    require_permission(current_user, "manage_personal_wallet")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Няма свързана фирма")
+
+    await db.personal_wallet_settings.update_one(
+        {"company_id": company_id},
+        {"$set": {"company_id": company_id, "alert_threshold_percent": update.alert_threshold_percent}},
+        upsert=True,
+    )
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name,
+        action="update", entity_type="personal_wallet_settings", company_id=company_id,
+        details={"alert_threshold_percent": update.alert_threshold_percent},
+    )
+    return {"alert_threshold_percent": update.alert_threshold_percent}
+
+@api_router.get("/personal-wallet/summary")
+async def get_personal_wallet_summary(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "view_personal_wallet")
+    company_id, scope = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Няма свързана фирма")
+
+    now = datetime.now(timezone.utc)
+    start_date, end_date = _month_bounds(now)
+    if now.month == 1:
+        prev_month_dt = now.replace(year=now.year - 1, month=12, day=1)
+    else:
+        prev_month_dt = now.replace(month=now.month - 1, day=1)
+    prev_start, prev_end = _month_bounds(prev_month_dt)
+
+    entries = await db.personal_wallet_entries.find(
+        {"company_id": company_id, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
+    ).to_list(2000)
+    prev_entries = await db.personal_wallet_entries.find(
+        {"company_id": company_id, "date": {"$gte": prev_start, "$lte": prev_end}}, {"_id": 0, "category": 1, "amount": 1}
+    ).to_list(2000)
+
+    total_spent = sum(e.get("amount", 0) for e in entries)
+    category_totals: dict = {}
+    for e in entries:
+        category_totals[e["category"]] = category_totals.get(e["category"], 0) + e.get("amount", 0)
+    prev_category_totals: dict = {}
+    for e in prev_entries:
+        prev_category_totals[e["category"]] = prev_category_totals.get(e["category"], 0) + e.get("amount", 0)
+    prev_total_spent = sum(prev_category_totals.values())
+
+    needs_total = sum(v for k, v in category_totals.items() if k in {c.value for c in WALLET_NEEDS_CATEGORIES})
+    wants_total = sum(v for k, v in category_totals.items() if k in {c.value for c in WALLET_WANTS_CATEGORIES})
+
+    profit_this_month = await _compute_month_profit(company_id, scope, current_user.user_id, start_date, end_date)
+
+    today_str = now.strftime("%Y-%m-%d")
+    two_weeks_str = (now + timedelta(days=14)).strftime("%Y-%m-%d")
+    upcoming_docs = await db.personal_wallet_entries.find(
+        {
+            "company_id": company_id, "is_recurring": True,
+            "next_due_date": {"$gte": today_str, "$lte": two_weeks_str},
+        },
+        {"_id": 0, "description": 1, "amount": 1, "next_due_date": 1, "category": 1},
+    ).sort("next_due_date", 1).to_list(50)
+    upcoming_due_total = sum(
+        u.get("amount", 0) for u in upcoming_docs if u.get("next_due_date", "") <= (now + timedelta(days=7)).strftime("%Y-%m-%d")
+    )
+
+    settings = await db.personal_wallet_settings.find_one({"company_id": company_id}, {"_id": 0})
+    threshold_percent = settings.get("alert_threshold_percent", 80.0) if settings else 80.0
+
+    safe_to_spend = round(profit_this_month - total_spent - upcoming_due_total, 2)
+    spent_percent_of_profit = round(total_spent / profit_this_month * 100, 1) if profit_this_month > 0 else None
+
+    status = "ok"
+    if spent_percent_of_profit is not None:
+        if spent_percent_of_profit >= threshold_percent:
+            status = "danger"
+        elif spent_percent_of_profit >= threshold_percent * 0.6:
+            status = "warning"
+    elif profit_this_month <= 0 and total_spent > 0:
+        status = "danger"
+
+    advice = generate_wallet_advice(
+        total_spent=total_spent, needs_total=needs_total, wants_total=wants_total,
+        category_totals=category_totals, last_month_category_totals=prev_category_totals,
+        profit_this_month=profit_this_month, safe_to_spend=safe_to_spend,
+        threshold_percent=threshold_percent, spent_percent_of_profit=spent_percent_of_profit,
+        upcoming=upcoming_docs,
+    )
+
+    return {
+        "period": {"start": start_date, "end": end_date},
+        "total_spent": round(total_spent, 2),
+        "prev_month_total_spent": round(prev_total_spent, 2),
+        "category_totals": {k: round(v, 2) for k, v in category_totals.items()},
+        "needs_total": round(needs_total, 2),
+        "wants_total": round(wants_total, 2),
+        "profit_this_month": round(profit_this_month, 2),
+        "safe_to_spend": safe_to_spend,
+        "threshold_percent": threshold_percent,
+        "spent_percent_of_profit": spent_percent_of_profit,
+        "status": status,
+        "upcoming": upcoming_docs,
+        "advice": advice,
+    }
+
 # ===================== STATISTICS ENDPOINTS =====================
 
 @api_router.get("/statistics/summary")
@@ -4245,20 +4692,14 @@ async def get_supplier_statistics(
     require_permission(current_user, "view_statistics")
     from collections import defaultdict
     from datetime import timedelta
-    
-    # Default to current month if no dates provided. end_date must land on
-    # the LAST day of the month, not the 1st of the next one - it's used
-    # below as an inclusive $lte boundary (through 23:59:59 of that date),
-    # so the 1st-of-next-month form would pull that whole day's invoices
-    # into this month's supplier stats too. See get_summary's identical fix.
+
+    # Unlike get_summary, this endpoint has no period selector in the UI -
+    # the frontend always calls it with no dates, expecting an all-time
+    # supplier-relationship overview (total/active/inactive suppliers, top-3
+    # concentration). Defaulting to the current month here used to hide
+    # every supplier with no invoices yet this month, making the whole tab
+    # read as empty for any account between scans.
     now = datetime.now(timezone.utc)
-    if not start_date and not end_date:
-        start_date = now.replace(day=1).strftime("%Y-%m-%d")
-        if now.month == 12:
-            last_day = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
-        end_date = last_day.strftime("%Y-%m-%d")
 
     # Build query for current period
     _, query = await get_company_scope(current_user)
@@ -7729,6 +8170,7 @@ async def import_commit(entity: str, request: Request, payload: ImportCommitRequ
 async def get_audit_logs(
     action: Optional[str] = None,
     entity_type: Optional[str] = None,
+    search: Optional[str] = None,
     limit: int = 50,
     current_user: User = Depends(get_current_user)
 ):
@@ -7743,9 +8185,10 @@ async def get_audit_logs(
         company_id=company_id,
         action=action,
         entity_type=entity_type,
+        search=search,
         limit=limit
     )
-    
+
     return {"logs": logs}
 
 # ===================== DATABASE INDEXES =====================
@@ -7777,6 +8220,11 @@ async def create_indexes():
         
         # Audit log index
         await db.audit_logs.create_index([("company_id", 1), ("created_at", -1)])
+
+        # Personal wallet indexes
+        await db.personal_wallet_entries.create_index([("company_id", 1), ("date", -1)])
+        await db.personal_wallet_entries.create_index([("company_id", 1), ("is_recurring", 1), ("next_due_date", 1)])
+        await db.personal_wallet_settings.create_index([("company_id", 1)], unique=True)
 
         # Team collaboration indexes (calendar, messages, push)
         await db.calendar_events.create_index([("company_id", 1), ("event_date", 1)])

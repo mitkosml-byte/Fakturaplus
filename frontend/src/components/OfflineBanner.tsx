@@ -1,25 +1,26 @@
 import React from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNetwork } from '../hooks/useNetwork';
 import { useLanguageStore } from '../i18n';
 import { COLORS } from '../theme/colors';
+import { Expandable } from './Expandable';
 
 export function OfflineBanner() {
   const { isOffline } = useNetwork();
   const { language } = useLanguageStore();
 
-  if (!isOffline) return null;
-
   return (
-    <View style={styles.container}>
-      <Ionicons name="cloud-offline" size={18} color={COLORS.warningLight} />
-      <Text style={styles.text}>
-        {language === 'bg' 
-          ? 'Няма връзка с интернет'
-          : 'No internet connection'}
-      </Text>
-    </View>
+    <Expandable expanded={isOffline}>
+      <View style={styles.container}>
+        <Ionicons name="cloud-offline" size={18} color={COLORS.warningLight} />
+        <Text style={styles.text}>
+          {language === 'bg'
+            ? 'Няма връзка с интернет'
+            : 'No internet connection'}
+        </Text>
+      </View>
+    </Expandable>
   );
 }
 

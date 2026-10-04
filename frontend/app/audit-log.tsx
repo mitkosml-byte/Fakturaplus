@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
   ScrollView,
   RefreshControl,
 } from 'react-native';
@@ -14,7 +15,10 @@ import { api } from '../src/services/api';
 import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
+import { AccessDenied, ScreenEnter, AnimatedEmptyIcon } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 type ActionFilter = 'all' | 'create' | 'update' | 'delete' | 'export';
@@ -46,11 +50,19 @@ export default function AuditLogScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionFilter, setActionFilter] = useState<ActionFilter>('all');
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const loadLogs = useCallback(async () => {
+  // Takes an optional override so the "clear" button can search with an
+  // empty string immediately, instead of racing the setSearchQuery('')
+  // state update that wouldn't be visible to this callback until the next
+  // render.
+  const loadLogs = useCallback(async (searchOverride?: string) => {
     try {
+      const search = searchOverride !== undefined ? searchOverride : searchQuery;
       const data = await api.getAuditLogs({
         action: actionFilter === 'all' ? undefined : actionFilter,
+        search: search.trim() || undefined,
         limit: 100,
       });
       setLogs(data.logs || []);
@@ -59,11 +71,16 @@ export default function AuditLogScreen() {
     } finally {
       setLoading(false);
     }
-  }, [actionFilter]);
+  }, [actionFilter, searchQuery]);
 
+  // Reloads on mount and whenever the action filter (chips) changes, but
+  // NOT on every searchQuery keystroke - search only runs when the user
+  // submits it (onSubmitEditing below), same as the invoices screen's
+  // search box, so typing doesn't fire a request per character.
   useEffect(() => {
     loadLogs();
-  }, [loadLogs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionFilter]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -99,6 +116,45 @@ export default function AuditLogScreen() {
     return entry.entity_type;
   };
 
+  // A deleted invoice carries its full snapshot on this entry (see
+  // restore_audit_entry in the backend) exactly once, until restored -
+  // gated on its own permission since undoing someone else's delete,
+  // possibly days later, is a sensitive admin action, not routine invoice
+  // work (see restore_deleted_data in ROLE_PERMISSIONS).
+  const canRestore = (entry: AuditLogEntry) =>
+    hasPermission('restore_deleted_data') &&
+    entry.action === 'delete' &&
+    entry.entity_type === 'invoice' &&
+    !entry.details?.restored;
+
+  const handleRestore = (entry: AuditLogEntry) => {
+    Alert.alert(
+      t('auditLog.restoreConfirmTitle'),
+      t('auditLog.restoreConfirmMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('auditLog.restore'),
+          onPress: async () => {
+            setRestoringId(entry.id);
+            try {
+              await api.restoreAuditLogEntry(entry.id);
+              Haptics.success();
+              Toast.success(t('auditLog.restoreSuccess'));
+              setLogs((prev) =>
+                prev.map((l) => (l.id === entry.id ? { ...l, details: { ...l.details, restored: true } } : l))
+              );
+            } catch (error: any) {
+              Alert.alert(t('common.error'), error.message);
+            } finally {
+              setRestoringId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const formatTimestamp = (value: string) => {
     try {
       return format(new Date(value), 'd MMM yyyy, HH:mm', { locale: dateLocale });
@@ -112,6 +168,7 @@ export default function AuditLogScreen() {
   }
 
   return (
+    <ScreenEnter>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
@@ -120,6 +177,23 @@ export default function AuditLogScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('auditLog.title')}</Text>
           <View style={{ width: 40 }} />
+        </View>
+
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color={COLORS.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={t('auditLog.searchPlaceholder')}
+            placeholderTextColor={COLORS.textMuted}
+            onSubmitEditing={() => loadLogs()}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => { setSearchQuery(''); loadLogs(''); }}>
+              <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
         </View>
 
         <ScrollView
@@ -147,7 +221,7 @@ export default function AuditLogScreen() {
         >
           {!loading && logs.length === 0 && (
             <View style={styles.emptyContainer}>
-              <Ionicons name="document-text-outline" size={56} color={COLORS.border} />
+              <AnimatedEmptyIcon name="document-text-outline" size={56} color={COLORS.border} />
               <Text style={styles.emptyText}>{t('auditLog.empty')}</Text>
             </View>
           )}
@@ -164,6 +238,21 @@ export default function AuditLogScreen() {
                     <Text style={styles.logUser}>{entry.user_name}</Text> · {describeEntry(entry)}
                   </Text>
                   <Text style={styles.logTimestamp}>{formatTimestamp(entry.created_at)}</Text>
+                  {canRestore(entry) && (
+                    <TouchableOpacity
+                      style={styles.restoreButton}
+                      onPress={() => handleRestore(entry)}
+                      disabled={restoringId === entry.id}
+                    >
+                      <Ionicons name="arrow-undo" size={14} color={COLORS.primary} />
+                      <Text style={styles.restoreButtonText}>
+                        {restoringId === entry.id ? '...' : t('auditLog.restore')}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {entry.action === 'delete' && entry.entity_type === 'invoice' && entry.details?.restored && (
+                    <Text style={styles.restoredBadge}>{t('auditLog.restored')}</Text>
+                  )}
                 </View>
               </View>
             );
@@ -173,6 +262,7 @@ export default function AuditLogScreen() {
         </ScrollView>
       </SafeAreaView>
     </View>
+    </ScreenEnter>
   );
 }
 
@@ -199,6 +289,22 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: 'white',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 14,
+    color: 'white',
+    fontSize: 16,
   },
   filterRow: {
     marginTop: 12,
@@ -274,5 +380,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 4,
+  },
+  restoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+  },
+  restoreButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  restoredBadge: {
+    fontSize: 12,
+    color: COLORS.success,
+    fontWeight: '500',
+    marginTop: 6,
   },
 });

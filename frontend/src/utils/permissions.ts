@@ -15,7 +15,11 @@ export type Permission =
   | 'view_profit'
   | 'view_personal_investments'
   | 'team_collaboration'
-  | 'manage_billing';
+  | 'manage_billing'
+  | 'restore_deleted_data'
+  | 'view_personal_wallet'
+  | 'add_personal_wallet_entries'
+  | 'manage_personal_wallet';
 
 export type ConfigurableRole = 'manager' | 'staff' | 'accountant';
 
@@ -50,7 +54,8 @@ const STAFF_LIKE_CONFIGURABLE: Permission[] = [
   'view_audit_log', 'manage_budget', 'export_data', 'view_statistics',
   'manage_invoices', 'add_revenue', 'add_expenses',
   'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
-  'team_collaboration',
+  'team_collaboration', 'restore_deleted_data',
+  'view_personal_wallet', 'add_personal_wallet_entries', 'manage_personal_wallet',
 ];
 
 export const ROLE_CONFIGURABLE_PERMISSIONS: Record<ConfigurableRole, Permission[]> = {
@@ -64,7 +69,8 @@ export const ROLE_CONFIGURABLE_PERMISSIONS: Record<ConfigurableRole, Permission[
   accountant: [
     'view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices',
     'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
-    'team_collaboration',
+    'team_collaboration', 'restore_deleted_data',
+    'view_personal_wallet', 'add_personal_wallet_entries', 'manage_personal_wallet',
   ],
 };
 
@@ -84,6 +90,10 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   view_personal_investments: { bg: 'Вижда лични инвестиции/ROI', en: 'Sees personal investments/ROI' },
   team_collaboration: { bg: 'Календар и съобщения', en: 'Calendar and messages' },
   manage_billing: { bg: 'Плащания и кредити за сканиране', en: 'Billing and scan credits' },
+  restore_deleted_data: { bg: 'Възстановяване на изтрити фактури', en: 'Restore deleted invoices' },
+  view_personal_wallet: { bg: 'Вижда личното тефтерче', en: 'Sees the personal wallet' },
+  add_personal_wallet_entries: { bg: 'Добавя в личното тефтерче', en: 'Adds to the personal wallet' },
+  manage_personal_wallet: { bg: 'Коригира личното тефтерче', en: 'Edits the personal wallet' },
 };
 
 export function getPermissionLabel(permission: Permission, language: Language): string {

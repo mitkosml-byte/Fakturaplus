@@ -7,8 +7,6 @@ import {
   TouchableOpacity,
   RefreshControl,
   TextInput,
-  Modal,
-  KeyboardAvoidingView,
   Platform,
   ImageBackground,
   ActivityIndicator,
@@ -18,6 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
+import { Toast } from '../../src/utils/toast';
+import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
 import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
 import { format, addDays, subDays } from 'date-fns';
@@ -27,7 +27,8 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge } from '../../src/components';
+import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser } from '../../src/components';
+import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 
@@ -47,6 +48,20 @@ export default function HomeScreen() {
   // or a custom range instead of the cards just going silent at zero on the
   // 1st of a new month with no way back to see where last month's data went.
   const [periodState, setPeriodState] = useState<PeriodState>(DEFAULT_PERIOD_STATE);
+
+  // #17: the ‹ › arrows get a directional slide instead of the numbers
+  // just jumping - new data enters from the direction of travel. Only the
+  // arrows (offset changes within the same mode) carry a direction; a
+  // mode switch or a manual range-date edit just cross-fades.
+  const periodReveal = useDirectionalReveal(
+    `${periodState.mode}-${periodState.offset}-${periodState.rangeStart ?? ''}-${periodState.rangeEnd ?? ''}`
+  );
+  const handlePeriodChange = (next: PeriodState) => {
+    if (next.mode === periodState.mode && next.offset !== periodState.offset) {
+      periodReveal.setDirection(next.offset > periodState.offset ? -1 : 1);
+    }
+    setPeriodState(next);
+  };
 
   // Quick-add revenue/expense should land inside whatever period the
   // navigator above is showing, not always on today's real date - otherwise
@@ -82,6 +97,8 @@ export default function HomeScreen() {
   const [personalDescription, setPersonalDescription] = useState('');
   const [personalType, setPersonalType] = useState('recurring');
   const [personalCategory, setPersonalCategory] = useState('other');
+  const [personalAmountError, setPersonalAmountError] = useState(false);
+  const [personalDescriptionError, setPersonalDescriptionError] = useState(false);
   
   // Revenue form
   const [fiscalRevenue, setFiscalRevenue] = useState('');
@@ -97,6 +114,8 @@ export default function HomeScreen() {
   // Expense form
   const [expenseDescription, setExpenseDescription] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseDescriptionError, setExpenseDescriptionError] = useState(false);
+  const [expenseAmountError, setExpenseAmountError] = useState(false);
   const [expenseDate, setExpenseDate] = useState(new Date());
   const [dayExpenses, setDayExpenses] = useState<Array<{id: string; description: string; amount: number; date: string}>>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
@@ -104,6 +123,14 @@ export default function HomeScreen() {
   // Date picker states
   const [isRevenueDatePickerVisible, setRevenueDatePickerVisible] = useState(false);
   const [isExpenseDatePickerVisible, setExpenseDatePickerVisible] = useState(false);
+
+  // Celebrates a genuine milestone - the period crossing from non-profitable
+  // into profitable - not routine saves, which would turn it into noise.
+  // prevProfitRef holds the last value we actually SAW (not the initial
+  // null), so the very first load of a never-profitable account doesn't
+  // read as "just crossed into profit".
+  const prevProfitRef = useRef<number | null>(null);
+  const [celebrateProfit, setCelebrateProfit] = useState(false);
 
   const loadData = useCallback(async () => {
     const bounds = getPeriodBounds(periodState);
@@ -113,6 +140,18 @@ export default function HomeScreen() {
     try {
       const summaryData = await api.getSummary({ start_date, end_date });
       setSummary(summaryData);
+      const newProfit = summaryData.profit;
+      if (
+        prevProfitRef.current !== null &&
+        prevProfitRef.current <= 0 &&
+        typeof newProfit === 'number' &&
+        newProfit > 0
+      ) {
+        setCelebrateProfit(true);
+      }
+      if (typeof newProfit === 'number') {
+        prevProfitRef.current = newProfit;
+      }
     } catch (error) {
       console.error('Error loading data:', error);
     }
@@ -280,14 +319,11 @@ export default function HomeScreen() {
   // Create personal expense
   const handleCreatePersonalExpense = async () => {
     const amount = parseFloat(personalAmount);
-    if (isNaN(amount) || amount <= 0) {
-      Alert.alert(t('common.error'), t('budget.invalidAmount'));
-      return;
-    }
-    if (!personalDescription.trim()) {
-      Alert.alert(t('common.error'), t('msg.fillAllFields'));
-      return;
-    }
+    const invalidAmount = isNaN(amount) || amount <= 0;
+    const missingDescription = !personalDescription.trim();
+    setPersonalAmountError(invalidAmount);
+    setPersonalDescriptionError(missingDescription);
+    if (invalidAmount || missingDescription) return;
     if (isSubmittingForm) return;
 
     // Tagged to whichever period the dashboard above is currently showing,
@@ -307,7 +343,8 @@ export default function HomeScreen() {
         period_year: periodStart.getFullYear(),
       });
 
-      Alert.alert(t('common.success'), t('personal.created'));
+      Haptics.success();
+      Toast.success(t('personal.created'));
       setPersonalAmount('');
       setPersonalDescription('');
       setPersonalType('recurring');
@@ -384,7 +421,8 @@ export default function HomeScreen() {
       setRevenueVatRate(20);
       setRevenueDate(getDefaultActionDate());
       loadData();
-      Alert.alert(t('common.success'), t('msg.revenueSaved'));
+      Haptics.success();
+      Toast.success(t('msg.revenueSaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -393,10 +431,11 @@ export default function HomeScreen() {
   };
 
   const handleAddExpense = async () => {
-    if (!expenseDescription || !expenseAmount) {
-      Alert.alert(t('common.error'), t('msg.fillAllFields'));
-      return;
-    }
+    const missingDescription = !expenseDescription;
+    const missingAmount = !expenseAmount;
+    setExpenseDescriptionError(missingDescription);
+    setExpenseAmountError(missingAmount);
+    if (missingDescription || missingAmount) return;
     if (isSubmittingForm) return;
 
     setIsSubmittingForm(true);
@@ -411,7 +450,8 @@ export default function HomeScreen() {
       setExpenseAmount('');
       loadDayExpenses(expenseDate);
       loadData();
-      Alert.alert(t('common.success'), t('msg.expenseSaved'));
+      Haptics.success();
+      Toast.success(t('msg.expenseSaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -443,18 +483,36 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            <PeriodNavigator state={periodState} onChange={setPeriodState} />
+            <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
 
-            {/* Summary Cards */}
+            <Animated.View style={periodReveal.style}>
+            {/* Summary Cards - skeletons stand in until the first real
+                summary lands, so these never flash "0.00 €" for data that
+                just hasn't arrived yet. */}
+            {!summary ? (
+              <>
+                <View style={styles.summaryContainer}>
+                  <SkeletonStat style={[styles.summaryCard, styles.incomeCard]} />
+                  <SkeletonStat style={[styles.summaryCard, styles.expenseCard]} />
+                </View>
+                <View style={styles.summaryContainer}>
+                  <SkeletonStat style={[styles.summaryCard, styles.cashCard]} />
+                  <SkeletonStat style={[styles.summaryCard, styles.cardCard]} />
+                </View>
+              </>
+            ) : (
+            <>
             <View style={styles.summaryContainer}>
               <View style={[styles.summaryCard, styles.incomeCard]}>
                 <View style={styles.cardIcon}>
                   <Ionicons name="trending-up" size={24} color={COLORS.success} />
                 </View>
                 <Text style={styles.cardLabel}>{t('home.totalIncome')}</Text>
-                <Text style={[styles.cardValue, { color: COLORS.success }]}>
-                  {summary?.total_income.toFixed(2) || '0.00'} €
-                </Text>
+                <CountUp
+                  value={summary?.total_income || 0}
+                  formatter={(n) => `${n.toFixed(2)} €`}
+                  style={[styles.cardValue, { color: COLORS.success }]}
+                />
               </View>
 
               <View style={[styles.summaryCard, styles.expenseCard]}>
@@ -462,9 +520,11 @@ export default function HomeScreen() {
                   <Ionicons name="trending-down" size={24} color={COLORS.danger} />
             </View>
             <Text style={styles.cardLabel}>{t('home.totalExpenses')}</Text>
-            <Text style={[styles.cardValue, { color: COLORS.danger }]}>
-              {summary?.total_expense.toFixed(2) || '0.00'} €
-            </Text>
+            <CountUp
+              value={summary?.total_expense || 0}
+              formatter={(n) => `${n.toFixed(2)} €`}
+              style={[styles.cardValue, { color: COLORS.danger }]}
+            />
           </View>
         </View>
 
@@ -475,9 +535,11 @@ export default function HomeScreen() {
               <Ionicons name="cash-outline" size={24} color={COLORS.success} />
             </View>
             <Text style={styles.cardLabel}>{t('home.cashRevenue')}</Text>
-            <Text style={[styles.cardValue, { color: COLORS.success }]}>
-              {(summary?.total_cash_revenue || 0).toFixed(2)} €
-            </Text>
+            <CountUp
+              value={summary?.total_cash_revenue || 0}
+              formatter={(n) => `${n.toFixed(2)} €`}
+              style={[styles.cardValue, { color: COLORS.success }]}
+            />
           </View>
 
           <View style={[styles.summaryCard, styles.cardCard]}>
@@ -485,11 +547,15 @@ export default function HomeScreen() {
               <Ionicons name="card-outline" size={24} color={COLORS.info} />
             </View>
             <Text style={styles.cardLabel}>{t('home.cardRevenue')}</Text>
-            <Text style={[styles.cardValue, { color: COLORS.info }]}>
-              {(summary?.total_card_revenue || 0).toFixed(2)} €
-            </Text>
+            <CountUp
+              value={summary?.total_card_revenue || 0}
+              formatter={(n) => `${n.toFixed(2)} €`}
+              style={[styles.cardValue, { color: COLORS.info }]}
+            />
           </View>
         </View>
+            </>
+            )}
 
         {/* VAT Card */}
         <View style={styles.vatCard}>
@@ -497,9 +563,11 @@ export default function HomeScreen() {
             <Ionicons name="calculator" size={24} color={COLORS.primary} />
             <Text style={styles.vatTitle}>{t('home.vatToPay')}</Text>
           </View>
-          <Text style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
-            {(summary?.vat_to_pay || 0).toFixed(2)} €
-          </Text>
+          <CountUp
+            value={summary?.vat_to_pay || 0}
+            formatter={(n) => `${n.toFixed(2)} €`}
+            style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}
+          />
           <View style={styles.vatDetails}>
             <View style={styles.vatDetailRow}>
               <Text style={styles.vatDetailLabel}>{t('stats.vatFromSales')}:</Text>
@@ -511,6 +579,7 @@ export default function HomeScreen() {
             </View>
           </View>
         </View>
+            </Animated.View>
 
         {/* Unpaid supplier invoices reminder - company-wide, not scoped to
             this month, since money owed from any past period is still owed */}
@@ -529,9 +598,11 @@ export default function HomeScreen() {
               <Text style={styles.unpaidTitle}>{t('home.unpaidInvoices')}</Text>
               <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </View>
-            <Text style={[styles.unpaidValue, { color: (summary?.overdue_invoice_count || 0) > 0 ? COLORS.danger : COLORS.warning }]}>
-              {(summary?.total_unpaid_amount || 0).toFixed(2)} €
-            </Text>
+            <CountUp
+              value={summary?.total_unpaid_amount || 0}
+              formatter={(n) => `${n.toFixed(2)} €`}
+              style={[styles.unpaidValue, { color: (summary?.overdue_invoice_count || 0) > 0 ? COLORS.danger : COLORS.warning }]}
+            />
             <Text style={styles.unpaidSubtitle}>
               {summary?.unpaid_invoice_count} {t('home.unpaidInvoicesCount')}
               {(summary?.overdue_invoice_count || 0) > 0
@@ -556,9 +627,11 @@ export default function HomeScreen() {
             <Text style={styles.avgTurnoverTitle}>{t('home.avgDailyTurnover')}</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </View>
-          <Text style={styles.avgTurnoverValue}>
-            {(((summary?.total_income || 0)) / openDaysThisMonth).toFixed(2)} €
-          </Text>
+          <CountUp
+            value={(summary?.total_income || 0) / openDaysThisMonth}
+            formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
+            style={styles.avgTurnoverValue}
+          />
           <Text style={styles.avgTurnoverSubtitle}>
             {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysThisMonth))}
           </Text>
@@ -573,31 +646,38 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* Personal wallet teaser - collapsed by default, see component for
+            why it's gated here rather than inside it. */}
+        {hasPermission('view_personal_wallet') && <PersonalWalletTeaser refreshSignal={summary} />}
+
         {/* Stats Overview */}
         <View style={styles.statsGrid}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
+            <CountUp value={summary?.invoice_count || 0} formatter={(n) => `${Math.round(n)}`} style={styles.statValue} />
             <Text style={styles.statLabel}>{t('home.invoices')}</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0}</Text>
+            <CountUp value={summary?.total_fiscal_revenue || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
             <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
           </View>
           <View style={styles.statItem}>
             {summary && summary.total_pocket_money === null ? (
               <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
             ) : (
-              <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0}</Text>
+              <CountUp value={summary?.total_pocket_money || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
             )}
             <Text style={styles.statLabel}>{t('home.pocket')}</Text>
           </View>
-          <View style={styles.statItem}>
+          <View style={[styles.statItem, { overflow: 'visible' }]}>
+            <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
             {summary && summary.profit === null ? (
               <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
             ) : (
-              <Text style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}>
-                {summary?.profit?.toFixed(0) || 0}
-              </Text>
+              <CountUp
+                value={summary?.profit || 0}
+                formatter={(n) => `${n.toFixed(0)}`}
+                style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
+              />
             )}
             <Text style={styles.statLabel}>{t('home.profit')}</Text>
           </View>
@@ -778,8 +858,7 @@ export default function HomeScreen() {
 
       {/* Personal Expense Modal (Owner Only) */}
       {isOwner && (
-        <Modal visible={personalExpenseModalVisible} animationType="slide" transparent>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+        <BottomSheet visible={personalExpenseModalVisible} onClose={() => setPersonalExpenseModalVisible(false)}>
             <View style={[styles.modalContent, { maxHeight: '90%' }]}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{t('personal.addExpense')}</Text>
@@ -802,24 +881,30 @@ export default function HomeScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('personal.amount')}</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, personalAmountError && styles.inputErrorBorder]}
                   placeholder="0.00"
                   placeholderTextColor={COLORS.textMuted}
                   keyboardType="decimal-pad"
                   value={personalAmount}
-                  onChangeText={setPersonalAmount}
+                  onChangeText={(v) => { setPersonalAmount(v); setPersonalAmountError(false); }}
                 />
+                <Expandable expanded={personalAmountError}>
+                  <Text style={styles.fieldErrorText}>{t('budget.invalidAmount')}</Text>
+                </Expandable>
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('personal.description')}</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, personalDescriptionError && styles.inputErrorBorder]}
                   placeholder={language === 'bg' ? 'напр. Наем, Заплати...' : 'e.g. Rent, Salaries...'}
                   placeholderTextColor={COLORS.textMuted}
                   value={personalDescription}
-                  onChangeText={setPersonalDescription}
+                  onChangeText={(v) => { setPersonalDescription(v); setPersonalDescriptionError(false); }}
                 />
+                <Expandable expanded={personalDescriptionError}>
+                  <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
+                </Expandable>
               </View>
 
               {/* Expense Type Selector */}
@@ -878,18 +963,16 @@ export default function HomeScreen() {
                 </ScrollView>
               </View>
 
-              <TouchableOpacity style={styles.submitButton} onPress={handleCreatePersonalExpense} disabled={isSubmittingForm}>
+              <PressableScale style={styles.submitButton} onPress={handleCreatePersonalExpense} disabled={isSubmittingForm}>
                 {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
-              </TouchableOpacity>
+              </PressableScale>
               </ScrollView>
             </View>
-          </KeyboardAvoidingView>
-        </Modal>
+        </BottomSheet>
       )}
 
       {/* Revenue Modal */}
-      <Modal visible={revenueModalVisible} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+      <BottomSheet visible={revenueModalVisible} onClose={closeRevenueModal}>
           <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('home.dailyRevenue')}</Text>
@@ -1013,17 +1096,21 @@ export default function HomeScreen() {
               <Text style={styles.inputHint}>{t('home.excludesVAT')}</Text>
             </View>
 
-            <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue} disabled={isSubmittingForm}>
+            <PressableScale style={styles.submitButton} onPress={handleAddRevenue} disabled={isSubmittingForm}>
               {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('home.save')}</Text>}
-            </TouchableOpacity>
+            </PressableScale>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      </BottomSheet>
 
       {/* Expense Modal */}
-      <Modal visible={expenseModalVisible} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+      <BottomSheet
+        visible={expenseModalVisible}
+        onClose={() => {
+          setExpenseModalVisible(false);
+          setExpenseDate(getDefaultActionDate());
+        }}
+      >
           <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('expenses.title')}</Text>
@@ -1127,39 +1214,44 @@ export default function HomeScreen() {
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>{t('expenses.description')}</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, expenseDescriptionError && styles.inputErrorBorder]}
                     value={expenseDescription}
-                    onChangeText={setExpenseDescription}
+                    onChangeText={(v) => { setExpenseDescription(v); setExpenseDescriptionError(false); }}
                     placeholder={t('expenses.placeholder')}
                     placeholderTextColor={COLORS.textMuted}
                   />
+                  <Expandable expanded={expenseDescriptionError}>
+                    <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
+                  </Expandable>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>{t('expenses.amount')} (€)</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, expenseAmountError && styles.inputErrorBorder]}
                     value={expenseAmount}
-                    onChangeText={setExpenseAmount}
+                    onChangeText={(v) => { setExpenseAmount(v); setExpenseAmountError(false); }}
                     keyboardType="decimal-pad"
                     placeholder="0.00"
                     placeholderTextColor={COLORS.textMuted}
                   />
+                  <Expandable expanded={expenseAmountError}>
+                    <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
+                  </Expandable>
                 </View>
 
-                <TouchableOpacity style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
+                <PressableScale style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
                   {isSubmittingForm ? <ActivityIndicator color="white" /> : (
                     <>
                       <Ionicons name="add-circle" size={20} color="white" />
                       <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
                     </>
                   )}
-                </TouchableOpacity>
+                </PressableScale>
               </View>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      </BottomSheet>
 
       <ExcelImportModal
         visible={importRevenueModalVisible}
@@ -1490,6 +1582,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  // Motion Design System #12: a calm red border instead of a shake when a
+  // required field is missing - the Expandable error text below fades in
+  // alongside it and clears the instant the user starts typing.
+  inputErrorBorder: {
+    borderColor: COLORS.danger,
+  },
+  fieldErrorText: {
+    color: COLORS.danger,
+    fontSize: 12,
+    marginTop: 6,
   },
   inputHint: {
     fontSize: 12,

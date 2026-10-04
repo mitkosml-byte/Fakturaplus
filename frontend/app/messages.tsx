@@ -18,7 +18,7 @@ import { api } from '../src/services/api';
 import { ConversationSummary, CollabMember } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import { getPushStatus } from '../src/utils/pushNotifications';
 import { COLORS } from '../src/theme/colors';
 
@@ -98,6 +98,7 @@ export default function MessagesScreen() {
   }
 
   return (
+    <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -193,6 +194,7 @@ export default function MessagesScreen() {
         </SafeAreaView>
       </View>
     </ImageBackground>
+    </ScreenEnter>
   );
 }
 
