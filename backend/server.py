@@ -645,7 +645,7 @@ ROLE_PERMISSIONS = {
         "manage_users", "manage_company", "view_audit_log", "manage_budget",
         "export_data", "view_statistics", "manage_invoices", "add_revenue", "add_expenses",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
-        "team_collaboration", "manage_billing",
+        "team_collaboration", "manage_billing", "restore_deleted_data",
     },
     "manager": {
         "manage_budget", "export_data", "view_statistics", "manage_invoices",
@@ -677,7 +677,7 @@ _STAFF_LIKE_CONFIGURABLE = {
     "view_audit_log", "manage_budget", "export_data", "view_statistics",
     "manage_invoices", "add_revenue", "add_expenses",
     "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
-    "team_collaboration",
+    "team_collaboration", "restore_deleted_data",
 }
 
 # The four sensitive-data-field permissions, used by sanitize_user's
@@ -694,7 +694,7 @@ _SENSITIVE_FIELD_PERMISSIONS = {
 # inspecting the stored list - is the only way to tell "never touched since
 # this version" apart from "deliberately configured to have none of the new
 # permissions").
-PERMISSIONS_SCHEMA_VERSION = 3
+PERMISSIONS_SCHEMA_VERSION = 4
 
 # Permissions introduced after PERMISSIONS_SCHEMA_VERSION 1, keyed by the
 # version that added them - see sanitize_user's migration branch below,
@@ -704,6 +704,7 @@ PERMISSIONS_SCHEMA_VERSION = 3
 _PERMISSIONS_ADDED_AT_VERSION = {
     2: _SENSITIVE_FIELD_PERMISSIONS,
     3: {"team_collaboration"},
+    4: {"restore_deleted_data"},
 }
 
 ROLE_CONFIGURABLE_PERMISSIONS = {
@@ -713,7 +714,7 @@ ROLE_CONFIGURABLE_PERMISSIONS = {
     "accountant": {
         "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
-        "team_collaboration",
+        "team_collaboration", "restore_deleted_data",
     },
 }
 
@@ -3432,10 +3433,61 @@ async def delete_invoice(invoice_id: str, current_user: User = Depends(get_curre
         entity_type="invoice",
         entity_id=invoice_id,
         company_id=company_id,
-        details={"supplier": invoice.get("supplier"), "invoice_number": invoice.get("invoice_number"), "total_amount": invoice.get("total_amount")} if invoice else None
+        # invoice_snapshot keeps the full document (not just the display
+        # summary below) so a holder of restore_deleted_data can undo an
+        # accidental delete from the audit log - see restore_audit_entry.
+        details={
+            "supplier": invoice.get("supplier"), "invoice_number": invoice.get("invoice_number"),
+            "total_amount": invoice.get("total_amount"),
+            "invoice_snapshot": invoice, "restored": False,
+        } if invoice else None
     )
 
     return {"message": "Фактурата е изтрита"}
+
+@api_router.post("/audit-logs/{log_id}/restore")
+async def restore_audit_entry(log_id: str, current_user: User = Depends(get_current_user)):
+    """Restores an invoice deleted earlier, from the full snapshot kept on
+    its own audit log entry. Deliberately separate from manage_invoices -
+    undoing someone else's delete (possibly days later) is a sensitive,
+    infrequent admin action, not routine invoice work, so it is gated on
+    its own permission the owner grants explicitly (see restore_deleted_data
+    in ROLE_PERMISSIONS)."""
+    require_permission(current_user, "restore_deleted_data")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+
+    log_entry = await db.audit_logs.find_one({"id": log_id, "company_id": company_id})
+    if not log_entry:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    if log_entry.get("action") != "delete" or log_entry.get("entity_type") != "invoice":
+        raise HTTPException(status_code=400, detail="Това действие не може да бъде възстановено")
+
+    details = log_entry.get("details") or {}
+    if details.get("restored"):
+        raise HTTPException(status_code=400, detail="Вече е възстановена")
+    snapshot = details.get("invoice_snapshot")
+    if not snapshot:
+        raise HTTPException(status_code=400, detail="Няма запазени данни за възстановяване на тази фактура")
+
+    if await db.invoices.find_one({"id": snapshot["id"]}, {"_id": 1}):
+        raise HTTPException(status_code=400, detail="Вече съществува фактура с това ID")
+
+    await db.invoices.insert_one(dict(snapshot))
+    await db.audit_logs.update_one({"id": log_id}, {"$set": {"details.restored": True}})
+
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="restore",
+        entity_type="invoice",
+        entity_id=snapshot.get("id"),
+        company_id=company_id,
+        details={"supplier": snapshot.get("supplier"), "invoice_number": snapshot.get("invoice_number"), "total_amount": snapshot.get("total_amount")}
+    )
+
+    return {"message": "Фактурата е възстановена"}
 
 # ===================== DAILY REVENUE ENDPOINTS =====================
 

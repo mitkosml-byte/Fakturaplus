@@ -17,7 +17,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useAuth } from '../../src/contexts/AuthContext';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
@@ -75,6 +76,8 @@ function getPeriodRange(
 export default function InvoicesScreen() {
   const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
+  const { hasPermission } = useAuth();
+  const router = useRouter();
   const params = useLocalSearchParams<{ paymentFilter?: string }>();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -339,38 +342,40 @@ export default function InvoicesScreen() {
     }
   };
 
-  // Sharpened #19 (Motion Design Audit): a confirm dialog the user has
-  // seen fifty times gets rubber-stamped on reflex - it protects no one
-  // and costs a tap and a beat every time. The row is removed immediately
-  // (with its own exit animation via the list's enter/exit motion) and the
-  // actual delete only fires after a dismissible undo window, which
-  // protects an actual mistake instead of a hypothetical one.
+  // Reverted the immediate-delete + 4s-undo-toast pattern (Motion Design
+  // Audit #19): a timed toast gives no real protection for a rare,
+  // irreversible financial action - miss the window (easy to do - the row
+  // is already gone, nothing holds your attention) and the invoice is
+  // simply gone. A blocking confirm costs one deliberate tap but can't be
+  // missed by accident, which matters far more here than the frame of
+  // friction it adds. A second, admin-gated safety net (restore from the
+  // audit log) covers the rest - see the audit-log screen.
   const handleDeleteInvoice = (id: string) => {
-    const removed = invoices.find((inv) => inv.id === id);
-    if (!removed) return;
+    const target = invoices.find((inv) => inv.id === id);
+    if (!target) return;
 
-    setInvoices((prev) => prev.filter((inv) => inv.id !== id));
-    if (selectedInvoice?.id === id) setSelectedInvoice(null);
-
-    let undone = false;
-    Toast.undo(t('invoices.deletedUndo'), () => {
-      undone = true;
-      setInvoices((prev) => (prev.some((inv) => inv.id === id) ? prev : [...prev, removed]));
-    });
-
-    setTimeout(async () => {
-      if (undone) return;
-      try {
-        await api.deleteInvoice(id);
-        Haptics.destructive();
-      } catch (error: any) {
-        // The row already left the UI - put it back rather than silently
-        // leaving the user thinking a delete that failed server-side
-        // actually went through.
-        setInvoices((prev) => (prev.some((inv) => inv.id === id) ? prev : [...prev, removed]));
-        Alert.alert(t('common.error'), error.message);
-      }
-    }, 4000);
+    Alert.alert(
+      t('common.delete'),
+      t('invoices.deleteConfirm'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('invoices.deleteInvoice'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.deleteInvoice(id);
+              Haptics.destructive();
+              setInvoices((prev) => prev.filter((inv) => inv.id !== id));
+              if (selectedInvoice?.id === id) setSelectedInvoice(null);
+              Toast.success(t('invoices.deletedUndo'));
+            } catch (error: any) {
+              Alert.alert(t('common.error'), error.message);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleExport = async (type: 'excel' | 'pdf') => {
@@ -517,6 +522,18 @@ export default function InvoicesScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Admin-only safety net for the confirm dialog above: whoever
+              holds restore_deleted_data can undo a delete after the fact
+              too, from the full snapshot kept on that invoice's audit log
+              entry - see restore_audit_entry in the backend. */}
+          {hasPermission('restore_deleted_data') && (
+            <TouchableOpacity style={styles.restoreHintBanner} onPress={() => router.push('/audit-log')}>
+              <Ionicons name="time-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.restoreHintText}>{t('invoices.restoreDeletedHint')}</Text>
+              <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+            </TouchableOpacity>
+          )}
 
           {/* Search */}
           <View style={styles.searchContainer}>
@@ -1255,6 +1272,23 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     gap: 12,
+  },
+  restoreHintBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  restoreHintText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '500',
   },
   searchInput: {
     flex: 1,

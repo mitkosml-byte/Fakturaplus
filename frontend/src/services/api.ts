@@ -698,6 +698,10 @@ class ApiService {
     return this.fetch(`/audit-logs${query ? `?${query}` : ''}`);
   }
 
+  async restoreAuditLogEntry(logId: string): Promise<{ message: string }> {
+    return this.fetch(`/audit-logs/${logId}/restore`, { method: 'POST' });
+  }
+
   // Personal Expenses (Owner only)
   async getPersonalExpenses(params?: { month?: number; year?: number; expense_type?: string; category?: string }): Promise<{ personal_expenses: PersonalExpense[] }> {
     const queryParams = new URLSearchParams();

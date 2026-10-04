@@ -861,7 +861,11 @@ export const translations: Translations = {
     bg: 'Фактурата е изтрита',
     en: 'Invoice deleted',
   },
-  
+  'invoices.restoreDeletedHint': {
+    bg: 'Изтрихте фактура по грешка? Възстановете я от Дневника на действията',
+    en: 'Deleted an invoice by mistake? Restore it from the audit log',
+  },
+
   // Statistics Screen
   'stats.title': {
     bg: 'Статистики',
@@ -2900,6 +2904,26 @@ export const translations: Translations = {
   'auditLog.entityInvoices': {
     bg: 'фактури',
     en: 'invoices',
+  },
+  'auditLog.restore': {
+    bg: 'Възстанови',
+    en: 'Restore',
+  },
+  'auditLog.restored': {
+    bg: 'Възстановена',
+    en: 'Restored',
+  },
+  'auditLog.restoreConfirmTitle': {
+    bg: 'Възстановяване на фактура',
+    en: 'Restore invoice',
+  },
+  'auditLog.restoreConfirmMessage': {
+    bg: 'Фактурата ще бъде добавена отново, точно както е била преди изтриването.',
+    en: 'The invoice will be added back exactly as it was before it was deleted.',
+  },
+  'auditLog.restoreSuccess': {
+    bg: 'Фактурата е възстановена',
+    en: 'Invoice restored',
   },
   'profile.export': {
     bg: 'Експорт',

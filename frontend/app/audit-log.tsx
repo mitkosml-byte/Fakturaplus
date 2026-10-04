@@ -14,6 +14,9 @@ import { api } from '../src/services/api';
 import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
+import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
@@ -46,6 +49,7 @@ export default function AuditLogScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionFilter, setActionFilter] = useState<ActionFilter>('all');
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const loadLogs = useCallback(async () => {
     try {
@@ -97,6 +101,45 @@ export default function AuditLogScreen() {
       return `${formatLabel}${count}`;
     }
     return entry.entity_type;
+  };
+
+  // A deleted invoice carries its full snapshot on this entry (see
+  // restore_audit_entry in the backend) exactly once, until restored -
+  // gated on its own permission since undoing someone else's delete,
+  // possibly days later, is a sensitive admin action, not routine invoice
+  // work (see restore_deleted_data in ROLE_PERMISSIONS).
+  const canRestore = (entry: AuditLogEntry) =>
+    hasPermission('restore_deleted_data') &&
+    entry.action === 'delete' &&
+    entry.entity_type === 'invoice' &&
+    !entry.details?.restored;
+
+  const handleRestore = (entry: AuditLogEntry) => {
+    Alert.alert(
+      t('auditLog.restoreConfirmTitle'),
+      t('auditLog.restoreConfirmMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('auditLog.restore'),
+          onPress: async () => {
+            setRestoringId(entry.id);
+            try {
+              await api.restoreAuditLogEntry(entry.id);
+              Haptics.success();
+              Toast.success(t('auditLog.restoreSuccess'));
+              setLogs((prev) =>
+                prev.map((l) => (l.id === entry.id ? { ...l, details: { ...l.details, restored: true } } : l))
+              );
+            } catch (error: any) {
+              Alert.alert(t('common.error'), error.message);
+            } finally {
+              setRestoringId(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const formatTimestamp = (value: string) => {
@@ -165,6 +208,21 @@ export default function AuditLogScreen() {
                     <Text style={styles.logUser}>{entry.user_name}</Text> · {describeEntry(entry)}
                   </Text>
                   <Text style={styles.logTimestamp}>{formatTimestamp(entry.created_at)}</Text>
+                  {canRestore(entry) && (
+                    <TouchableOpacity
+                      style={styles.restoreButton}
+                      onPress={() => handleRestore(entry)}
+                      disabled={restoringId === entry.id}
+                    >
+                      <Ionicons name="arrow-undo" size={14} color={COLORS.primary} />
+                      <Text style={styles.restoreButtonText}>
+                        {restoringId === entry.id ? '...' : t('auditLog.restore')}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {entry.action === 'delete' && entry.entity_type === 'invoice' && entry.details?.restored && (
+                    <Text style={styles.restoredBadge}>{t('auditLog.restored')}</Text>
+                  )}
                 </View>
               </View>
             );
@@ -276,5 +334,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 4,
+  },
+  restoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+  },
+  restoreButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  restoredBadge: {
+    fontSize: 12,
+    color: COLORS.success,
+    fontWeight: '500',
+    marginTop: 6,
   },
 });
