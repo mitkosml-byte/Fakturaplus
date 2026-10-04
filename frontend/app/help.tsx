@@ -194,9 +194,9 @@ export default function HelpScreen() {
     },
     {
       icon: 'person-circle',
-      title: 'Лични разходи (само за титуляря)',
+      title: 'Лични вложения (само за титуляря)',
       content: [
-        '💼 Проследявайте лични разходи, изтеглени от бизнеса, отделно от фирмените разходи',
+        '💼 Проследявайте лични средства, които влагате в бизнеса (стока, наем, персонал и др.) - за анализ на възвръщаемостта (ROI). За разходи, които теглите от бизнеса за лични нужди, вижте Лично тефтерче',
         '📜 Пълна история с филтри по период, вид и категория в Начало → История',
       ],
     },
@@ -362,9 +362,9 @@ export default function HelpScreen() {
     },
     {
       icon: 'person-circle',
-      title: 'Personal Expenses (owner only)',
+      title: 'Personal Investments (owner only)',
       content: [
-        '💼 Track personal expenses withdrawn from the business, separately from company expenses',
+        '💼 Track personal funds you invest into the business (goods, rent, personnel, etc.) - for return-on-investment (ROI) analysis. For expenses you withdraw from the business for personal use, see Personal Wallet',
         '📜 Full history with filters by period, type and category under Home → History',
       ],
     },
