@@ -32,7 +32,7 @@ import { ROLE_DEFAULT_PERMISSIONS, ConfigurableRole } from '../src/utils/permiss
 // ROLE_PERMISSIONS in backend/server.py) - never checklist-configurable -
 // so it's handled as a distinct branch wherever ConfigurableRole drives UI.
 type PickableRole = ConfigurableRole | 'owner';
-import { PermissionsChecklist, ScreenEnter } from '../src/components';
+import { PermissionsChecklist, ScreenEnter, BottomSheet } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -491,8 +491,7 @@ export default function UsersManagementScreen() {
           </ScrollView>
 
           {/* Invite Modal */}
-          <Modal visible={showInviteModal} animationType="slide" transparent>
-            <View style={styles.modalOverlay}>
+          <BottomSheet visible={showInviteModal} onClose={() => setShowInviteModal(false)}>
               <View style={[styles.modalContent, styles.modalContentScrollable]}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>
@@ -614,12 +613,10 @@ export default function UsersManagementScreen() {
                 </TouchableOpacity>
                 </ScrollView>
               </View>
-            </View>
-          </Modal>
+          </BottomSheet>
 
           {/* Edit Access Modal - role + permissions checklist for an existing member */}
-          <Modal visible={!!editingUser} animationType="slide" transparent>
-            <View style={styles.modalOverlay}>
+          <BottomSheet visible={!!editingUser} onClose={() => setEditingUser(null)}>
               <View style={[styles.modalContent, styles.modalContentScrollable]}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>{t('users.editAccess')}</Text>
@@ -708,8 +705,7 @@ export default function UsersManagementScreen() {
                   )}
                 </ScrollView>
               </View>
-            </View>
-          </Modal>
+          </BottomSheet>
 
           {/* Invitation Code Modal */}
           <Modal visible={showCodeModal} animationType="fade" transparent>
