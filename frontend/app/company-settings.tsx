@@ -16,11 +16,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
 import { api } from '../src/services/api';
 import { Company } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -116,7 +117,7 @@ export default function CompanySettingsScreen() {
         bank_iban: bankIban.trim() || undefined,
       });
       setCompany(savedCompany);
-      Alert.alert(t('common.success'), t('company.saved'));
+      Toast.success(t('company.saved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -143,6 +144,7 @@ export default function CompanySettingsScreen() {
   }
 
   return (
+    <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -349,6 +351,7 @@ export default function CompanySettingsScreen() {
         </SafeAreaView>
       </View>
     </ImageBackground>
+    </ScreenEnter>
   );
 }
 

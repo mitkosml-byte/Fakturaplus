@@ -8,6 +8,7 @@ import { StyleSheet, View } from 'react-native';
 import { OfflineBanner } from '../src/components/OfflineBanner';
 import { PriceAlertPopup } from '../src/components/PriceAlertPopup';
 import { OnboardingTutorial } from '../src/components/OnboardingTutorial';
+import { ToastHost } from '../src/components/ToastHost';
 import { COLORS } from '../src/theme/colors';
 
 // Single source of truth for auth-based navigation. Screens (login.tsx,
@@ -59,8 +60,10 @@ function AppShell() {
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: COLORS.background },
+            animation: 'slide_from_right',
           }}
         />
+        <ToastHost />
       </View>
     </>
   );

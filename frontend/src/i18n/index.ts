@@ -1153,6 +1153,10 @@ export const translations: Translations = {
     bg: 'Затвори',
     en: 'Close',
   },
+  'common.undo': {
+    bg: 'Отмяна',
+    en: 'Undo',
+  },
   'msg.downloadFailed': {
     bg: 'Не можах да изтегля файла',
     en: 'Could not download the file',
