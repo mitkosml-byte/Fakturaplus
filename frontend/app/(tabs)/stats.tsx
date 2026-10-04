@@ -22,6 +22,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { Alert } from '../../src/utils/alert';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
+import { ChipTabs } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 
@@ -776,64 +777,34 @@ export default function StatsScreen() {
             </View>
 
             {/* Tab Selector */}
-            <View style={styles.tabSelector}>
-              <TouchableOpacity
-                style={[styles.tabButton, activeTab === 'overview' && styles.tabButtonActive]}
-                onPress={() => setActiveTab('overview')}
-              >
-                <Ionicons name="bar-chart" size={16} color={activeTab === 'overview' ? 'white' : COLORS.textMuted} />
-                <Text style={[styles.tabButtonText, activeTab === 'overview' && styles.tabButtonTextActive]}>
-                  {t('stats.overview')}
-                </Text>
-              </TouchableOpacity>
-              {/* Suppliers tab - Only for Owner/Manager */}
-              {hasPermission('view_statistics') && (
-                <TouchableOpacity
-                  style={[styles.tabButton, activeTab === 'suppliers' && styles.tabButtonActive]}
-                  onPress={() => setActiveTab('suppliers')}
-                >
-                  <Ionicons name="business" size={16} color={activeTab === 'suppliers' ? 'white' : COLORS.textMuted} />
-                  <Text style={[styles.tabButtonText, activeTab === 'suppliers' && styles.tabButtonTextActive]}>
-                    {t('stats.suppliers')}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              {/* Items tab - Only for Owner/Manager */}
-              {hasPermission('view_statistics') && (
-                <TouchableOpacity
-                  style={[styles.tabButton, activeTab === 'items' && styles.tabButtonActive]}
-                  onPress={() => setActiveTab('items')}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="pricetags" size={16} color={activeTab === 'items' ? 'white' : COLORS.textMuted} />
-                    {unreadAlerts > 0 && (
-                      <View style={styles.alertBadge}>
-                        <Text style={styles.alertBadgeText}>{unreadAlerts}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={[styles.tabButtonText, activeTab === 'items' && styles.tabButtonTextActive]}>
-                    {t('stats.items')}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <ChipTabs
+              active={activeTab}
+              onChange={setActiveTab}
+              options={[
+                { key: 'overview', label: t('stats.overview'), icon: 'bar-chart' },
+                // Suppliers/Items tabs - Only for Owner/Manager
+                ...(hasPermission('view_statistics')
+                  ? [{ key: 'suppliers' as const, label: t('stats.suppliers'), icon: 'business' as const }]
+                  : []),
+                ...(hasPermission('view_statistics')
+                  ? [{ key: 'items' as const, label: t('stats.items'), icon: 'pricetags' as const, badge: unreadAlerts }]
+                  : []),
+              ]}
+            />
 
             {activeTab === 'overview' ? (
               <>
                 {/* Period Selector */}
-                <View style={styles.periodSelector}>
-                  {(['week', 'month', 'year'] as const).map((p) => (
-                    <TouchableOpacity
-                      key={p}
-                      style={[styles.periodButton, period === p && styles.periodButtonActive]}
-                      onPress={() => setPeriod(p)}
-                    >
-                      <Text style={[styles.periodButtonText, period === p && styles.periodButtonTextActive]}>
-                        {p === 'week' ? t('stats.week') : p === 'month' ? t('stats.month') : t('stats.year')}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                <View style={styles.periodSelectorWrap}>
+                  <ChipTabs
+                    active={period}
+                    onChange={setPeriod}
+                    options={[
+                      { key: 'week', label: t('stats.week') },
+                      { key: 'month', label: t('stats.month') },
+                      { key: 'year', label: t('stats.year') },
+                    ]}
+                  />
                 </View>
 
                 {/* Average Daily Turnover - reacts to the same period selector above,
@@ -2083,11 +2054,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 4,
   },
-  periodSelector: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 4,
+  periodSelectorWrap: {
     marginBottom: 20,
   },
   periodButton: {
