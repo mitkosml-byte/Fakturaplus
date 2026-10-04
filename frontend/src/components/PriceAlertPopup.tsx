@@ -7,6 +7,7 @@ import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
+import { ModalBlurBackdrop } from './ModalBlurBackdrop';
 
 // Surfaces unread price-increase alerts "loudly" as a blocking popup, on top
 // of their existing passive listing in Statistics -> Items. Re-checks
@@ -100,6 +101,7 @@ export function PriceAlertPopup() {
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={closePopup}>
       <View style={styles.overlay}>
+        <ModalBlurBackdrop />
         <View style={styles.card}>
           <View style={styles.header}>
             <Ionicons name="alert-circle" size={28} color={COLORS.danger} />
@@ -156,7 +158,6 @@ export function PriceAlertPopup() {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,

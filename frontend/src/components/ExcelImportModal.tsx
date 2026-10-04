@@ -7,6 +7,7 @@ import { downloadAndShareFile } from '../utils/downloadFile';
 import { Alert } from '../utils/alert';
 import { useTranslation } from '../i18n';
 import { ImportEntity, ImportPreviewResult } from '../types';
+import { ModalBlurBackdrop } from './ModalBlurBackdrop';
 import { COLORS } from '../theme/colors';
 
 interface FieldConfig {
@@ -102,6 +103,7 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <View style={styles.overlay}>
+        <ModalBlurBackdrop />
         <View style={styles.content}>
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
@@ -227,7 +229,6 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,

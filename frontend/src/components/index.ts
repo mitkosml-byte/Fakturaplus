@@ -20,3 +20,5 @@ export { RoleBadge } from './RoleBadge';
 export { FadeIn } from './FadeIn';
 export { Skeleton, SkeletonRow, SkeletonStat } from './Skeleton';
 export { CountUp } from './CountUp';
+export { ModalBlurBackdrop } from './ModalBlurBackdrop';
+export { AnimatedTabIcon } from './AnimatedTabIcon';

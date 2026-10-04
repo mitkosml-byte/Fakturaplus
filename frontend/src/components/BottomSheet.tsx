@@ -17,6 +17,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { PanResponder } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { COLORS } from '../theme/colors';
 import { DURATION, EASING, SHEET_SPRING } from '../theme/motion';
 
@@ -102,7 +103,13 @@ export function BottomSheet({ visible, onClose, children, style }: Props) {
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]}>
+      <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]}>
+        {/* Blurs whatever is behind the sheet instead of just dimming it -
+            the glass/frosted look a native sheet is expected to have.
+            BlurView has a web implementation (CSS backdrop-filter), so this
+            works on the web build too. */}
+        <BlurView intensity={32} tint="dark" style={StyleSheet.absoluteFill} />
+        <View style={[StyleSheet.absoluteFill, styles.backdrop]} />
         <Pressable style={StyleSheet.absoluteFill} onPress={() => animateOut(onClose)} />
       </Animated.View>
       <KeyboardAvoidingView
