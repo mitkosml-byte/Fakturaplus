@@ -2881,6 +2881,10 @@ export const translations: Translations = {
     bg: 'Всички',
     en: 'All',
   },
+  'auditLog.searchPlaceholder': {
+    bg: 'Търси по потребител, доставчик или номер...',
+    en: 'Search by user, supplier or number...',
+  },
   'auditLog.actionCreate': {
     bg: 'Създадена',
     en: 'Created',

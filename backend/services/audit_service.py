@@ -1,6 +1,7 @@
 """Audit logging service"""
 from datetime import datetime, timezone
 from typing import Optional
+import re
 import uuid
 
 class AuditService:
@@ -40,6 +41,7 @@ class AuditService:
         user_id: Optional[str] = None,
         action: Optional[str] = None,
         entity_type: Optional[str] = None,
+        search: Optional[str] = None,
         limit: int = 100
     ):
         """Get audit logs with filters, always scoped to one company."""
@@ -54,7 +56,18 @@ class AuditService:
             query["action"] = action
         if entity_type:
             query["entity_type"] = entity_type
-        
+        if search:
+            # Covers the fields a person would actually search by: who did
+            # it, and (for invoices, the overwhelming majority of entries)
+            # the supplier or invoice number - not a full-text index, just
+            # a case-insensitive substring match across those.
+            pattern = re.compile(re.escape(search), re.IGNORECASE)
+            query["$or"] = [
+                {"user_name": pattern},
+                {"details.supplier": pattern},
+                {"details.invoice_number": pattern},
+            ]
+
         logs = await self.db.audit_logs.find(
             query, {"_id": 0}
         ).sort("created_at", -1).limit(limit).to_list(limit)

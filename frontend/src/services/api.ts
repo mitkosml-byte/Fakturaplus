@@ -689,10 +689,11 @@ class ApiService {
   }
 
   // Audit Logs
-  async getAuditLogs(params?: { action?: string; entity_type?: string; limit?: number }): Promise<{ logs: any[] }> {
+  async getAuditLogs(params?: { action?: string; entity_type?: string; search?: string; limit?: number }): Promise<{ logs: any[] }> {
     const queryParams = new URLSearchParams();
     if (params?.action) queryParams.set('action', params.action);
     if (params?.entity_type) queryParams.set('entity_type', params.entity_type);
+    if (params?.search) queryParams.set('search', params.search);
     if (params?.limit) queryParams.set('limit', params.limit.toString());
     const query = queryParams.toString();
     return this.fetch(`/audit-logs${query ? `?${query}` : ''}`);

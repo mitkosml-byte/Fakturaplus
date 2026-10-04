@@ -7775,6 +7775,7 @@ async def import_commit(entity: str, request: Request, payload: ImportCommitRequ
 async def get_audit_logs(
     action: Optional[str] = None,
     entity_type: Optional[str] = None,
+    search: Optional[str] = None,
     limit: int = 50,
     current_user: User = Depends(get_current_user)
 ):
@@ -7789,9 +7790,10 @@ async def get_audit_logs(
         company_id=company_id,
         action=action,
         entity_type=entity_type,
+        search=search,
         limit=limit
     )
-    
+
     return {"logs": logs}
 
 # ===================== DATABASE INDEXES =====================

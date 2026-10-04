@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
   ScrollView,
   RefreshControl,
 } from 'react-native';
@@ -50,11 +51,18 @@ export default function AuditLogScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionFilter, setActionFilter] = useState<ActionFilter>('all');
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const loadLogs = useCallback(async () => {
+  // Takes an optional override so the "clear" button can search with an
+  // empty string immediately, instead of racing the setSearchQuery('')
+  // state update that wouldn't be visible to this callback until the next
+  // render.
+  const loadLogs = useCallback(async (searchOverride?: string) => {
     try {
+      const search = searchOverride !== undefined ? searchOverride : searchQuery;
       const data = await api.getAuditLogs({
         action: actionFilter === 'all' ? undefined : actionFilter,
+        search: search.trim() || undefined,
         limit: 100,
       });
       setLogs(data.logs || []);
@@ -63,11 +71,16 @@ export default function AuditLogScreen() {
     } finally {
       setLoading(false);
     }
-  }, [actionFilter]);
+  }, [actionFilter, searchQuery]);
 
+  // Reloads on mount and whenever the action filter (chips) changes, but
+  // NOT on every searchQuery keystroke - search only runs when the user
+  // submits it (onSubmitEditing below), same as the invoices screen's
+  // search box, so typing doesn't fire a request per character.
   useEffect(() => {
     loadLogs();
-  }, [loadLogs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionFilter]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -166,6 +179,23 @@ export default function AuditLogScreen() {
           <View style={{ width: 40 }} />
         </View>
 
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color={COLORS.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={t('auditLog.searchPlaceholder')}
+            placeholderTextColor={COLORS.textMuted}
+            onSubmitEditing={() => loadLogs()}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => { setSearchQuery(''); loadLogs(''); }}>
+              <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -259,6 +289,22 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: 'white',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 14,
+    color: 'white',
+    fontSize: 16,
   },
   filterRow: {
     marginTop: 12,
