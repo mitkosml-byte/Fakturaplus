@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -733,6 +733,57 @@ class ApiService {
 
   async deletePersonalExpense(id: string): Promise<{ message: string }> {
     return this.fetch(`/personal-expenses/${id}`, { method: 'DELETE' });
+  }
+
+  // Personal Wallet (Лично тефтерче) - gated on its own 3-tier permission,
+  // separate from the business-investment tracking above.
+  async getPersonalWalletEntries(params?: { category?: string; start_date?: string; end_date?: string }): Promise<{ entries: PersonalWalletEntry[] }> {
+    const queryParams = new URLSearchParams();
+    if (params?.category) queryParams.set('category', params.category);
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    const query = queryParams.toString();
+    return this.fetch(`/personal-wallet/entries${query ? `?${query}` : ''}`);
+  }
+
+  async createPersonalWalletEntry(entry: {
+    category: PersonalWalletCategory;
+    description: string;
+    amount: number;
+    date: string;
+    is_recurring?: boolean;
+    next_due_date?: string;
+    notes?: string;
+  }): Promise<{ message: string; id: string }> {
+    return this.fetch('/personal-wallet/entries', { method: 'POST', body: JSON.stringify(entry) });
+  }
+
+  async updatePersonalWalletEntry(id: string, update: Partial<{
+    category: PersonalWalletCategory;
+    description: string;
+    amount: number;
+    date: string;
+    is_recurring: boolean;
+    next_due_date: string | null;
+    notes: string;
+  }>): Promise<PersonalWalletEntry> {
+    return this.fetch(`/personal-wallet/entries/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deletePersonalWalletEntry(id: string): Promise<{ message: string }> {
+    return this.fetch(`/personal-wallet/entries/${id}`, { method: 'DELETE' });
+  }
+
+  async getPersonalWalletSummary(): Promise<PersonalWalletSummary> {
+    return this.fetch('/personal-wallet/summary');
+  }
+
+  async getPersonalWalletSettings(): Promise<{ alert_threshold_percent: number }> {
+    return this.fetch('/personal-wallet/settings');
+  }
+
+  async updatePersonalWalletSettings(alert_threshold_percent: number): Promise<{ alert_threshold_percent: number }> {
+    return this.fetch('/personal-wallet/settings', { method: 'PUT', body: JSON.stringify({ alert_threshold_percent }) });
   }
 
   // ROI Analysis (Owner only)

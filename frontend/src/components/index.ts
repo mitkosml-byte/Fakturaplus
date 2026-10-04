@@ -24,3 +24,5 @@ export { ModalBlurBackdrop } from './ModalBlurBackdrop';
 export { AnimatedTabIcon } from './AnimatedTabIcon';
 export { AnimatedEmptyIcon } from './AnimatedEmptyIcon';
 export { CelebrationGlow } from './CelebrationGlow';
+export { PersonalWalletTeaser } from './PersonalWalletTeaser';
+export { WalletAlertPopup } from './WalletAlertPopup';

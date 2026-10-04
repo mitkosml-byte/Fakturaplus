@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
 import { OfflineBanner } from '../src/components/OfflineBanner';
 import { PriceAlertPopup } from '../src/components/PriceAlertPopup';
+import { WalletAlertPopup } from '../src/components/WalletAlertPopup';
 import { OnboardingTutorial } from '../src/components/OnboardingTutorial';
 import { ToastHost } from '../src/components/ToastHost';
 import { useLanguageStore } from '../src/i18n';
@@ -66,6 +67,7 @@ function AppShell() {
       <View style={styles.container}>
         <OfflineBanner />
         <PriceAlertPopup />
+        <WalletAlertPopup />
         <OnboardingTutorial />
         <Stack
           screenOptions={{

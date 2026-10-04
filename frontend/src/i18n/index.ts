@@ -2589,7 +2589,175 @@ export const translations: Translations = {
     bg: 'Сигурни ли сте, че искате да изтриете този разход?',
     en: 'Are you sure you want to delete this expense?',
   },
-  
+
+  // Personal Wallet (Лично тефтерче) - household spending tracked out of
+  // company funds, distinct from "personal" above (money put INTO the
+  // business).
+  'wallet.tabInvestments': {
+    bg: 'Инвестиции',
+    en: 'Investments',
+  },
+  'wallet.tabWallet': {
+    bg: 'Тефтерче',
+    en: 'Wallet',
+  },
+  'wallet.title': {
+    bg: 'Лично тефтерче',
+    en: 'Personal wallet',
+  },
+  'wallet.subtitle': {
+    bg: 'Лични разходи от фирмените пари',
+    en: 'Personal spending out of company funds',
+  },
+  'wallet.safeToSpend': {
+    bg: 'Безопасно за теглене',
+    en: 'Safe to spend',
+  },
+  'wallet.safeToSpendHint': {
+    bg: 'Печалба за месеца минус вече изтегленото минус предстоящи задължения',
+    en: "This month's profit minus what's already withdrawn minus upcoming obligations",
+  },
+  'wallet.spentThisMonth': {
+    bg: 'Изтеглено този месец',
+    en: 'Withdrawn this month',
+  },
+  'wallet.ofProfit': {
+    bg: 'от печалбата',
+    en: 'of profit',
+  },
+  'wallet.statusOk': {
+    bg: 'В норма',
+    en: 'On track',
+  },
+  'wallet.statusWarning': {
+    bg: 'Внимание',
+    en: 'Caution',
+  },
+  'wallet.statusDanger': {
+    bg: 'Риск от преразход',
+    en: 'Overspend risk',
+  },
+  'wallet.addEntry': {
+    bg: 'Добави разход',
+    en: 'Add expense',
+  },
+  'wallet.editEntry': {
+    bg: 'Коригирай разход',
+    en: 'Edit expense',
+  },
+  'wallet.category': {
+    bg: 'Категория',
+    en: 'Category',
+  },
+  'wallet.categoryLoan': {
+    bg: 'Кредит',
+    en: 'Loan',
+  },
+  'wallet.categoryLease': {
+    bg: 'Лизинг',
+    en: 'Lease',
+  },
+  'wallet.categoryUtility': {
+    bg: 'Комунални',
+    en: 'Utilities',
+  },
+  'wallet.categoryInsurance': {
+    bg: 'Застраховка',
+    en: 'Insurance',
+  },
+  'wallet.categorySubscription': {
+    bg: 'Абонамент',
+    en: 'Subscription',
+  },
+  'wallet.categoryDaily': {
+    bg: 'Ежедневни',
+    en: 'Daily',
+  },
+  'wallet.categoryOneOff': {
+    bg: 'Еднократно',
+    en: 'One-off',
+  },
+  'wallet.isRecurring': {
+    bg: 'Повтарящ се разход',
+    en: 'Recurring expense',
+  },
+  'wallet.nextDueDate': {
+    bg: 'Дата на следващо плащане',
+    en: 'Next due date',
+  },
+  'wallet.byCategory': {
+    bg: 'По категория',
+    en: 'By category',
+  },
+  'wallet.needsVsWants': {
+    bg: 'Нужди срещу желания',
+    en: 'Needs vs. wants',
+  },
+  'wallet.needs': {
+    bg: 'Нужди (кредити, лизинг, комунални)',
+    en: 'Needs (loans, lease, utilities)',
+  },
+  'wallet.wants': {
+    bg: 'Желания (абонаменти, ежедневни)',
+    en: 'Wants (subscriptions, daily)',
+  },
+  'wallet.vsLastMonth': {
+    bg: 'спрямо миналия месец',
+    en: 'vs. last month',
+  },
+  'wallet.upcoming': {
+    bg: 'Предстоящи плащания',
+    en: 'Upcoming payments',
+  },
+  'wallet.advice': {
+    bg: 'Съвети',
+    en: 'Advice',
+  },
+  'wallet.settings': {
+    bg: 'Настройки на алармата',
+    en: 'Alert settings',
+  },
+  'wallet.alertThreshold': {
+    bg: 'Праг за аларма (% от печалбата)',
+    en: 'Alert threshold (% of profit)',
+  },
+  'wallet.saveThreshold': {
+    bg: 'Запази прага',
+    en: 'Save threshold',
+  },
+  'wallet.thresholdSaved': {
+    bg: 'Прагът е запазен',
+    en: 'Threshold saved',
+  },
+  'wallet.noEntries': {
+    bg: 'Няма въведени лични разходи',
+    en: 'No personal expenses recorded',
+  },
+  'wallet.noEntriesHint': {
+    bg: 'Добавете първия разход, за да започне проследяването',
+    en: 'Add your first expense to start tracking',
+  },
+  'wallet.deleteConfirm': {
+    bg: 'Сигурни ли сте, че искате да изтриете този запис?',
+    en: 'Are you sure you want to delete this entry?',
+  },
+  'wallet.entrySaved': {
+    bg: 'Записът е запазен',
+    en: 'Entry saved',
+  },
+  'wallet.entryDeleted': {
+    bg: 'Записът е изтрит',
+    en: 'Entry deleted',
+  },
+  'wallet.homeTeaserTitle': {
+    bg: 'Лично тефтерче',
+    en: 'Personal wallet',
+  },
+  'wallet.homeTeaserOpen': {
+    bg: 'Отвори тефтерчето',
+    en: 'Open wallet',
+  },
+
   // ROI
   'roi.title': {
     bg: 'ROI Анализ',

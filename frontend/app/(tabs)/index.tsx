@@ -27,7 +27,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable, CountUp, SkeletonStat, CelebrationGlow } from '../../src/components';
+import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser } from '../../src/components';
 import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
@@ -645,6 +645,10 @@ export default function HomeScreen() {
             <ClosedDaysCalendar collapsible />
           </View>
         )}
+
+        {/* Personal wallet teaser - collapsed by default, see component for
+            why it's gated here rather than inside it. */}
+        {hasPermission('view_personal_wallet') && <PersonalWalletTeaser refreshSignal={summary} />}
 
         {/* Stats Overview */}
         <View style={styles.statsGrid}>
