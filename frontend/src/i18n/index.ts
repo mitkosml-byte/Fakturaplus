@@ -857,6 +857,10 @@ export const translations: Translations = {
     bg: 'Сигурни ли сте, че искате да изтриете тази фактура?',
     en: 'Are you sure you want to delete this invoice?',
   },
+  'invoices.deletedUndo': {
+    bg: 'Фактурата е изтрита',
+    en: 'Invoice deleted',
+  },
   
   // Statistics Screen
   'stats.title': {
@@ -1156,6 +1160,10 @@ export const translations: Translations = {
   'common.undo': {
     bg: 'Отмяна',
     en: 'Undo',
+  },
+  'common.saved': {
+    bg: 'Промените са запазени',
+    en: 'Changes saved',
   },
   'msg.downloadFailed': {
     bg: 'Не можах да изтегля файла',

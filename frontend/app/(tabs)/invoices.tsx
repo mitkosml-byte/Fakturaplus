@@ -20,6 +20,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
+import { Toast } from '../../src/utils/toast';
+import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
 import { Invoice, VatTreatment } from '../../src/types';
 import { validateEikFormat } from '../../src/utils/eik';
@@ -270,6 +272,7 @@ export default function InvoicesScreen() {
       });
       applyInvoiceUpdate(updated);
       setEditMode(false);
+      Toast.success(t('common.saved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -282,6 +285,7 @@ export default function InvoicesScreen() {
     try {
       const updated = await api.updateInvoice(invoice.id, { is_paid: !invoice.is_paid });
       applyInvoiceUpdate(updated);
+      if (updated.is_paid) Haptics.success();
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -310,6 +314,7 @@ export default function InvoicesScreen() {
       const updated = await api.updateInvoice(selectedInvoice.id, { paid_amount: amount });
       applyInvoiceUpdate(updated);
       setPaymentModalVisible(false);
+      Haptics.success();
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -317,26 +322,38 @@ export default function InvoicesScreen() {
     }
   };
 
-  const handleDeleteInvoice = async (id: string) => {
-    Alert.alert(
-      t('invoices.delete'),
-      t('invoices.deleteConfirm'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.deleteInvoice(id);
-              loadInvoices();
-            } catch (error: any) {
-              Alert.alert(t('common.error'), error.message);
-            }
-          },
-        },
-      ]
-    );
+  // Sharpened #19 (Motion Design Audit): a confirm dialog the user has
+  // seen fifty times gets rubber-stamped on reflex - it protects no one
+  // and costs a tap and a beat every time. The row is removed immediately
+  // (with its own exit animation via the list's enter/exit motion) and the
+  // actual delete only fires after a dismissible undo window, which
+  // protects an actual mistake instead of a hypothetical one.
+  const handleDeleteInvoice = (id: string) => {
+    const removed = invoices.find((inv) => inv.id === id);
+    if (!removed) return;
+
+    setInvoices((prev) => prev.filter((inv) => inv.id !== id));
+    if (selectedInvoice?.id === id) setSelectedInvoice(null);
+
+    let undone = false;
+    Toast.undo(t('invoices.deletedUndo'), () => {
+      undone = true;
+      setInvoices((prev) => (prev.some((inv) => inv.id === id) ? prev : [...prev, removed]));
+    });
+
+    setTimeout(async () => {
+      if (undone) return;
+      try {
+        await api.deleteInvoice(id);
+        Haptics.destructive();
+      } catch (error: any) {
+        // The row already left the UI - put it back rather than silently
+        // leaving the user thinking a delete that failed server-side
+        // actually went through.
+        setInvoices((prev) => (prev.some((inv) => inv.id === id) ? prev : [...prev, removed]));
+        Alert.alert(t('common.error'), error.message);
+      }
+    }, 4000);
   };
 
   const handleExport = async (type: 'excel' | 'pdf') => {
