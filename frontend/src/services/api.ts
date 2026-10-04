@@ -753,6 +753,7 @@ class ApiService {
     date: string;
     is_recurring?: boolean;
     next_due_date?: string;
+    recurring_until?: string | null;
     notes?: string;
   }): Promise<{ message: string; id: string }> {
     return this.fetch('/personal-wallet/entries', { method: 'POST', body: JSON.stringify(entry) });
@@ -765,6 +766,7 @@ class ApiService {
     date: string;
     is_recurring: boolean;
     next_due_date: string | null;
+    recurring_until: string | null;
     notes: string;
   }>): Promise<PersonalWalletEntry> {
     return this.fetch(`/personal-wallet/entries/${id}`, { method: 'PUT', body: JSON.stringify(update) });

@@ -2685,6 +2685,18 @@ export const translations: Translations = {
     bg: 'Дата на следващо плащане',
     en: 'Next due date',
   },
+  'wallet.hasEndDate': {
+    bg: 'Има крайна дата (договор/период)',
+    en: 'Has an end date (contract/term)',
+  },
+  'wallet.hasEndDateHint': {
+    bg: 'Включи, ако разходът е за определен период - напр. лизинг или абонамент с краен срок',
+    en: 'Turn on if the expense runs for a fixed period - e.g. a lease or a fixed-term subscription',
+  },
+  'wallet.recurringUntil': {
+    bg: 'Важи до',
+    en: 'Valid until',
+  },
   'wallet.byCategory': {
     bg: 'По категория',
     en: 'By category',
