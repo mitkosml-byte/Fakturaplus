@@ -17,3 +17,4 @@ export type { ChipTabOption } from './ChipTabs';
 export { useDirectionalReveal } from './DirectionalReveal';
 export { Expandable } from './Expandable';
 export { RoleBadge } from './RoleBadge';
+export { FadeIn } from './FadeIn';

@@ -22,7 +22,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { Alert } from '../../src/utils/alert';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
-import { ChipTabs } from '../../src/components';
+import { ChipTabs, FadeIn } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 
@@ -1206,7 +1206,7 @@ export default function StatsScreen() {
                     <Text style={styles.loadingText}>{t('stats.loadingData')}</Text>
                   </View>
                 ) : supplierOverview ? (
-                  <>
+                  <FadeIn>
                     {/* Executive Summary */}
                     <View style={styles.executiveSummaryCard}>
                       <View style={styles.execSummaryHeader}>
@@ -1555,7 +1555,7 @@ export default function StatsScreen() {
                         ))}
                       </View>
                     )}
-                  </>
+                  </FadeIn>
                 ) : (
                   <View style={styles.noDataContainer}>
                     <Ionicons name="business-outline" size={48} color={COLORS.textMuted} />
@@ -1573,7 +1573,7 @@ export default function StatsScreen() {
                     <Text style={styles.loadingText}>{t('stats.loadingData')}</Text>
                   </View>
                 ) : (
-                  <>
+                  <FadeIn>
                     {/* Price Alerts Section */}
                     {priceAlerts.length > 0 && (
                       <View style={styles.priceAlertsCard}>
@@ -1841,7 +1841,7 @@ export default function StatsScreen() {
                         ))}
                       </View>
                     )}
-                  </>
+                  </FadeIn>
                 )}
                 <View style={{ height: 40 }} />
               </View>
