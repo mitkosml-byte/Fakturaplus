@@ -25,7 +25,7 @@ import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFil
 import { Employee, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter } from '../src/components';
+import { AccessDenied, ScreenEnter, PressableScale } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -381,9 +381,9 @@ export default function EmployeeAbsencesScreen() {
                 onChangeText={setHolidayNote}
               />
             </ScrollView>
-            <TouchableOpacity style={styles.saveButton} onPress={saveHolidayWork} disabled={savingHoliday}>
+            <PressableScale style={styles.saveButton} onPress={saveHolidayWork} disabled={savingHoliday}>
               {savingHoliday ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -473,9 +473,9 @@ export default function EmployeeAbsencesScreen() {
                 onChangeText={setLeaveNote}
               />
             </ScrollView>
-            <TouchableOpacity style={styles.saveButton} onPress={saveLeave} disabled={savingLeave}>
+            <PressableScale style={styles.saveButton} onPress={saveLeave} disabled={savingLeave}>
               {savingLeave ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -527,14 +527,14 @@ export default function EmployeeAbsencesScreen() {
               cancelTextIOS={t('common.cancel')}
               locale={language}
             />
-            <TouchableOpacity style={styles.saveButton} onPress={runExport} disabled={exporting}>
+            <PressableScale style={styles.saveButton} onPress={runExport} disabled={exporting}>
               {exporting ? <ActivityIndicator color="white" /> : (
                 <>
                   <Ionicons name="download-outline" size={18} color="white" />
                   <Text style={styles.saveButtonText}>{t('absences.exportExcel')}</Text>
                 </>
               )}
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </View>
       </Modal>

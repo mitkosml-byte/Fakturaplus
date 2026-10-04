@@ -19,7 +19,7 @@ import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter } from '../src/components';
+import { AccessDenied, ScreenEnter, PressableScale } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
 
@@ -349,9 +349,9 @@ export default function BudgetScreen() {
               >
                 <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveBudget} disabled={savingBudget}>
+              <PressableScale style={styles.modalSaveBtn} onPress={saveBudget} disabled={savingBudget}>
                 {savingBudget ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
-              </TouchableOpacity>
+              </PressableScale>
             </View>
           </View>
         </View>
@@ -399,9 +399,9 @@ export default function BudgetScreen() {
               >
                 <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveRecurringExpense} disabled={savingRecurring}>
+              <PressableScale style={styles.modalSaveBtn} onPress={saveRecurringExpense} disabled={savingRecurring}>
                 {savingRecurring ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
-              </TouchableOpacity>
+              </PressableScale>
             </View>
           </View>
         </View>
