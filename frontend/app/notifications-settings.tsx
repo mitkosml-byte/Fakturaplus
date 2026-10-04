@@ -18,6 +18,7 @@ import { api } from '../src/services/api';
 import { NotificationSettings } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { getPushStatus, enablePushNotifications, disablePushNotifications } from '../src/utils/pushNotifications';
+import { ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -124,6 +125,7 @@ export default function NotificationsSettingsScreen() {
   }
 
   return (
+    <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -267,6 +269,7 @@ export default function NotificationsSettingsScreen() {
         </SafeAreaView>
       </View>
     </ImageBackground>
+    </ScreenEnter>
   );
 }
 

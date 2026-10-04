@@ -22,7 +22,7 @@ import { Employee, PayrollAgreementType, PayrollRates, PayrollBreakdown, Payroll
 import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
 
@@ -315,6 +315,7 @@ export default function PayrollScreen() {
   }
 
   return (
+    <ScreenEnter>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
@@ -683,6 +684,7 @@ export default function PayrollScreen() {
         onImported={loadData}
       />
     </View>
+    </ScreenEnter>
   );
 }
 

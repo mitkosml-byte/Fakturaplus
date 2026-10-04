@@ -14,7 +14,7 @@ import { api } from '../src/services/api';
 import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 type ActionFilter = 'all' | 'create' | 'update' | 'delete' | 'export';
@@ -112,6 +112,7 @@ export default function AuditLogScreen() {
   }
 
   return (
+    <ScreenEnter>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
@@ -173,6 +174,7 @@ export default function AuditLogScreen() {
         </ScrollView>
       </SafeAreaView>
     </View>
+    </ScreenEnter>
   );
 }
 

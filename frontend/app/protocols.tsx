@@ -16,7 +16,7 @@ import { Invoice } from '../src/types';
 import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -58,6 +58,7 @@ export default function ProtocolsScreen() {
   }
 
   return (
+    <ScreenEnter>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
@@ -126,6 +127,7 @@ export default function ProtocolsScreen() {
         </ScrollView>
       </SafeAreaView>
     </View>
+    </ScreenEnter>
   );
 }
 

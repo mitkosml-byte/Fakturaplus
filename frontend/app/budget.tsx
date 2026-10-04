@@ -17,7 +17,7 @@ import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
 
@@ -175,6 +175,7 @@ export default function BudgetScreen() {
   }
 
   return (
+    <ScreenEnter>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {/* Header */}
@@ -414,6 +415,7 @@ export default function BudgetScreen() {
         onImported={loadData}
       />
     </View>
+    </ScreenEnter>
   );
 }
 

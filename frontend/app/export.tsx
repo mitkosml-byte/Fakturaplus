@@ -14,7 +14,7 @@ import { Alert } from '../src/utils/alert';
 import { useTranslation } from '../src/i18n';
 import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFile';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 export default function ExportScreen() {
@@ -67,6 +67,7 @@ export default function ExportScreen() {
   }
 
   return (
+    <ScreenEnter>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {/* Header */}
@@ -181,6 +182,7 @@ export default function ExportScreen() {
         </View>
       </SafeAreaView>
     </View>
+    </ScreenEnter>
   );
 }
 

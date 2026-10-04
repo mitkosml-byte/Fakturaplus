@@ -23,7 +23,7 @@ import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFil
 import { Employee, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied } from '../src/components';
+import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -226,6 +226,7 @@ export default function EmployeeAbsencesScreen() {
   }
 
   return (
+    <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -535,6 +536,7 @@ export default function EmployeeAbsencesScreen() {
         </View>
       </Modal>
     </ImageBackground>
+    </ScreenEnter>
   );
 }
 
