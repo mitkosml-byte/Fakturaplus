@@ -20,7 +20,7 @@ import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
-import { ScanCreditsReloadButton, StaggerReveal } from '../../src/components';
+import { ScanCreditsReloadButton, StaggerReveal, Expandable } from '../../src/components';
 import { api } from '../../src/services/api';
 import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod } from '../../src/types';
 import { format, parse } from 'date-fns';
@@ -534,7 +534,7 @@ export default function ScanScreen() {
                   </Text>
 
                   {/* AI Corrections Info */}
-                  {ocrCorrections.length > 0 && (
+                  <Expandable expanded={ocrCorrections.length > 0}>
                     <View style={styles.correctionsContainer}>
                       <View style={styles.correctionsHeader}>
                         <Ionicons name="sparkles" size={18} color={COLORS.success} />
@@ -556,7 +556,7 @@ export default function ScanScreen() {
                         </View>
                       ))}
                     </View>
-                  )}
+                  </Expandable>
 
                   {scanMode === 'sales' ? (
                     <>
