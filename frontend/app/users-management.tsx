@@ -32,7 +32,7 @@ import { ROLE_DEFAULT_PERMISSIONS, ConfigurableRole } from '../src/utils/permiss
 // ROLE_PERMISSIONS in backend/server.py) - never checklist-configurable -
 // so it's handled as a distinct branch wherever ConfigurableRole drives UI.
 type PickableRole = ConfigurableRole | 'owner';
-import { PermissionsChecklist, ScreenEnter, BottomSheet } from '../src/components';
+import { PermissionsChecklist, ScreenEnter, BottomSheet, RoleBadge } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -380,11 +380,12 @@ export default function UsersManagementScreen() {
                   </View>
                   
                   <View style={styles.userActions}>
-                    <View style={[styles.roleBadge, { backgroundColor: getRoleColor(user.role) + '20' }]}>
-                      <Text style={[styles.roleText, { color: getRoleColor(user.role) }]}>
-                        {getRoleName(user.role)}
-                      </Text>
-                    </View>
+                    <RoleBadge
+                      label={getRoleName(user.role)}
+                      color={getRoleColor(user.role)}
+                      style={[styles.roleBadge, { backgroundColor: getRoleColor(user.role) + '20' }]}
+                      textStyle={[styles.roleText, { color: getRoleColor(user.role) }]}
+                    />
                     
                     {user.user_id !== currentUser?.user_id && (
                       <View style={styles.actionButtons}>
