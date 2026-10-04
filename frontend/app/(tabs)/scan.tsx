@@ -16,6 +16,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../../src/utils/alert';
+import { Toast } from '../../src/utils/toast';
+import { Haptics } from '../../src/utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton } from '../../src/components';
@@ -302,10 +304,11 @@ export default function ScanScreen() {
         payment_method: paymentMethod || undefined,
         payment_due_date: paymentMethod === 'bank_transfer' && paymentDueDate ? paymentDueDate.toISOString() : undefined,
       });
+      Haptics.success();
       if (saved.protocol_number) {
-        Alert.alert(t('common.success'), `${t('msg.invoiceSaved')}\n\n${t('scan.protocolAssigned')} ${saved.protocol_number}`);
+        Toast.success(`${t('msg.invoiceSaved')} · ${t('scan.protocolAssigned')} ${saved.protocol_number}`);
       } else {
-        Alert.alert(t('common.success'), t('msg.invoiceSaved'));
+        Toast.success(t('msg.invoiceSaved'));
       }
       resetForm();
     } catch (error: any) {

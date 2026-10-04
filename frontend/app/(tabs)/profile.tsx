@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Alert } from '../../src/utils/alert';
+import { Toast } from '../../src/utils/toast';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation, useLanguageStore, Language } from '../../src/i18n';
@@ -109,7 +110,7 @@ export default function ProfileScreen() {
       setNewCompanyName('');
       setNewCompanyEik('');
       await Promise.all([refreshUser(), loadCompany(), loadMemberships()]);
-      Alert.alert(t('common.success'), t('companySwitcher.newCompanyCreated'));
+      Toast.success(t('companySwitcher.newCompanyCreated'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {

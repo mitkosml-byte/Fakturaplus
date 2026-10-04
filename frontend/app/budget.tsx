@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
 import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
@@ -98,7 +99,7 @@ export default function BudgetScreen() {
         expense_limit: parseFloat(budgetLimit),
         alert_threshold: parseFloat(alertThreshold)
       });
-      Alert.alert(t('common.success'), t('budget.saved'));
+      Toast.success(t('budget.saved'));
       setShowBudgetModal(false);
       loadData();
     } catch (error) {
@@ -121,7 +122,7 @@ export default function BudgetScreen() {
         amount: parseFloat(recurringAmount),
         day_of_month: parseInt(recurringDay)
       });
-      Alert.alert(t('common.success'), t('budget.recurringCreated'));
+      Toast.success(t('budget.recurringCreated'));
       setShowRecurringModal(false);
       setRecurringDesc('');
       setRecurringAmount('');

@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
 import { useTranslation } from '../src/i18n';
 import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFile';
 import { useAuth } from '../src/contexts/AuthContext';
@@ -29,7 +30,7 @@ export default function ExportScreen() {
     try {
       const { shared } = await downloadAndShareFile(endpoint, filename);
       if (!shared) {
-        Alert.alert(t('common.success'), t('export.fileSaved'));
+        Toast.success(t('export.fileSaved'));
       }
     } catch (error) {
       console.error('Export error:', error);

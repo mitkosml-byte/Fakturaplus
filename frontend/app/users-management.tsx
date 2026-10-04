@@ -17,6 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { User, Invitation, OwnerAction } from '../src/types';
 import { useAuth } from '../src/contexts/AuthContext';
@@ -218,7 +220,8 @@ export default function UsersManagementScreen() {
       if (result.status === 'pending_approval') {
         Alert.alert(t('users.approvalRequired'), result.message);
       } else {
-        Alert.alert(t('common.success'), t('users.accessUpdated'));
+        Toast.success(t('users.accessUpdated'));
+        Haptics.notify();
       }
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);

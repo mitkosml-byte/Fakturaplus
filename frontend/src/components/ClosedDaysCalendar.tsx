@@ -15,6 +15,7 @@ import { useFocusEffect } from 'expo-router';
 import { Calendar, DateData } from 'react-native-calendars';
 import { format } from 'date-fns';
 import { Alert } from '../utils/alert';
+import { Toast } from '../utils/toast';
 import { api } from '../services/api';
 import { ClosedDateException } from '../types';
 import { useTranslation } from '../i18n';
@@ -103,7 +104,7 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
     setSaving(true);
     try {
       await api.updateCompany({ closed_weekdays: closedWeekdays });
-      Alert.alert(t('common.success'), t('closedDays.weeklySaved'));
+      Toast.success(t('closedDays.weeklySaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
