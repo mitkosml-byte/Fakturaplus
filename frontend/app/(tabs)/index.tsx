@@ -26,7 +26,8 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, BottomSheet } from '../../src/components';
+import { ScanCreditsBadge, BottomSheet, useDirectionalReveal } from '../../src/components';
+import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 
@@ -46,6 +47,20 @@ export default function HomeScreen() {
   // or a custom range instead of the cards just going silent at zero on the
   // 1st of a new month with no way back to see where last month's data went.
   const [periodState, setPeriodState] = useState<PeriodState>(DEFAULT_PERIOD_STATE);
+
+  // #17: the ‹ › arrows get a directional slide instead of the numbers
+  // just jumping - new data enters from the direction of travel. Only the
+  // arrows (offset changes within the same mode) carry a direction; a
+  // mode switch or a manual range-date edit just cross-fades.
+  const periodReveal = useDirectionalReveal(
+    `${periodState.mode}-${periodState.offset}-${periodState.rangeStart ?? ''}-${periodState.rangeEnd ?? ''}`
+  );
+  const handlePeriodChange = (next: PeriodState) => {
+    if (next.mode === periodState.mode && next.offset !== periodState.offset) {
+      periodReveal.setDirection(next.offset > periodState.offset ? -1 : 1);
+    }
+    setPeriodState(next);
+  };
 
   // Quick-add revenue/expense should land inside whatever period the
   // navigator above is showing, not always on today's real date - otherwise
@@ -442,8 +457,9 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            <PeriodNavigator state={periodState} onChange={setPeriodState} />
+            <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
 
+            <Animated.View style={periodReveal.style}>
             {/* Summary Cards */}
             <View style={styles.summaryContainer}>
               <View style={[styles.summaryCard, styles.incomeCard]}>
@@ -510,6 +526,7 @@ export default function HomeScreen() {
             </View>
           </View>
         </View>
+            </Animated.View>
 
         {/* Unpaid supplier invoices reminder - company-wide, not scoped to
             this month, since money owed from any past period is still owed */}

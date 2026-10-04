@@ -14,3 +14,4 @@ export { ScanCreditsRing } from './ScanCreditsRing';
 export { StaggerReveal } from './StaggerReveal';
 export { ChipTabs } from './ChipTabs';
 export type { ChipTabOption } from './ChipTabs';
+export { useDirectionalReveal } from './DirectionalReveal';
