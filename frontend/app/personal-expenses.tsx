@@ -17,7 +17,7 @@ import { api } from '../src/services/api';
 import { PersonalExpense, PersonalExpenseType, PersonalExpenseCategory } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, BottomSheet } from '../src/components';
+import { AccessDenied, ScreenEnter, BottomSheet, Expandable } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -64,6 +64,8 @@ export default function PersonalExpensesHistoryScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
+  const [amountError, setAmountError] = useState(false);
+  const [descriptionError, setDescriptionError] = useState(false);
   const [expenseType, setExpenseType] = useState<PersonalExpenseType>('recurring');
   const [category, setCategory] = useState<PersonalExpenseCategory>('other');
   const [saving, setSaving] = useState(false);
@@ -126,14 +128,11 @@ export default function PersonalExpensesHistoryScreen() {
 
   const handleSave = async () => {
     const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert(t('common.error'), t('budget.invalidAmount'));
-      return;
-    }
-    if (!description.trim()) {
-      Alert.alert(t('common.error'), t('msg.fillAllFields'));
-      return;
-    }
+    const invalidAmount = isNaN(parsedAmount) || parsedAmount <= 0;
+    const missingDescription = !description.trim();
+    setAmountError(invalidAmount);
+    setDescriptionError(missingDescription);
+    if (invalidAmount || missingDescription) return;
     setSaving(true);
     try {
       const now = new Date();
@@ -349,22 +348,28 @@ export default function PersonalExpensesHistoryScreen() {
 
                   <Text style={styles.inputLabel}>{t('personal.amount')}</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, amountError && styles.inputErrorBorder]}
                     value={amount}
-                    onChangeText={setAmount}
+                    onChangeText={(v) => { setAmount(v); setAmountError(false); }}
                     placeholder="0.00"
                     placeholderTextColor={COLORS.textMuted}
                     keyboardType="decimal-pad"
                   />
+                  <Expandable expanded={amountError}>
+                    <Text style={styles.fieldErrorText}>{t('budget.invalidAmount')}</Text>
+                  </Expandable>
 
                   <Text style={styles.inputLabel}>{t('personal.description')}</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, descriptionError && styles.inputErrorBorder]}
                     value={description}
-                    onChangeText={setDescription}
+                    onChangeText={(v) => { setDescription(v); setDescriptionError(false); }}
                     placeholder={t('personal.descriptionPlaceholder')}
                     placeholderTextColor={COLORS.textMuted}
                   />
+                  <Expandable expanded={descriptionError}>
+                    <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
+                  </Expandable>
 
                   <Text style={styles.inputLabel}>{t('personal.type')}</Text>
                   <View style={styles.chipRowWrap}>
@@ -514,6 +519,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     color: 'white',
     fontSize: 15,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  inputErrorBorder: {
+    borderColor: COLORS.danger,
+  },
+  fieldErrorText: {
+    color: COLORS.danger,
+    fontSize: 12,
+    marginTop: 4,
   },
   saveButton: {
     backgroundColor: COLORS.primary,
