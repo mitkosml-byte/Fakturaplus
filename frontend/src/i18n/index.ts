@@ -999,6 +999,26 @@ export const translations: Translations = {
     bg: 'Настройки',
     en: 'Settings',
   },
+  'profile.category.company': {
+    bg: 'Фирма и екип',
+    en: 'Company & Team',
+  },
+  'profile.category.accounting': {
+    bg: 'Счетоводство',
+    en: 'Accounting',
+  },
+  'profile.category.security': {
+    bg: 'Сигурност',
+    en: 'Security',
+  },
+  'profile.category.settings': {
+    bg: 'Настройки',
+    en: 'Settings',
+  },
+  'profile.category.support': {
+    bg: 'Поддръжка',
+    en: 'Support',
+  },
   'profile.users': {
     bg: 'Потребители',
     en: 'Users',

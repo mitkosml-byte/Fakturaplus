@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -23,6 +24,7 @@ import { api } from '../../src/services/api';
 import { Company, CompanyMembership } from '../../src/types';
 import { getRoleName as sharedGetRoleName, getRoleColor } from '../../src/utils/roles';
 import { COLORS } from '../../src/theme/colors';
+import { DURATION, EASING } from '../../src/theme/motion';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -41,6 +43,71 @@ export default function ProfileScreen() {
   const [newCompanyName, setNewCompanyName] = useState('');
   const [newCompanyEik, setNewCompanyEik] = useState('');
   const [creatingCompany, setCreatingCompany] = useState(false);
+
+  // Profile IA: 20 flat rows regrouped into 5 categories (Motion Design
+  // Audit's documented proposal) behind a horizontal chip selector, the
+  // same pattern Statistics uses for its own tabs. A category is only
+  // ever shown if it has at least one item this user's role can see, so
+  // a narrower permission set means fewer categories, not emptier ones.
+  type CategoryKey = 'company' | 'accounting' | 'security' | 'settings' | 'support';
+  const [activeCategory, setActiveCategory] = useState<CategoryKey | null>(null);
+  const [displayedCategory, setDisplayedCategory] = useState<CategoryKey | null>(null);
+  // Measured on demand via measureLayout rather than cached from onLayout:
+  // react-native-web's onLayout is backed by a ResizeObserver, which only
+  // fires on a SIZE change - a chip that merely shifts x position because a
+  // sibling was inserted/removed before it (exactly what happens here, since
+  // hasPermission depends on `user` and can load a beat after first paint,
+  // changing which categories - and therefore which chips - exist) never
+  // refires onLayout, leaving a stale cached x behind. measureLayout queries
+  // the real current DOM position every time instead, so it can't go stale.
+  const rowRef = useRef<View>(null);
+  const chipRefs = useRef<Partial<Record<CategoryKey, any>>>({});
+  const pillX = useSharedValue(0);
+  const pillWidth = useSharedValue(0);
+  const contentOpacity = useSharedValue(1);
+  const prevVisibleKeysRef = useRef<string | null>(null);
+
+  const movePillTo = (key: CategoryKey, animate: boolean) => {
+    const node = chipRefs.current[key];
+    const row = rowRef.current;
+    if (!node || !row) return;
+    // @ts-ignore - measureLayout is exposed by the host component both the
+    // View and the TouchableOpacity ref forward to on native and web.
+    node.measureLayout(
+      row,
+      (x: number, _y: number, width: number) => {
+        if (animate) {
+          pillX.value = withTiming(x, { duration: DURATION.fast, easing: EASING.standard });
+          pillWidth.value = withTiming(width, { duration: DURATION.fast, easing: EASING.standard });
+        } else {
+          pillX.value = x;
+          pillWidth.value = width;
+        }
+      },
+      () => {}
+    );
+  };
+
+  const handleCategoryChange = (key: CategoryKey) => {
+    if (key === activeCategory) return;
+    setActiveCategory(key);
+    movePillTo(key, true);
+    // Content cross-fades rather than slides (Motion Design System:
+    // "Category tab / chip switch") - sliding both the pill and the
+    // content underneath would be two competing horizontal motions.
+    contentOpacity.value = withTiming(0, { duration: DURATION.fast, easing: EASING.easeIn }, (finished) => {
+      if (finished) {
+        runOnJS(setDisplayedCategory)(key);
+        contentOpacity.value = withTiming(1, { duration: DURATION.fast, easing: EASING.easeOut });
+      }
+    });
+  };
+
+  const contentAnimatedStyle = useAnimatedStyle(() => ({ opacity: contentOpacity.value }));
+  const pillAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: pillX.value }],
+    width: pillWidth.value,
+  }));
 
   const loadCompany = useCallback(async () => {
     try {
@@ -144,6 +211,289 @@ export default function ProfileScreen() {
 
   const getRoleName = (role: string) => sharedGetRoleName(role, language);
 
+  interface MenuItemDef {
+    key: string;
+    title: string;
+    subtitle: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    iconBg: string;
+    iconColor: string;
+    onPress: () => void;
+  }
+
+  const allCategories: { key: CategoryKey; label: string; icon: keyof typeof Ionicons.glyphMap; items: MenuItemDef[] }[] = [
+    {
+      key: 'company',
+      label: t('profile.category.company'),
+      icon: 'briefcase-outline',
+      items: [
+        ...(hasPermission('manage_company') || !company
+          ? [{
+              key: 'company',
+              title: t('profile.company'),
+              subtitle: company ? t('profile.companyData') : t('profile.noCompanyYet'),
+              icon: 'business' as const,
+              iconBg: 'rgba(59, 130, 246, 0.15)',
+              iconColor: COLORS.info,
+              onPress: () => router.push('/company-settings'),
+            }]
+          : []),
+        ...(hasPermission('manage_users')
+          ? [{
+              key: 'users',
+              title: t('profile.users'),
+              subtitle: t('profile.usersDesc'),
+              icon: 'people' as const,
+              iconBg: 'rgba(236, 72, 153, 0.15)',
+              iconColor: COLORS.pink,
+              onPress: () => router.push('/users-management'),
+            }]
+          : []),
+        ...(hasPermission('team_collaboration')
+          ? [{
+              key: 'calendar',
+              title: t('profile.calendar'),
+              subtitle: t('profile.calendarDesc'),
+              icon: 'calendar' as const,
+              iconBg: 'rgba(139, 92, 246, 0.15)',
+              iconColor: COLORS.primary,
+              onPress: () => router.push('/calendar'),
+            }]
+          : []),
+        ...(hasPermission('team_collaboration')
+          ? [{
+              key: 'messages',
+              title: t('profile.messages'),
+              subtitle: t('profile.messagesDesc'),
+              icon: 'chatbubbles' as const,
+              iconBg: 'rgba(16, 185, 129, 0.15)',
+              iconColor: COLORS.success,
+              onPress: () => router.push('/messages'),
+            }]
+          : []),
+        ...(hasPermission('manage_company')
+          ? [{
+              key: 'closedDays',
+              title: t('profile.closedDays'),
+              subtitle: t('profile.closedDaysDesc'),
+              icon: 'calendar-outline' as const,
+              iconBg: 'rgba(239, 68, 68, 0.15)',
+              iconColor: COLORS.danger,
+              onPress: () => router.push('/closed-days'),
+            }]
+          : []),
+      ],
+    },
+    {
+      key: 'accounting',
+      label: t('profile.category.accounting'),
+      icon: 'calculator-outline',
+      items: [
+        ...(hasPermission('manage_budget')
+          ? [{
+              key: 'budget',
+              title: t('profile.budget'),
+              subtitle: t('profile.budgetDesc'),
+              icon: 'wallet' as const,
+              iconBg: 'rgba(139, 92, 246, 0.15)',
+              iconColor: COLORS.primary,
+              onPress: () => router.push('/budget'),
+            }]
+          : []),
+        ...(hasPermission('manage_budget')
+          ? [{
+              key: 'payroll',
+              title: t('payroll.title'),
+              subtitle: t('profile.payrollDesc'),
+              icon: 'people' as const,
+              iconBg: 'rgba(16, 185, 129, 0.15)',
+              iconColor: COLORS.success,
+              onPress: () => router.push('/payroll'),
+            }]
+          : []),
+        ...(hasPermission('manage_budget')
+          ? [{
+              key: 'absences',
+              title: t('absences.title'),
+              subtitle: t('profile.absencesDesc'),
+              icon: 'sunny' as const,
+              iconBg: 'rgba(245, 158, 11, 0.15)',
+              iconColor: COLORS.warning,
+              onPress: () => router.push('/employee-absences'),
+            }]
+          : []),
+        ...(hasPermission('manage_budget')
+          ? [{
+              key: 'assets',
+              title: t('assets.title'),
+              subtitle: t('profile.assetsDesc'),
+              icon: 'business' as const,
+              iconBg: 'rgba(245, 158, 11, 0.15)',
+              iconColor: COLORS.warning,
+              onPress: () => router.push('/assets'),
+            }]
+          : []),
+        ...(hasPermission('view_statistics')
+          ? [{
+              key: 'protocols',
+              title: t('profile.protocols'),
+              subtitle: t('profile.protocolsDesc'),
+              icon: 'document-text' as const,
+              iconBg: 'rgba(139, 92, 246, 0.15)',
+              iconColor: COLORS.primary,
+              onPress: () => router.push('/protocols'),
+            }]
+          : []),
+        ...(hasPermission('export_data')
+          ? [{
+              key: 'export',
+              title: t('profile.export'),
+              subtitle: t('profile.exportDesc'),
+              icon: 'download' as const,
+              iconBg: 'rgba(236, 72, 153, 0.15)',
+              iconColor: COLORS.pink,
+              onPress: () => router.push('/export'),
+            }]
+          : []),
+      ],
+    },
+    {
+      key: 'security',
+      label: t('profile.category.security'),
+      icon: 'shield-checkmark-outline',
+      items: [
+        {
+          key: 'accountSecurity',
+          title: t('profile.accountSecurity'),
+          subtitle: user?.has_password ? t('profile.changePassword') : t('profile.setPasswordForEmail'),
+          icon: 'lock-closed',
+          iconBg: 'rgba(16, 185, 129, 0.15)',
+          iconColor: COLORS.success,
+          onPress: () => router.push('/account-security'),
+        },
+        ...(hasPermission('view_audit_log')
+          ? [{
+              key: 'auditLog',
+              title: t('profile.auditLog'),
+              subtitle: t('profile.auditLogDesc'),
+              icon: 'list' as const,
+              iconBg: 'rgba(99, 102, 241, 0.15)',
+              iconColor: COLORS.indigo,
+              onPress: () => router.push('/audit-log'),
+            }]
+          : []),
+        ...(isOwner
+          ? [{
+              key: 'backup',
+              title: t('profile.backup'),
+              subtitle: t('profile.backupRestore'),
+              icon: 'cloud-upload' as const,
+              iconBg: 'rgba(16, 185, 129, 0.15)',
+              iconColor: COLORS.success,
+              onPress: () => router.push('/backup'),
+            }]
+          : []),
+      ],
+    },
+    {
+      key: 'settings',
+      label: t('profile.category.settings'),
+      icon: 'settings-outline',
+      items: [
+        {
+          key: 'notifications',
+          title: t('profile.notifications'),
+          subtitle: t('profile.vatNotifications'),
+          icon: 'notifications',
+          iconBg: 'rgba(139, 92, 246, 0.15)',
+          iconColor: COLORS.primary,
+          onPress: () => router.push('/notifications-settings'),
+        },
+        {
+          key: 'scanCredits',
+          title: t('scanCredits.title'),
+          subtitle: t('scanCredits.totalRemaining'),
+          icon: 'scan',
+          iconBg: 'rgba(139, 92, 246, 0.15)',
+          iconColor: COLORS.primary,
+          onPress: () => router.push('/scan-credits'),
+        },
+        {
+          key: 'language',
+          title: t('profile.language'),
+          subtitle: language === 'bg' ? t('profile.languageBulgarian') : t('profile.languageEnglish'),
+          icon: 'language',
+          iconBg: 'rgba(245, 158, 11, 0.15)',
+          iconColor: COLORS.warning,
+          onPress: () => setShowLanguageModal(true),
+        },
+      ],
+    },
+    {
+      key: 'support',
+      label: t('profile.category.support'),
+      icon: 'help-buoy-outline',
+      items: [
+        {
+          key: 'help',
+          title: t('profile.help'),
+          subtitle: t('profile.howToUse'),
+          icon: 'help-circle',
+          iconBg: 'rgba(99, 102, 241, 0.15)',
+          iconColor: COLORS.indigo,
+          onPress: () => router.push('/help'),
+        },
+        {
+          key: 'privacyPolicy',
+          title: t('profile.privacyPolicy'),
+          subtitle: t('profile.privacyPolicyDesc'),
+          icon: 'shield-checkmark',
+          iconBg: 'rgba(16, 185, 129, 0.15)',
+          iconColor: COLORS.success,
+          onPress: () => router.push('/privacy-policy'),
+        },
+        {
+          key: 'termsOfService',
+          title: t('profile.termsOfService'),
+          subtitle: t('profile.termsOfServiceDesc'),
+          icon: 'document-text',
+          iconBg: 'rgba(245, 158, 11, 0.15)',
+          iconColor: COLORS.warning,
+          onPress: () => router.push('/terms-of-service'),
+        },
+      ],
+    },
+  ];
+
+  const visibleCategories = allCategories.filter((c) => c.items.length > 0);
+  const visibleKeysSignature = visibleCategories.map((c) => c.key).join(',');
+  if (prevVisibleKeysRef.current !== null && prevVisibleKeysRef.current !== visibleKeysSignature) {
+    if (activeCategory !== null && !visibleCategories.some((c) => c.key === activeCategory)) {
+      // The active category's permission was revoked out from under it
+      // (edge case - a role change mid-session) - fall back to the first
+      // category that's still actually visible.
+      setActiveCategory(visibleCategories[0]?.key ?? null);
+      setDisplayedCategory(visibleCategories[0]?.key ?? null);
+    }
+  }
+  prevVisibleKeysRef.current = visibleKeysSignature;
+  if (activeCategory === null && visibleCategories.length > 0) {
+    // First render: pick the first visible category without going through
+    // the animated transition - there's nothing on screen yet to cross-fade from.
+    setActiveCategory(visibleCategories[0].key);
+    setDisplayedCategory(visibleCategories[0].key);
+  }
+  const currentItems = visibleCategories.find((c) => c.key === displayedCategory)?.items || [];
+
+  // Re-snap the pill (no animation - this isn't a user action) whenever the
+  // set of visible categories changes, e.g. once `user` finishes loading a
+  // beat after first paint and a permission-gated category's chip appears
+  // or disappears, shifting everyone after it.
+  useEffect(() => {
+    if (activeCategory) movePillTo(activeCategory, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleKeysSignature, activeCategory]);
+
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
@@ -206,280 +556,50 @@ export default function ProfileScreen() {
               </View>
         </View>
 
-        {/* Menu Items */}
-        <View style={styles.menuSection}>
-          <Text style={styles.menuSectionTitle}>{t('profile.settings')}</Text>
-
-          {/* Users Management - Only for Owner */}
-          {hasPermission('manage_users') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/users-management')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
-                <Ionicons name="people" size={20} color={COLORS.pink} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.users')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.usersDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          {/* Company Settings - Owner, or anyone without a company yet (create/join) */}
-          {(hasPermission('manage_company') || !company) && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/company-settings')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-                <Ionicons name="business" size={20} color={COLORS.info} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.company')}</Text>
-                <Text style={styles.menuSubtitle}>
-                  {company
-                    ? t('profile.companyData')
-                    : t('profile.noCompanyYet')}
+        {/* Category selector - replaces the old flat 20-row list (Motion
+            Design Audit's Profile IA proposal). A sliding pill tracks the
+            active chip; the row below cross-fades when it changes. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categoryScroll}
+        >
+          <View ref={rowRef} style={styles.categoryRow}>
+            <Animated.View style={[styles.categoryPill, pillAnimatedStyle]} />
+            {visibleCategories.map((cat) => (
+              <TouchableOpacity
+                key={cat.key}
+                ref={(node) => { chipRefs.current[cat.key] = node; }}
+                style={styles.categoryChip}
+                onPress={() => handleCategoryChange(cat.key)}
+              >
+                <Ionicons
+                  name={cat.icon}
+                  size={15}
+                  color={activeCategory === cat.key ? 'white' : COLORS.textMuted}
+                />
+                <Text style={[styles.categoryChipText, activeCategory === cat.key && styles.categoryChipTextActive]}>
+                  {cat.label}
                 </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/account-security')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-              <Ionicons name="lock-closed" size={20} color={COLORS.success} />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.accountSecurity')}</Text>
-              <Text style={styles.menuSubtitle}>
-                {user?.has_password
-                  ? t('profile.changePassword')
-                  : t('profile.setPasswordForEmail')}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications-settings')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-              <Ionicons name="notifications" size={20} color={COLORS.primary} />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.notifications')}</Text>
-              <Text style={styles.menuSubtitle}>{t('profile.vatNotifications')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-          </TouchableOpacity>
-
-          {/* Team collaboration: shared calendar + messages (owner/manager/accountant) */}
-          {hasPermission('team_collaboration') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/calendar')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                <Ionicons name="calendar" size={20} color={COLORS.primary} />
+        <Animated.View style={[styles.menuSection, contentAnimatedStyle]}>
+          {currentItems.map((item) => (
+            <TouchableOpacity key={item.key} style={styles.menuItem} onPress={item.onPress}>
+              <View style={[styles.menuIcon, { backgroundColor: item.iconBg }]}>
+                <Ionicons name={item.icon} size={20} color={item.iconColor} />
               </View>
               <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.calendar')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.calendarDesc')}</Text>
+                <Text style={styles.menuTitle}>{item.title}</Text>
+                <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
-          )}
-
-          {hasPermission('team_collaboration') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/messages')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Ionicons name="chatbubbles" size={20} color={COLORS.success} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.messages')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.messagesDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          {/* Closed days (weekly pattern + calendar exceptions) - Owner only */}
-          {hasPermission('manage_company') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/closed-days')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-                <Ionicons name="calendar-outline" size={20} color={COLORS.danger} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.closedDays')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.closedDaysDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          {/* Budget - Owner and Manager only */}
-          {hasPermission('manage_budget') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/budget')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                <Ionicons name="wallet" size={20} color={COLORS.primary} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.budget')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.budgetDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/scan-credits')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-              <Ionicons name="scan" size={20} color={COLORS.primary} />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('scanCredits.title')}</Text>
-              <Text style={styles.menuSubtitle}>{t('scanCredits.totalRemaining')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-          </TouchableOpacity>
-
-          {/* Payroll - Owner and Manager */}
-          {hasPermission('manage_budget') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/payroll')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Ionicons name="people" size={20} color={COLORS.success} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('payroll.title')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.payrollDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          {/* Employee holiday-work + leave tracking - Owner and Manager */}
-          {hasPermission('manage_budget') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/employee-absences')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-                <Ionicons name="sunny" size={20} color={COLORS.warning} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('absences.title')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.absencesDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          {/* Fixed Assets (ДМА) - Owner and Manager */}
-          {hasPermission('manage_budget') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/assets')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-                <Ionicons name="business" size={20} color={COLORS.warning} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('assets.title')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.assetsDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          {/* Audit Log - Owner only */}
-          {hasPermission('view_audit_log') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/audit-log')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
-                <Ionicons name="list" size={20} color={COLORS.indigo} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.auditLog')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.auditLogDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          {/* VAT Protocols (чл.117) - Owner and Manager */}
-          {hasPermission('view_statistics') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/protocols')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-                <Ionicons name="document-text" size={20} color={COLORS.primary} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.protocols')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.protocolsDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          {/* Export - Owner and Manager only */}
-          {hasPermission('export_data') && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/export')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
-                <Ionicons name="download" size={20} color={COLORS.pink} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.export')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.exportDesc')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          {/* Backup/Restore - Owner only (backend requires owner too) */}
-          {isOwner && (
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/backup')}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Ionicons name="cloud-upload" size={20} color={COLORS.success} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{t('profile.backup')}</Text>
-                <Text style={styles.menuSubtitle}>{t('profile.backupRestore')}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => setShowLanguageModal(true)}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-              <Ionicons name="language" size={20} color={COLORS.warning} />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.language')}</Text>
-              <Text style={styles.menuSubtitle}>{language === 'bg' ? t('profile.languageBulgarian') : t('profile.languageEnglish')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.menuSection}>
-          <Text style={styles.menuSectionTitle}>{t('profile.info')}</Text>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/help')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
-              <Ionicons name="help-circle" size={20} color={COLORS.indigo} />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.help')}</Text>
-              <Text style={styles.menuSubtitle}>{t('profile.howToUse')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/privacy-policy')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-              <Ionicons name="shield-checkmark" size={20} color={COLORS.success} />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.privacyPolicy')}</Text>
-              <Text style={styles.menuSubtitle}>{t('profile.privacyPolicyDesc')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/terms-of-service')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-              <Ionicons name="document-text" size={20} color={COLORS.warning} />
-            </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>{t('profile.termsOfService')}</Text>
-              <Text style={styles.menuSubtitle}>{t('profile.termsOfServiceDesc')}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-          </TouchableOpacity>
-        </View>
+          ))}
+        </Animated.View>
 
             {/* Logout Button */}
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -759,6 +879,41 @@ const styles = StyleSheet.create({
   },
   roleTextAccountant: {
     color: COLORS.primary,
+  },
+  categoryScroll: {
+    marginBottom: 16,
+    flexGrow: 0,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    padding: 4,
+    gap: 2,
+  },
+  categoryPill: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    left: 0,
+    backgroundColor: COLORS.primary,
+    borderRadius: 10,
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  categoryChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  categoryChipTextActive: {
+    color: 'white',
   },
   menuSection: {
     marginBottom: 24,
