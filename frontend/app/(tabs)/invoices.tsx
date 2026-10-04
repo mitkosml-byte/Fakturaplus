@@ -280,16 +280,20 @@ export default function InvoicesScreen() {
     }
   };
 
+  // Optimistic UI (Motion Design Audit, Phase A - the roadmap's highest-
+  // leverage item): the checkbox flips the instant it's tapped instead of
+  // waiting on the round trip, and only rolls back if the request actually
+  // fails. A toggle this small has nothing worth a loading spinner for.
   const handleTogglePaid = async (invoice: Invoice) => {
-    setUpdatingPayment(true);
+    const optimistic: Invoice = { ...invoice, is_paid: !invoice.is_paid };
+    applyInvoiceUpdate(optimistic);
+    if (optimistic.is_paid) Haptics.success();
     try {
-      const updated = await api.updateInvoice(invoice.id, { is_paid: !invoice.is_paid });
+      const updated = await api.updateInvoice(invoice.id, { is_paid: optimistic.is_paid });
       applyInvoiceUpdate(updated);
-      if (updated.is_paid) Haptics.success();
     } catch (error: any) {
+      applyInvoiceUpdate(invoice);
       Alert.alert(t('common.error'), error.message);
-    } finally {
-      setUpdatingPayment(false);
     }
   };
 
