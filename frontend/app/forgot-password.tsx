@@ -15,6 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
 import { COLORS } from '../src/theme/colors';
@@ -63,11 +65,9 @@ export default function ForgotPasswordScreen() {
     setResetting(true);
     try {
       await api.resetPassword(email.trim(), trimmedCode, newPassword);
-      Alert.alert(
-        t('common.success'),
-        t('forgotPassword.passwordChanged'),
-        [{ text: 'OK', onPress: () => router.replace('/login') }]
-      );
+      Haptics.success();
+      Toast.success(t('forgotPassword.passwordChanged'));
+      router.replace('/login');
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {

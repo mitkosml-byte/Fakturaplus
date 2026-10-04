@@ -15,6 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
@@ -44,9 +46,9 @@ export default function JoinCompanyScreen() {
     try {
       const result = await api.acceptInvitation(trimmed);
       await refreshUser();
-      Alert.alert(t('Успех', 'Success'), result.message, [
-        { text: 'OK', onPress: () => router.replace('/(tabs)/profile') },
-      ]);
+      Haptics.success();
+      Toast.success(result.message);
+      router.replace('/(tabs)/profile');
     } catch (error: any) {
       Alert.alert(t('Грешка', 'Error'), error.message);
     } finally {

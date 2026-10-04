@@ -13,6 +13,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
+import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
@@ -58,8 +60,8 @@ export default function AccountSecurityScreen() {
     try {
       await api.changePassword(newPassword, hasPassword ? currentPassword : undefined);
       await refreshUser();
-      Alert.alert(
-        t('Успех', 'Success'),
+      Haptics.success();
+      Toast.success(
         hasPassword
           ? t('Паролата е сменена успешно', 'Password changed successfully')
           : t('Паролата е зададена успешно. Вече можете да влизате и с имейл.', 'Password set successfully. You can now also log in with email.')
