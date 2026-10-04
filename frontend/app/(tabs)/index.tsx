@@ -27,7 +27,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, BottomSheet, useDirectionalReveal } from '../../src/components';
+import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale } from '../../src/components';
 import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
@@ -897,9 +897,9 @@ export default function HomeScreen() {
                 </ScrollView>
               </View>
 
-              <TouchableOpacity style={styles.submitButton} onPress={handleCreatePersonalExpense} disabled={isSubmittingForm}>
+              <PressableScale style={styles.submitButton} onPress={handleCreatePersonalExpense} disabled={isSubmittingForm}>
                 {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
-              </TouchableOpacity>
+              </PressableScale>
               </ScrollView>
             </View>
         </BottomSheet>
@@ -1030,9 +1030,9 @@ export default function HomeScreen() {
               <Text style={styles.inputHint}>{t('home.excludesVAT')}</Text>
             </View>
 
-            <TouchableOpacity style={styles.submitButton} onPress={handleAddRevenue} disabled={isSubmittingForm}>
+            <PressableScale style={styles.submitButton} onPress={handleAddRevenue} disabled={isSubmittingForm}>
               {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('home.save')}</Text>}
-            </TouchableOpacity>
+            </PressableScale>
             </ScrollView>
           </View>
       </BottomSheet>
@@ -1168,14 +1168,14 @@ export default function HomeScreen() {
                   />
                 </View>
 
-                <TouchableOpacity style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
+                <PressableScale style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
                   {isSubmittingForm ? <ActivityIndicator color="white" /> : (
                     <>
                       <Ionicons name="add-circle" size={20} color="white" />
                       <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
                     </>
                   )}
-                </TouchableOpacity>
+                </PressableScale>
               </View>
             </ScrollView>
           </View>

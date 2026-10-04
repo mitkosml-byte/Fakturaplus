@@ -29,7 +29,7 @@ import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
-import { ScanCreditsBadge, Expandable } from '../../src/components';
+import { ScanCreditsBadge, Expandable, PressableScale } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { DURATION, EASING } from '../../src/theme/motion';
@@ -869,9 +869,9 @@ export default function InvoicesScreen() {
                   <TouchableOpacity style={styles.editCancelButton} onPress={() => setEditMode(false)} disabled={savingEdit}>
                     <Text style={styles.editCancelButtonText}>{t('common.cancel')}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.submitButton, { flex: 1 }]} onPress={handleSaveEditedInvoice} disabled={savingEdit}>
+                  <PressableScale style={[styles.submitButton, { flex: 1 }]} onPress={handleSaveEditedInvoice} disabled={savingEdit}>
                     {savingEdit ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
+                  </PressableScale>
                 </View>
               </ScrollView>
             )}
@@ -1107,7 +1107,7 @@ export default function InvoicesScreen() {
                   </View>
                 )}
 
-                <TouchableOpacity
+                <PressableScale
                   style={styles.deleteButton}
                   onPress={() => {
                     setSelectedInvoice(null);
@@ -1116,7 +1116,7 @@ export default function InvoicesScreen() {
                 >
                   <Ionicons name="trash" size={20} color={COLORS.danger} />
                   <Text style={styles.deleteButtonText}>{t('invoices.deleteInvoice')}</Text>
-                </TouchableOpacity>
+                </PressableScale>
               </ScrollView>
             )}
           </View>

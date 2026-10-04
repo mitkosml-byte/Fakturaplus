@@ -20,7 +20,7 @@ import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
-import { ScanCreditsReloadButton, StaggerReveal, Expandable } from '../../src/components';
+import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
 import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod } from '../../src/types';
 import { format, parse } from 'date-fns';
@@ -885,7 +885,7 @@ export default function ScanScreen() {
                     </>
                   )}
 
-                  <TouchableOpacity
+                  <PressableScale
                     style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
                     onPress={scanMode === 'sales' ? handleAddToRevenue : handleSaveInvoice}
                     disabled={isSaving}
@@ -900,7 +900,7 @@ export default function ScanScreen() {
                         </Text>
                       </>
                     )}
-                  </TouchableOpacity>
+                  </PressableScale>
                 </View>
               )}
             </View>
