@@ -9,3 +9,4 @@ export { ScanCreditsReloadButton } from './ScanCreditsReloadButton';
 export { PressableScale } from './PressableScale';
 export { ScreenEnter } from './ScreenEnter';
 export { ToastHost } from './ToastHost';
+export { BottomSheet } from './BottomSheet';

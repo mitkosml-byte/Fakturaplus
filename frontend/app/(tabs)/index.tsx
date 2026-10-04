@@ -7,8 +7,6 @@ import {
   TouchableOpacity,
   RefreshControl,
   TextInput,
-  Modal,
-  KeyboardAvoidingView,
   Platform,
   ImageBackground,
   ActivityIndicator,
@@ -28,7 +26,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge } from '../../src/components';
+import { ScanCreditsBadge, BottomSheet } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 
@@ -779,8 +777,7 @@ export default function HomeScreen() {
 
       {/* Personal Expense Modal (Owner Only) */}
       {isOwner && (
-        <Modal visible={personalExpenseModalVisible} animationType="slide" transparent>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+        <BottomSheet visible={personalExpenseModalVisible} onClose={() => setPersonalExpenseModalVisible(false)}>
             <View style={[styles.modalContent, { maxHeight: '90%' }]}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{t('personal.addExpense')}</Text>
@@ -884,13 +881,11 @@ export default function HomeScreen() {
               </TouchableOpacity>
               </ScrollView>
             </View>
-          </KeyboardAvoidingView>
-        </Modal>
+        </BottomSheet>
       )}
 
       {/* Revenue Modal */}
-      <Modal visible={revenueModalVisible} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+      <BottomSheet visible={revenueModalVisible} onClose={closeRevenueModal}>
           <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('home.dailyRevenue')}</Text>
@@ -1019,12 +1014,16 @@ export default function HomeScreen() {
             </TouchableOpacity>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      </BottomSheet>
 
       {/* Expense Modal */}
-      <Modal visible={expenseModalVisible} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+      <BottomSheet
+        visible={expenseModalVisible}
+        onClose={() => {
+          setExpenseModalVisible(false);
+          setExpenseDate(getDefaultActionDate());
+        }}
+      >
           <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('expenses.title')}</Text>
@@ -1159,8 +1158,7 @@ export default function HomeScreen() {
               </View>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      </BottomSheet>
 
       <ExcelImportModal
         visible={importRevenueModalVisible}
