@@ -27,7 +27,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale } from '../../src/components';
+import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable } from '../../src/components';
 import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
@@ -97,6 +97,8 @@ export default function HomeScreen() {
   const [personalDescription, setPersonalDescription] = useState('');
   const [personalType, setPersonalType] = useState('recurring');
   const [personalCategory, setPersonalCategory] = useState('other');
+  const [personalAmountError, setPersonalAmountError] = useState(false);
+  const [personalDescriptionError, setPersonalDescriptionError] = useState(false);
   
   // Revenue form
   const [fiscalRevenue, setFiscalRevenue] = useState('');
@@ -112,6 +114,8 @@ export default function HomeScreen() {
   // Expense form
   const [expenseDescription, setExpenseDescription] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseDescriptionError, setExpenseDescriptionError] = useState(false);
+  const [expenseAmountError, setExpenseAmountError] = useState(false);
   const [expenseDate, setExpenseDate] = useState(new Date());
   const [dayExpenses, setDayExpenses] = useState<Array<{id: string; description: string; amount: number; date: string}>>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
@@ -295,14 +299,11 @@ export default function HomeScreen() {
   // Create personal expense
   const handleCreatePersonalExpense = async () => {
     const amount = parseFloat(personalAmount);
-    if (isNaN(amount) || amount <= 0) {
-      Alert.alert(t('common.error'), t('budget.invalidAmount'));
-      return;
-    }
-    if (!personalDescription.trim()) {
-      Alert.alert(t('common.error'), t('msg.fillAllFields'));
-      return;
-    }
+    const invalidAmount = isNaN(amount) || amount <= 0;
+    const missingDescription = !personalDescription.trim();
+    setPersonalAmountError(invalidAmount);
+    setPersonalDescriptionError(missingDescription);
+    if (invalidAmount || missingDescription) return;
     if (isSubmittingForm) return;
 
     // Tagged to whichever period the dashboard above is currently showing,
@@ -410,10 +411,11 @@ export default function HomeScreen() {
   };
 
   const handleAddExpense = async () => {
-    if (!expenseDescription || !expenseAmount) {
-      Alert.alert(t('common.error'), t('msg.fillAllFields'));
-      return;
-    }
+    const missingDescription = !expenseDescription;
+    const missingAmount = !expenseAmount;
+    setExpenseDescriptionError(missingDescription);
+    setExpenseAmountError(missingAmount);
+    if (missingDescription || missingAmount) return;
     if (isSubmittingForm) return;
 
     setIsSubmittingForm(true);
@@ -821,24 +823,30 @@ export default function HomeScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('personal.amount')}</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, personalAmountError && styles.inputErrorBorder]}
                   placeholder="0.00"
                   placeholderTextColor={COLORS.textMuted}
                   keyboardType="decimal-pad"
                   value={personalAmount}
-                  onChangeText={setPersonalAmount}
+                  onChangeText={(v) => { setPersonalAmount(v); setPersonalAmountError(false); }}
                 />
+                <Expandable expanded={personalAmountError}>
+                  <Text style={styles.fieldErrorText}>{t('budget.invalidAmount')}</Text>
+                </Expandable>
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('personal.description')}</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, personalDescriptionError && styles.inputErrorBorder]}
                   placeholder={language === 'bg' ? 'напр. Наем, Заплати...' : 'e.g. Rent, Salaries...'}
                   placeholderTextColor={COLORS.textMuted}
                   value={personalDescription}
-                  onChangeText={setPersonalDescription}
+                  onChangeText={(v) => { setPersonalDescription(v); setPersonalDescriptionError(false); }}
                 />
+                <Expandable expanded={personalDescriptionError}>
+                  <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
+                </Expandable>
               </View>
 
               {/* Expense Type Selector */}
@@ -1148,24 +1156,30 @@ export default function HomeScreen() {
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>{t('expenses.description')}</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, expenseDescriptionError && styles.inputErrorBorder]}
                     value={expenseDescription}
-                    onChangeText={setExpenseDescription}
+                    onChangeText={(v) => { setExpenseDescription(v); setExpenseDescriptionError(false); }}
                     placeholder={t('expenses.placeholder')}
                     placeholderTextColor={COLORS.textMuted}
                   />
+                  <Expandable expanded={expenseDescriptionError}>
+                    <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
+                  </Expandable>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>{t('expenses.amount')} (€)</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, expenseAmountError && styles.inputErrorBorder]}
                     value={expenseAmount}
-                    onChangeText={setExpenseAmount}
+                    onChangeText={(v) => { setExpenseAmount(v); setExpenseAmountError(false); }}
                     keyboardType="decimal-pad"
                     placeholder="0.00"
                     placeholderTextColor={COLORS.textMuted}
                   />
+                  <Expandable expanded={expenseAmountError}>
+                    <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
+                  </Expandable>
                 </View>
 
                 <PressableScale style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
@@ -1510,6 +1524,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  // Motion Design System #12: a calm red border instead of a shake when a
+  // required field is missing - the Expandable error text below fades in
+  // alongside it and clears the instant the user starts typing.
+  inputErrorBorder: {
+    borderColor: COLORS.danger,
+  },
+  fieldErrorText: {
+    color: COLORS.danger,
+    fontSize: 12,
+    marginTop: 6,
   },
   inputHint: {
     fontSize: 12,

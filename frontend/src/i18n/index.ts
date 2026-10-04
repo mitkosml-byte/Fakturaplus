@@ -1185,6 +1185,10 @@ export const translations: Translations = {
     bg: 'Промените са запазени',
     en: 'Changes saved',
   },
+  'common.required': {
+    bg: 'Задължително поле',
+    en: 'Required field',
+  },
   'msg.downloadFailed': {
     bg: 'Не можах да изтегля файла',
     en: 'Could not download the file',
