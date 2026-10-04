@@ -10,3 +10,4 @@ export { PressableScale } from './PressableScale';
 export { ScreenEnter } from './ScreenEnter';
 export { ToastHost } from './ToastHost';
 export { BottomSheet } from './BottomSheet';
+export { ScanCreditsRing } from './ScanCreditsRing';
