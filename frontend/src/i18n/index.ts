@@ -642,6 +642,14 @@ export const translations: Translations = {
     bg: 'Покупка',
     en: 'Purchase',
   },
+  'scanCredits.reloadButton': {
+    bg: 'Презареди кредити за сканиране',
+    en: 'Top up scan credits',
+  },
+  'scanCredits.reloadButtonWithCount': {
+    bg: 'Остават {count} сканирания · Презареди',
+    en: '{count} scans left · Top up',
+  },
   'scanCredits.buyPackages': {
     bg: 'Купи пакет сканирания',
     en: 'Buy a scan package',

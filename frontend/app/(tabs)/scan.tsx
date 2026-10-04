@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { Alert } from '../../src/utils/alert';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
+import { ScanCreditsReloadButton } from '../../src/components';
 import { api } from '../../src/services/api';
 import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod } from '../../src/types';
 import { format, parse } from 'date-fns';
@@ -381,6 +382,8 @@ export default function ScanScreen() {
                 <Text style={styles.title}>{t('scan.title')}</Text>
                 <Text style={styles.subtitle}>{t('scan.subtitle')}</Text>
               </View>
+
+              {capturedImages.length === 0 && <ScanCreditsReloadButton />}
 
               {capturedImages.length === 0 && (
                 <View style={styles.modeToggle}>

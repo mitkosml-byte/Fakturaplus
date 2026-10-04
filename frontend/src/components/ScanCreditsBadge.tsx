@@ -10,6 +10,10 @@ import { COLORS } from '../theme/colors';
 // from) - a quiet, always-visible reminder of the balance that the
 // scan-credits screen covers in full, without duplicating that screen's
 // whole layout in two more places.
+//
+// Deliberately teal, not the primary purple every other header icon uses -
+// user feedback was that it blended in and was too easy to miss as an
+// actual tappable entry point to the billing screen.
 export function ScanCreditsBadge() {
   const router = useRouter();
   const [remaining, setRemaining] = useState<number | null>(null);
@@ -30,7 +34,7 @@ export function ScanCreditsBadge() {
       onPress={() => router.push('/scan-credits')}
       accessibilityLabel={`${remaining}`}
     >
-      <Ionicons name="scan-outline" size={14} color={remaining === 0 ? COLORS.warning : COLORS.primary} />
+      <Ionicons name="scan-outline" size={14} color={remaining === 0 ? COLORS.warning : COLORS.teal} />
       <Text style={[styles.text, remaining === 0 && styles.textEmpty]}>{remaining}</Text>
     </TouchableOpacity>
   );
@@ -44,15 +48,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    backgroundColor: 'rgba(20, 184, 166, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(20, 184, 166, 0.35)',
   },
   badgeEmpty: {
     backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderColor: 'rgba(245, 158, 11, 0.35)',
   },
   text: {
     fontSize: 13,
     fontWeight: '700',
-    color: COLORS.primary,
+    color: COLORS.teal,
   },
   textEmpty: {
     color: COLORS.warning,
