@@ -3883,10 +3883,13 @@ async def get_roi_analysis(
     # view_profit, както при get_summary - иначе зрител без това право би я
     # видял изписана в текст през ai_insights, дори полетата по-долу да са null.
     if visibility["profit"]:
-        # Generate AI insights. Each daily_revenue record is one day with
-        # turnover actually logged, so its count is a reasonable proxy for how
-        # much real history backs this period's numbers (a calendar month can
-        # be mostly empty early on, or sparsely filled for a seasonal business).
+        # Generate AI insights. The "need ~45-60 days" warning below is about
+        # whether the BUSINESS overall has enough logged history for the
+        # noise in ROI/profit to have settled - not whether this one
+        # calendar month does, which no month (max 31 days) could ever
+        # satisfy on its own. So this is a total count across all time,
+        # scoped to the company, not len(revenues) for just this period.
+        total_days_with_data = await db.daily_revenue.count_documents(scope)
         ai_insights = await generate_roi_insights(
             total_personal=total_personal,
             total_investment=total_investment,
@@ -3895,7 +3898,7 @@ async def get_roi_analysis(
             roi_percent=roi_percent,
             is_profitable=is_profitable,
             investment_covered=investment_covered,
-            days_with_data=len(revenues),
+            days_with_data=total_days_with_data,
         )
     else:
         ai_insights = ["🔒 Нямаш право да виждаш печалбата за избрания период"]
@@ -3930,7 +3933,7 @@ async def generate_roi_insights(
 
     # Basic insights без AI (винаги налични)
     if total_personal == 0:
-        insights.append("📊 Няма въведени лични разходи за периода")
+        insights.append("📊 Няма въведени лични вложения за периода")
         return insights
 
     # ROI/profit swing wildly on a handful of days (one big invoice, one
@@ -3938,13 +3941,16 @@ async def generate_roi_insights(
     # scaling/reinvestment suggestion into what's still a noisy sample.
     # MIN_RELIABLE_DAYS is a judgment call, not a measured threshold - about
     # a month and a half is the point where day-to-day noise usually stops
-    # dominating the trend for a small shop.
+    # dominating the trend for a small shop. days_with_data is the
+    # company's TOTAL logged history (see caller), so this warning clears
+    # once, permanently, rather than resetting every time a new calendar
+    # month starts - a single month could never reach 45 days on its own.
     MIN_RELIABLE_DAYS = 45
     data_is_sparse = days_with_data < MIN_RELIABLE_DAYS
     if data_is_sparse:
         day_word = "ден" if days_with_data == 1 else "дни"
         insights.append(
-            f"📅 Анализът обхваща само {days_with_data} {day_word} с въведен оборот - "
+            f"📅 Фирмата има общо {days_with_data} {day_word} с въведен оборот - "
             f"изчакайте поне {MIN_RELIABLE_DAYS}-60 дни натрупани данни, преди да вземате "
             "решения за мащабиране на база тези цифри"
         )
