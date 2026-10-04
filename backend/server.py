@@ -4245,20 +4245,14 @@ async def get_supplier_statistics(
     require_permission(current_user, "view_statistics")
     from collections import defaultdict
     from datetime import timedelta
-    
-    # Default to current month if no dates provided. end_date must land on
-    # the LAST day of the month, not the 1st of the next one - it's used
-    # below as an inclusive $lte boundary (through 23:59:59 of that date),
-    # so the 1st-of-next-month form would pull that whole day's invoices
-    # into this month's supplier stats too. See get_summary's identical fix.
+
+    # Unlike get_summary, this endpoint has no period selector in the UI -
+    # the frontend always calls it with no dates, expecting an all-time
+    # supplier-relationship overview (total/active/inactive suppliers, top-3
+    # concentration). Defaulting to the current month here used to hide
+    # every supplier with no invoices yet this month, making the whole tab
+    # read as empty for any account between scans.
     now = datetime.now(timezone.utc)
-    if not start_date and not end_date:
-        start_date = now.replace(day=1).strftime("%Y-%m-%d")
-        if now.month == 12:
-            last_day = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
-        end_date = last_day.strftime("%Y-%m-%d")
 
     # Build query for current period
     _, query = await get_company_scope(current_user)
