@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useLanguageStore } from '../i18n';
+import { AnimatedEmptyIcon } from './AnimatedEmptyIcon';
 import { COLORS } from '../theme/colors';
 
 interface EmptyStateProps {
@@ -16,7 +16,7 @@ export function EmptyState({ icon, title, subtitle, actionLabel, onAction }: Emp
   return (
     <View style={styles.container}>
       <View style={styles.iconContainer}>
-        <Ionicons name={icon as any} size={48} color={COLORS.textMuted} />
+        <AnimatedEmptyIcon name={icon as any} />
       </View>
       <Text style={styles.title}>{title}</Text>
       {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}

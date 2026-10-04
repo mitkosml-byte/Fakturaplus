@@ -25,6 +25,7 @@ import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
+import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, interpolate, Extrapolation } from 'react-native-reanimated';
 
 const { width } = Dimensions.get('window');
 const chartWidth = width - 80;
@@ -44,6 +45,22 @@ export default function StatsScreen() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
+
+  // Header shrinks/fades as the page scrolls past it - a calm, premium
+  // reaction to scroll instead of the title just sitting there inert.
+  // Clamped to the header's own scroll distance (~90px), so it settles
+  // once fully scrolled past rather than continuing to shrink forever.
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
+  const headerAnimatedStyle = useAnimatedStyle(() => {
+    const progress = interpolate(scrollY.value, [0, 90], [0, 1], Extrapolation.CLAMP);
+    return {
+      opacity: interpolate(progress, [0, 1], [1, 0.4]),
+      transform: [{ scale: interpolate(progress, [0, 1], [1, 0.92]) }],
+    };
+  });
 
   // Lets other screens (e.g. the Home dashboard's average-turnover card)
   // deep-link straight into a specific period here instead of always
@@ -760,11 +777,13 @@ export default function StatsScreen() {
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
-          <ScrollView
+          <Animated.ScrollView
             style={styles.scrollView}
+            onScroll={scrollHandler}
+            scrollEventThrottle={16}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           >
-            <View style={styles.header}>
+            <Animated.View style={[styles.header, headerAnimatedStyle]}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.title}>{t('stats.title')}</Text>
                 <Text style={styles.subtitle}>{t('stats.subtitle')}</Text>
@@ -774,7 +793,7 @@ export default function StatsScreen() {
                   <Ionicons name="download" size={22} color={COLORS.primary} />
                 </TouchableOpacity>
               )}
-            </View>
+            </Animated.View>
 
             {/* Tab Selector */}
             <ChipTabs
@@ -1867,7 +1886,7 @@ export default function StatsScreen() {
                 <View style={{ height: 40 }} />
               </View>
             ) : null}
-          </ScrollView>
+          </Animated.ScrollView>
         </SafeAreaView>
       </View>
       

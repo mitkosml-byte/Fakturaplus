@@ -19,7 +19,7 @@ import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, PressableScale, CountUp, Skeleton, SkeletonRow } from '../src/components';
+import { AccessDenied, ScreenEnter, PressableScale, CountUp, Skeleton, SkeletonRow, AnimatedEmptyIcon } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
 
@@ -295,7 +295,7 @@ export default function BudgetScreen() {
               </View>
             ) : (
               <TouchableOpacity style={styles.noBudgetCard} onPress={openBudgetModal}>
-                <Ionicons name="add-circle-outline" size={48} color={COLORS.textMuted} />
+                <AnimatedEmptyIcon name="add-circle-outline" size={48} />
                 <Text style={styles.noBudgetText}>{t('budget.noBudget')}</Text>
                 <Text style={styles.noBudgetHint}>{t('budget.tapToCreate')}</Text>
               </TouchableOpacity>

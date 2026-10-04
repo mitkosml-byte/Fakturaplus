@@ -27,7 +27,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable, CountUp, SkeletonStat } from '../../src/components';
+import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable, CountUp, SkeletonStat, CelebrationGlow } from '../../src/components';
 import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
@@ -124,6 +124,14 @@ export default function HomeScreen() {
   const [isRevenueDatePickerVisible, setRevenueDatePickerVisible] = useState(false);
   const [isExpenseDatePickerVisible, setExpenseDatePickerVisible] = useState(false);
 
+  // Celebrates a genuine milestone - the period crossing from non-profitable
+  // into profitable - not routine saves, which would turn it into noise.
+  // prevProfitRef holds the last value we actually SAW (not the initial
+  // null), so the very first load of a never-profitable account doesn't
+  // read as "just crossed into profit".
+  const prevProfitRef = useRef<number | null>(null);
+  const [celebrateProfit, setCelebrateProfit] = useState(false);
+
   const loadData = useCallback(async () => {
     const bounds = getPeriodBounds(periodState);
     const start_date = toApiDate(bounds.start);
@@ -132,6 +140,18 @@ export default function HomeScreen() {
     try {
       const summaryData = await api.getSummary({ start_date, end_date });
       setSummary(summaryData);
+      const newProfit = summaryData.profit;
+      if (
+        prevProfitRef.current !== null &&
+        prevProfitRef.current <= 0 &&
+        typeof newProfit === 'number' &&
+        newProfit > 0
+      ) {
+        setCelebrateProfit(true);
+      }
+      if (typeof newProfit === 'number') {
+        prevProfitRef.current = newProfit;
+      }
     } catch (error) {
       console.error('Error loading data:', error);
     }
@@ -644,7 +664,8 @@ export default function HomeScreen() {
             )}
             <Text style={styles.statLabel}>{t('home.pocket')}</Text>
           </View>
-          <View style={styles.statItem}>
+          <View style={[styles.statItem, { overflow: 'visible' }]}>
+            <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
             {summary && summary.profit === null ? (
               <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
             ) : (

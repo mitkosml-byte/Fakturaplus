@@ -30,12 +30,17 @@ import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
-import { ScanCreditsBadge, Expandable, PressableScale, CountUp, SkeletonRow } from '../../src/components';
+import { ScanCreditsBadge, Expandable, PressableScale, CountUp, SkeletonRow, AnimatedEmptyIcon } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
 import { DURATION, EASING } from '../../src/theme/motion';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
+
+// Module-scope so it isn't recreated every render - SectionList itself
+// has no Reanimated-provided Animated wrapper (unlike FlatList/ScrollView),
+// so one is built here to drive the header's scroll-linked animation below.
+const AnimatedSectionList = Animated.createAnimatedComponent(SectionList) as unknown as typeof SectionList;
 
 type PeriodPreset = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'thisYear' | 'custom';
 
@@ -83,6 +88,20 @@ export default function InvoicesScreen() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+
+  // Header shrinks/fades as the list scrolls past it, same treatment as
+  // the Statistics screen - see its comment for why it's clamped.
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
+  const headerAnimatedStyle = useAnimatedStyle(() => {
+    const progress = interpolate(scrollY.value, [0, 90], [0, 1], Extrapolation.CLAMP);
+    return {
+      opacity: interpolate(progress, [0, 1], [1, 0.4]),
+      transform: [{ scale: interpolate(progress, [0, 1], [1, 0.92]) }],
+    };
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
@@ -513,7 +532,7 @@ export default function InvoicesScreen() {
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
-          <View style={styles.header}>
+          <Animated.View style={[styles.header, headerAnimatedStyle]}>
             <Text style={styles.title}>{t('invoices.title')}</Text>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
               <ScanCreditsBadge />
@@ -524,7 +543,7 @@ export default function InvoicesScreen() {
                 <Ionicons name="download" size={24} color={COLORS.primary} />
               </TouchableOpacity>
             </View>
-          </View>
+          </Animated.View>
 
           {/* Admin-only safety net for the confirm dialog above: whoever
               holds restore_deleted_data can undo a delete after the fact
@@ -701,19 +720,21 @@ export default function InvoicesScreen() {
               <SkeletonRow />
             </View>
           ) : (
-          <SectionList
+          <AnimatedSectionList
             sections={sections}
             renderItem={renderInvoice}
             renderSectionHeader={renderSectionHeader}
             stickySectionHeadersEnabled
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item: Invoice) => item.id}
             contentContainerStyle={styles.listContent}
+            onScroll={scrollHandler}
+            scrollEventThrottle={16}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
             }
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
-                <Ionicons name="document-text-outline" size={64} color={COLORS.border} />
+                <AnimatedEmptyIcon name="document-text-outline" size={64} color={COLORS.border} />
                 <Text style={styles.emptyText}>{t('invoices.noInvoices')}</Text>
                 <Text style={styles.emptyHint}>{t('invoices.scanFirst')}</Text>
               </View>

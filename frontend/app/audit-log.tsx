@@ -18,7 +18,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
-import { AccessDenied, ScreenEnter } from '../src/components';
+import { AccessDenied, ScreenEnter, AnimatedEmptyIcon } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 type ActionFilter = 'all' | 'create' | 'update' | 'delete' | 'export';
@@ -221,7 +221,7 @@ export default function AuditLogScreen() {
         >
           {!loading && logs.length === 0 && (
             <View style={styles.emptyContainer}>
-              <Ionicons name="document-text-outline" size={56} color={COLORS.border} />
+              <AnimatedEmptyIcon name="document-text-outline" size={56} color={COLORS.border} />
               <Text style={styles.emptyText}>{t('auditLog.empty')}</Text>
             </View>
           )}

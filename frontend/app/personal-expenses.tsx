@@ -17,7 +17,7 @@ import { api } from '../src/services/api';
 import { PersonalExpense, PersonalExpenseType, PersonalExpenseCategory } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, BottomSheet, Expandable } from '../src/components';
+import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -284,7 +284,7 @@ export default function PersonalExpensesHistoryScreen() {
             <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 32 }}>
               {grouped.length === 0 && (
                 <View style={styles.emptyContainer}>
-                  <Ionicons name="wallet-outline" size={64} color={COLORS.border} />
+                  <AnimatedEmptyIcon name="wallet-outline" size={64} color={COLORS.border} />
                   <Text style={styles.emptyText}>{t('personal.noExpenses')}</Text>
                 </View>
               )}
