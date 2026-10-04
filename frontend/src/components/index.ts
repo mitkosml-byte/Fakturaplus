@@ -18,3 +18,5 @@ export { useDirectionalReveal } from './DirectionalReveal';
 export { Expandable } from './Expandable';
 export { RoleBadge } from './RoleBadge';
 export { FadeIn } from './FadeIn';
+export { Skeleton, SkeletonRow, SkeletonStat } from './Skeleton';
+export { CountUp } from './CountUp';

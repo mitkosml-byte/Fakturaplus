@@ -22,7 +22,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { Alert } from '../../src/utils/alert';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
-import { ChipTabs, FadeIn } from '../../src/components';
+import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 
@@ -817,9 +817,11 @@ export default function StatsScreen() {
                     <Ionicons name="speedometer" size={24} color={COLORS.info} />
                     <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
                   </View>
-                  <Text style={styles.avgTurnoverStatValue}>
-                    {(chartData.reduce((sum, d) => sum + d.income, 0) / openDaysInWindow).toFixed(2)} €
-                  </Text>
+                  <CountUp
+                    value={chartData.reduce((sum, d) => sum + d.income, 0) / openDaysInWindow}
+                    formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
+                    style={styles.avgTurnoverStatValue}
+                  />
                   <Text style={styles.avgTurnoverStatSubtitle}>
                     {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysInWindow))}
                   </Text>
@@ -827,30 +829,46 @@ export default function StatsScreen() {
 
                 <PeriodNavigator state={summaryPeriodState} onChange={setSummaryPeriodState} />
 
-                {/* Summary Cards */}
+                {/* Summary Cards - a skeleton stand-in until the first real
+                    summary lands, so the grid never briefly shows "0.00 €"
+                    for data that just hasn't arrived yet. */}
+                {!summary ? (
+                  <View style={styles.summaryGrid}>
+                    <SkeletonStat style={styles.summaryCard} />
+                    <SkeletonStat style={styles.summaryCard} />
+                    <SkeletonStat style={styles.summaryCard} />
+                    <SkeletonStat style={styles.summaryCard} />
+                  </View>
+                ) : (
                 <View style={styles.summaryGrid}>
                   <View style={[styles.summaryCard, { borderLeftColor: COLORS.success }]}>
                     <Ionicons name="trending-up" size={24} color={COLORS.success} />
                     <Text style={styles.cardLabel}>{t('stats.totalIncome')}</Text>
-                    <Text style={[styles.cardValue, { color: COLORS.success }]}>
-                      {summary?.total_income.toFixed(2) || '0.00'} €
-                    </Text>
+                    <CountUp
+                      value={summary?.total_income || 0}
+                      formatter={(n) => `${n.toFixed(2)} €`}
+                      style={[styles.cardValue, { color: COLORS.success }]}
+                    />
                     {renderTrendBadge(summary?.total_income, previousSummary?.total_income, true)}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: COLORS.danger }]}>
                     <Ionicons name="trending-down" size={24} color={COLORS.danger} />
                     <Text style={styles.cardLabel}>{t('stats.totalExpense')}</Text>
-                    <Text style={[styles.cardValue, { color: COLORS.danger }]}>
-                      {summary?.total_expense.toFixed(2) || '0.00'} €
-                    </Text>
+                    <CountUp
+                      value={summary?.total_expense || 0}
+                      formatter={(n) => `${n.toFixed(2)} €`}
+                      style={[styles.cardValue, { color: COLORS.danger }]}
+                    />
                     {renderTrendBadge(summary?.total_expense, previousSummary?.total_expense, false)}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: COLORS.primary }]}>
                     <Ionicons name="calculator" size={24} color={COLORS.primary} />
                     <Text style={styles.cardLabel}>{t('stats.vatToPay')}</Text>
-                    <Text style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
-                      {summary?.vat_to_pay.toFixed(2) || '0.00'} €
-                    </Text>
+                    <CountUp
+                      value={summary?.vat_to_pay || 0}
+                      formatter={(n) => `${n.toFixed(2)} €`}
+                      style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}
+                    />
                     {renderTrendBadge(summary?.vat_to_pay, previousSummary?.vat_to_pay, false)}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: COLORS.warning }]}>
@@ -860,14 +878,17 @@ export default function StatsScreen() {
                       <Ionicons name="lock-closed" size={20} color={COLORS.textMuted} style={{ marginVertical: 4 }} />
                     ) : (
                       <>
-                        <Text style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}>
-                          {summary?.profit?.toFixed(2) || '0.00'} €
-                        </Text>
+                        <CountUp
+                          value={summary?.profit || 0}
+                          formatter={(n) => `${n.toFixed(2)} €`}
+                          style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
+                        />
                         {renderTrendBadge(summary?.profit, previousSummary?.profit, true)}
                       </>
                     )}
                   </View>
                 </View>
+                )}
 
                 {summary?.financial_visibility && (
                   summary.financial_visibility.pocket_money === false ||

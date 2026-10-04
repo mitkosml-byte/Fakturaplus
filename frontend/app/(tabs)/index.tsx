@@ -27,7 +27,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable } from '../../src/components';
+import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable, CountUp, SkeletonStat } from '../../src/components';
 import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
@@ -466,16 +466,33 @@ export default function HomeScreen() {
             <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
 
             <Animated.View style={periodReveal.style}>
-            {/* Summary Cards */}
+            {/* Summary Cards - skeletons stand in until the first real
+                summary lands, so these never flash "0.00 €" for data that
+                just hasn't arrived yet. */}
+            {!summary ? (
+              <>
+                <View style={styles.summaryContainer}>
+                  <SkeletonStat style={[styles.summaryCard, styles.incomeCard]} />
+                  <SkeletonStat style={[styles.summaryCard, styles.expenseCard]} />
+                </View>
+                <View style={styles.summaryContainer}>
+                  <SkeletonStat style={[styles.summaryCard, styles.cashCard]} />
+                  <SkeletonStat style={[styles.summaryCard, styles.cardCard]} />
+                </View>
+              </>
+            ) : (
+            <>
             <View style={styles.summaryContainer}>
               <View style={[styles.summaryCard, styles.incomeCard]}>
                 <View style={styles.cardIcon}>
                   <Ionicons name="trending-up" size={24} color={COLORS.success} />
                 </View>
                 <Text style={styles.cardLabel}>{t('home.totalIncome')}</Text>
-                <Text style={[styles.cardValue, { color: COLORS.success }]}>
-                  {summary?.total_income.toFixed(2) || '0.00'} €
-                </Text>
+                <CountUp
+                  value={summary?.total_income || 0}
+                  formatter={(n) => `${n.toFixed(2)} €`}
+                  style={[styles.cardValue, { color: COLORS.success }]}
+                />
               </View>
 
               <View style={[styles.summaryCard, styles.expenseCard]}>
@@ -483,9 +500,11 @@ export default function HomeScreen() {
                   <Ionicons name="trending-down" size={24} color={COLORS.danger} />
             </View>
             <Text style={styles.cardLabel}>{t('home.totalExpenses')}</Text>
-            <Text style={[styles.cardValue, { color: COLORS.danger }]}>
-              {summary?.total_expense.toFixed(2) || '0.00'} €
-            </Text>
+            <CountUp
+              value={summary?.total_expense || 0}
+              formatter={(n) => `${n.toFixed(2)} €`}
+              style={[styles.cardValue, { color: COLORS.danger }]}
+            />
           </View>
         </View>
 
@@ -496,9 +515,11 @@ export default function HomeScreen() {
               <Ionicons name="cash-outline" size={24} color={COLORS.success} />
             </View>
             <Text style={styles.cardLabel}>{t('home.cashRevenue')}</Text>
-            <Text style={[styles.cardValue, { color: COLORS.success }]}>
-              {(summary?.total_cash_revenue || 0).toFixed(2)} €
-            </Text>
+            <CountUp
+              value={summary?.total_cash_revenue || 0}
+              formatter={(n) => `${n.toFixed(2)} €`}
+              style={[styles.cardValue, { color: COLORS.success }]}
+            />
           </View>
 
           <View style={[styles.summaryCard, styles.cardCard]}>
@@ -506,11 +527,15 @@ export default function HomeScreen() {
               <Ionicons name="card-outline" size={24} color={COLORS.info} />
             </View>
             <Text style={styles.cardLabel}>{t('home.cardRevenue')}</Text>
-            <Text style={[styles.cardValue, { color: COLORS.info }]}>
-              {(summary?.total_card_revenue || 0).toFixed(2)} €
-            </Text>
+            <CountUp
+              value={summary?.total_card_revenue || 0}
+              formatter={(n) => `${n.toFixed(2)} €`}
+              style={[styles.cardValue, { color: COLORS.info }]}
+            />
           </View>
         </View>
+            </>
+            )}
 
         {/* VAT Card */}
         <View style={styles.vatCard}>
@@ -518,9 +543,11 @@ export default function HomeScreen() {
             <Ionicons name="calculator" size={24} color={COLORS.primary} />
             <Text style={styles.vatTitle}>{t('home.vatToPay')}</Text>
           </View>
-          <Text style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
-            {(summary?.vat_to_pay || 0).toFixed(2)} €
-          </Text>
+          <CountUp
+            value={summary?.vat_to_pay || 0}
+            formatter={(n) => `${n.toFixed(2)} €`}
+            style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}
+          />
           <View style={styles.vatDetails}>
             <View style={styles.vatDetailRow}>
               <Text style={styles.vatDetailLabel}>{t('stats.vatFromSales')}:</Text>
@@ -551,9 +578,11 @@ export default function HomeScreen() {
               <Text style={styles.unpaidTitle}>{t('home.unpaidInvoices')}</Text>
               <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </View>
-            <Text style={[styles.unpaidValue, { color: (summary?.overdue_invoice_count || 0) > 0 ? COLORS.danger : COLORS.warning }]}>
-              {(summary?.total_unpaid_amount || 0).toFixed(2)} €
-            </Text>
+            <CountUp
+              value={summary?.total_unpaid_amount || 0}
+              formatter={(n) => `${n.toFixed(2)} €`}
+              style={[styles.unpaidValue, { color: (summary?.overdue_invoice_count || 0) > 0 ? COLORS.danger : COLORS.warning }]}
+            />
             <Text style={styles.unpaidSubtitle}>
               {summary?.unpaid_invoice_count} {t('home.unpaidInvoicesCount')}
               {(summary?.overdue_invoice_count || 0) > 0
@@ -578,9 +607,11 @@ export default function HomeScreen() {
             <Text style={styles.avgTurnoverTitle}>{t('home.avgDailyTurnover')}</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </View>
-          <Text style={styles.avgTurnoverValue}>
-            {(((summary?.total_income || 0)) / openDaysThisMonth).toFixed(2)} €
-          </Text>
+          <CountUp
+            value={(summary?.total_income || 0) / openDaysThisMonth}
+            formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
+            style={styles.avgTurnoverValue}
+          />
           <Text style={styles.avgTurnoverSubtitle}>
             {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysThisMonth))}
           </Text>
@@ -598,18 +629,18 @@ export default function HomeScreen() {
         {/* Stats Overview */}
         <View style={styles.statsGrid}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
+            <CountUp value={summary?.invoice_count || 0} formatter={(n) => `${Math.round(n)}`} style={styles.statValue} />
             <Text style={styles.statLabel}>{t('home.invoices')}</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0}</Text>
+            <CountUp value={summary?.total_fiscal_revenue || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
             <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
           </View>
           <View style={styles.statItem}>
             {summary && summary.total_pocket_money === null ? (
               <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
             ) : (
-              <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0}</Text>
+              <CountUp value={summary?.total_pocket_money || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
             )}
             <Text style={styles.statLabel}>{t('home.pocket')}</Text>
           </View>
@@ -617,9 +648,11 @@ export default function HomeScreen() {
             {summary && summary.profit === null ? (
               <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
             ) : (
-              <Text style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}>
-                {summary?.profit?.toFixed(0) || 0}
-              </Text>
+              <CountUp
+                value={summary?.profit || 0}
+                formatter={(n) => `${n.toFixed(0)}`}
+                style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
+              />
             )}
             <Text style={styles.statLabel}>{t('home.profit')}</Text>
           </View>

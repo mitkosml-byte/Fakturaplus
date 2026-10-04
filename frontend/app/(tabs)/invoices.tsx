@@ -30,7 +30,7 @@ import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
-import { ScanCreditsBadge, Expandable, PressableScale } from '../../src/components';
+import { ScanCreditsBadge, Expandable, PressableScale, CountUp, SkeletonRow } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { DURATION, EASING } from '../../src/theme/motion';
@@ -82,6 +82,7 @@ export default function InvoicesScreen() {
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
@@ -150,6 +151,8 @@ export default function InvoicesScreen() {
       setInvoices(data);
     } catch (error) {
       console.error('Error loading invoices:', error);
+    } finally {
+      setInitialLoading(false);
     }
   }, [searchQuery, periodPreset, customStartDate, customEndDate, paymentFilter]);
 
@@ -678,11 +681,26 @@ export default function InvoicesScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('invoices.total')}:</Text>
-              <Text style={[styles.summaryValue, { color: COLORS.primary }]}>{totalAmount.toFixed(2)} €</Text>
+              <CountUp
+                value={totalAmount}
+                formatter={(n) => `${n.toFixed(2)} €`}
+                style={[styles.summaryValue, { color: COLORS.primary }]}
+              />
             </View>
           </View>
 
-          {/* List */}
+          {/* List - a handful of skeleton rows while the first page is
+              still loading, instead of briefly flashing the "no invoices"
+              empty state for data that just hasn't arrived yet. */}
+          {initialLoading && invoices.length === 0 ? (
+            <View style={styles.listContent}>
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+            </View>
+          ) : (
           <SectionList
             sections={sections}
             renderItem={renderInvoice}
@@ -701,6 +719,7 @@ export default function InvoicesScreen() {
               </View>
             }
           />
+          )}
 
           {/* Export Modal */}
       <Modal visible={exportModalVisible} animationType="fade" transparent>
