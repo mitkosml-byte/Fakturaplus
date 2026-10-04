@@ -632,6 +632,7 @@ export interface PersonalWalletEntry {
   date: string;
   is_recurring: boolean;
   next_due_date?: string | null;
+  recurring_until?: string | null;
   notes?: string | null;
   created_at: string;
   updated_at?: string | null;
@@ -641,6 +642,7 @@ export interface PersonalWalletUpcoming {
   description: string;
   amount: number;
   next_due_date: string;
+  recurring_until?: string | null;
   category: PersonalWalletCategory;
 }
 

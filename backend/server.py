@@ -489,6 +489,11 @@ class PersonalWalletEntry(BaseModel):
     date: str
     is_recurring: bool = False
     next_due_date: Optional[str] = None
+    # Term end for a recurring obligation (lease/contract/subscription expiry) -
+    # once past, the entry stops being surfaced as an upcoming due payment
+    # (see /personal-wallet/summary) instead of nagging forever after the
+    # underlying contract has actually ended.
+    recurring_until: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
@@ -500,6 +505,7 @@ class PersonalWalletEntryCreate(BaseModel):
     date: str
     is_recurring: bool = False
     next_due_date: Optional[str] = None
+    recurring_until: Optional[str] = None
     notes: Optional[str] = None
 
 class PersonalWalletEntryUpdate(BaseModel):
@@ -509,6 +515,7 @@ class PersonalWalletEntryUpdate(BaseModel):
     date: Optional[str] = None
     is_recurring: Optional[bool] = None
     next_due_date: Optional[str] = None
+    recurring_until: Optional[str] = None
     notes: Optional[str] = None
 
 class PersonalWalletSettingsUpdate(BaseModel):
@@ -4239,6 +4246,7 @@ async def create_personal_wallet_entry(
         date=entry.date,
         is_recurring=entry.is_recurring,
         next_due_date=entry.next_due_date,
+        recurring_until=entry.recurring_until,
         notes=entry.notes,
     )
     await db.personal_wallet_entries.insert_one(entry_obj.dict())
@@ -4390,8 +4398,12 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
         {
             "company_id": company_id, "is_recurring": True,
             "next_due_date": {"$gte": today_str, "$lte": two_weeks_str},
+            # Once a lease/contract/subscription's own end date has passed,
+            # stop flagging it as an upcoming obligation - $or with None
+            # matches entries predating this field too.
+            "$or": [{"recurring_until": None}, {"recurring_until": {"$gte": today_str}}],
         },
-        {"_id": 0, "description": 1, "amount": 1, "next_due_date": 1, "category": 1},
+        {"_id": 0, "description": 1, "amount": 1, "next_due_date": 1, "category": 1, "recurring_until": 1},
     ).sort("next_due_date", 1).to_list(50)
     upcoming_due_total = sum(
         u.get("amount", 0) for u in upcoming_docs if u.get("next_due_date", "") <= (now + timedelta(days=7)).strftime("%Y-%m-%d")

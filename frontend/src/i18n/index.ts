@@ -2480,22 +2480,22 @@ export const translations: Translations = {
     en: 'Merged statistics',
   },
   
-  // Personal Expenses & ROI (Owner only)
+  // Personal Investments & ROI (Owner only)
   'personal.title': {
-    bg: 'Лични разходи',
-    en: 'Personal Expenses',
+    bg: 'Лични вложения',
+    en: 'Personal Investments',
   },
   'personal.subtitle': {
-    bg: 'Вашите инвестиции в бизнеса',
-    en: 'Your investments in the business',
+    bg: 'Вашите лични вложения в бизнеса',
+    en: 'Your personal investments in the business',
   },
   'personal.periodNotice': {
     bg: 'Ще се запише за {period} - месецът, който в момента гледате на Начало',
     en: 'This will be recorded for {period} - the month you\'re currently viewing on Home',
   },
   'personal.addExpense': {
-    bg: 'Добави разход',
-    en: 'Add Expense',
+    bg: 'Добави вложение',
+    en: 'Add Investment',
   },
   'personal.history': {
     bg: 'История',
@@ -2574,20 +2574,20 @@ export const translations: Translations = {
     en: 'Notes',
   },
   'personal.noExpenses': {
-    bg: 'Няма лични разходи за периода',
-    en: 'No personal expenses for this period',
+    bg: 'Няма лични вложения за периода',
+    en: 'No personal investments for this period',
   },
   'personal.created': {
-    bg: 'Разходът е записан',
-    en: 'Expense recorded',
+    bg: 'Вложението е записано',
+    en: 'Investment recorded',
   },
   'personal.deleted': {
-    bg: 'Разходът е изтрит',
-    en: 'Expense deleted',
+    bg: 'Вложението е изтрито',
+    en: 'Investment deleted',
   },
   'personal.deleteConfirm': {
-    bg: 'Сигурни ли сте, че искате да изтриете този разход?',
-    en: 'Are you sure you want to delete this expense?',
+    bg: 'Сигурни ли сте, че искате да изтриете това вложение?',
+    en: 'Are you sure you want to delete this investment?',
   },
 
   // Personal Wallet (Лично тефтерче) - household spending tracked out of
@@ -2684,6 +2684,18 @@ export const translations: Translations = {
   'wallet.nextDueDate': {
     bg: 'Дата на следващо плащане',
     en: 'Next due date',
+  },
+  'wallet.hasEndDate': {
+    bg: 'Има крайна дата (договор/период)',
+    en: 'Has an end date (contract/term)',
+  },
+  'wallet.hasEndDateHint': {
+    bg: 'Включи, ако разходът е за определен период - напр. лизинг или абонамент с краен срок',
+    en: 'Turn on if the expense runs for a fixed period - e.g. a lease or a fixed-term subscription',
+  },
+  'wallet.recurringUntil': {
+    bg: 'Важи до',
+    en: 'Valid until',
   },
   'wallet.byCategory': {
     bg: 'По категория',

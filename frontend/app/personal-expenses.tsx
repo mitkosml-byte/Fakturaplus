@@ -162,12 +162,15 @@ export default function PersonalExpensesHistoryScreen() {
   const [walletDate, setWalletDate] = useState(new Date());
   const [walletIsRecurring, setWalletIsRecurring] = useState(false);
   const [walletNextDueDate, setWalletNextDueDate] = useState(new Date());
+  const [walletHasRecurringUntil, setWalletHasRecurringUntil] = useState(false);
+  const [walletRecurringUntil, setWalletRecurringUntil] = useState(new Date());
   const [walletNotes, setWalletNotes] = useState('');
   const [walletAmountError, setWalletAmountError] = useState(false);
   const [walletDescriptionError, setWalletDescriptionError] = useState(false);
   const [walletSaving, setWalletSaving] = useState(false);
   const [showWalletDatePicker, setShowWalletDatePicker] = useState(false);
   const [showWalletDueDatePicker, setShowWalletDueDatePicker] = useState(false);
+  const [showWalletRecurringUntilPicker, setShowWalletRecurringUntilPicker] = useState(false);
 
   const loadWallet = useCallback(async () => {
     if (!canViewWallet) {
@@ -287,6 +290,8 @@ export default function PersonalExpensesHistoryScreen() {
     setWalletDate(new Date());
     setWalletIsRecurring(false);
     setWalletNextDueDate(new Date());
+    setWalletHasRecurringUntil(false);
+    setWalletRecurringUntil(new Date());
     setWalletNotes('');
     setWalletAmountError(false);
     setWalletDescriptionError(false);
@@ -300,6 +305,8 @@ export default function PersonalExpensesHistoryScreen() {
     setWalletDate(new Date(entry.date));
     setWalletIsRecurring(entry.is_recurring);
     setWalletNextDueDate(entry.next_due_date ? new Date(entry.next_due_date) : new Date());
+    setWalletHasRecurringUntil(!!entry.recurring_until);
+    setWalletRecurringUntil(entry.recurring_until ? new Date(entry.recurring_until) : new Date());
     setWalletNotes(entry.notes || '');
     setWalletAmountError(false);
     setWalletDescriptionError(false);
@@ -322,6 +329,9 @@ export default function PersonalExpensesHistoryScreen() {
         date: walletDate.toISOString().slice(0, 10),
         is_recurring: walletIsRecurring,
         next_due_date: walletIsRecurring ? walletNextDueDate.toISOString().slice(0, 10) : undefined,
+        recurring_until: walletIsRecurring && walletHasRecurringUntil
+          ? walletRecurringUntil.toISOString().slice(0, 10)
+          : null,
         notes: walletNotes.trim() || undefined,
       };
       if (editingEntryId) {
@@ -766,14 +776,19 @@ export default function PersonalExpensesHistoryScreen() {
                                 </View>
                                 {entry.is_recurring && (
                                   <View style={styles.badge}>
-                                    <Text style={styles.badgeTextNeutral}>↻ {entry.next_due_date}</Text>
+                                    <Text style={styles.badgeTextNeutral}>
+                                      ↻ {entry.next_due_date}{entry.recurring_until ? ` → ${entry.recurring_until}` : ''}
+                                    </Text>
                                   </View>
                                 )}
                               </View>
                               {canManageWallet && (
-                                <TouchableOpacity onPress={() => handleDeleteWalletEntry(entry)} hitSlop={8}>
-                                  <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
-                                </TouchableOpacity>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                                  <Ionicons name="create-outline" size={16} color={COLORS.textMuted} />
+                                  <TouchableOpacity onPress={() => handleDeleteWalletEntry(entry)} hitSlop={8}>
+                                    <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+                                  </TouchableOpacity>
+                                </View>
                               )}
                             </View>
                           </TouchableOpacity>
@@ -937,6 +952,36 @@ export default function PersonalExpensesHistoryScreen() {
                         cancelTextIOS={t('common.cancel')}
                         locale={language}
                       />
+
+                      <View style={styles.switchRow}>
+                        <Text style={styles.inputLabel}>{t('wallet.hasEndDate')}</Text>
+                        <Switch
+                          value={walletHasRecurringUntil}
+                          onValueChange={setWalletHasRecurringUntil}
+                          trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                          thumbColor="white"
+                        />
+                      </View>
+                      <Text style={styles.fieldHintText}>{t('wallet.hasEndDateHint')}</Text>
+
+                      <Expandable expanded={walletHasRecurringUntil}>
+                        <View>
+                          <Text style={styles.inputLabel}>{t('wallet.recurringUntil')}</Text>
+                          <TouchableOpacity style={styles.input} onPress={() => setShowWalletRecurringUntilPicker(true)}>
+                            <Text style={{ color: 'white' }}>{walletRecurringUntil.toISOString().slice(0, 10)}</Text>
+                          </TouchableOpacity>
+                          <DateTimePickerModal
+                            isVisible={showWalletRecurringUntilPicker}
+                            mode="date"
+                            date={walletRecurringUntil}
+                            onConfirm={(d) => { setWalletRecurringUntil(d); setShowWalletRecurringUntilPicker(false); }}
+                            onCancel={() => setShowWalletRecurringUntilPicker(false)}
+                            confirmTextIOS={t('common.select')}
+                            cancelTextIOS={t('common.cancel')}
+                            locale={language}
+                          />
+                        </View>
+                      </Expandable>
                     </View>
                   </Expandable>
 
@@ -1082,6 +1127,12 @@ const styles = StyleSheet.create({
     color: COLORS.danger,
     fontSize: 12,
     marginTop: 4,
+  },
+  fieldHintText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    marginTop: -4,
+    marginBottom: 8,
   },
   saveButton: {
     backgroundColor: COLORS.primary,
