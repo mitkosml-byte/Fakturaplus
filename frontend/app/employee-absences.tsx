@@ -19,6 +19,7 @@ import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { format } from 'date-fns';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFile';
 import { Employee, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType } from '../src/types';
@@ -206,6 +207,7 @@ export default function EmployeeAbsencesScreen() {
       const filename = `praznici_otpuski_${startStr}_${endStr}.xlsx`;
       const { shared } = await downloadAndShareFile(endpoint, filename);
       if (!shared) {
+        Haptics.success();
         Toast.success(t('export.fileSaved'));
       }
       setExportModalVisible(false);

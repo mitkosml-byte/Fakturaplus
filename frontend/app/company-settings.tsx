@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { Company } from '../src/types';
 import { useTranslation } from '../src/i18n';
@@ -117,6 +118,7 @@ export default function CompanySettingsScreen() {
         bank_iban: bankIban.trim() || undefined,
       });
       setCompany(savedCompany);
+      Haptics.success();
       Toast.success(t('company.saved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);

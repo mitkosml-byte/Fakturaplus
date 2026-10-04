@@ -17,6 +17,7 @@ import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
+import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
 import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
 import { format, addDays, subDays } from 'date-fns';
@@ -321,6 +322,7 @@ export default function HomeScreen() {
         period_year: periodStart.getFullYear(),
       });
 
+      Haptics.success();
       Toast.success(t('personal.created'));
       setPersonalAmount('');
       setPersonalDescription('');
@@ -398,6 +400,7 @@ export default function HomeScreen() {
       setRevenueVatRate(20);
       setRevenueDate(getDefaultActionDate());
       loadData();
+      Haptics.success();
       Toast.success(t('msg.revenueSaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
@@ -425,6 +428,7 @@ export default function HomeScreen() {
       setExpenseAmount('');
       loadDayExpenses(expenseDate);
       loadData();
+      Haptics.success();
       Toast.success(t('msg.expenseSaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);

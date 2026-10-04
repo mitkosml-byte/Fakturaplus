@@ -284,6 +284,7 @@ export default function InvoicesScreen() {
       });
       applyInvoiceUpdate(updated);
       setEditMode(false);
+      Haptics.success();
       Toast.success(t('common.saved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);

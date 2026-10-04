@@ -16,6 +16,7 @@ import { Calendar, DateData } from 'react-native-calendars';
 import { format } from 'date-fns';
 import { Alert } from '../utils/alert';
 import { Toast } from '../utils/toast';
+import { Haptics } from '../utils/haptics';
 import { api } from '../services/api';
 import { ClosedDateException } from '../types';
 import { useTranslation } from '../i18n';
@@ -104,6 +105,7 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
     setSaving(true);
     try {
       await api.updateCompany({ closed_weekdays: closedWeekdays });
+      Haptics.success();
       Toast.success(t('closedDays.weeklySaved'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);

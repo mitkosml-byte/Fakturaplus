@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
+import { Haptics } from '../../src/utils/haptics';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation, useLanguageStore, Language } from '../../src/i18n';
@@ -177,6 +178,7 @@ export default function ProfileScreen() {
       setNewCompanyName('');
       setNewCompanyEik('');
       await Promise.all([refreshUser(), loadCompany(), loadMemberships()]);
+      Haptics.success();
       Toast.success(t('companySwitcher.newCompanyCreated'));
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);

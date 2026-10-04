@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { NotificationSettings } from '../src/types';
 import { useTranslation } from '../src/i18n';
@@ -94,6 +95,7 @@ export default function NotificationsSettingsScreen() {
         periodic_enabled: periodicEnabled,
         periodic_dates: selectedDates,
       });
+      Haptics.success();
       Toast.success(t('notifications.saved'));
       router.back();
     } catch (error: any) {

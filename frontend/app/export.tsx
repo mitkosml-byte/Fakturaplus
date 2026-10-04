@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
+import { Haptics } from '../src/utils/haptics';
 import { useTranslation } from '../src/i18n';
 import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFile';
 import { useAuth } from '../src/contexts/AuthContext';
@@ -30,6 +31,7 @@ export default function ExportScreen() {
     try {
       const { shared } = await downloadAndShareFile(endpoint, filename);
       if (!shared) {
+        Haptics.success();
         Toast.success(t('export.fileSaved'));
       }
     } catch (error) {
