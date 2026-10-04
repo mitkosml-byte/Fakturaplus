@@ -29,8 +29,10 @@ import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
-import { ScanCreditsBadge } from '../../src/components';
+import { ScanCreditsBadge, Expandable } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { DURATION, EASING } from '../../src/theme/motion';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -94,6 +96,16 @@ export default function InvoicesScreen() {
   const [showOnlyEikIssues, setShowOnlyEikIssues] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'partial' | 'overdue'>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const chevronRotation = useSharedValue(0);
+  useEffect(() => {
+    chevronRotation.value = withTiming(filtersExpanded ? 180 : 0, {
+      duration: DURATION.deliberate,
+      easing: EASING.standard,
+    });
+  }, [filtersExpanded]);
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${chevronRotation.value}deg` }],
+  }));
 
   // Lets the Home dashboard's unpaid-invoices reminder deep-link straight
   // into this filter instead of always landing on "all".
@@ -534,10 +546,12 @@ export default function InvoicesScreen() {
               {t('invoices.filtersButton')}
               {activeFilterCount > 0 ? ` · ${activeFilterCount} ${t('invoices.filtersActive')}` : ''}
             </Text>
-            <Ionicons name={filtersExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.primary} />
+            <Animated.View style={chevronStyle}>
+              <Ionicons name="chevron-down" size={16} color={COLORS.primary} />
+            </Animated.View>
           </TouchableOpacity>
 
-          {filtersExpanded && (
+          <Expandable expanded={filtersExpanded}>
             <>
               {/* Period filter */}
               <ScrollView
@@ -616,7 +630,7 @@ export default function InvoicesScreen() {
                 ))}
               </ScrollView>
             </>
-          )}
+          </Expandable>
 
           {/* ЕИК issues banner */}
           {eikIssueCount > 0 && (
