@@ -469,6 +469,78 @@ export const translations: Translations = {
     bg: 'Коректен ЕИК',
     en: 'Valid EIK',
   },
+  'doc.type': {
+    bg: 'Вид документ',
+    en: 'Document type',
+  },
+  'doc.invoice': {
+    bg: 'Фактура',
+    en: 'Invoice',
+  },
+  'doc.credit_note': {
+    bg: 'Кредитно известие',
+    en: 'Credit note',
+  },
+  'doc.debit_note': {
+    bg: 'Дебитно известие',
+    en: 'Debit note',
+  },
+  'doc.receipt': {
+    bg: 'Касова бележка',
+    en: 'Receipt',
+  },
+  'doc.proforma': {
+    bg: 'Проформа',
+    en: 'Pro forma',
+  },
+  'doc.short.credit_note': {
+    bg: 'КИ',
+    en: 'CN',
+  },
+  'doc.short.debit_note': {
+    bg: 'ДИ',
+    en: 'DN',
+  },
+  'doc.short.receipt': {
+    bg: 'КБ',
+    en: 'RC',
+  },
+  'doc.relatedInvoice': {
+    bg: 'Към фактура №',
+    en: 'For invoice №',
+  },
+  'doc.relatedFound': {
+    bg: 'Оригиналната фактура е намерена в системата и документите са свързани.',
+    en: 'The original invoice was found and the documents are linked.',
+  },
+  'doc.relatedNotFound': {
+    bg: 'Оригиналната фактура не е намерена в системата. Проверете номера или качете и нея.',
+    en: "The original invoice isn't in the system. Check the number or upload it too.",
+  },
+  'doc.relatedMissing': {
+    bg: 'Въведете номера на фактурата, която това известие коригира.',
+    en: 'Enter the number of the invoice this note corrects.',
+  },
+  'doc.creditNoteNote': {
+    bg: 'Кредитното известие намалява разхода и ДДС. Записва се с минус и не изисква плащане.',
+    en: 'A credit note reduces the expense and VAT. It is saved as a negative amount and needs no payment.',
+  },
+  'doc.debitNoteNote': {
+    bg: 'Дебитното известие увеличава разхода по оригиналната фактура.',
+    en: 'A debit note increases the expense on the original invoice.',
+  },
+  'doc.proformaNote': {
+    bg: 'Това е проформа - тя не е счетоводен документ и не може да се запише. Изчакайте оригиналната фактура от доставчика.',
+    en: "This is a pro forma - it isn't an accounting document and can't be saved. Wait for the supplier's actual invoice.",
+  },
+  'doc.proformaDetectedTitle': {
+    bg: 'Разпозната е проформа',
+    en: 'Pro forma detected',
+  },
+  'doc.savedNotLinked': {
+    bg: 'Записано, но оригиналната фактура не е намерена',
+    en: 'Saved, but the original invoice was not found',
+  },
   'scan.vatTreatment': {
     bg: 'ДДС третиране',
     en: 'VAT treatment',

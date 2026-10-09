@@ -22,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
-import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod } from '../../src/types';
+import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, DocumentType, isCorrectingDoc } from '../../src/types';
 import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
@@ -67,6 +67,10 @@ export default function ScanScreen() {
   const [supplierEik, setSupplierEik] = useState('');
   const [eikCheck, setEikCheck] = useState<{ valid: boolean; reason: string | null } | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [documentType, setDocumentType] = useState<DocumentType>('invoice');
+  const [relatedInvoiceNumber, setRelatedInvoiceNumber] = useState('');
+  // true/false = AI провери и намери/не намери оригинала; null = не е проверявано
+  const [relatedFound, setRelatedFound] = useState<boolean | null>(null);
   const [amountWithoutVat, setAmountWithoutVat] = useState('');
   const [vatAmount, setVatAmount] = useState('');
   const [totalAmount, setTotalAmount] = useState('');
@@ -198,6 +202,13 @@ export default function ScanScreen() {
       setSupplier(result.supplier);
       setSupplierEik(result.supplier_eik || '');
       setInvoiceNumber(result.invoice_number);
+      const detectedType: DocumentType = result.document_type || 'invoice';
+      setDocumentType(detectedType);
+      setRelatedInvoiceNumber(result.related_invoice_number || '');
+      setRelatedFound(isCorrectingDoc(detectedType) && result.related_invoice_number ? !!result.related_invoice_id : null);
+      if (detectedType === 'proforma') {
+        Alert.alert(t('doc.proformaDetectedTitle'), t('doc.proformaNote'));
+      }
       setAmountWithoutVat(result.amount_without_vat.toString());
       setVatAmount(result.vat_amount.toString());
       setTotalAmount(result.total_amount.toString());
@@ -281,6 +292,11 @@ export default function ScanScreen() {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;
     }
+    if (documentType === 'proforma') {
+      Alert.alert(t('doc.proformaDetectedTitle'), t('doc.proformaNote'));
+      return;
+    }
+    const isCreditNote = documentType === 'credit_note';
 
     const itemsPayload: InvoiceItemCreate[] = items
       .filter(item => item.name.trim() && item.unit_price)
@@ -297,19 +313,25 @@ export default function ScanScreen() {
         supplier,
         supplier_eik: supplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
-        amount_without_vat: parseFloat(amountWithoutVat) || 0,
-        vat_amount: parseFloat(vatAmount) || 0,
-        total_amount: parseFloat(totalAmount) || 0,
+        document_type: documentType,
+        related_invoice_number: isCorrectingDoc(documentType) ? relatedInvoiceNumber.trim() || undefined : undefined,
+        // Сумите се пращат както са на документа (положителни) - сървърът
+        // записва кредитното известие с минус
+        amount_without_vat: Math.abs(parseFloat(amountWithoutVat) || 0),
+        vat_amount: Math.abs(parseFloat(vatAmount) || 0),
+        total_amount: Math.abs(parseFloat(totalAmount) || 0),
         vat_treatment: vatTreatment || undefined,
         date: invoiceDate.toISOString(),
         image_base64s: capturedImages.length > 0 ? capturedImages : undefined,
         notes: notes || undefined,
         items: itemsPayload.length > 0 ? itemsPayload : undefined,
-        payment_method: paymentMethod || undefined,
-        payment_due_date: paymentMethod === 'bank_transfer' && paymentDueDate ? paymentDueDate.toISOString() : undefined,
+        payment_method: isCreditNote ? undefined : (paymentMethod || undefined),
+        payment_due_date: !isCreditNote && paymentMethod === 'bank_transfer' && paymentDueDate ? paymentDueDate.toISOString() : undefined,
       });
       Haptics.success();
-      if (saved.protocol_number) {
+      if (isCorrectingDoc(documentType) && !saved.related_invoice_id) {
+        Toast.info(t('doc.savedNotLinked'));
+      } else if (saved.protocol_number) {
         Toast.success(`${t('msg.invoiceSaved')} · ${t('scan.protocolAssigned')} ${saved.protocol_number}`);
       } else {
         Toast.success(t('msg.invoiceSaved'));
@@ -364,6 +386,9 @@ export default function ScanScreen() {
     setSupplierEik('');
     setEikCheck(null);
     setInvoiceNumber('');
+    setDocumentType('invoice');
+    setRelatedInvoiceNumber('');
+    setRelatedFound(null);
     setAmountWithoutVat('');
     setVatAmount('');
     setTotalAmount('');
@@ -608,6 +633,41 @@ export default function ScanScreen() {
                     </>
                   ) : (
                     <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('doc.type')}</Text>
+                    <View style={styles.vatTreatmentGrid}>
+                      {(['invoice', 'credit_note', 'debit_note', 'receipt', 'proforma'] as DocumentType[]).map((option) => (
+                        <TouchableOpacity
+                          key={option}
+                          style={[styles.vatTreatmentChip, documentType === option && styles.vatTreatmentChipActive]}
+                          onPress={() => { setDocumentType(option); setRelatedFound(null); }}
+                        >
+                          <Text style={[styles.vatTreatmentChipText, documentType === option && styles.vatTreatmentChipTextActive]}>
+                            {t(`doc.${option}`)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    {documentType === 'credit_note' && (
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="return-down-back" size={16} color={COLORS.success} />
+                        <Text style={styles.protocolNoteText}>{t('doc.creditNoteNote')}</Text>
+                      </View>
+                    )}
+                    {documentType === 'debit_note' && (
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="information-circle" size={16} color={COLORS.primary} />
+                        <Text style={styles.protocolNoteText}>{t('doc.debitNoteNote')}</Text>
+                      </View>
+                    )}
+                    {documentType === 'proforma' && (
+                      <View style={[styles.protocolNote, styles.proformaNote]}>
+                        <Ionicons name="close-circle" size={16} color={COLORS.danger} />
+                        <Text style={[styles.protocolNoteText, { color: COLORS.danger }]}>{t('doc.proformaNote')}</Text>
+                      </View>
+                    )}
+                  </View>
+
                   <StaggerReveal index={0} style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.supplier')} *</Text>
                     <TextInput
@@ -656,6 +716,33 @@ export default function ScanScreen() {
                       placeholderTextColor={COLORS.textMuted}
                     />
                   </StaggerReveal>
+
+                  {isCorrectingDoc(documentType) && (
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>{t('doc.relatedInvoice')}</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={relatedInvoiceNumber}
+                        onChangeText={(v) => { setRelatedInvoiceNumber(v); setRelatedFound(null); }}
+                        placeholder="0000000001"
+                        placeholderTextColor={COLORS.textMuted}
+                      />
+                      {(!relatedInvoiceNumber.trim() || relatedFound !== null) && (
+                        <View style={styles.protocolNote}>
+                          <Ionicons
+                            name={relatedFound ? 'link' : 'alert-circle'}
+                            size={16}
+                            color={relatedFound ? COLORS.success : COLORS.warning}
+                          />
+                          <Text style={styles.protocolNoteText}>
+                            {!relatedInvoiceNumber.trim()
+                              ? t('doc.relatedMissing')
+                              : relatedFound ? t('doc.relatedFound') : t('doc.relatedNotFound')}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
 
                   {/* Date of Issue */}
                   <StaggerReveal index={3} style={styles.inputGroup}>
@@ -752,6 +839,7 @@ export default function ScanScreen() {
                     )}
                   </StaggerReveal>
 
+                  {documentType !== 'credit_note' && (
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
                     <View style={styles.vatTreatmentGrid}>
@@ -794,6 +882,7 @@ export default function ScanScreen() {
                       </TouchableOpacity>
                     )}
                   </View>
+                  )}
 
                   <DateTimePickerModal
                     isVisible={isDueDatePickerVisible}
@@ -1220,6 +1309,9 @@ const styles = StyleSheet.create({
   },
   vatTreatmentChipTextActive: {
     color: 'white',
+  },
+  proformaNote: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
   },
   protocolNote: {
     flexDirection: 'row',
