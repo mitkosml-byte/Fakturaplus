@@ -93,6 +93,14 @@ export type VatTreatment =
 
 export type PaymentMethod = 'cash' | 'bank_transfer';
 
+// Вид на търговския документ. Кредитното известие се съхранява със
+// ОТРИЦАТЕЛНИ суми (намалява разхода); проформата не се записва изобщо.
+export type DocumentType = 'invoice' | 'credit_note' | 'debit_note' | 'receipt' | 'proforma';
+
+// Известията коригират друга фактура и трябва да сочат към нея
+export const isCorrectingDoc = (type?: DocumentType | null): boolean =>
+  type === 'credit_note' || type === 'debit_note';
+
 export interface Invoice {
   id: string;
   user_id: string;
@@ -100,6 +108,9 @@ export interface Invoice {
   supplier: string;
   supplier_eik?: string;
   invoice_number: string;
+  document_type?: DocumentType; // липсва при стари записи = 'invoice'
+  related_invoice_number?: string; // за кредитно/дебитно известие
+  related_invoice_id?: string; // ако оригиналната фактура е в системата
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;
@@ -154,6 +165,9 @@ export interface OCRResult {
   supplier: string;
   supplier_eik?: string;  // ЕИК на доставчика, ако е разпознат
   invoice_number: string;
+  document_type?: DocumentType;  // разпознат вид документ
+  related_invoice_number?: string;  // за кредитно/дебитно известие
+  related_invoice_id?: string;  // ако оригиналът вече е в системата
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;

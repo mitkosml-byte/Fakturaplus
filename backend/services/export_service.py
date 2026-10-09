@@ -57,6 +57,18 @@ def _excel_safe(value):
 
 class ExportService:
     @staticmethod
+    def _document_label(inv: dict) -> str:
+        """№ на документа, с вид за известията - напр. "КИ 0000123 към 0000100"."""
+        number = inv.get('invoice_number', '') or ''
+        prefix = {"credit_note": "КИ", "debit_note": "ДИ", "receipt": "КБ"}.get(inv.get('document_type') or 'invoice')
+        if not prefix:
+            return number
+        label = f"{prefix} {number}"
+        if inv.get('related_invoice_number'):
+            label += f" към {inv['related_invoice_number']}"
+        return label
+
+    @staticmethod
     def generate_invoices_excel(invoices: List[dict], company_name: str = "") -> bytes:
         """Generate Excel file from invoices"""
         if not EXCEL_AVAILABLE:
@@ -119,7 +131,7 @@ class ExportService:
             data = [
                 date_str,
                 _excel_safe(inv.get('supplier', '')),
-                _excel_safe(inv.get('invoice_number', '')),
+                _excel_safe(ExportService._document_label(inv)),
                 amount_without_vat,
                 vat_amount,
                 total,
@@ -435,7 +447,13 @@ class ExportService:
             date_val = inv.get("date")
             is_datetime = isinstance(date_val, datetime)
             date_str = date_val.strftime("%d.%m.%Y") if is_datetime else str(date_val)[:10]
-            doc_type = "Протокол чл.117" if treatment == "reverse_charge" else "Фактура"
+            doc_type = {
+                "credit_note": "Кредитно известие",
+                "debit_note": "Дебитно известие",
+                "receipt": "Касова бележка",
+            }.get(inv.get("document_type") or "invoice", "Фактура")
+            if treatment == "reverse_charge" and doc_type == "Фактура":
+                doc_type = "Протокол чл.117"
 
             protocol_number = ""
             deadline_str = ""

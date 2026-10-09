@@ -24,7 +24,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
-import { Invoice, VatTreatment } from '../../src/types';
+import { Invoice, VatTreatment, DocumentType, isCorrectingDoc } from '../../src/types';
 import { validateEikFormat } from '../../src/utils/eik';
 import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
@@ -270,6 +270,8 @@ export default function InvoicesScreen() {
   const [editVatAmount, setEditVatAmount] = useState('');
   const [editVatTreatment, setEditVatTreatment] = useState<VatTreatment | ''>('');
   const [editNotes, setEditNotes] = useState('');
+  const [editDocumentType, setEditDocumentType] = useState<DocumentType>('invoice');
+  const [editRelatedNumber, setEditRelatedNumber] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
   const startEditInvoice = (invoice: Invoice) => {
@@ -277,8 +279,12 @@ export default function InvoicesScreen() {
     setEditSupplierEik(invoice.supplier_eik || '');
     setEditInvoiceNumber(invoice.invoice_number);
     setEditDate(new Date(invoice.date));
-    setEditAmountWithoutVat(invoice.amount_without_vat.toFixed(2));
-    setEditVatAmount(invoice.vat_amount.toFixed(2));
+    // Кредитните известия се пазят с минус, но се редактират както са
+    // отпечатани (положителни) - знакът се слага от сървъра по вида документ.
+    setEditAmountWithoutVat(Math.abs(invoice.amount_without_vat).toFixed(2));
+    setEditVatAmount(Math.abs(invoice.vat_amount).toFixed(2));
+    setEditDocumentType(invoice.document_type || 'invoice');
+    setEditRelatedNumber(invoice.related_invoice_number || '');
     setEditVatTreatment(invoice.vat_treatment || '');
     setEditNotes(invoice.notes || '');
     setEditMode(true);
@@ -290,7 +296,7 @@ export default function InvoicesScreen() {
     const invoiceNumber = editInvoiceNumber.trim();
     const withoutVat = parseFloat(editAmountWithoutVat.replace(',', '.'));
     const vat = parseFloat(editVatAmount.replace(',', '.'));
-    if (!supplier || !invoiceNumber || isNaN(withoutVat) || isNaN(vat)) {
+    if (!supplier || !invoiceNumber || isNaN(withoutVat) || isNaN(vat) || withoutVat < 0 || vat < 0) {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;
     }
@@ -306,7 +312,12 @@ export default function InvoicesScreen() {
         total_amount: withoutVat + vat,
         vat_treatment: editVatTreatment || undefined,
         notes: editNotes.trim() || undefined,
+        document_type: editDocumentType,
+        related_invoice_number: isCorrectingDoc(editDocumentType) ? editRelatedNumber.trim() : undefined,
       });
+      if (editDocumentType === 'credit_note' && !updated.related_invoice_id) {
+        Toast.info(t('doc.savedNotLinked'));
+      }
       applyInvoiceUpdate(updated);
       setEditMode(false);
       Haptics.success();
@@ -424,6 +435,7 @@ export default function InvoicesScreen() {
     const isUnpaid = item.payment_method === 'bank_transfer' && !item.is_paid;
     const overdue = isUnpaid && !!item.payment_due_date && new Date(item.payment_due_date).getTime() < Date.now();
     const isPartial = isUnpaid && item.paid_amount > 0;
+    const docShort = item.document_type && item.document_type !== 'invoice' ? t(`doc.short.${item.document_type}`) : '';
     const statusLabel = overdue ? t('invoices.overdue') : (isPartial ? t('invoices.partiallyPaid') : t('invoices.unpaid'));
 
     return (
@@ -438,7 +450,7 @@ export default function InvoicesScreen() {
             <Text style={styles.supplierName} numberOfLines={1}>{item.supplier}</Text>
           </View>
           <View style={styles.invoiceRowTopRight}>
-            <Text style={styles.totalValueCompact}>{item.total_amount.toFixed(2)} €</Text>
+            <Text style={[styles.totalValueCompact, item.total_amount < 0 && styles.negativeAmount]}>{item.total_amount.toFixed(2)} €</Text>
             {/* Explicit, discoverable delete action - the same long-press
                 gesture on the card still works too (and goes through the
                 exact same confirm dialog below), but a visible "X" doesn't
@@ -459,8 +471,16 @@ export default function InvoicesScreen() {
             {item.invoice_number} · {formatDate(item.date)}
           </Text>
 
-          {(eikIssue || isUnpaid) && (
+          {(eikIssue || isUnpaid || docShort) && (
             <View style={styles.compactBadgeRow}>
+              {docShort && (
+                <View style={[styles.compactBadge, styles.docTypeBadge]}>
+                  <Ionicons name={item.document_type === 'credit_note' ? 'return-down-back' : 'document-text-outline'} size={11} color={COLORS.primaryLight} />
+                  <Text style={[styles.compactBadgeText, { color: COLORS.primaryLight }]}>
+                    {docShort}{item.related_invoice_number ? ` → ${item.related_invoice_number}` : ''}
+                  </Text>
+                </View>
+              )}
               {eikIssue && (
                 <View style={styles.compactBadge}>
                   <Ionicons name="alert-circle" size={11} color={COLORS.warning} />
@@ -832,6 +852,23 @@ export default function InvoicesScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('doc.type')}</Text>
+                  <View style={styles.vatTreatmentGrid}>
+                    {(['invoice', 'credit_note', 'debit_note', 'receipt'] as DocumentType[]).map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={[styles.vatTreatmentChip, editDocumentType === option && styles.vatTreatmentChipActive]}
+                        onPress={() => setEditDocumentType(option)}
+                      >
+                        <Text style={[styles.vatTreatmentChipText, editDocumentType === option && styles.vatTreatmentChipTextActive]}>
+                          {t(`doc.${option}`)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>{t('invoices.invoiceNo')} *</Text>
                   <TextInput
                     style={styles.input}
@@ -840,6 +877,19 @@ export default function InvoicesScreen() {
                     placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
+
+                {isCorrectingDoc(editDocumentType) && (
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('doc.relatedInvoice')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editRelatedNumber}
+                      onChangeText={setEditRelatedNumber}
+                      placeholder="0000000001"
+                      placeholderTextColor={COLORS.textMuted}
+                    />
+                  </View>
+                )}
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>{t('invoices.dateLabel')} *</Text>
@@ -969,6 +1019,20 @@ export default function InvoicesScreen() {
                     </View>
                   );
                 })()}
+                {selectedInvoice.document_type && selectedInvoice.document_type !== 'invoice' && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionLabel}>{t('doc.type')}</Text>
+                    <Text style={styles.detailSectionValue}>
+                      {t(`doc.${selectedInvoice.document_type}`)}
+                      {selectedInvoice.related_invoice_number ? ` · ${t('doc.relatedInvoice')} ${selectedInvoice.related_invoice_number}` : ''}
+                    </Text>
+                    {isCorrectingDoc(selectedInvoice.document_type) && (
+                      <Text style={[styles.detailSectionLabel, { marginTop: 4, color: selectedInvoice.related_invoice_id ? COLORS.success : COLORS.warning }]}>
+                        {selectedInvoice.related_invoice_id ? t('doc.relatedFound') : t('doc.relatedNotFound')}
+                      </Text>
+                    )}
+                  </View>
+                )}
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.invoiceNo')}</Text>
                   <Text style={styles.detailSectionValue}>{selectedInvoice.invoice_number}</Text>
@@ -1488,6 +1552,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
     flexShrink: 0,
+  },
+  negativeAmount: {
+    color: COLORS.success,
+  },
+  docTypeBadge: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
   },
   compactBadge: {
     flexDirection: 'row',

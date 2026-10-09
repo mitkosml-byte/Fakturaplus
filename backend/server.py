@@ -8,7 +8,7 @@ import asyncio
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ValidationError
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from enum import Enum
 import uuid
 from datetime import datetime, timezone, timedelta, date
@@ -282,6 +282,35 @@ class VatTreatment(str, Enum):
     REVERSE_CHARGE = "reverse_charge"  # Обратно начисляване / ВОП (протокол чл.117/чл.84)
     OUTSIDE_SCOPE = "outside_scope"    # Извън обхвата на ЗДДС
 
+class DocumentType(str, Enum):
+    INVOICE = "invoice"            # Фактура
+    CREDIT_NOTE = "credit_note"    # Кредитно известие (сторно) - намалява разхода, записва се с минус
+    DEBIT_NOTE = "debit_note"      # Дебитно известие - увеличава разхода
+    RECEIPT = "receipt"            # Касова бележка (фискален бон) без фактура
+    PROFORMA = "proforma"          # Проформа - НЕ е счетоводен документ, не се записва
+
+DOCUMENT_TYPE_LABELS = {
+    "invoice": "Фактура",
+    "credit_note": "Кредитно известие",
+    "debit_note": "Дебитно известие",
+    "receipt": "Касова бележка",
+    "proforma": "Проформа",
+}
+
+# Документи, които коригират друга фактура и трябва да сочат към нея (чл.115 ЗДДС)
+CORRECTING_DOCUMENT_TYPES = {DocumentType.CREDIT_NOTE, DocumentType.DEBIT_NOTE}
+
+def signed_amount(value: Optional[float], document_type: Optional[str]) -> Optional[float]:
+    """Сумите се въвеждат винаги положителни (както са отпечатани), но
+    кредитното известие се съхранява с МИНУС - така намалява автоматично
+    разходите, ДДС за приспадане, статистиките и дневника на покупките,
+    без всяка справка да трябва да знае за видовете документи."""
+    if value is None:
+        return None
+    if document_type == DocumentType.CREDIT_NOTE or document_type == "credit_note":
+        return -abs(value)
+    return abs(value)
+
 class Invoice(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -289,7 +318,12 @@ class Invoice(BaseModel):
     supplier: str
     supplier_eik: Optional[str] = None  # ЕИК/Булстат на доставчика
     invoice_number: str
-    amount_without_vat: float
+    # Вид документ - старите записи нямат поле и се четат като фактура
+    document_type: DocumentType = DocumentType.INVOICE
+    # За кредитно/дебитно известие: номер и id на фактурата, която коригира
+    related_invoice_number: Optional[str] = None
+    related_invoice_id: Optional[str] = None
+    amount_without_vat: float  # при кредитно известие - отрицателна
     vat_amount: float
     total_amount: float
     vat_treatment: Optional[VatTreatment] = None  # ДДС третиране за дневника на покупки
@@ -369,6 +403,10 @@ class InvoiceCreate(BaseModel):
     supplier: str
     supplier_eik: Optional[str] = None
     invoice_number: str
+    document_type: DocumentType = DocumentType.INVOICE
+    related_invoice_number: Optional[str] = None
+    # Сумите се подават положителни, както са на документа - знакът се
+    # определя от document_type (виж signed_amount)
     amount_without_vat: float = Field(ge=0)
     vat_amount: float = Field(ge=0)
     total_amount: float = Field(ge=0)
@@ -385,6 +423,8 @@ class InvoiceUpdate(BaseModel):
     supplier: Optional[str] = None
     supplier_eik: Optional[str] = None
     invoice_number: Optional[str] = None
+    document_type: Optional[DocumentType] = None
+    related_invoice_number: Optional[str] = None
     amount_without_vat: Optional[float] = Field(default=None, ge=0)
     vat_amount: Optional[float] = Field(default=None, ge=0)
     total_amount: Optional[float] = Field(default=None, ge=0)
@@ -559,6 +599,9 @@ class OCRResult(BaseModel):
     supplier: str
     supplier_eik: Optional[str] = None  # ЕИК на доставчика, ако е видим на фактурата
     invoice_number: str
+    document_type: str = "invoice"  # invoice | credit_note | debit_note | receipt | proforma
+    related_invoice_number: Optional[str] = None  # за кредитно/дебитно известие
+    related_invoice_id: Optional[str] = None  # ако оригиналната фактура вече е в системата
     amount_without_vat: float
     vat_amount: float
     total_amount: float
@@ -2504,7 +2547,15 @@ class ClaudeInvoiceItem(BaseModel):
 class ClaudeInvoiceExtraction(BaseModel):
     supplier: str = Field(description="Пълното име на доставчика (издателя), НЕ на получателя/купувача")
     supplier_eik: Optional[str] = Field(default=None, description="ЕИК/Булстат на доставчика, ако е видим на фактурата")
-    invoice_number: str = Field(description="Номер на фактурата")
+    invoice_number: str = Field(description="Номер на документа (фактура, кредитно/дебитно известие и т.н.)")
+    document_type: Literal["invoice", "credit_note", "debit_note", "receipt", "proforma"] = Field(
+        default="invoice",
+        description="Вид на документа според заглавието му: invoice = ФАКТУРА; credit_note = КРЕДИТНО ИЗВЕСТИЕ (вкл. сторно); debit_note = ДЕБИТНО ИЗВЕСТИЕ; receipt = само касова бележка/фискален бон без фактура; proforma = ПРОФОРМА / проформа фактура / оферта",
+    )
+    related_invoice_number: Optional[str] = Field(
+        default=None,
+        description="Само за кредитно/дебитно известие: номерът на фактурата, към която е издадено (\"към фактура №...\"), иначе null",
+    )
     invoice_date: Optional[str] = Field(default=None, description="Дата на издаване, формат YYYY-MM-DD")
     payment_due_date: Optional[str] = Field(default=None, description="Срок/падеж за плащане, формат YYYY-MM-DD, само ако е изрично отпечатан на фактурата")
     amount_without_vat: float = Field(description="Данъчна основа / обща сума без ДДС")
@@ -2533,6 +2584,17 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 СРОК ЗА ПЛАЩАНЕ (payment_due_date):
 Много фактури печатат изрично срока/падежа за плащане - текст като "Срок за плащане", "Падеж", "Платимо до", "Дата на падеж", "Due date". Ако видиш такава изрична дата, върни я в payment_due_date (YYYY-MM-DD). Ако вместо дата е отпечатан само брой дни (напр. "Срок за плащане: 14 дни от датата на издаване"), изчисли конкретната дата спрямо датата на издаване на фактурата. Ако на фактурата изобщо няма отпечатан срок или брой дни за плащане, остави payment_due_date празно (null) - НЕ гадай и НЕ прилагай стандартен срок по подразбиране, това ще бъде направено от приложението само ако полето остане празно.
 
+ВИД НА ДОКУМЕНТА (document_type) - изключително важно:
+Определи вида по ЗАГЛАВИЕТО на документа, не по съдържанието:
+- "ФАКТУРА" -> invoice
+- "КРЕДИТНО ИЗВЕСТИЕ" (също "сторно фактура", "сторно") -> credit_note. Кредитното известие НАМАЛЯВА задължението (връщане на стока, отстъпка, корекция).
+- "ДЕБИТНО ИЗВЕСТИЕ" -> debit_note. Увеличава задължението.
+- Само касова бележка / фискален бон, без отделна фактура -> receipt
+- "ПРОФОРМА" / "проформа фактура" / "оферта" -> proforma (не е счетоводен документ)
+Ако не си сигурен, върни invoice.
+При кредитно и дебитно известие потърси номера на фактурата, към която е издадено (текст като "към фактура №", "по фактура №", "основание: фактура") и го върни в related_invoice_number.
+Връщай сумите винаги като ПОЛОЖИТЕЛНИ числа, дори ако на кредитното известие са отпечатани с минус - знакът се определя от вида на документа.
+
 ОБЩИ ПРАВИЛА:
 - Всички суми в полетата на артикулите и amount_without_vat са БЕЗ ДДС.
 - ДДС в България обикновено е 20%.
@@ -2542,6 +2604,30 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 
 МНОГОСТРАНИЧНИ ФАКТУРИ:
 Понякога ще получиш НЯКОЛКО изображения една след друга (в реда, в който са заснети) - това са СТРАНИЦИ НА ЕДНА И СЪЩА ФАКТУРА, а не отделни документи. Заглавната част (доставчик, ЕИК, номер, дата) обикновено е само на първата страница - вземи я оттам. Таблицата с артикули може да продължава през няколко страници - извлечи РЕДОВЕТЕ ОТ ВСИЧКИ СТРАНИЦИ ПОРЕД, като ги обединиш в един общ списък, без да пропускаш или дублираш редове (внимавай ако последният ред на една страница и първият на следващата съвпадат - това е една и съща позиция, не я брой два пъти). Общите суми (данъчна основа, ДДС, обща сума за плащане) обикновено са отпечатани само на ПОСЛЕДНАТА страница - вземи ги оттам, а не сумирай ръчно от отделните страници."""
+
+async def find_related_invoice(current_user: "User", supplier: str, supplier_eik: Optional[str], invoice_number: str) -> Optional[dict]:
+    """Намира фактурата, която кредитно/дебитно известие коригира - по
+    номер в рамките на фирмата, предпочитайки същия доставчик (по ЕИК или
+    име). Номерата често се печатат с/без водещи нули, затова сравняваме
+    и без тях."""
+    if not invoice_number:
+        return None
+    _, scope = await get_company_scope(current_user)
+    digits = invoice_number.strip().lstrip("0") or invoice_number.strip()
+    candidates = await db.invoices.find(
+        {**scope, "invoice_number": {"$regex": f"^0*{re.escape(digits)}$"},
+         "document_type": {"$nin": ["credit_note", "debit_note"]}},
+        {"_id": 0, "image_base64": 0, "image_base64s": 0},
+    ).to_list(20)
+    if not candidates:
+        return None
+    for inv in candidates:
+        if supplier_eik and inv.get("supplier_eik") and inv["supplier_eik"].strip() == supplier_eik.strip():
+            return inv
+    for inv in candidates:
+        if supplier and (inv.get("supplier") or "").strip().lower() == supplier.strip().lower():
+            return inv
+    return None
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
 @limiter.limit("20/minute")
@@ -2655,13 +2741,25 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
             invoice_label=corrected.get("supplier") or None,
         )
 
+        document_type = corrected.get("document_type") or "invoice"
+        related_number = (corrected.get("related_invoice_number") or "").strip() or None
+        related_id = None
+        if related_number and document_type in ("credit_note", "debit_note"):
+            original = await find_related_invoice(
+                current_user, corrected.get("supplier", ""), corrected.get("supplier_eik"), related_number
+            )
+            related_id = original["id"] if original else None
+
         return OCRResult(
             supplier=corrected.get("supplier", ""),
             supplier_eik=corrected.get("supplier_eik"),
             invoice_number=corrected.get("invoice_number", ""),
-            amount_without_vat=float(corrected.get("amount_without_vat", 0)),
-            vat_amount=float(corrected.get("vat_amount", 0)),
-            total_amount=float(corrected.get("total_amount", 0)),
+            document_type=document_type,
+            related_invoice_number=related_number,
+            related_invoice_id=related_id,
+            amount_without_vat=abs(float(corrected.get("amount_without_vat", 0))),
+            vat_amount=abs(float(corrected.get("vat_amount", 0))),
+            total_amount=abs(float(corrected.get("total_amount", 0))),
             invoice_date=corrected.get("invoice_date"),
             payment_due_date=corrected.get("payment_due_date"),
             items=[OCRItemResult(**item) for item in corrected.get("items", [])],
@@ -3112,6 +3210,25 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     normalized_supplier, _ = await normalize_supplier_name(invoice.supplier, company_id)
     invoice.supplier = normalized_supplier
 
+    # Проформата е само покана за плащане - не е счетоводен документ и не
+    # се осчетоводява. Записът ѝ би удвоил разхода, когато дойде истинската
+    # фактура, затова изобщо не я приемаме.
+    if invoice.document_type == DocumentType.PROFORMA:
+        raise HTTPException(
+            status_code=400,
+            detail="Това е проформа фактура - тя не е счетоводен документ и не се записва. Изчакайте оригиналната фактура от доставчика.",
+        )
+
+    related_invoice_id = None
+    if invoice.document_type in CORRECTING_DOCUMENT_TYPES:
+        if invoice.related_invoice_number:
+            original = await find_related_invoice(
+                current_user, invoice.supplier, invoice.supplier_eik, invoice.related_invoice_number
+            )
+            related_invoice_id = original["id"] if original else None
+    else:
+        invoice.related_invoice_number = None
+
     # Check for duplicate invoice
     if company_id:
         # If user has a company, check across all company users
@@ -3148,6 +3265,8 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     
     invoice_dict = invoice.dict()
     invoice_date = datetime.fromisoformat(invoice_dict["date"].replace("Z", "+00:00"))
+    is_credit_note = invoice.document_type == DocumentType.CREDIT_NOTE
+    invoice_dict["related_invoice_id"] = related_invoice_id
 
     # Suggest a VAT treatment when the caller didn't set one, based on the
     # VAT-to-base ratio - saves the common case (standard 20%) a manual pick,
@@ -3170,7 +3289,15 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     paid_amount = 0.0
     paid_at = None
     payment_due_date = None
-    if invoice_dict.get("payment_method") == "cash":
+    if is_credit_note:
+        invoice_dict["payment_method"] = None
+        invoice_dict["payment_due_date"] = None
+        # Кредитното известие не се "плаща" - то намалява задължението към
+        # доставчика (прихваща се или се възстановява). Маркира се уредено,
+        # за да не излиза като неплатено задължение.
+        is_paid = True
+        paid_at = invoice_date
+    elif invoice_dict.get("payment_method") == "cash":
         is_paid = True
         paid_amount = invoice_dict.get("total_amount", 0)
         paid_at = invoice_date
@@ -3205,6 +3332,14 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
 
             item_dict["id"] = str(uuid.uuid4())
             items_list.append(item_dict)
+
+            if is_credit_note:
+                # Редовете на кредитното известие намаляват разхода - знакът
+                # им следва документа. Не влизат в историята на цените, за
+                # да не изкривяват алармите за поскъпване и статистиките.
+                item_dict["total_price"] = -abs(item_dict["total_price"])
+                item_dict["vat_amount"] = -abs(item_dict["vat_amount"])
+                continue
 
             # Check price changes and create alerts if company exists
             if company_id:
@@ -3265,6 +3400,11 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
                 )
                 await db.item_price_history.insert_one(price_history.dict())
     
+    for field in ("amount_without_vat", "vat_amount", "total_amount"):
+        invoice_dict[field] = signed_amount(invoice_dict[field], invoice.document_type)
+    if is_credit_note:
+        paid_amount = invoice_dict["total_amount"]
+
     invoice_obj = Invoice(
         user_id=current_user.user_id,
         company_id=company_id,
@@ -3279,7 +3419,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     await db.invoices.insert_one(invoice_obj.dict())
     
     # Update price history and alerts with invoice_id
-    if company_id and invoice.items:
+    if company_id and invoice.items and not is_credit_note:
         for item_dict in items_list:
             normalized_name = item_normalized_names.get(item_dict["id"], item_dict["name"].strip().lower())
             await db.item_price_history.update_many(
@@ -3308,7 +3448,8 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         entity_type="invoice",
         entity_id=invoice_obj.id,
         company_id=company_id,
-        details={"supplier": invoice_obj.supplier, "invoice_number": invoice_obj.invoice_number, "total_amount": invoice_obj.total_amount}
+        details={"supplier": invoice_obj.supplier, "invoice_number": invoice_obj.invoice_number,
+                 "total_amount": invoice_obj.total_amount, "document_type": invoice_obj.document_type.value}
     )
 
     return invoice_obj
@@ -3398,6 +3539,61 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     if not existing:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
 
+    # ---- Вид документ и знак на сумите ----
+    old_type = existing.get("document_type") or DocumentType.INVOICE.value
+    new_type = update_data.get("document_type") or old_type
+    new_type = new_type.value if isinstance(new_type, DocumentType) else new_type
+    if new_type == DocumentType.PROFORMA.value:
+        raise HTTPException(status_code=400, detail="Проформата не е счетоводен документ и не може да бъде записана.")
+    type_changed = new_type != old_type
+    for field in ("amount_without_vat", "vat_amount", "total_amount"):
+        if field in update_data:
+            update_data[field] = signed_amount(update_data[field], new_type)
+        elif type_changed and existing.get(field) is not None:
+            update_data[field] = signed_amount(existing[field], new_type)
+    if type_changed and existing.get("items"):
+        resigned = []
+        for item in existing["items"]:
+            item = dict(item)
+            for f in ("total_price", "vat_amount"):
+                if item.get(f) is not None:
+                    item[f] = signed_amount(item[f], new_type)
+            resigned.append(item)
+        update_data["items"] = resigned
+
+    if new_type in ("credit_note", "debit_note"):
+        if "related_invoice_number" in update_data or type_changed or "supplier" in update_data:
+            rel_number = update_data.get("related_invoice_number", existing.get("related_invoice_number"))
+            rel_number = (rel_number or "").strip() or None
+            update_data["related_invoice_number"] = rel_number
+            original = await find_related_invoice(
+                current_user,
+                update_data.get("supplier", existing.get("supplier", "")),
+                update_data.get("supplier_eik", existing.get("supplier_eik")),
+                rel_number,
+            ) if rel_number else None
+            update_data["related_invoice_id"] = original["id"] if original and original["id"] != invoice_id else None
+    elif type_changed:
+        update_data["related_invoice_number"] = None
+        update_data["related_invoice_id"] = None
+
+    if new_type == DocumentType.CREDIT_NOTE.value:
+        # Кредитното известие е уредено по дефиниция (виж create_invoice) -
+        # плащанията по него не се следят.
+        for f in ("payment_method", "payment_due_date", "is_paid", "paid_amount"):
+            update_data.pop(f, None)
+        update_data["is_paid"] = True
+        update_data["paid_amount"] = update_data.get("total_amount", existing.get("total_amount", 0))
+        update_data["payment_due_date"] = None
+        if not existing.get("paid_at"):
+            update_data["paid_at"] = update_data.get("date", existing["date"])
+    elif type_changed and old_type == DocumentType.CREDIT_NOTE.value and "paid_amount" not in update_data and "is_paid" not in update_data:
+        # Бивше кредитно известие, сега разход - започва като неплатено,
+        # освен ако е в брой (тогава правилото по-долу го маркира платено).
+        update_data["is_paid"] = False
+        update_data["paid_amount"] = 0.0
+        update_data["paid_at"] = None
+
     # Same auto-paid/due-date rules as on create, so switching an invoice's
     # payment method later behaves the same as picking it up front.
     cash_auto_paid = (
@@ -3412,7 +3608,9 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     if update_data.get("payment_method") == "bank_transfer" and "payment_due_date" not in update_data and not existing.get("payment_due_date"):
         update_data["payment_due_date"] = update_data.get("date", existing["date"]) + timedelta(days=14)
 
-    if "paid_amount" in update_data and not cash_auto_paid:
+    if new_type == DocumentType.CREDIT_NOTE.value:
+        pass  # уредено по-горе
+    elif "paid_amount" in update_data and not cash_auto_paid:
         # paid_amount is the source of truth for payment progress once
         # given - it drives is_paid/paid_at, not the other way round, so a
         # partial payment (0 < paid_amount < total) always shows is_paid as
@@ -3431,7 +3629,7 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
             update_data["paid_at"] = datetime.now(timezone.utc)
         elif not now_fully_paid:
             update_data["paid_at"] = None
-    elif "is_paid" in update_data and not cash_auto_paid:
+    elif "is_paid" in update_data and not cash_auto_paid and not (type_changed and old_type == DocumentType.CREDIT_NOTE.value):
         # Ticking "is_paid" directly (the quick mark-fully-paid/unpaid
         # toggle, without keying in an exact amount) keeps paid_amount
         # consistent with it, and stamps/clears paid_at to "now" - when the
