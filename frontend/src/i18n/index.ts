@@ -1291,10 +1291,6 @@ export const translations: Translations = {
     bg: 'Попълнете задължителните полета',
     en: 'Fill in required fields',
   },
-  'scan.invalidItemPrice': {
-    bg: 'Проверете цената на „{item}“ - не може да е отрицателна. Възможно е сканирането да я е разпознало грешно.',
-    en: 'Check the price for "{item}" - it can\'t be negative. The scan may have misread it.',
-  },
   'msg.duplicateInvoice': {
     bg: 'Тази фактура вече съществува',
     en: 'This invoice already exists',

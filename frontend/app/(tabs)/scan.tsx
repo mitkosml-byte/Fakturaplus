@@ -288,19 +288,11 @@ export default function ScanScreen() {
         name: item.name.trim(),
         quantity: parseFloat(item.quantity) || 1,
         unit: item.unit.trim() || 'бр.',
+        // A negative unit_price is kept as-is, not clamped to 0 - a
+        // discount/rebate line ("отстъпка") printed as its own row on the
+        // invoice is a real, common pattern the backend accepts on purpose.
         unit_price: parseFloat(item.unit_price) || 0,
       }));
-
-    // A negative unit_price is almost always a misread by the scan (e.g. a
-    // discount line picked up as if it were its own item) rather than a
-    // real price - catch it here, naming the actual item, instead of
-    // round-tripping to the server for a rejection the user then has to
-    // match back to one of possibly several item rows themselves.
-    const negativePriceItem = itemsPayload.find(item => item.unit_price < 0);
-    if (negativePriceItem) {
-      Alert.alert(t('common.error'), t('scan.invalidItemPrice').replace('{item}', negativePriceItem.name));
-      return;
-    }
 
     setIsSaving(true);
     try {

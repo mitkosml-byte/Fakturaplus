@@ -326,9 +326,13 @@ class InvoiceItemCreate(BaseModel):
     name: str
     quantity: float = Field(default=1, gt=0)
     unit: str = "бр."
-    unit_price: float = Field(ge=0)
-    total_price: Optional[float] = Field(default=None, ge=0)  # Ако не е подадено, се изчислява
-    vat_amount: Optional[float] = Field(default=None, ge=0)
+    # Negative is legitimate here - a discount/rebate line ("отстъпка")
+    # printed as its own row on the invoice is a real, common pattern, not
+    # a bad OCR read; total_price/vat_amount below follow the same sign
+    # when computed from it (quantity * a negative unit_price).
+    unit_price: float
+    total_price: Optional[float] = None  # Ако не е подадено, се изчислява
+    vat_amount: Optional[float] = None
 
 # Item Price History - за проследяване на цените
 class ItemPriceHistory(BaseModel):
@@ -3206,8 +3210,11 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
             item_dict["id"] = str(uuid.uuid4())
             items_list.append(item_dict)
 
-            # Check price changes and create alerts if company exists
-            if company_id:
+            # A negative-priced row is a discount/rebate line ("отстъпка"),
+            # not a product with its own trackable price - skip price-change
+            # alerts and price history for it so it doesn't get compared
+            # against (or pollute) a real item's price trend.
+            if company_id and item.unit_price >= 0:
                 normalized_name, _ = await normalize_item_name(item.name, company_id)
                 item_normalized_names[item_dict["id"]] = normalized_name
 
