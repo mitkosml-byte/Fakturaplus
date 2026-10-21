@@ -3,6 +3,61 @@ import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartData
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+// Bulgarian labels for the field names that actually show up in
+// validation errors across invoices/expenses/items, so a rejected save
+// names the field the way the user sees it on screen, not its Python
+// attribute name. Unlisted fields just fall back to their raw name.
+const FIELD_LABELS: Record<string, string> = {
+  quantity: 'количество', unit_price: 'единична цена', total_price: 'обща цена',
+  vat_amount: 'ДДС', amount_without_vat: 'сума без ДДС', total_amount: 'обща сума',
+  amount: 'сума', name: 'име', date: 'дата', supplier: 'доставчик',
+  invoice_number: 'номер на фактура', description: 'описание',
+};
+
+// Pydantic's error `type` is a stable machine-readable code, independent of
+// the (English) `msg` text - map the couple of constraint kinds that
+// actually occur in this app's models (every numeric Field here uses only
+// gt=0 or ge=0) to a short Bulgarian phrase instead of passing through
+// "Input should be greater than or equal to 0".
+function friendlyReason(type: unknown, msg: string): string {
+  if (type === 'greater_than') return 'трябва да е по-голямо от 0';
+  if (type === 'greater_than_equal') return 'не може да бъде отрицателно число';
+  if (type === 'missing') return 'е задължително поле';
+  return msg;
+}
+
+// FastAPI's own validation-error shape puts `detail` as an ARRAY of
+// {loc, msg, type} objects (one per invalid field), not a string - passing
+// that straight to `new Error(detail)` coerces it via Array.prototype.join,
+// which stringifies each plain object as the literal text "[object Object]"
+// instead of anything a user can act on. Pull out each item's own field +
+// reason instead, translated where this app has a known label for them.
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item) => {
+      if (item && typeof item === 'object' && 'msg' in item) {
+        const loc = Array.isArray((item as any).loc) ? (item as any).loc : [];
+        const field = loc[loc.length - 1];
+        const reason = friendlyReason((item as any).type, (item as any).msg);
+        if (typeof field !== 'string') return reason;
+        const label = FIELD_LABELS[field] || field;
+        // A validation error nested inside an item list (loc includes a
+        // numeric index, e.g. ["body","items",0,"unit_price"]) names which
+        // item row it's about, not just the field - "артикул 1" (1-based,
+        // matching what the UI shows) rather than a bare field name that
+        // could mean any of several rows.
+        const itemIndex = loc.length >= 2 && typeof loc[loc.length - 2] === 'number' ? loc[loc.length - 2] + 1 : null;
+        return itemIndex !== null ? `артикул ${itemIndex} - ${label}: ${reason}` : `${label}: ${reason}`;
+      }
+      return typeof item === 'string' ? item : JSON.stringify(item);
+    });
+    return messages.join('; ') || 'Грешка в заявката';
+  }
+  if (detail && typeof detail === 'object') return JSON.stringify(detail);
+  return 'Грешка в заявката';
+}
+
 class ApiService {
   private token: string | null = null;
 
@@ -32,7 +87,7 @@ class ApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
-      const err = new Error(error.detail || 'Грешка в заявката') as Error & { status?: number };
+      const err = new Error(formatApiErrorDetail(error.detail)) as Error & { status?: number };
       // Attached so callers that need to branch on it (e.g. 402 = no scan
       // credits remaining, show the purchase screen instead of a plain
       // error alert) can do so without parsing the message text.
@@ -236,7 +291,7 @@ class ApiService {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
-      throw new Error(error.detail || 'Грешка в заявката');
+      throw new Error(formatApiErrorDetail(error.detail));
     }
     return response.json();
   }
