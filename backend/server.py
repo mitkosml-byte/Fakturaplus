@@ -100,6 +100,15 @@ BILLING_ENABLED = bool(STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET)
 if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
+# Temporary pause switch for the scan-credit paywall, set via a Render env
+# var - not a per-company setting, since this is meant for "I'm between
+# billing setups, let everyone scan for free for now" rather than an
+# ongoing per-customer discount. While off, /ocr/scan neither blocks on an
+# empty balance nor deducts a scan, so turning it back on later resumes
+# exactly where the balance was left, instead of having silently drained it
+# to a large negative number the whole time it was off.
+SCAN_CREDITS_ENFORCED = os.environ.get('SCAN_CREDITS_ENFORCED', 'true').strip().lower() != 'false'
+
 async def send_email(to_email: str, subject: str, html_body: str) -> bool:
     if not EMAIL_FEATURES_ENABLED:
         return False
@@ -2608,8 +2617,9 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
     # Scan-credit gate - the one real variable cost in the whole app (see
     # SCAN CREDITS below). Checked before the AI call is made, not after,
     # so a company with an empty balance never triggers (and never pays
-    # for) the expensive part of this endpoint.
-    if not await scan_credit_service.has_scans_remaining(company_id, current_user.user_id):
+    # for) the expensive part of this endpoint. Skipped entirely while
+    # SCAN_CREDITS_ENFORCED is off (see its own comment above).
+    if SCAN_CREDITS_ENFORCED and not await scan_credit_service.has_scans_remaining(company_id, current_user.user_id):
         raise HTTPException(
             status_code=402,
             detail="Нямате оставащи сканирания. Купете пакет, за да продължите.",
@@ -2654,10 +2664,13 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
 
         # Spend exactly one scan now that the AI call actually succeeded -
         # a failed/errored scan (any branch below) never gets charged.
-        await scan_credit_service.spend_scan(
-            company_id, current_user.user_id, current_user.name,
-            invoice_label=corrected.get("supplier") or None,
-        )
+        # Skipped while SCAN_CREDITS_ENFORCED is off, so the balance is
+        # exactly where it was left once enforcement resumes.
+        if SCAN_CREDITS_ENFORCED:
+            await scan_credit_service.spend_scan(
+                company_id, current_user.user_id, current_user.name,
+                invoice_label=corrected.get("supplier") or None,
+            )
 
         return OCRResult(
             supplier=corrected.get("supplier", ""),
