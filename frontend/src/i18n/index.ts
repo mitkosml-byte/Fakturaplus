@@ -351,7 +351,63 @@ export const translations: Translations = {
     bg: 'Напр. гориво, материали...',
     en: 'E.g. fuel, materials...',
   },
-  
+  'expenses.history': {
+    bg: 'История',
+    en: 'History',
+  },
+  'expenses.duplicateTitle': {
+    bg: 'Възможно повторение',
+    en: 'Possible duplicate',
+  },
+  'expenses.duplicateMessage': {
+    bg: 'Вече имаш разход „{description}“ за този ден - сигурен ли си, че искаш да добавиш още един?',
+    en: 'You already have an expense "{description}" for this day - are you sure you want to add another one?',
+  },
+  'expenses.addAnyway': {
+    bg: 'Добави пак',
+    en: 'Add anyway',
+  },
+  'expenses.historyTitle': {
+    bg: 'История на В канала',
+    en: 'Off-book expenses history',
+  },
+  'expenses.searchPlaceholder': {
+    bg: 'Търси по описание...',
+    en: 'Search by description...',
+  },
+  'expenses.periodAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'expenses.periodThisMonth': {
+    bg: 'Този месец',
+    en: 'This month',
+  },
+  'expenses.periodLastMonth': {
+    bg: 'Миналия месец',
+    en: 'Last month',
+  },
+  'expenses.empty': {
+    bg: 'Няма записани разходи',
+    en: 'No expenses recorded',
+  },
+  'expenses.editExpense': {
+    bg: 'Редакция на разход',
+    en: 'Edit expense',
+  },
+  'expenses.expenseUpdated': {
+    bg: 'Разходът е обновен',
+    en: 'Expense updated',
+  },
+  'expenses.expenseDeleted': {
+    bg: 'Разходът е изтрит',
+    en: 'Expense deleted',
+  },
+  'expenses.totalLabel': {
+    bg: 'Общо',
+    en: 'Total',
+  },
+
   // Scan Screen
   'scan.title': {
     bg: 'Сканиране на фактура',

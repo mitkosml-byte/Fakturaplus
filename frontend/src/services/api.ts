@@ -387,6 +387,13 @@ class ApiService {
     });
   }
 
+  async updateExpense(id: string, update: Partial<{ description: string; amount: number; date: string }>): Promise<NonInvoiceExpense> {
+    return this.fetch(`/expenses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(update),
+    });
+  }
+
   async deleteExpense(id: string): Promise<void> {
     await this.fetch(`/expenses/${id}`, { method: 'DELETE' });
   }

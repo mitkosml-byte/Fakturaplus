@@ -442,6 +442,11 @@ class NonInvoiceExpenseCreate(BaseModel):
     amount: float = Field(gt=0)
     date: str
 
+class NonInvoiceExpenseUpdate(BaseModel):
+    description: Optional[str] = None
+    amount: Optional[float] = Field(default=None, gt=0)
+    date: Optional[str] = None
+
 # ===================== PERSONAL EXPENSES & ROI MODELS =====================
 
 class PersonalExpenseType(str, Enum):
@@ -3712,6 +3717,20 @@ async def get_expenses(
 
     expenses = await db.expenses.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
     return [NonInvoiceExpense(**e) for e in expenses]
+
+@api_router.put("/expenses/{expense_id}", response_model=NonInvoiceExpense)
+async def update_expense(expense_id: str, update: NonInvoiceExpenseUpdate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_expenses")
+    _, scope = await get_company_scope(current_user)
+    update_data = {k: v for k, v in update.dict(exclude_unset=True).items()}
+    if update_data:
+        result = await db.expenses.update_one({"id": expense_id, **scope}, {"$set": update_data})
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Разходът не е намерен")
+    existing = await db.expenses.find_one({"id": expense_id, **scope}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Разходът не е намерен")
+    return NonInvoiceExpense(**existing)
 
 @api_router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str, current_user: User = Depends(get_current_user)):

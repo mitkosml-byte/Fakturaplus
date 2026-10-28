@@ -430,14 +430,7 @@ export default function HomeScreen() {
     }
   };
 
-  const handleAddExpense = async () => {
-    const missingDescription = !expenseDescription;
-    const missingAmount = !expenseAmount;
-    setExpenseDescriptionError(missingDescription);
-    setExpenseAmountError(missingAmount);
-    if (missingDescription || missingAmount) return;
-    if (isSubmittingForm) return;
-
+  const submitExpense = async () => {
     setIsSubmittingForm(true);
     try {
       await api.createExpense({
@@ -457,6 +450,35 @@ export default function HomeScreen() {
     } finally {
       setIsSubmittingForm(false);
     }
+  };
+
+  const handleAddExpense = () => {
+    const missingDescription = !expenseDescription;
+    const missingAmount = !expenseAmount;
+    setExpenseDescriptionError(missingDescription);
+    setExpenseAmountError(missingAmount);
+    if (missingDescription || missingAmount) return;
+    if (isSubmittingForm) return;
+
+    // A soft nudge, not a block - catches the easy-to-make mistake of
+    // re-adding a bill you already logged today (nothing here shows you
+    // the OTHER days you might have missed instead - that's what the new
+    // История screen is for), while still allowing two real same-day,
+    // same-description expenses (e.g. two separate fuel stops) through.
+    const normalizedNew = expenseDescription.trim().toLowerCase();
+    const possibleDuplicate = dayExpenses.find((e) => e.description.trim().toLowerCase() === normalizedNew);
+    if (possibleDuplicate) {
+      Alert.alert(
+        t('expenses.duplicateTitle'),
+        t('expenses.duplicateMessage').replace('{description}', possibleDuplicate.description),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('expenses.addAnyway'), onPress: submitExpense },
+        ]
+      );
+      return;
+    }
+    submitExpense();
   };
 
   const today = format(new Date(), "d MMMM yyyy 'г.'" , { locale: bg });
@@ -1114,12 +1136,24 @@ export default function HomeScreen() {
           <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('expenses.title')}</Text>
-              <TouchableOpacity onPress={() => {
-                setExpenseModalVisible(false);
-                setExpenseDate(getDefaultActionDate());
-              }}>
-                <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <TouchableOpacity
+                  style={styles.historyPersonalButton}
+                  onPress={() => {
+                    setExpenseModalVisible(false);
+                    router.push('/off-book-expenses');
+                  }}
+                >
+                  <Ionicons name="time-outline" size={16} color={COLORS.textSecondary} />
+                  <Text style={styles.historyPersonalText}>{t('expenses.history')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => {
+                  setExpenseModalVisible(false);
+                  setExpenseDate(getDefaultActionDate());
+                }}>
+                  <Ionicons name="close" size={28} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
