@@ -704,9 +704,15 @@ async def get_company_scope(current_user: User) -> tuple:
     if not company_id:
         return None, {"user_id": current_user.user_id}
 
+    return company_id, await company_data_scope(company_id)
+
+async def company_data_scope(company_id: str) -> dict:
+    """The company-wide half of get_company_scope's filter, usable from
+    background tasks that only have a company_id (no logged-in User) - the
+    budget-alert tick below is the first such caller."""
     member_docs = await db.users.find({"company_id": company_id}, {"_id": 0, "user_id": 1}).to_list(1000)
     member_ids = [m["user_id"] for m in member_docs]
-    return company_id, {
+    return {
         "$or": [
             {"company_id": company_id},
             {"user_id": {"$in": member_ids}, "company_id": None},
@@ -6700,7 +6706,15 @@ async def create_budget(budget: BudgetCreate, current_user: User = Depends(get_c
     if existing:
         await db.budgets.update_one(
             {"company_id": company_id, "month": budget.month},
-            {"$set": {"expense_limit": budget.expense_limit, "alert_threshold": budget.alert_threshold}}
+            {
+                "$set": {"expense_limit": budget.expense_limit, "alert_threshold": budget.alert_threshold},
+                # A changed limit/threshold invalidates any push already
+                # sent against the OLD numbers - e.g. lowering the limit
+                # should let the threshold alert fire again even if it
+                # already fired once this month under the previous, higher
+                # limit, instead of staying silent for the rest of the month.
+                "$unset": {"alert_sent": "", "exceeded_sent": ""},
+            }
         )
     else:
         budget_doc = {
@@ -6709,41 +6723,36 @@ async def create_budget(budget: BudgetCreate, current_user: User = Depends(get_c
             "month": budget.month,
             "expense_limit": budget.expense_limit,
             "alert_threshold": budget.alert_threshold,
+            "alert_sent": False,
+            "exceeded_sent": False,
             "created_at": datetime.now(timezone.utc)
         }
         await db.budgets.insert_one(budget_doc)
     
     return {"message": "Budget saved"}
 
-@api_router.get("/budget/status")
-async def get_budget_status(current_user: User = Depends(get_current_user)):
-    """Get current month budget status"""
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {"has_budget": False}
-    
-    current_month = datetime.now().strftime("%Y-%m")
-    budget = await db.budgets.find_one({"company_id": company_id, "month": current_month}, {"_id": 0})
-
+async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
+    """Shared by the live /budget/status endpoint and the background
+    threshold-alert tick below, so both agree exactly on what "percent
+    used" means (invoices + off-book expenses + payroll + depreciation).
+    Returns None if the company has no budget set for that month."""
+    budget = await db.budgets.find_one({"company_id": company_id, "month": month}, {"_id": 0})
     if not budget:
-        return {"has_budget": False}
+        return None
 
     # Calculate current expenses. Bounded at both ends - an unbounded $gte
     # alone would also pull in any future-dated invoice/expense (a
     # pre-scheduled invoice, a typo'd date) into THIS month's budget check.
-    now = datetime.now(timezone.utc)
-    month_start_str = f"{current_month}-01"
+    year, mon = int(month[:4]), int(month[5:7])
+    month_start_str = f"{month}-01"
     month_start = datetime.fromisoformat(f"{month_start_str}T00:00:00+00:00")
-    if now.month == 12:
-        month_end_date = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
+    if mon == 12:
+        month_end_date = datetime(year + 1, 1, 1, tzinfo=timezone.utc) - timedelta(days=1)
     else:
-        month_end_date = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
+        month_end_date = datetime(year, mon + 1, 1, tzinfo=timezone.utc) - timedelta(days=1)
     month_end_str = month_end_date.strftime("%Y-%m-%d")
     month_end = datetime.fromisoformat(f"{month_end_str}T00:00:00+00:00")
-    _, scope = await get_company_scope(current_user)
+    scope = await company_data_scope(company_id)
 
     invoices = await db.invoices.find(
         {**scope, "date": {"$gte": month_start, "$lte": month_end}},
@@ -6760,8 +6769,10 @@ async def get_budget_status(current_user: User = Depends(get_current_user)):
     # expenses would silently ignore the two costs guaranteed to happen
     # every month, and understate how close the company actually is to its
     # limit. Same helpers and period bounds as /statistics/summary.
-    total_payroll_cost = await get_payroll_cost_for_period(company_id, current_user.user_id, month_start_str, month_end_str)
-    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, current_user.user_id, month_start_str, month_end_str)
+    # user_id is unused by these helpers whenever company_id is set (see
+    # simple_scope_query) - safe to pass a placeholder here.
+    total_payroll_cost = await get_payroll_cost_for_period(company_id, "", month_start_str, month_end_str)
+    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, "", month_start_str, month_end_str)
 
     total_spent = sum(inv.get("total_amount", 0) for inv in invoices)
     total_spent += sum(exp.get("amount", 0) for exp in expenses)
@@ -6770,14 +6781,14 @@ async def get_budget_status(current_user: User = Depends(get_current_user)):
 
     limit = budget.get("expense_limit", 0)
     threshold = budget.get("alert_threshold", 80)
-    
+
     percent_used = (total_spent / limit * 100) if limit > 0 else 0
     is_alert = percent_used >= threshold
     is_exceeded = percent_used >= 100
-    
+
     return {
         "has_budget": True,
-        "month": current_month,
+        "month": month,
         "expense_limit": limit,
         "total_spent": round(total_spent, 2),
         "total_invoice_amount": round(sum(inv.get("total_amount", 0) for inv in invoices), 2),
@@ -6790,6 +6801,20 @@ async def get_budget_status(current_user: User = Depends(get_current_user)):
         "is_alert": is_alert,
         "is_exceeded": is_exceeded
     }
+
+@api_router.get("/budget/status")
+async def get_budget_status(current_user: User = Depends(get_current_user)):
+    """Get current month budget status"""
+    require_permission(current_user, "manage_budget")
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
+    company_id = user_doc.get("company_id") if user_doc else None
+
+    if not company_id:
+        return {"has_budget": False}
+
+    current_month = datetime.now().strftime("%Y-%m")
+    status = await compute_budget_status(company_id, current_month)
+    return status if status else {"has_budget": False}
 
 # ===================== RECURRING EXPENSES =====================
 
@@ -8194,6 +8219,82 @@ async def start_calendar_reminder_loop():
     # hitting a small internal endpoint would be the fix if exact timing
     # ever matters more than "eventually, once the app is open again".
     asyncio.create_task(_calendar_reminder_loop())
+
+async def _budget_alert_tick():
+    """Pushes a real phone notification the moment a company crosses its
+    monthly budget's alert threshold (and again, separately, if it goes on
+    to exceed the budget entirely) - unlike the in-app price-change alerts,
+    nobody has to have the app open to find out. Each of the two crossings
+    fires at most once per month per company: alert_sent/exceeded_sent on
+    the budget document (reset whenever the limit/threshold itself changes,
+    see create_budget) is the dedupe, exactly like calendar's reminder_sent.
+
+    Exposed as its own tick function (called from the loop below) so a test
+    can call it directly without sleeping."""
+    current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    pending = await db.budgets.find(
+        {
+            "month": current_month,
+            "$or": [{"alert_sent": {"$ne": True}}, {"exceeded_sent": {"$ne": True}}],
+        },
+        {"_id": 0},
+    ).to_list(1000)
+
+    for budget in pending:
+        company_id = budget["company_id"]
+        status = await compute_budget_status(company_id, current_month)
+        if not status:
+            continue
+
+        recipients = await db.users.find(
+            {"company_id": company_id, "permissions": "manage_budget"}, {"_id": 0, "user_id": 1}
+        ).to_list(100)
+        recipient_ids = [r["user_id"] for r in recipients]
+        if not recipient_ids:
+            continue
+
+        if status["is_exceeded"] and not budget.get("exceeded_sent"):
+            await push_service.send_to_users(
+                db, recipient_ids,
+                title="Бюджетът е надхвърлен",
+                body=(
+                    f"Разходите за {current_month} вече са {status['total_spent']:.2f} € - "
+                    f"над лимита от {status['expense_limit']:.2f} €."
+                ),
+                data={"type": "budget", "month": current_month},
+            )
+            await db.budgets.update_one(
+                {"company_id": company_id, "month": current_month},
+                {"$set": {"exceeded_sent": True, "alert_sent": True}},
+            )
+        elif status["is_alert"] and not budget.get("alert_sent"):
+            await push_service.send_to_users(
+                db, recipient_ids,
+                title="Приближаваш бюджетния лимит",
+                body=(
+                    f"Разходите за {current_month} достигнаха {status['percent_used']:.0f}% "
+                    f"от лимита от {status['expense_limit']:.2f} €."
+                ),
+                data={"type": "budget", "month": current_month},
+            )
+            await db.budgets.update_one(
+                {"company_id": company_id, "month": current_month},
+                {"$set": {"alert_sent": True}},
+            )
+
+async def _budget_alert_loop():
+    while True:
+        try:
+            await _budget_alert_tick()
+        except Exception as e:
+            logger.error(f"Budget alert loop error: {e}")
+        # Hourly is plenty for a monthly threshold - unlike a calendar
+        # reminder, there's no "exact minute" to hit.
+        await asyncio.sleep(3600)
+
+@app.on_event("startup")
+async def start_budget_alert_loop():
+    asyncio.create_task(_budget_alert_loop())
 
 # ===================== BULK IMPORT (CSV/EXCEL) =====================
 # Each entity's commit step calls the EXISTING create_* route function per
