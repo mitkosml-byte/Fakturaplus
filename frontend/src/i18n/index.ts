@@ -1225,6 +1225,10 @@ export const translations: Translations = {
     bg: 'Запази',
     en: 'Save',
   },
+  'common.saving': {
+    bg: 'Запазване...',
+    en: 'Saving...',
+  },
   'common.operationFailed': {
     bg: 'Действието не бе успешно. Опитайте отново.',
     en: 'The operation failed. Please try again.',
@@ -1453,8 +1457,12 @@ export const translations: Translations = {
     bg: 'Сборът на артикулите се различава от стойността без ДДС на фактурата - възможна грешка при въвеждането.',
     en: "The items' sum differs from the invoice's amount without VAT - possible entry error.",
   },
-  'invoices.vsLastPurchase': {
-    bg: 'спрямо предишна доставка',
+  'invoices.vsBaseline': {
+    bg: 'спрямо средно от последните {count} доставки',
+    en: 'vs. average of last {count} purchases',
+  },
+  'invoices.vsBaselineSingle': {
+    bg: 'спрямо последната доставка',
     en: 'vs. last purchase',
   },
   'invoices.deleteInvoice': {
@@ -2266,12 +2274,12 @@ export const translations: Translations = {
     en: 'Price change!',
   },
   'priceAlertPopup.subtitleSingle': {
-    bg: 'Забелязахме повишение на цената на артикул от последна фактура.',
-    en: 'We noticed a price increase on an item from a recent invoice.',
+    bg: 'Забелязахме промяна в цената на артикул от последна фактура.',
+    en: 'We noticed a price change on an item from a recent invoice.',
   },
   'priceAlertPopup.subtitleMultiple': {
-    bg: 'Забелязахме повишение на цените на {count} артикула от последни фактури.',
-    en: 'We noticed price increases on {count} items from recent invoices.',
+    bg: 'Забелязахме промяна в цените на {count} артикула от последни фактури.',
+    en: 'We noticed price changes on {count} items from recent invoices.',
   },
   'priceAlertPopup.more': {
     bg: '+ още {count}',
@@ -2284,6 +2292,30 @@ export const translations: Translations = {
   'priceAlertPopup.viewDetails': {
     bg: 'Виж в статистиката',
     en: 'View in statistics',
+  },
+  'priceAlertPopup.invoiceRef': {
+    bg: 'фактура №{number}',
+    en: 'invoice #{number}',
+  },
+  'priceAlertPopup.basisSingle': {
+    bg: 'Сравнено с последната покупка на този артикул',
+    en: 'Compared to the last purchase of this item',
+  },
+  'priceAlertPopup.basisMultiple': {
+    bg: 'Сравнено със средната цена от последните {count} покупки',
+    en: 'Compared to the average of the last {count} purchases',
+  },
+  'priceAlertPopup.viewInvoice': {
+    bg: 'Виж фактурата',
+    en: 'View invoice',
+  },
+  'priceAlertPopup.muteItem': {
+    bg: 'Не предупреждавай пак',
+    en: "Don't alert again",
+  },
+  'priceAlertPopup.muted': {
+    bg: 'Няма да получаваш повече аларми за този артикул от този доставчик',
+    en: "You won't get alerts for this item from this supplier anymore",
   },
 
   // Items & Price Tracking
@@ -2298,6 +2330,66 @@ export const translations: Translations = {
   'stats.priceAlerts': {
     bg: 'Ценови аларми',
     en: 'Price Alerts',
+  },
+  'stats.priceAlertsEmpty': {
+    bg: 'Няма активни ценови аларми в момента.',
+    en: 'No active price alerts right now.',
+  },
+  'priceAlertSettings.title': {
+    bg: 'Настройки на ценови аларми',
+    en: 'Price alert settings',
+  },
+  'priceAlertSettings.saved': {
+    bg: 'Настройките са запазени',
+    en: 'Settings saved',
+  },
+  'priceAlertSettings.enabled': {
+    bg: 'Ценови аларми',
+    en: 'Price alerts',
+  },
+  'priceAlertSettings.enabledHint': {
+    bg: 'Изключи ако изобщо не искаш да получаваш аларми за промяна в цените.',
+    en: "Turn off if you don't want price-change alerts at all.",
+  },
+  'priceAlertSettings.alertOnDecrease': {
+    bg: 'Предупреждавай и при поевтиняване',
+    en: 'Also alert on price drops',
+  },
+  'priceAlertSettings.alertOnDecreaseHint': {
+    bg: 'Полезно - може да означава възможност за преговори с друг доставчик или по-изгодна покупка.',
+    en: 'Useful - can mean a negotiation opportunity or a better deal elsewhere.',
+  },
+  'priceAlertSettings.threshold': {
+    bg: 'Праг за аларма (%)',
+    en: 'Alert threshold (%)',
+  },
+  'priceAlertSettings.thresholdHint': {
+    bg: 'Алармирай само при промяна поне с толкова процента спрямо средната от последните покупки.',
+    en: 'Only alert when the change is at least this many percent vs. the recent-purchases average.',
+  },
+  'priceAlertSettings.minAbsoluteChange': {
+    bg: 'Минимална разлика (€)',
+    en: 'Minimum difference (€)',
+  },
+  'priceAlertSettings.minAbsoluteChangeHint': {
+    bg: 'Пропускай промени под тази сума - за да не се получават аларми заради стотинки разлика в евтини артикули.',
+    en: "Skip changes smaller than this amount - so cheap items don't trigger alerts over a few cents.",
+  },
+  'priceAlertSettings.mutedTitle': {
+    bg: 'Спрени аларми за артикули',
+    en: 'Muted item alerts',
+  },
+  'priceAlertSettings.mutedHint': {
+    bg: 'Артикули, за които няма да получаваш повече ценови аларми от конкретния доставчик.',
+    en: "Items you've chosen not to get price alerts for, from a specific supplier.",
+  },
+  'priceAlertSettings.mutedEmpty': {
+    bg: 'Няма спрени артикули.',
+    en: 'No muted items.',
+  },
+  'priceAlertSettings.unmute': {
+    bg: 'Възобнови',
+    en: 'Unmute',
   },
   'stats.priceChange': {
     bg: 'Промяна в цена',

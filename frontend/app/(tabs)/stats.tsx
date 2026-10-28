@@ -10,16 +10,19 @@ import {
   ImageBackground,
   ActivityIndicator,
   Modal,
+  Switch,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { api } from '../../src/services/api';
-import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse } from '../../src/types';
+import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse, PriceAlertSettings, PriceAlertMute } from '../../src/types';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { Alert } from '../../src/utils/alert';
+import { Toast } from '../../src/utils/toast';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
@@ -41,6 +44,7 @@ const CHART_COLORS: string[] = [
 export default function StatsScreen() {
   const { t } = useTranslation();
   const { hasPermission, isOwner } = useAuth();
+  const router = useRouter();
   const params = useLocalSearchParams<{ period?: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
@@ -328,6 +332,77 @@ export default function StatsScreen() {
       setUnreadAlerts(prev => Math.max(0, prev - 1));
     } catch (error) {
       console.error('Error dismissing alert:', error);
+    }
+  };
+
+  const muteAlertItem = async (alert: any) => {
+    try {
+      await api.createPriceAlertMute(alert.item_name, alert.supplier);
+      await api.updatePriceAlert(alert.id, 'dismissed');
+      setPriceAlerts(prev => prev.filter(a => a.id !== alert.id));
+      if (alert.status === 'unread') setUnreadAlerts(prev => Math.max(0, prev - 1));
+      Toast.success(t('priceAlertPopup.muted'));
+      loadAlertSettings();
+    } catch (error) {
+      console.error('Error muting price alert:', error);
+    }
+  };
+
+  const viewAlertInvoice = (alert: any) => {
+    router.push({ pathname: '/(tabs)/invoices', params: { invoiceId: alert.invoice_id } });
+  };
+
+  // Price-alert settings + the per-item mute list - the only place in the
+  // app these are reachable from, so this doubles as the feature's
+  // "settings" screen (opened via the gear icon next to the alerts card).
+  const [alertSettingsModalVisible, setAlertSettingsModalVisible] = useState(false);
+  const [alertSettings, setAlertSettings] = useState<PriceAlertSettings | null>(null);
+  const [alertMutes, setAlertMutes] = useState<PriceAlertMute[]>([]);
+  const [savingAlertSettings, setSavingAlertSettings] = useState(false);
+
+  const loadAlertSettings = useCallback(async () => {
+    try {
+      const [settings, mutesData] = await Promise.all([
+        api.getPriceAlertSettings(),
+        api.getPriceAlertMutes(),
+      ]);
+      setAlertSettings(settings);
+      setAlertMutes(mutesData.mutes || []);
+    } catch (error) {
+      console.error('Error loading price alert settings:', error);
+    }
+  }, []);
+
+  const openAlertSettings = () => {
+    setAlertSettingsModalVisible(true);
+    loadAlertSettings();
+  };
+
+  const saveAlertSettings = async () => {
+    if (!alertSettings) return;
+    setSavingAlertSettings(true);
+    try {
+      await api.updatePriceAlertSettings({
+        threshold_percent: alertSettings.threshold_percent,
+        min_absolute_change: alertSettings.min_absolute_change,
+        alert_on_decrease: alertSettings.alert_on_decrease,
+        enabled: alertSettings.enabled,
+      });
+      Toast.success(t('priceAlertSettings.saved'));
+      setAlertSettingsModalVisible(false);
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setSavingAlertSettings(false);
+    }
+  };
+
+  const unmuteItem = async (muteId: string) => {
+    try {
+      await api.deletePriceAlertMute(muteId);
+      setAlertMutes(prev => prev.filter(m => m.id !== muteId));
+    } catch (error) {
+      console.error('Error unmuting item:', error);
     }
   };
 
@@ -772,6 +847,111 @@ export default function StatsScreen() {
       </Modal>
     );
   };
+
+  const renderAlertSettingsModal = () => (
+    <Modal
+      visible={alertSettingsModalVisible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => setAlertSettingsModalVisible(false)}
+    >
+      <View style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle} numberOfLines={1}>{t('priceAlertSettings.title')}</Text>
+          <TouchableOpacity onPress={() => setAlertSettingsModalVisible(false)}>
+            <Ionicons name="close" size={28} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {!alertSettings ? (
+          <View style={styles.modalLoading}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+          </View>
+        ) : (
+          <ScrollView style={styles.modalContent}>
+            <View style={styles.alertSettingsRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.enabled')}</Text>
+                <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.enabledHint')}</Text>
+              </View>
+              <Switch
+                value={alertSettings.enabled}
+                onValueChange={(v) => setAlertSettings({ ...alertSettings, enabled: v })}
+                trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                thumbColor={alertSettings.enabled ? 'white' : COLORS.textMuted}
+              />
+            </View>
+
+            <View style={styles.alertSettingsRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.alertOnDecrease')}</Text>
+                <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.alertOnDecreaseHint')}</Text>
+              </View>
+              <Switch
+                value={alertSettings.alert_on_decrease}
+                onValueChange={(v) => setAlertSettings({ ...alertSettings, alert_on_decrease: v })}
+                trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                thumbColor={alertSettings.alert_on_decrease ? 'white' : COLORS.textMuted}
+              />
+            </View>
+
+            <View style={styles.alertSettingsField}>
+              <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.threshold')}</Text>
+              <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.thresholdHint')}</Text>
+              <TextInput
+                style={styles.alertSettingsInput}
+                value={String(alertSettings.threshold_percent)}
+                onChangeText={(v) => setAlertSettings({ ...alertSettings, threshold_percent: parseFloat(v) || 0 })}
+                keyboardType="decimal-pad"
+                placeholderTextColor={COLORS.textMuted}
+              />
+            </View>
+
+            <View style={styles.alertSettingsField}>
+              <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.minAbsoluteChange')}</Text>
+              <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.minAbsoluteChangeHint')}</Text>
+              <TextInput
+                style={styles.alertSettingsInput}
+                value={String(alertSettings.min_absolute_change)}
+                onChangeText={(v) => setAlertSettings({ ...alertSettings, min_absolute_change: parseFloat(v) || 0 })}
+                keyboardType="decimal-pad"
+                placeholderTextColor={COLORS.textMuted}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.alertSettingsSaveBtn, savingAlertSettings && { opacity: 0.6 }]}
+              onPress={saveAlertSettings}
+              disabled={savingAlertSettings}
+            >
+              <Text style={styles.alertSettingsSaveBtnText}>
+                {savingAlertSettings ? t('common.saving') : t('common.save')}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.alertSettingsDivider} />
+
+            <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.mutedTitle')}</Text>
+            <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.mutedHint')}</Text>
+            {alertMutes.length === 0 ? (
+              <Text style={styles.alertsEmptyText}>{t('priceAlertSettings.mutedEmpty')}</Text>
+            ) : alertMutes.map((mute) => (
+              <View key={mute.id} style={styles.mutedRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.alertItemName} numberOfLines={1}>{mute.item_name}</Text>
+                  <Text style={styles.alertSupplier} numberOfLines={1}>{mute.supplier}</Text>
+                </View>
+                <TouchableOpacity onPress={() => unmuteItem(mute.id)} style={styles.mutedUnmuteBtn}>
+                  <Text style={styles.mutedUnmuteBtnText}>{t('priceAlertSettings.unmute')}</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        )}
+      </View>
+    </Modal>
+  );
 
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -1614,8 +1794,11 @@ export default function StatsScreen() {
                   </View>
                 ) : (
                   <FadeIn>
-                    {/* Price Alerts Section */}
-                    {priceAlerts.length > 0 && (
+                    {/* Price Alerts Section - header (with settings access) is
+                        always shown once items exist, even with zero current
+                        alerts, since this is the only place the threshold/
+                        mute-list settings are reachable from. */}
+                    {itemStats && (
                       <View style={styles.priceAlertsCard}>
                         <View style={styles.priceAlertsHeader}>
                           <Ionicons name="alert-circle" size={24} color={COLORS.danger} />
@@ -1625,35 +1808,65 @@ export default function StatsScreen() {
                               <Text style={styles.alertCountText}>{unreadAlerts}</Text>
                             </View>
                           )}
+                          <TouchableOpacity
+                            onPress={openAlertSettings}
+                            style={styles.alertSettingsBtn}
+                            accessibilityLabel={t('priceAlertSettings.title')}
+                          >
+                            <Ionicons name="settings-outline" size={18} color={COLORS.textMuted} />
+                          </TouchableOpacity>
                         </View>
-                        
-                        {priceAlerts.filter(a => a.status !== 'dismissed').slice(0, 5).map((alert) => (
-                          <View 
-                            key={alert.id} 
+
+                        {priceAlerts.filter(a => a.status !== 'dismissed').length === 0 ? (
+                          <Text style={styles.alertsEmptyText}>{t('stats.priceAlertsEmpty')}</Text>
+                        ) : priceAlerts.filter(a => a.status !== 'dismissed').slice(0, 5).map((alert) => {
+                          const isDecrease = alert.direction === 'decrease';
+                          return (
+                          <View
+                            key={alert.id}
                             style={[styles.alertItem, alert.status === 'unread' && styles.alertItemUnread]}
                           >
                             <View style={styles.alertInfo}>
                               <Text style={styles.alertItemName} numberOfLines={1}>{alert.item_name}</Text>
-                              <Text style={styles.alertSupplier}>{alert.supplier}</Text>
+                              <Text style={styles.alertSupplier}>
+                                {alert.supplier} · {t('priceAlertPopup.invoiceRef').replace('{number}', alert.invoice_number)}
+                              </Text>
                               <View style={styles.alertPrices}>
                                 <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
                                 <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
-                                <Text style={styles.alertNewPrice}>{alert.new_price.toFixed(2)}€</Text>
-                                <View style={styles.alertChangeBadge}>
-                                  <Text style={styles.alertChangeText}>+{alert.change_percent}%</Text>
+                                <Text style={[styles.alertNewPrice, isDecrease && { color: COLORS.success }]}>{alert.new_price.toFixed(2)}€</Text>
+                                <View style={[styles.alertChangeBadge, isDecrease && { backgroundColor: '#22C55E20' }]}>
+                                  <Text style={[styles.alertChangeText, isDecrease && { color: COLORS.success }]}>
+                                    {alert.change_percent > 0 ? '+' : ''}{alert.change_percent}%
+                                  </Text>
                                 </View>
+                              </View>
+                              <Text style={styles.alertBasisText}>
+                                {(alert.baseline_purchase_count || 1) > 1
+                                  ? t('priceAlertPopup.basisMultiple').replace('{count}', String(alert.baseline_purchase_count))
+                                  : t('priceAlertPopup.basisSingle')}
+                              </Text>
+                              <View style={styles.alertRowLinks}>
+                                <TouchableOpacity onPress={() => viewAlertInvoice(alert)} style={styles.alertRowLinkBtn}>
+                                  <Ionicons name="document-text-outline" size={12} color={COLORS.primary} />
+                                  <Text style={styles.alertRowLinkText}>{t('priceAlertPopup.viewInvoice')}</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => muteAlertItem(alert)} style={styles.alertRowLinkBtn}>
+                                  <Ionicons name="notifications-off-outline" size={12} color={COLORS.textMuted} />
+                                  <Text style={styles.alertRowLinkTextMuted}>{t('priceAlertPopup.muteItem')}</Text>
+                                </TouchableOpacity>
                               </View>
                             </View>
                             <View style={styles.alertActions}>
                               {alert.status === 'unread' && (
-                                <TouchableOpacity 
+                                <TouchableOpacity
                                   style={styles.alertActionBtn}
                                   onPress={() => markAlertAsRead(alert.id)}
                                 >
                                   <Ionicons name="checkmark" size={18} color={COLORS.success} />
                                 </TouchableOpacity>
                               )}
-                              <TouchableOpacity 
+                              <TouchableOpacity
                                 style={styles.alertActionBtn}
                                 onPress={() => dismissAlert(alert.id)}
                               >
@@ -1661,7 +1874,7 @@ export default function StatsScreen() {
                               </TouchableOpacity>
                             </View>
                           </View>
-                        ))}
+                        );})}
                       </View>
                     )}
 
@@ -1895,6 +2108,9 @@ export default function StatsScreen() {
 
       {/* Supplier Compare Modal */}
       {renderCompareModal()}
+
+      {/* Price Alert Settings Modal */}
+      {renderAlertSettingsModal()}
 
       {/* Item Detail Modal */}
       <Modal
@@ -3179,6 +3395,115 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: COLORS.surface,
     borderRadius: 8,
+  },
+  alertSettingsBtn: {
+    padding: 4,
+  },
+  alertsEmptyText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    paddingVertical: 12,
+  },
+  alertBasisText: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    marginTop: 4,
+  },
+  alertRowLinks: {
+    flexDirection: 'row',
+    gap: 14,
+    marginTop: 6,
+  },
+  alertRowLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  alertRowLinkText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  alertRowLinkTextMuted: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+
+  // Price Alert Settings Modal
+  alertSettingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    gap: 12,
+  },
+  alertSettingsField: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  alertSettingsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+  },
+  alertSettingsHint: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  alertSettingsInput: {
+    marginTop: 10,
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: 'white',
+    fontSize: 15,
+  },
+  alertSettingsSaveBtn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  alertSettingsSaveBtnText: {
+    color: 'white',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  alertSettingsDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: 20,
+  },
+  mutedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 8,
+    gap: 8,
+  },
+  mutedUnmuteBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: COLORS.background,
+  },
+  mutedUnmuteBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
 
   // Price Inflation Card

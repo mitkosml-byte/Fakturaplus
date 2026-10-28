@@ -83,7 +83,7 @@ export default function InvoicesScreen() {
   const { language } = useLanguageStore();
   const { hasPermission } = useAuth();
   const router = useRouter();
-  const params = useLocalSearchParams<{ paymentFilter?: string }>();
+  const params = useLocalSearchParams<{ paymentFilter?: string; invoiceId?: string }>();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -141,6 +141,18 @@ export default function InvoicesScreen() {
       setFiltersExpanded(true);
     }
   }, [params.paymentFilter]);
+
+  // Lets a price alert (or anything else pointing at one specific invoice)
+  // deep-link straight to it, even if it falls outside whatever date/search
+  // filter this screen currently has applied - fetched directly by id
+  // rather than relying on it being in the already-loaded `invoices` list.
+  useEffect(() => {
+    if (!params.invoiceId) return;
+    const id = params.invoiceId;
+    api.getInvoice(id)
+      .then((invoice) => setSelectedInvoice(invoice))
+      .catch((error) => console.error('Error opening linked invoice:', error));
+  }, [params.invoiceId]);
 
   // Reverse-charge suppliers are foreign and don't have a Bulgarian ЕИК,
   // so they're excluded from this check on purpose.
@@ -1096,10 +1108,23 @@ export default function InvoicesScreen() {
                             <View style={{ flex: 2 }}>
                               <Text style={styles.itemRowName} numberOfLines={2}>{item.name}</Text>
                               {alert && (
-                                <View style={styles.itemPriceAlertBadge}>
-                                  <Ionicons name="trending-up" size={11} color={COLORS.danger} />
-                                  <Text style={styles.itemPriceAlertText}>
-                                    +{alert.change_percent}% {t('invoices.vsLastPurchase')}
+                                <View style={[
+                                  styles.itemPriceAlertBadge,
+                                  alert.direction === 'decrease' && styles.itemPriceAlertBadgeDecrease,
+                                ]}>
+                                  <Ionicons
+                                    name={alert.direction === 'decrease' ? 'trending-down' : 'trending-up'}
+                                    size={11}
+                                    color={alert.direction === 'decrease' ? COLORS.success : COLORS.danger}
+                                  />
+                                  <Text style={[
+                                    styles.itemPriceAlertText,
+                                    alert.direction === 'decrease' && styles.itemPriceAlertTextDecrease,
+                                  ]}>
+                                    {alert.change_percent > 0 ? '+' : ''}{alert.change_percent}%{' '}
+                                    {(alert.baseline_purchase_count || 1) > 1
+                                      ? t('invoices.vsBaseline').replace('{count}', String(alert.baseline_purchase_count))
+                                      : t('invoices.vsBaselineSingle')}
                                   </Text>
                                 </View>
                               )}
@@ -1995,6 +2020,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: COLORS.danger,
     fontWeight: '600',
+  },
+  itemPriceAlertBadgeDecrease: {},
+  itemPriceAlertTextDecrease: {
+    color: COLORS.success,
   },
   itemsSumRow: {
     flexDirection: 'row',

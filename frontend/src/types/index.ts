@@ -328,14 +328,24 @@ export interface PriceAlert {
   old_price: number;
   new_price: number;
   change_percent: number;
+  direction: 'increase' | 'decrease';
+  baseline_purchase_count: number;
   invoice_id: string;
   invoice_number: string;
   status: 'unread' | 'read' | 'dismissed';
   created_at: string;
 }
 
+export interface PriceAlertMute {
+  id: string;
+  item_name: string;
+  supplier: string;
+}
+
 export interface PriceAlertSettings {
   threshold_percent: number;
+  min_absolute_change: number;
+  alert_on_decrease: boolean;
   enabled: boolean;
 }
 

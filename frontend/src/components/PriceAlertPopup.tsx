@@ -2,27 +2,29 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useSegments } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
 import { ModalBlurBackdrop } from './ModalBlurBackdrop';
+import { Toast } from '../utils/toast';
 
-// Surfaces unread price-increase alerts "loudly" as a blocking popup, on top
+// Surfaces unread price-change alerts "loudly" as a blocking popup, on top
 // of their existing passive listing in Statistics -> Items. Re-checks
 // whenever the user returns to a screen (segments change) rather than on a
 // timer, since that's the cheapest reliable proxy for "app is in active use"
 // available without push infrastructure.
 //
-// This is meant to inform once, not nag - a dismissed alert is remembered in
-// AsyncStorage (not just in-memory) precisely so a page refresh or app
-// restart doesn't bring the same still-unread alert back as a popup. The
-// passive list in Statistics -> Items is unaffected and still shows it as
-// unread; only the pop-up is suppressed once seen.
+// "Seen" state lives ONLY in the backend's own `status` field - there used
+// to be a second, parallel "seen" cache in local AsyncStorage, which is
+// exactly why old alerts kept resurfacing: it was capped at 300 entries and
+// completely disconnected from the real status (Statistics -> Items could
+// show an alert as already read/dismissed while this popup, on a different
+// device or after the cache evicted it, popped it up again as "new"). A
+// single source of truth fixes that for good: closing this popup marks
+// every alert it showed as "read" on the server, exactly like the
+// checkmark in Statistics -> Items does.
 const RECHECK_INTERVAL_MS = 5 * 60 * 1000;
-const DISMISSED_IDS_KEY = 'dismissed_price_alert_popup_ids';
-const MAX_STORED_DISMISSED_IDS = 300;
 
 export function PriceAlertPopup() {
   const { isAuthenticated, hasPermission } = useAuth();
@@ -32,63 +34,51 @@ export function PriceAlertPopup() {
 
   const [alerts, setAlerts] = useState<any[]>([]);
   const [visible, setVisible] = useState(false);
-  const [storageLoaded, setStorageLoaded] = useState(false);
-  const dismissedIdsRef = useRef<Set<string>>(new Set());
   const lastCheckRef = useRef(0);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(DISMISSED_IDS_KEY);
-        dismissedIdsRef.current = new Set(raw ? JSON.parse(raw) : []);
-      } catch (error) {
-        dismissedIdsRef.current = new Set();
-      } finally {
-        setStorageLoaded(true);
-      }
-    })();
-  }, []);
-
-  const persistDismissed = async (ids: Set<string>) => {
-    let idsArray = Array.from(ids);
-    if (idsArray.length > MAX_STORED_DISMISSED_IDS) {
-      idsArray = idsArray.slice(idsArray.length - MAX_STORED_DISMISSED_IDS);
-    }
-    dismissedIdsRef.current = new Set(idsArray);
-    try {
-      await AsyncStorage.setItem(DISMISSED_IDS_KEY, JSON.stringify(idsArray));
-    } catch (error) {
-      console.error('Error persisting dismissed price alerts:', error);
-    }
-  };
-
   const checkAlerts = useCallback(async () => {
-    if (!isAuthenticated || !hasPermission('view_statistics') || !storageLoaded) return;
+    if (!isAuthenticated || !hasPermission('view_statistics')) return;
     const now = Date.now();
     if (now - lastCheckRef.current < RECHECK_INTERVAL_MS) return;
     lastCheckRef.current = now;
     try {
       const data = await api.getPriceAlerts('unread');
-      const fresh = (data.alerts || []).filter((a: any) => !dismissedIdsRef.current.has(a.id));
-      if (fresh.length > 0) {
-        setAlerts(fresh);
+      if ((data.alerts || []).length > 0) {
+        setAlerts(data.alerts);
         setVisible(true);
       }
     } catch (error) {
       // Silent - this is a secondary notification, not core functionality.
       console.error('Error checking price alerts:', error);
     }
-  }, [isAuthenticated, hasPermission, storageLoaded]);
+  }, [isAuthenticated, hasPermission]);
 
   useEffect(() => {
     if (isAuthenticated) checkAlerts();
-  }, [isAuthenticated, storageLoaded, segments.join('/')]);
+  }, [isAuthenticated, segments.join('/')]);
 
   const closePopup = () => {
-    const updated = new Set(dismissedIdsRef.current);
-    alerts.forEach((a) => updated.add(a.id));
-    persistDismissed(updated);
     setVisible(false);
+    alerts.forEach((a) => {
+      api.updatePriceAlert(a.id, 'read').catch((error) => console.error('Error marking price alert read:', error));
+    });
+  };
+
+  const viewInvoice = (alert: any) => {
+    setVisible(false);
+    api.updatePriceAlert(alert.id, 'read').catch((error) => console.error('Error marking price alert read:', error));
+    router.push({ pathname: '/(tabs)/invoices', params: { invoiceId: alert.invoice_id } });
+  };
+
+  const muteAlert = async (alert: any) => {
+    try {
+      await api.createPriceAlertMute(alert.item_name, alert.supplier);
+      await api.updatePriceAlert(alert.id, 'read');
+      setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
+      Toast.success(t('priceAlertPopup.muted'));
+    } catch (error) {
+      console.error('Error muting price alert:', error);
+    }
   };
 
   const goToStatistics = () => {
@@ -118,22 +108,48 @@ export function PriceAlertPopup() {
           </Text>
 
           <ScrollView style={styles.list}>
-            {alerts.slice(0, 6).map((alert) => (
-              <View key={alert.id} style={styles.alertRow}>
-                <View style={styles.alertInfo}>
-                  <Text style={styles.alertItemName} numberOfLines={1}>{alert.item_name}</Text>
-                  <Text style={styles.alertSupplier}>{alert.supplier}</Text>
+            {alerts.slice(0, 6).map((alert) => {
+              const isDecrease = alert.direction === 'decrease';
+              return (
+                <View key={alert.id} style={styles.alertRow}>
+                  <View style={styles.alertTopLine}>
+                    <View style={styles.alertInfo}>
+                      <Text style={styles.alertItemName} numberOfLines={1}>{alert.item_name}</Text>
+                      <Text style={styles.alertSupplier} numberOfLines={1}>
+                        {alert.supplier} · {t('priceAlertPopup.invoiceRef').replace('{number}', alert.invoice_number)}
+                      </Text>
+                    </View>
+                    <View style={styles.alertPrices}>
+                      <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
+                      <Ionicons name="arrow-forward" size={13} color={COLORS.textMuted} />
+                      <Text style={[styles.alertNewPrice, isDecrease && styles.alertNewPriceDecrease]}>
+                        {alert.new_price.toFixed(2)}€
+                      </Text>
+                    </View>
+                    <View style={[styles.changeBadge, isDecrease && styles.changeBadgeDecrease]}>
+                      <Text style={[styles.changeText, isDecrease && styles.changeTextDecrease]}>
+                        {alert.change_percent > 0 ? '+' : ''}{alert.change_percent}%
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.alertBasisText}>
+                    {(alert.baseline_purchase_count || 1) > 1
+                      ? t('priceAlertPopup.basisMultiple').replace('{count}', String(alert.baseline_purchase_count))
+                      : t('priceAlertPopup.basisSingle')}
+                  </Text>
+                  <View style={styles.alertRowActions}>
+                    <TouchableOpacity style={styles.alertRowActionBtn} onPress={() => viewInvoice(alert)}>
+                      <Ionicons name="document-text-outline" size={13} color={COLORS.primary} />
+                      <Text style={styles.alertRowActionText}>{t('priceAlertPopup.viewInvoice')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.alertRowActionBtn} onPress={() => muteAlert(alert)}>
+                      <Ionicons name="notifications-off-outline" size={13} color={COLORS.textMuted} />
+                      <Text style={styles.alertRowActionTextMuted}>{t('priceAlertPopup.muteItem')}</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <View style={styles.alertPrices}>
-                  <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
-                  <Ionicons name="arrow-forward" size={13} color={COLORS.textMuted} />
-                  <Text style={styles.alertNewPrice}>{alert.new_price.toFixed(2)}€</Text>
-                </View>
-                <View style={styles.changeBadge}>
-                  <Text style={styles.changeText}>+{alert.change_percent}%</Text>
-                </View>
-              </View>
-            ))}
+              );
+            })}
             {alerts.length > 6 && (
               <Text style={styles.moreText}>
                 {t('priceAlertPopup.more').replace('{count}', String(alerts.length - 6))}
@@ -193,13 +209,15 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   list: {
-    maxHeight: 320,
+    maxHeight: 360,
   },
   alertRow: {
     backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 12,
     marginBottom: 8,
+  },
+  alertTopLine: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -232,16 +250,50 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: COLORS.danger,
   },
+  alertNewPriceDecrease: {
+    color: COLORS.success,
+  },
   changeBadge: {
     backgroundColor: '#EF444420',
     paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 6,
   },
+  changeBadgeDecrease: {
+    backgroundColor: '#22C55E20',
+  },
   changeText: {
     fontSize: 11,
     fontWeight: 'bold',
     color: COLORS.danger,
+  },
+  changeTextDecrease: {
+    color: COLORS.success,
+  },
+  alertBasisText: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    marginTop: 6,
+  },
+  alertRowActions: {
+    flexDirection: 'row',
+    gap: 14,
+    marginTop: 8,
+  },
+  alertRowActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  alertRowActionText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  alertRowActionTextMuted: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textMuted,
   },
   moreText: {
     fontSize: 12,

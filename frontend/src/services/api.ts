@@ -612,15 +612,40 @@ class ApiService {
     });
   }
 
-  async getPriceAlertSettings(): Promise<{ threshold_percent: number; enabled: boolean }> {
+  async getPriceAlertSettings(): Promise<{
+    threshold_percent: number;
+    min_absolute_change: number;
+    alert_on_decrease: boolean;
+    enabled: boolean;
+  }> {
     return this.fetch('/items/price-alert-settings');
   }
 
-  async updatePriceAlertSettings(settings: { threshold_percent?: number; enabled?: boolean }): Promise<{ message: string }> {
+  async updatePriceAlertSettings(settings: {
+    threshold_percent?: number;
+    min_absolute_change?: number;
+    alert_on_decrease?: boolean;
+    enabled?: boolean;
+  }): Promise<{ message: string }> {
     return this.fetch('/items/price-alert-settings', {
       method: 'PUT',
       body: JSON.stringify(settings),
     });
+  }
+
+  async getPriceAlertMutes(): Promise<{ mutes: { id: string; item_name: string; supplier: string }[] }> {
+    return this.fetch('/items/price-alert-mutes');
+  }
+
+  async createPriceAlertMute(itemName: string, supplier: string): Promise<{ mute: { id: string } }> {
+    return this.fetch('/items/price-alert-mutes', {
+      method: 'POST',
+      body: JSON.stringify({ item_name: itemName, supplier }),
+    });
+  }
+
+  async deletePriceAlertMute(muteId: string): Promise<{ message: string }> {
+    return this.fetch(`/items/price-alert-mutes/${muteId}`, { method: 'DELETE' });
   }
 
   async getPriceInflation(startDate: string, endDate: string): Promise<{

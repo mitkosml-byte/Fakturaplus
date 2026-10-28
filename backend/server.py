@@ -16,6 +16,7 @@ import base64
 import httpx
 import io
 import re
+import statistics
 import json
 import difflib
 from passlib.context import CryptContext
@@ -362,6 +363,14 @@ class PriceAlertSettings(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     company_id: str
     threshold_percent: float = 10.0  # Праг за аларма в %
+    # A %-only threshold fires the same for a 0.10 lv item as for a 500 lv
+    # one - this absolute floor (in the invoice's currency) filters out
+    # changes that cross the % threshold but are financially noise.
+    min_absolute_change: float = 2.0
+    # Price *drops* are also useful (renegotiate elsewhere, switch item) -
+    # off by default so existing companies' alert volume doesn't change
+    # until they opt in.
+    alert_on_decrease: bool = False
     enabled: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -370,12 +379,28 @@ class PriceAlert(BaseModel):
     company_id: str
     item_name: str
     supplier: str
-    old_price: float
+    old_price: float  # Базова цена (медиана/средно от последните покупки) - виж baseline_purchase_count
     new_price: float
     change_percent: float
+    direction: str = "increase"  # increase | decrease
+    # How many prior purchases the baseline (old_price) was computed from -
+    # shown to the user so a one-off anomaly isn't silently treated as "the
+    # real price" without any indication of where the number came from.
+    baseline_purchase_count: int = 1
     invoice_id: str
     invoice_number: str
     status: str = "unread"  # unread, read, dismissed
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Lets a company say "stop alerting me about this item from this supplier"
+# permanently, for items whose price is known to fluctuate normally (fuel,
+# produce) instead of being forced to re-dismiss the same noisy alert
+# forever.
+class PriceAlertMute(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    item_name: str  # Нормализирано име (както се пази в item_price_history)
+    supplier: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class InvoiceCreate(BaseModel):
@@ -3236,8 +3261,12 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
                 normalized_name, _ = await normalize_item_name(item.name, company_id)
                 item_normalized_names[item_dict["id"]] = normalized_name
 
-                # Find last price for this item from same supplier
-                last_price_record = await db.item_price_history.find_one(
+                # Baseline = median of the last up-to-3 purchases of this item
+                # from this supplier, not just the single last one - a lone
+                # one-off (a misread, a rush order, a one-time discount) used
+                # to become "the price" and make the *next* normal purchase
+                # look like the anomaly.
+                recent_records = await db.item_price_history.find(
                     {
                         "company_id": company_id,
                         "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"},
@@ -3245,32 +3274,46 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
                     },
                     {"_id": 0},
                     sort=[("invoice_date", -1)]
-                )
-                
-                # Get threshold setting
+                ).to_list(3)
+
+                # Get threshold/mute settings
                 alert_settings = await db.price_alert_settings.find_one(
                     {"company_id": company_id},
                     {"_id": 0}
                 )
                 threshold = alert_settings.get("threshold_percent", 10.0) if alert_settings else 10.0
+                min_absolute_change = alert_settings.get("min_absolute_change", 2.0) if alert_settings else 2.0
+                alert_on_decrease = alert_settings.get("alert_on_decrease", False) if alert_settings else False
                 alert_enabled = alert_settings.get("enabled", True) if alert_settings else True
-                
-                if last_price_record and alert_enabled:
-                    old_price = last_price_record["unit_price"]
+
+                is_muted = alert_enabled and bool(await db.price_alert_mutes.find_one({
+                    "company_id": company_id,
+                    "item_name": normalized_name,
+                    "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"},
+                }))
+
+                if recent_records and alert_enabled and not is_muted:
+                    old_price = statistics.median(r["unit_price"] for r in recent_records)
                     new_price = item.unit_price
-                    
+
                     if old_price > 0:
                         change_percent = ((new_price - old_price) / old_price) * 100
-                        
-                        # Create alert if price increased above threshold
-                        if change_percent >= threshold:
+                        absolute_change = abs(new_price - old_price)
+                        crosses_threshold = (
+                            (change_percent >= threshold) or
+                            (alert_on_decrease and change_percent <= -threshold)
+                        )
+
+                        if crosses_threshold and absolute_change >= min_absolute_change:
                             alert = PriceAlert(
                                 company_id=company_id,
                                 item_name=item.name,
                                 supplier=invoice.supplier,
-                                old_price=old_price,
+                                old_price=round(old_price, 4),
                                 new_price=new_price,
                                 change_percent=round(change_percent, 2),
+                                direction="increase" if change_percent >= 0 else "decrease",
+                                baseline_purchase_count=len(recent_records),
                                 invoice_id="",  # Will be set after invoice is created
                                 invoice_number=invoice.invoice_number
                             )
@@ -5723,16 +5766,19 @@ async def get_price_alert_settings(current_user: User = Depends(get_current_user
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
     
+    defaults = {"threshold_percent": 10.0, "min_absolute_change": 2.0, "alert_on_decrease": False, "enabled": True}
     if not company_id:
-        return {"threshold_percent": 10.0, "enabled": True}
-    
+        return defaults
+
     settings = await db.price_alert_settings.find_one({"company_id": company_id}, {"_id": 0})
-    
+
     if not settings:
-        return {"threshold_percent": 10.0, "enabled": True}
-    
+        return defaults
+
     return {
         "threshold_percent": settings.get("threshold_percent", 10.0),
+        "min_absolute_change": settings.get("min_absolute_change", 2.0),
+        "alert_on_decrease": settings.get("alert_on_decrease", False),
         "enabled": settings.get("enabled", True)
     }
 
@@ -5758,11 +5804,15 @@ async def update_price_alert_settings(
     update_data = {}
     if "threshold_percent" in body:
         update_data["threshold_percent"] = float(body["threshold_percent"])
+    if "min_absolute_change" in body:
+        update_data["min_absolute_change"] = float(body["min_absolute_change"])
+    if "alert_on_decrease" in body:
+        update_data["alert_on_decrease"] = bool(body["alert_on_decrease"])
     if "enabled" in body:
         update_data["enabled"] = bool(body["enabled"])
-    
+
     existing = await db.price_alert_settings.find_one({"company_id": company_id})
-    
+
     if existing:
         await db.price_alert_settings.update_one(
             {"company_id": company_id},
@@ -5771,8 +5821,51 @@ async def update_price_alert_settings(
     else:
         settings = PriceAlertSettings(company_id=company_id, **update_data)
         await db.price_alert_settings.insert_one(settings.dict())
-    
+
     return {"message": "Настройките са запазени"}
+
+@api_router.get("/items/price-alert-mutes")
+async def get_price_alert_mutes(current_user: User = Depends(get_current_user)):
+    """Връща списъка с артикули/доставчици, за които алармите са спрени"""
+    require_permission(current_user, "view_statistics")
+    _, scope = await get_company_scope(current_user)
+    mutes = await db.price_alert_mutes.find(scope, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"mutes": mutes}
+
+class PriceAlertMuteCreate(BaseModel):
+    item_name: str
+    supplier: str
+
+@api_router.post("/items/price-alert-mutes")
+async def create_price_alert_mute(payload: PriceAlertMuteCreate, current_user: User = Depends(get_current_user)):
+    """Спира бъдещи аларми за конкретен артикул от конкретен доставчик"""
+    require_permission(current_user, "view_statistics")
+    company_id, scope = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+
+    normalized_name, _ = await normalize_item_name(payload.item_name, company_id)
+    existing = await db.price_alert_mutes.find_one({
+        **scope,
+        "item_name": normalized_name,
+        "supplier": {"$regex": f"^{re.escape(payload.supplier)}$", "$options": "i"},
+    })
+    if existing:
+        return {"mute": existing}
+
+    mute = PriceAlertMute(company_id=company_id, item_name=normalized_name, supplier=payload.supplier)
+    await db.price_alert_mutes.insert_one(mute.dict())
+    return {"mute": mute.dict()}
+
+@api_router.delete("/items/price-alert-mutes/{mute_id}")
+async def delete_price_alert_mute(mute_id: str, current_user: User = Depends(get_current_user)):
+    """Възобновява алармите за артикул/доставчик, който е бил спрян"""
+    require_permission(current_user, "view_statistics")
+    _, scope = await get_company_scope(current_user)
+    result = await db.price_alert_mutes.delete_one({"id": mute_id, **scope})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    return {"message": "Алармите за този артикул са възобновени"}
 
 @api_router.get("/items/price-history/{item_name}")
 async def get_item_price_history(
