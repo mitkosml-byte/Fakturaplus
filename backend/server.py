@@ -2592,6 +2592,83 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 МНОГОСТРАНИЧНИ ФАКТУРИ:
 Понякога ще получиш НЯКОЛКО изображения една след друга (в реда, в който са заснети) - това са СТРАНИЦИ НА ЕДНА И СЪЩА ФАКТУРА, а не отделни документи. Заглавната част (доставчик, ЕИК, номер, дата) обикновено е само на първата страница - вземи я оттам. Таблицата с артикули може да продължава през няколко страници - извлечи РЕДОВЕТЕ ОТ ВСИЧКИ СТРАНИЦИ ПОРЕД, като ги обединиш в един общ списък, без да пропускаш или дублираш редове (внимавай ако последният ред на една страница и първият на следващата съвпадат - това е една и съща позиция, не я брой два пъти). Общите суми (данъчна основа, ДДС, обща сума за плащане) обикновено са отпечатани само на ПОСЛЕДНАТА страница - вземи ги оттам, а не сумирай ръчно от отделните страници."""
 
+async def log_ai_usage(company_id: Optional[str], endpoint: str, response, extra: Optional[dict] = None):
+    """Records the real per-call token usage Anthropic's own response
+    reports, so "how much is AI actually costing us" can be answered from
+    real data instead of estimated from the code and published rates - see
+    the cost-optimization pass this was built from (no Admin API key was
+    available to pull historical numbers, so this is the measurement
+    channel going forward). Never raises - a logging failure must not break
+    the AI response it's piggybacking on."""
+    try:
+        usage = response.usage
+        await db.ai_usage_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "company_id": company_id,
+            "endpoint": endpoint,
+            "model": response.model,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+            "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
+            **(extra or {}),
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logger.warning(f"Failed to log AI usage for {endpoint}: {e}")
+
+@api_router.get("/admin/ai-usage-summary")
+async def get_ai_usage_summary(days: int = 30, current_user: User = Depends(get_current_user)):
+    """Real AI-cost summary built from logged response.usage data (see
+    log_ai_usage above) - the measurement channel this app uses instead of
+    Anthropic's own Usage/Cost Admin API, which it has no admin key for.
+    Costs are an ESTIMATE at Claude Opus 5.5's currently published rates
+    (fetched from platform.claude.com/docs/en/about-claude/pricing on
+    2026-10-28) - re-check that page if the real bill ever looks off, since
+    rates can change and this endpoint doesn't re-fetch them."""
+    require_permission(current_user, "manage_budget")
+    from collections import defaultdict
+
+    _, scope = await get_company_scope(current_user)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    entries = await db.ai_usage_log.find({**scope, "created_at": {"$gte": since}}, {"_id": 0}).to_list(100000)
+
+    RATES_USD_PER_MTOK = {"input": 4.0, "output": 20.0, "cache_creation": 5.0, "cache_read": 0.20}
+
+    by_endpoint = defaultdict(lambda: {
+        "calls": 0, "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+    })
+    for e in entries:
+        bucket = by_endpoint[e.get("endpoint", "unknown")]
+        bucket["calls"] += 1
+        bucket["input_tokens"] += e.get("input_tokens", 0)
+        bucket["output_tokens"] += e.get("output_tokens", 0)
+        bucket["cache_creation_input_tokens"] += e.get("cache_creation_input_tokens", 0)
+        bucket["cache_read_input_tokens"] += e.get("cache_read_input_tokens", 0)
+
+    def estimate_cost(b: dict) -> float:
+        return (
+            b["input_tokens"] / 1_000_000 * RATES_USD_PER_MTOK["input"] +
+            b["output_tokens"] / 1_000_000 * RATES_USD_PER_MTOK["output"] +
+            b["cache_creation_input_tokens"] / 1_000_000 * RATES_USD_PER_MTOK["cache_creation"] +
+            b["cache_read_input_tokens"] / 1_000_000 * RATES_USD_PER_MTOK["cache_read"]
+        )
+
+    breakdown = []
+    total_cost = 0.0
+    for endpoint, bucket in by_endpoint.items():
+        cost = estimate_cost(bucket)
+        total_cost += cost
+        breakdown.append({"endpoint": endpoint, "estimated_cost_usd": round(cost, 4), **bucket})
+    breakdown.sort(key=lambda x: x["estimated_cost_usd"], reverse=True)
+
+    return {
+        "days": days,
+        "total_estimated_cost_usd": round(total_cost, 4),
+        "by_endpoint": breakdown,
+    }
+
 @api_router.post("/ocr/scan", response_model=OCRResult)
 @limiter.limit("20/minute")
 async def scan_invoice(request: Request, image_base64: str = None, current_user: User = Depends(get_current_user)):
@@ -2684,6 +2761,7 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
             }],
             output_format=ClaudeInvoiceExtraction,
         )
+        await log_ai_usage(company_id, "ocr_scan", response, {"page_count": len(image_blocks)})
 
         extracted = response.parsed_output
         if extracted is None:
@@ -4100,6 +4178,7 @@ async def generate_roi_insights(
             system="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български, като посочваш всички суми в евро (€), никога в лева.",
             messages=[{"role": "user", "content": prompt}],
         )
+        await log_ai_usage(None, "roi_insights", response)
         ai_recommendation = next((b.text for b in response.content if b.type == "text"), "").strip()
 
         if ai_recommendation and len(ai_recommendation) < 200:
@@ -6290,6 +6369,7 @@ async def run_ai_item_merge(company_id: str) -> dict:
             messages=[{"role": "user", "content": prompt}],
             output_format=ItemMergeResult,
         )
+        await log_ai_usage(company_id, "item_merge", response)
 
         parsed = response.parsed_output
         groups = parsed.groups if parsed else []
@@ -8486,6 +8566,7 @@ async def create_indexes():
         await db.push_subscriptions.create_index([("endpoint", 1)], unique=True)
         await db.feedback_submissions.create_index([("created_at", -1)])
         await db.push_subscriptions.create_index([("user_id", 1)])
+        await db.ai_usage_log.create_index([("company_id", 1), ("created_at", -1)])
 
         # Multi-owner removal-approval requests
         await db.owner_actions.create_index([("company_id", 1), ("status", 1)])
