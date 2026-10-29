@@ -25,6 +25,8 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { ScreenEnter, ScanCreditsRing } from '../src/components';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useQueryClient } from '@tanstack/react-query';
+import { scanBalanceQueryKey } from '../src/queries/useScanBalance';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -48,6 +50,7 @@ function openCheckout(url: string) {
 
 export default function ScanCreditsScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { t } = useTranslation();
   const { hasPermission } = useAuth();
   const canManageBilling = hasPermission('manage_billing');
@@ -89,6 +92,11 @@ export default function ScanCreditsScreen() {
       setBalance(balanceData);
       setPackages(packagesData);
       setHistory(historyData);
+      // Pushes the balance this screen just fetched into the shared
+      // cache ScanCreditsBadge/ScanCreditsReloadButton read from, so a
+      // purchase or scan reflected here shows up there too without a
+      // second redundant fetch (Module 1 audit finding #5).
+      queryClient.setQueryData(scanBalanceQueryKey, balanceData);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message || t('scanCredits.loadError'));
     } finally {

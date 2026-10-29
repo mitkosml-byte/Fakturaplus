@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { api } from '../services/api';
+import { useScanBalance } from '../queries/useScanBalance';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
 
@@ -14,15 +14,8 @@ import { COLORS } from '../theme/colors';
 export function ScanCreditsReloadButton() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [remaining, setRemaining] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.getScanBalance()
-      .then((balance) => { if (!cancelled) setRemaining(balance.total_remaining); })
-      .catch(() => { /* non-critical - button still works without the count */ });
-    return () => { cancelled = true; };
-  }, []);
+  const { data: balance } = useScanBalance();
+  const remaining = balance?.total_remaining ?? null;
 
   return (
     <TouchableOpacity style={styles.button} onPress={() => router.push('/scan-credits')}>

@@ -5,6 +5,8 @@ import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from '../src/queries/queryClient';
 import { OfflineBanner } from '../src/components/OfflineBanner';
 import { PriceAlertPopup } from '../src/components/PriceAlertPopup';
 import { WalletAlertPopup } from '../src/components/WalletAlertPopup';
@@ -85,11 +87,13 @@ function AppShell() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.container}>
-      <SafeAreaProvider>
-        <AuthProvider>
-          <AppShell />
-        </AuthProvider>
-      </SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <AuthProvider>
+            <AppShell />
+          </AuthProvider>
+        </SafeAreaProvider>
+      </QueryClientProvider>
     </GestureHandlerRootView>
   );
 }

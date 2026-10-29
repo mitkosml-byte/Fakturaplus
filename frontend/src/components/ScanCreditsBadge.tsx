@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { api } from '../services/api';
+import { useScanBalance } from '../queries/useScanBalance';
 import { COLORS } from '../theme/colors';
 
 // Small persistent pill showing remaining scan credits, mounted in the
@@ -16,15 +16,8 @@ import { COLORS } from '../theme/colors';
 // actual tappable entry point to the billing screen.
 export function ScanCreditsBadge() {
   const router = useRouter();
-  const [remaining, setRemaining] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.getScanBalance()
-      .then((balance) => { if (!cancelled) setRemaining(balance.total_remaining); })
-      .catch(() => { /* silent - this is a convenience indicator, not critical path */ });
-    return () => { cancelled = true; };
-  }, []);
+  const { data: balance } = useScanBalance();
+  const remaining = balance?.total_remaining ?? null;
 
   if (remaining === null) return null;
 

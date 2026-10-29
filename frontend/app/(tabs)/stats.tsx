@@ -27,6 +27,12 @@ import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
+import { PriceAlertsCard } from '../../src/components/stats/PriceAlertsCard';
+import { ReorderNudgesCard } from '../../src/components/stats/ReorderNudgesCard';
+import { ForecastCard } from '../../src/components/stats/ForecastCard';
+import { PriceInflationCard } from '../../src/components/stats/PriceInflationCard';
+import { AlertSettingsModal } from '../../src/components/stats/AlertSettingsModal';
+import { SupplierCompareModal } from '../../src/components/stats/SupplierCompareModal';
 import { COLORS } from '../../src/theme/colors';
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, interpolate, Extrapolation } from 'react-native-reanimated';
 
@@ -790,176 +796,10 @@ export default function StatsScreen() {
     </Modal>
   );
 
-  // Render supplier comparison modal
-  const renderCompareModal = () => {
-    const maxAmount = compareResult?.suppliers?.length
-      ? Math.max(...compareResult.suppliers.map((s: any) => s.total_amount), 1)
-      : 1;
-    return (
-      <Modal
-        visible={compareModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => {
-          setCompareModalVisible(false);
-          setCompareResult(null);
-        }}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle} numberOfLines={1}>{t('stats.compareTitle')}</Text>
-            <TouchableOpacity onPress={() => { setCompareModalVisible(false); setCompareResult(null); }}>
-              <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-          </View>
-
-          {loadingCompare ? (
-            <View style={styles.modalLoading}>
-              <ActivityIndicator size="large" color={COLORS.primary} />
-            </View>
-          ) : compareResult?.suppliers?.length ? (
-            <ScrollView style={{ flex: 1, padding: 16 }}>
-              {compareResult.suppliers.map((s: any, idx: number) => (
-                <View key={s.supplier} style={styles.compareCard}>
-                  <Text style={styles.compareSupplierName} numberOfLines={1}>{s.supplier}</Text>
-
-                  <View style={styles.compareBarRow}>
-                    <Text style={styles.compareBarLabel}>{t('stats.compareTotalAmount')}</Text>
-                    <Text style={styles.compareBarValue}>{s.total_amount.toFixed(2)} €</Text>
-                  </View>
-                  <View style={styles.compareBarTrack}>
-                    <View style={[styles.compareBarFill, { width: `${(s.total_amount / maxAmount) * 100}%`, backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }]} />
-                  </View>
-
-                  <View style={styles.compareStatsRow}>
-                    <View style={styles.compareStatItem}>
-                      <Text style={styles.compareStatLabel}>{t('stats.compareInvoiceCount')}</Text>
-                      <Text style={styles.compareStatValue}>{s.invoice_count}</Text>
-                    </View>
-                    <View style={styles.compareStatItem}>
-                      <Text style={styles.compareStatLabel}>{t('stats.compareAvgInvoice')}</Text>
-                      <Text style={styles.compareStatValue}>{s.avg_invoice.toFixed(2)} €</Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          ) : (
-            <View style={styles.modalLoading}>
-              <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
-              <Text style={styles.noDataText}>{t('stats.noData')}</Text>
-            </View>
-          )}
-        </View>
-      </Modal>
-    );
+  const closeCompareModal = () => {
+    setCompareModalVisible(false);
+    setCompareResult(null);
   };
-
-  const renderAlertSettingsModal = () => (
-    <Modal
-      visible={alertSettingsModalVisible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={() => setAlertSettingsModalVisible(false)}
-    >
-      <View style={styles.modalContainer}>
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle} numberOfLines={1}>{t('priceAlertSettings.title')}</Text>
-          <TouchableOpacity onPress={() => setAlertSettingsModalVisible(false)}>
-            <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        </View>
-
-        {!alertSettings ? (
-          <View style={styles.modalLoading}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
-          </View>
-        ) : (
-          <ScrollView style={styles.modalContent}>
-            <View style={styles.alertSettingsRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.enabled')}</Text>
-                <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.enabledHint')}</Text>
-              </View>
-              <Switch
-                value={alertSettings.enabled}
-                onValueChange={(v) => setAlertSettings({ ...alertSettings, enabled: v })}
-                trackColor={{ false: COLORS.border, true: COLORS.primary }}
-                thumbColor={alertSettings.enabled ? 'white' : COLORS.textMuted}
-              />
-            </View>
-
-            <View style={styles.alertSettingsRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.alertOnDecrease')}</Text>
-                <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.alertOnDecreaseHint')}</Text>
-              </View>
-              <Switch
-                value={alertSettings.alert_on_decrease}
-                onValueChange={(v) => setAlertSettings({ ...alertSettings, alert_on_decrease: v })}
-                trackColor={{ false: COLORS.border, true: COLORS.primary }}
-                thumbColor={alertSettings.alert_on_decrease ? 'white' : COLORS.textMuted}
-              />
-            </View>
-
-            <View style={styles.alertSettingsField}>
-              <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.threshold')}</Text>
-              <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.thresholdHint')}</Text>
-              <TextInput
-                style={styles.alertSettingsInput}
-                value={String(alertSettings.threshold_percent)}
-                onChangeText={(v) => setAlertSettings({ ...alertSettings, threshold_percent: parseFloat(v) || 0 })}
-                keyboardType="decimal-pad"
-                placeholderTextColor={COLORS.textMuted}
-              />
-            </View>
-
-            <View style={styles.alertSettingsField}>
-              <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.minAbsoluteChange')}</Text>
-              <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.minAbsoluteChangeHint')}</Text>
-              <TextInput
-                style={styles.alertSettingsInput}
-                value={String(alertSettings.min_absolute_change)}
-                onChangeText={(v) => setAlertSettings({ ...alertSettings, min_absolute_change: parseFloat(v) || 0 })}
-                keyboardType="decimal-pad"
-                placeholderTextColor={COLORS.textMuted}
-              />
-            </View>
-
-            <TouchableOpacity
-              style={[styles.alertSettingsSaveBtn, savingAlertSettings && { opacity: 0.6 }]}
-              onPress={saveAlertSettings}
-              disabled={savingAlertSettings}
-            >
-              <Text style={styles.alertSettingsSaveBtnText}>
-                {savingAlertSettings ? t('common.saving') : t('common.save')}
-              </Text>
-            </TouchableOpacity>
-
-            <View style={styles.alertSettingsDivider} />
-
-            <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.mutedTitle')}</Text>
-            <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.mutedHint')}</Text>
-            {alertMutes.length === 0 ? (
-              <Text style={styles.alertsEmptyText}>{t('priceAlertSettings.mutedEmpty')}</Text>
-            ) : alertMutes.map((mute) => (
-              <View key={mute.id} style={styles.mutedRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.alertItemName} numberOfLines={1}>{mute.item_name}</Text>
-                  <Text style={styles.alertSupplier} numberOfLines={1}>{mute.supplier}</Text>
-                </View>
-                <TouchableOpacity onPress={() => unmuteItem(mute.id)} style={styles.mutedUnmuteBtn}>
-                  <Text style={styles.mutedUnmuteBtnText}>{t('priceAlertSettings.unmute')}</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        )}
-      </View>
-    </Modal>
-  );
 
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -1357,101 +1197,12 @@ export default function StatsScreen() {
 
                 {/* Forecast */}
                 {hasPermission('view_statistics') && (revenueForecast?.forecast?.length > 0 || expenseForecast?.forecast?.length > 0) && (
-                  <View style={styles.forecastSection}>
-                    <View style={styles.chartHeader}>
-                      <Ionicons name="analytics" size={22} color={COLORS.primary} />
-                      <Text style={styles.chartTitle}>{t('stats.forecastTitle')}</Text>
-                    </View>
-
-                    {/* Lookback range - was a hardcoded 6 months with no
-                        way to change it, which made the forecast blind
-                        (and its trend noisy) for a company under 6
-                        months old. Same button pattern as the price
-                        inflation period selector above. */}
-                    <View style={styles.rankingSelector}>
-                      {([
-                        { days: 30, labelKey: 'stats.forecastRange1m' },
-                        { days: 90, labelKey: 'stats.forecastRange3m' },
-                        { days: 180, labelKey: 'stats.forecastRange6m' },
-                        { days: 365, labelKey: 'stats.forecastRange12m' },
-                      ] as const).map((opt) => (
-                        <TouchableOpacity
-                          key={opt.days}
-                          style={[styles.rankingButton, forecastRangeDays === opt.days && styles.rankingButtonActive]}
-                          onPress={() => setForecastRangeDays(opt.days)}
-                        >
-                          <Text style={[styles.rankingButtonText, forecastRangeDays === opt.days && styles.rankingButtonTextActive]}>
-                            {t(opt.labelKey)}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-
-                    <Text style={styles.forecastHint}>
-                      {t(
-                        forecastRangeDays === 30 ? 'stats.forecastHint1m'
-                          : forecastRangeDays === 90 ? 'stats.forecastHint3m'
-                          : forecastRangeDays === 365 ? 'stats.forecastHint12m'
-                          : 'stats.forecastHint6m'
-                      )}
-                    </Text>
-                    <View style={styles.forecastRow}>
-                      {revenueForecast?.forecast?.[0] && (
-                        <View style={styles.forecastCard}>
-                          {revenueForecast.trend === 'insufficient_data' ? (
-                            <>
-                              <Ionicons name="hourglass-outline" size={20} color={COLORS.textMuted} />
-                              <Text style={styles.forecastLabel}>{t('stats.forecastAverageOnly')} · {t('stats.forecastRevenue')}</Text>
-                              <Text style={[styles.forecastValue, { color: COLORS.textMuted }]}>
-                                {revenueForecast.avg_monthly.toFixed(0)} €
-                              </Text>
-                            </>
-                          ) : (
-                            <>
-                              <Ionicons name="trending-up" size={20} color={COLORS.success} />
-                              <Text style={styles.forecastLabel}>{t('stats.forecastRevenue')}</Text>
-                              <Text style={[styles.forecastValue, { color: COLORS.success }]}>
-                                {revenueForecast.forecast[0].predicted_amount.toFixed(0)} €
-                              </Text>
-                              <Text style={styles.forecastTrend}>
-                                {revenueForecast.trend === 'increasing' ? '📈' : revenueForecast.trend === 'decreasing' ? '📉' : '➖'}
-                                {' '}{revenueForecast.trend_percent > 0 ? '+' : ''}{revenueForecast.trend_percent}%
-                              </Text>
-                            </>
-                          )}
-                        </View>
-                      )}
-                      {expenseForecast?.forecast?.[0] && (
-                        <View style={styles.forecastCard}>
-                          {expenseForecast.trend === 'insufficient_data' ? (
-                            <>
-                              <Ionicons name="hourglass-outline" size={20} color={COLORS.textMuted} />
-                              <Text style={styles.forecastLabel}>{t('stats.forecastAverageOnly')} · {t('stats.forecastExpense')}</Text>
-                              <Text style={[styles.forecastValue, { color: COLORS.textMuted }]}>
-                                {expenseForecast.avg_monthly.toFixed(0)} €
-                              </Text>
-                            </>
-                          ) : (
-                            <>
-                              <Ionicons name="trending-down" size={20} color={COLORS.danger} />
-                              <Text style={styles.forecastLabel}>{t('stats.forecastExpense')}</Text>
-                              <Text style={[styles.forecastValue, { color: COLORS.danger }]}>
-                                {expenseForecast.forecast[0].predicted_amount.toFixed(0)} €
-                              </Text>
-                              <Text style={styles.forecastTrend}>
-                                {expenseForecast.trend === 'increasing' ? '📈' : expenseForecast.trend === 'decreasing' ? '📉' : '➖'}
-                                {' '}{expenseForecast.trend_percent > 0 ? '+' : ''}{expenseForecast.trend_percent}%
-                              </Text>
-                            </>
-                          )}
-                        </View>
-                      )}
-                    </View>
-
-                    {(revenueForecast?.trend === 'insufficient_data' || expenseForecast?.trend === 'insufficient_data') && (
-                      <Text style={styles.forecastHint}>{t('stats.forecastInsufficientData')}</Text>
-                    )}
-                  </View>
+                  <ForecastCard
+                    revenueForecast={revenueForecast}
+                    expenseForecast={expenseForecast}
+                    forecastRangeDays={forecastRangeDays}
+                    onChangeRangeDays={setForecastRangeDays}
+                  />
                 )}
 
                 {/* ROI Trend - owner or a delegated view_personal_investments
@@ -1867,83 +1618,15 @@ export default function StatsScreen() {
                         alerts, since this is the only place the threshold/
                         mute-list settings are reachable from. */}
                     {itemStats && (
-                      <View style={styles.priceAlertsCard}>
-                        <View style={styles.priceAlertsHeader}>
-                          <Ionicons name="alert-circle" size={24} color={COLORS.danger} />
-                          <Text style={styles.priceAlertsTitle}>{t('stats.priceAlerts')}</Text>
-                          {unreadAlerts > 0 && (
-                            <View style={styles.alertCountBadge}>
-                              <Text style={styles.alertCountText}>{unreadAlerts}</Text>
-                            </View>
-                          )}
-                          <TouchableOpacity
-                            onPress={openAlertSettings}
-                            style={styles.alertSettingsBtn}
-                            accessibilityLabel={t('priceAlertSettings.title')}
-                          >
-                            <Ionicons name="settings-outline" size={18} color={COLORS.textMuted} />
-                          </TouchableOpacity>
-                        </View>
-
-                        {priceAlerts.filter(a => a.status !== 'dismissed').length === 0 ? (
-                          <Text style={styles.alertsEmptyText}>{t('stats.priceAlertsEmpty')}</Text>
-                        ) : priceAlerts.filter(a => a.status !== 'dismissed').slice(0, 5).map((alert) => {
-                          const isDecrease = alert.direction === 'decrease';
-                          return (
-                          <View
-                            key={alert.id}
-                            style={[styles.alertItem, alert.status === 'unread' && styles.alertItemUnread]}
-                          >
-                            <View style={styles.alertInfo}>
-                              <Text style={styles.alertItemName} numberOfLines={1}>{alert.item_name}</Text>
-                              <Text style={styles.alertSupplier}>
-                                {alert.supplier} · {t('priceAlertPopup.invoiceRef').replace('{number}', alert.invoice_number)}
-                              </Text>
-                              <View style={styles.alertPrices}>
-                                <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
-                                <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
-                                <Text style={[styles.alertNewPrice, isDecrease && { color: COLORS.success }]}>{alert.new_price.toFixed(2)}€</Text>
-                                <View style={[styles.alertChangeBadge, isDecrease && { backgroundColor: '#22C55E20' }]}>
-                                  <Text style={[styles.alertChangeText, isDecrease && { color: COLORS.success }]}>
-                                    {alert.change_percent > 0 ? '+' : ''}{alert.change_percent}%
-                                  </Text>
-                                </View>
-                              </View>
-                              <Text style={styles.alertBasisText}>
-                                {(alert.baseline_purchase_count || 1) > 1
-                                  ? t('priceAlertPopup.basisMultiple').replace('{count}', String(alert.baseline_purchase_count))
-                                  : t('priceAlertPopup.basisSingle')}
-                              </Text>
-                              <View style={styles.alertRowLinks}>
-                                <TouchableOpacity onPress={() => viewAlertInvoice(alert)} style={styles.alertRowLinkBtn}>
-                                  <Ionicons name="document-text-outline" size={12} color={COLORS.primary} />
-                                  <Text style={styles.alertRowLinkText}>{t('priceAlertPopup.viewInvoice')}</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={() => muteAlertItem(alert)} style={styles.alertRowLinkBtn}>
-                                  <Ionicons name="notifications-off-outline" size={12} color={COLORS.textMuted} />
-                                  <Text style={styles.alertRowLinkTextMuted}>{t('priceAlertPopup.muteItem')}</Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                            <View style={styles.alertActions}>
-                              {alert.status === 'unread' && (
-                                <TouchableOpacity
-                                  style={styles.alertActionBtn}
-                                  onPress={() => markAlertAsRead(alert.id)}
-                                >
-                                  <Ionicons name="checkmark" size={18} color={COLORS.success} />
-                                </TouchableOpacity>
-                              )}
-                              <TouchableOpacity
-                                style={styles.alertActionBtn}
-                                onPress={() => dismissAlert(alert.id)}
-                              >
-                                <Ionicons name="close" size={18} color={COLORS.danger} />
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        );})}
-                      </View>
+                      <PriceAlertsCard
+                        priceAlerts={priceAlerts}
+                        unreadAlerts={unreadAlerts}
+                        onOpenSettings={openAlertSettings}
+                        onViewInvoice={viewAlertInvoice}
+                        onMute={muteAlertItem}
+                        onMarkRead={markAlertAsRead}
+                        onDismiss={dismissAlert}
+                      />
                     )}
 
                     {/* Item Totals */}
@@ -1970,98 +1653,17 @@ export default function StatsScreen() {
                     {/* Reorder nudges - a pattern in purchase timing
                         noticed from data already captured by scanning,
                         not inventory/stock tracking. */}
-                    {reorderNudges.length > 0 && (
-                      <View style={styles.inflationCard}>
-                        <View style={styles.priceAlertsHeader}>
-                          <Ionicons name="repeat" size={24} color={COLORS.warning} />
-                          <Text style={styles.inflationTitle}>{t('stats.reorderNudgesTitle')}</Text>
-                        </View>
-                        <View style={{ gap: 8 }}>
-                          {reorderNudges.map((n, idx) => (
-                            <Text key={idx} style={styles.forecastHint}>
-                              {t('stats.reorderNudgeLine')
-                                .replace('{item}', n.item_name)
-                                .replace('{supplier}', n.supplier)
-                                .replace('{median}', String(n.median_days_between))
-                                .replace('{daysSince}', String(n.days_since_last))}
-                            </Text>
-                          ))}
-                        </View>
-                      </View>
-                    )}
+                    <ReorderNudgesCard nudges={reorderNudges} />
 
                     {/* Price Inflation Card */}
-                    <View style={styles.inflationCard}>
-                      <View style={styles.priceAlertsHeader}>
-                        <Ionicons name="analytics" size={24} color={COLORS.warning} />
-                        <Text style={styles.inflationTitle}>{t('stats.priceInflation')}</Text>
-                      </View>
-
-                      <View style={styles.rankingSelector}>
-                        {(['month', 'quarter', 'year'] as const).map((p) => (
-                          <TouchableOpacity
-                            key={p}
-                            style={[styles.rankingButton, inflationPeriod === p && styles.rankingButtonActive]}
-                            onPress={() => setInflationPeriod(p)}
-                          >
-                            <Text style={[styles.rankingButtonText, inflationPeriod === p && styles.rankingButtonTextActive]}>
-                              {t(`stats.inflationPeriod.${p}`)}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-
-                      {loadingInflation ? (
-                        <ActivityIndicator size="small" color={COLORS.warning} style={{ marginVertical: 16 }} />
-                      ) : inflationData && inflationData.items_compared > 0 ? (
-                        <>
-                          <View style={styles.inflationHeadline}>
-                            <Text style={[
-                              styles.inflationHeadlineValue,
-                              { color: inflationData.overall_change_percent > 0 ? COLORS.danger : inflationData.overall_change_percent < 0 ? COLORS.success : COLORS.textSecondary }
-                            ]}>
-                              {inflationData.overall_change_percent > 0 ? '+' : ''}{inflationData.overall_change_percent}%
-                            </Text>
-                            <Text style={styles.inflationHeadlineLabel}>
-                              {t('stats.inflationHeadline')} ({inflationData.items_compared} {t('stats.inflationItemsCompared')})
-                            </Text>
-                          </View>
-
-                          <TouchableOpacity
-                            style={styles.inflationToggle}
-                            onPress={() => setInflationExpanded(!inflationExpanded)}
-                          >
-                            <Text style={styles.inflationToggleText}>
-                              {inflationExpanded ? t('stats.inflationHideDetails') : t('stats.inflationShowDetails')}
-                            </Text>
-                            <Ionicons name={inflationExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.warning} />
-                          </TouchableOpacity>
-
-                          {inflationExpanded && inflationData.items.map((item: any) => (
-                            <View key={item.item_name} style={styles.alertItem}>
-                              <View style={styles.alertInfo}>
-                                <Text style={styles.alertItemName} numberOfLines={1}>{item.item_name}</Text>
-                                <Text style={styles.alertSupplier}>{item.supplier} • {item.purchase_count}x</Text>
-                                <View style={styles.alertPrices}>
-                                  <Text style={styles.alertOldPrice}>{item.start_price.toFixed(2)}€</Text>
-                                  <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
-                                  <Text style={[styles.alertNewPrice, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>
-                                    {item.end_price.toFixed(2)}€
-                                  </Text>
-                                  <View style={[styles.alertChangeBadge, { backgroundColor: item.change_percent >= 0 ? '#EF444420' : '#10B98120' }]}>
-                                    <Text style={[styles.alertChangeText, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>
-                                      {item.change_percent > 0 ? '+' : ''}{item.change_percent}%
-                                    </Text>
-                                  </View>
-                                </View>
-                              </View>
-                            </View>
-                          ))}
-                        </>
-                      ) : (
-                        <Text style={styles.inflationNoData}>{t('stats.inflationNoData')}</Text>
-                      )}
-                    </View>
+                    <PriceInflationCard
+                      inflationData={inflationData}
+                      inflationPeriod={inflationPeriod}
+                      onChangePeriod={setInflationPeriod}
+                      loadingInflation={loadingInflation}
+                      inflationExpanded={inflationExpanded}
+                      onToggleExpanded={() => setInflationExpanded(!inflationExpanded)}
+                    />
 
                     {/* Ranking Type Selector */}
                     <View style={styles.rankingSelector}>
@@ -2198,10 +1800,24 @@ export default function StatsScreen() {
       {renderSupplierDetailModal()}
 
       {/* Supplier Compare Modal */}
-      {renderCompareModal()}
+      <SupplierCompareModal
+        visible={compareModalVisible}
+        onClose={closeCompareModal}
+        loadingCompare={loadingCompare}
+        compareResult={compareResult}
+      />
 
       {/* Price Alert Settings Modal */}
-      {renderAlertSettingsModal()}
+      <AlertSettingsModal
+        visible={alertSettingsModalVisible}
+        onClose={() => setAlertSettingsModalVisible(false)}
+        alertSettings={alertSettings}
+        onChangeSettings={setAlertSettings}
+        alertMutes={alertMutes}
+        savingAlertSettings={savingAlertSettings}
+        onSave={saveAlertSettings}
+        onUnmute={unmuteItem}
+      />
 
       {/* Item Detail Modal */}
       <Modal
@@ -2672,45 +2288,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'white',
   },
-  forecastSection: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 16,
-  },
-  forecastHint: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: -4,
-    marginBottom: 12,
-  },
-  forecastRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  forecastCard: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-  },
-  forecastLabel: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  forecastValue: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    marginTop: 4,
-  },
-  forecastTrend: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-  },
   tabSelector: {
     flexDirection: 'row',
     backgroundColor: COLORS.surface,
@@ -3009,60 +2586,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 15,
     fontWeight: '700',
-  },
-  compareCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-  },
-  compareSupplierName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: 'white',
-    marginBottom: 10,
-  },
-  compareBarRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  compareBarLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  compareBarValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'white',
-  },
-  compareBarTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.background,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  compareBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  compareStatsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  compareStatItem: {
-    alignItems: 'center',
-  },
-  compareStatLabel: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginBottom: 2,
-  },
-  compareStatValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
   },
   supplierItem: {
     flexDirection: 'row',
@@ -3395,255 +2918,8 @@ const styles = StyleSheet.create({
   },
   
   // Price Alerts Card
-  priceAlertsCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.danger,
-  },
-  priceAlertsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
-  priceAlertsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.danger,
-    flex: 1,
-  },
-  alertCountBadge: {
-    backgroundColor: COLORS.danger,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  alertCountText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  alertItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
-  },
-  alertItemUnread: {
-    borderLeftWidth: 3,
-    borderLeftColor: COLORS.danger,
-  },
-  alertInfo: {
-    flex: 1,
-  },
-  alertItemName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-  },
-  alertSupplier: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  alertPrices: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-  },
-  alertOldPrice: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    textDecorationLine: 'line-through',
-  },
-  alertNewPrice: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: COLORS.danger,
-  },
-  alertChangeBadge: {
-    backgroundColor: '#EF444420',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  alertChangeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: COLORS.danger,
-  },
-  alertActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  alertActionBtn: {
-    padding: 8,
-    backgroundColor: COLORS.surface,
-    borderRadius: 8,
-  },
-  alertSettingsBtn: {
-    padding: 4,
-  },
-  alertsEmptyText: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    paddingVertical: 12,
-  },
-  alertBasisText: {
-    fontSize: 10,
-    color: COLORS.textMuted,
-    marginTop: 4,
-  },
-  alertRowLinks: {
-    flexDirection: 'row',
-    gap: 14,
-    marginTop: 6,
-  },
-  alertRowLinkBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  alertRowLinkText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.primary,
-  },
-  alertRowLinkTextMuted: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-  },
-
-  // Price Alert Settings Modal
-  alertSettingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-    gap: 12,
-  },
-  alertSettingsField: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-  },
-  alertSettingsLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-  },
-  alertSettingsHint: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  alertSettingsInput: {
-    marginTop: 10,
-    backgroundColor: COLORS.background,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: 'white',
-    fontSize: 15,
-  },
-  alertSettingsSaveBtn: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  alertSettingsSaveBtnText: {
-    color: 'white',
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  alertSettingsDivider: {
-    height: 1,
-    backgroundColor: COLORS.border,
-    marginVertical: 20,
-  },
-  mutedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 8,
-    gap: 8,
-  },
-  mutedUnmuteBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: COLORS.background,
-  },
-  mutedUnmuteBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.primary,
-  },
 
   // Price Inflation Card
-  inflationCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.warning,
-  },
-  inflationTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.warning,
-    flex: 1,
-  },
-  inflationHeadline: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  inflationHeadlineValue: {
-    fontSize: 36,
-    fontWeight: 'bold',
-  },
-  inflationHeadlineLabel: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  inflationToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-  },
-  inflationToggleText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.warning,
-  },
-  inflationNoData: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
 
   // Item Trend Badge
   itemTrendBadge: {
