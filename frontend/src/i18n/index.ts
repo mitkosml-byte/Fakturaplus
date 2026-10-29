@@ -371,6 +371,106 @@ export const translations: Translations = {
     bg: 'История на В канала',
     en: 'Off-book expenses history',
   },
+  'receivables.title': {
+    bg: 'Кой ми дължи',
+    en: 'Who owes me',
+  },
+  'receivables.add': {
+    bg: 'Добави',
+    en: 'Add',
+  },
+  'receivables.addNew': {
+    bg: 'Нов запис',
+    en: 'New entry',
+  },
+  'receivables.editTitle': {
+    bg: 'Редактирай записа',
+    en: 'Edit entry',
+  },
+  'receivables.filterAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'receivables.filterUnpaid': {
+    bg: 'Неплатени',
+    en: 'Unpaid',
+  },
+  'receivables.filterOverdue': {
+    bg: 'Просрочени',
+    en: 'Overdue',
+  },
+  'receivables.filterPaid': {
+    bg: 'Платени',
+    en: 'Paid',
+  },
+  'receivables.totalOwed': {
+    bg: 'Дължимо общо',
+    en: 'Total owed',
+  },
+  'receivables.overdueCount': {
+    bg: 'Просрочени',
+    en: 'Overdue',
+  },
+  'receivables.customerName': {
+    bg: 'Клиент',
+    en: 'Customer',
+  },
+  'receivables.customerNamePlaceholder': {
+    bg: 'Име на клиента',
+    en: "Customer's name",
+  },
+  'receivables.amount': {
+    bg: 'Сума',
+    en: 'Amount',
+  },
+  'receivables.description': {
+    bg: 'Описание',
+    en: 'Description',
+  },
+  'receivables.descriptionPlaceholder': {
+    bg: 'За какво е (незадължително)',
+    en: 'What it was for (optional)',
+  },
+  'receivables.dueDate': {
+    bg: 'Падеж',
+    en: 'Due date',
+  },
+  'receivables.noDueDate': {
+    bg: 'Без падеж',
+    en: 'No due date',
+  },
+  'receivables.dueLabel': {
+    bg: 'Падеж',
+    en: 'Due',
+  },
+  'receivables.paidLabel': {
+    bg: 'Платено',
+    en: 'Paid',
+  },
+  'receivables.empty': {
+    bg: 'Няма записи - добави първия с бутона горе',
+    en: 'No entries yet - add the first one above',
+  },
+  'receivables.saved': {
+    bg: 'Записът е добавен',
+    en: 'Entry saved',
+  },
+  'receivables.updated': {
+    bg: 'Записът е обновен',
+    en: 'Entry updated',
+  },
+  'receivables.markedPaid': {
+    bg: 'Отбелязано като платено',
+    en: 'Marked as paid',
+  },
+  'receivables.deleted': {
+    bg: 'Записът е изтрит',
+    en: 'Entry deleted',
+  },
+  'receivables.deleteConfirm': {
+    bg: 'Да изтрия ли този запис?',
+    en: 'Delete this entry?',
+  },
   'expenses.searchPlaceholder': {
     bg: 'Търси по описание...',
     en: 'Search by description...',
@@ -3523,6 +3623,7 @@ export const translations: Translations = {
   'payroll.totalCostThisMonth': { bg: 'Общ разход за персонал този месец', en: 'Total staff cost this month' },
 
   'profile.assetsDesc': { bg: 'Регистър на дълготрайните активи и амортизации', en: 'Fixed assets register and depreciation' },
+  'profile.receivablesDesc': { bg: 'Кой колко ти дължи и от кога', en: 'Who owes you how much, and since when' },
   'assets.title': { bg: 'Дълготрайни активи (ДМА)', en: 'Fixed assets' },
   'assets.depreciationThisMonth': { bg: 'Амортизации за месеца', en: 'Depreciation this month' },
   'assets.netBookValue': { bg: 'Балансова стойност', en: 'Net book value' },

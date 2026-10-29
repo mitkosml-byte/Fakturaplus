@@ -142,6 +142,32 @@ export interface NonInvoiceExpense {
   created_at: string;
 }
 
+export interface Customer {
+  id: string;
+  company_id: string | null;
+  user_id: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  notes?: string | null;
+  created_at: string;
+}
+
+export interface Receivable {
+  id: string;
+  company_id: string | null;
+  user_id: string;
+  customer_id?: string | null;
+  customer_name: string;
+  description?: string | null;
+  amount: number;
+  due_date?: string | null;
+  is_paid: boolean;
+  paid_amount: number;
+  paid_at?: string | null;
+  created_at: string;
+}
+
 export interface OCRItemResult {
   name: string;
   quantity: number;

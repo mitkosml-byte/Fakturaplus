@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -491,6 +491,49 @@ class ApiService {
 
   async deleteExpense(id: string): Promise<void> {
     await this.fetch(`/expenses/${id}`, { method: 'DELETE' });
+  }
+
+  // Customers (lightweight - see Customer type's own note)
+  async createCustomer(customer: { name: string; phone?: string; email?: string; notes?: string }): Promise<Customer> {
+    return this.fetch('/customers', { method: 'POST', body: JSON.stringify(customer) });
+  }
+
+  async getCustomers(search?: string): Promise<Customer[]> {
+    return this.fetch(`/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+  }
+
+  async updateCustomer(id: string, update: Partial<{ name: string; phone: string; email: string; notes: string }>): Promise<Customer> {
+    return this.fetch(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteCustomer(id: string): Promise<void> {
+    await this.fetch(`/customers/${id}`, { method: 'DELETE' });
+  }
+
+  // Receivables ("who owes me") - mirrors the unpaid/overdue invoice
+  // (payables) pattern already used for what the business owes suppliers.
+  async createReceivable(receivable: {
+    customer_id?: string; customer_name: string; description?: string; amount: number; due_date?: string;
+  }): Promise<Receivable> {
+    return this.fetch('/receivables', { method: 'POST', body: JSON.stringify(receivable) });
+  }
+
+  async getReceivables(status?: 'unpaid' | 'overdue' | 'paid'): Promise<Receivable[]> {
+    return this.fetch(`/receivables${status ? `?status=${status}` : ''}`);
+  }
+
+  async getReceivablesSummary(): Promise<{ total_owed: number; unpaid_count: number; total_overdue: number; overdue_count: number }> {
+    return this.fetch('/receivables/summary');
+  }
+
+  async updateReceivable(id: string, update: Partial<{
+    customer_name: string; description: string; amount: number; due_date: string; is_paid: boolean; paid_amount: number;
+  }>): Promise<Receivable> {
+    return this.fetch(`/receivables/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteReceivable(id: string): Promise<void> {
+    await this.fetch(`/receivables/${id}`, { method: 'DELETE' });
   }
 
   // Statistics

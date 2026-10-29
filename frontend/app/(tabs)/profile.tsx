@@ -335,6 +335,17 @@ export default function ProfileScreen() {
               onPress: () => router.push('/assets'),
             }]
           : []),
+        ...(hasPermission('add_revenue')
+          ? [{
+              key: 'receivables',
+              title: t('receivables.title'),
+              subtitle: t('profile.receivablesDesc'),
+              icon: 'cash' as const,
+              iconBg: 'rgba(16, 185, 129, 0.15)',
+              iconColor: COLORS.success,
+              onPress: () => router.push('/receivables'),
+            }]
+          : []),
         ...(hasPermission('view_statistics')
           ? [{
               key: 'protocols',

@@ -105,6 +105,101 @@ def test_daily_revenue(client):
     assert r.status_code == 200
 
 
+def test_customers_and_receivables(client):
+    """Module 7 Finding #2: the mirror image of payables (what the
+    business owes suppliers, already covered by test_invoices'
+    payment_status filters) - what customers owe the business."""
+    owner = h(STATE["owner_token"])
+
+    r = client.post("/api/customers", headers=owner, json={"name": "Иван Иванов", "phone": "0888123456"})
+    assert r.status_code == 200, r.text
+    customer_id = r.json()["id"]
+
+    r = client.get("/api/customers?search=Иван", headers=owner)
+    assert r.status_code == 200 and len(r.json()) == 1
+
+    r = client.put(f"/api/customers/{customer_id}", headers=owner, json={"email": "ivan@test.com"})
+    assert r.status_code == 200 and r.json()["email"] == "ivan@test.com"
+
+    # A receivable doesn't require a Customer record - customer_name alone
+    # is enough (the "lightweight, never a CRM" boundary from the audit).
+    r = client.post("/api/receivables", headers=owner, json={
+        "customer_name": "Петър Петров (без запис)", "amount": 150, "due_date": "2020-01-01",
+    })
+    assert r.status_code == 200, r.text
+    overdue_id = r.json()["id"]
+
+    r = client.post("/api/receivables", headers=owner, json={
+        "customer_id": customer_id, "customer_name": "Иван Иванов", "amount": 80, "due_date": "2099-01-01",
+    })
+    assert r.status_code == 200
+    not_due_id = r.json()["id"]
+
+    # Validation: amount must be positive.
+    r = client.post("/api/receivables", headers=owner, json={"customer_name": "x", "amount": 0})
+    assert r.status_code == 422
+
+    r = client.get("/api/receivables?status=overdue", headers=owner)
+    assert r.status_code == 200
+    overdue_ids = {x["id"] for x in r.json()}
+    assert overdue_id in overdue_ids and not_due_id not in overdue_ids
+
+    r = client.get("/api/receivables/summary", headers=owner)
+    assert r.status_code == 200
+    summary = r.json()
+    assert summary["total_owed"] == 230 and summary["unpaid_count"] == 2
+    assert summary["total_overdue"] == 150 and summary["overdue_count"] == 1
+
+    # Marking paid stamps paid_at/paid_amount and drops it out of the
+    # overdue/unpaid totals.
+    r = client.put(f"/api/receivables/{overdue_id}", headers=owner, json={"is_paid": True})
+    assert r.status_code == 200
+    assert r.json()["is_paid"] is True and r.json()["paid_amount"] == 150 and r.json()["paid_at"] is not None
+
+    r = client.get("/api/receivables/summary", headers=owner)
+    assert r.json()["total_owed"] == 80 and r.json()["overdue_count"] == 0
+
+    r = client.delete(f"/api/receivables/{not_due_id}", headers=owner)
+    assert r.status_code == 200
+    r = client.delete(f"/api/customers/{customer_id}", headers=owner)
+    assert r.status_code == 200
+
+    # A staff member without add_revenue must be refused - created
+    # directly against the DB (same shortcut other tests in this module
+    # use for an extra user) rather than through the rate-limited
+    # register/invite/accept flow, which is already exercised elsewhere.
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+
+    no_revenue_staff_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    no_revenue_staff_token = uuid_module.uuid4().hex
+
+    async def _make_no_revenue_staff():
+        me = client.get("/api/auth/me", headers=owner).json()
+        await server_module.db.users.insert_one({
+            "user_id": no_revenue_staff_id, "email": f"{no_revenue_staff_id}@test.com", "name": "No Revenue Staff",
+            # A non-empty list that excludes add_revenue - an EMPTY list is
+            # treated by sanitize_user as "never configured" and silently
+            # backfilled to the role's default set, which would defeat
+            # this exact check.
+            "role": "staff", "company_id": me["company_id"], "permissions": ["view_statistics"],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": no_revenue_staff_id, "session_token": no_revenue_staff_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+
+    asyncio.run(_make_no_revenue_staff())
+    r = client.post("/api/customers", headers=h(no_revenue_staff_token), json={"name": "x"})
+    assert r.status_code == 403
+
+
 def test_expenses(client):
     owner = h(STATE["owner_token"])
     r = client.post("/api/expenses", headers=owner, json={"description": "Гориво", "amount": 50, "date": "2026-09-10"})

@@ -3915,6 +3915,178 @@ async def get_daily_revenues(
             r["pocket_money"] = 0
     return [DailyRevenue(**r) for r in revenues]
 
+# ===================== CUSTOMERS & RECEIVABLES (Module 7 Finding #2) =====
+
+class Customer(BaseModel):
+    """Deliberately lightweight - a name and a way to reach them, never a
+    CRM. Exists only so a receivable can say "this customer" without
+    re-typing their contact details every time; see the Module 7 audit
+    decision this was built from."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: Optional[str] = None
+    user_id: str
+    name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class CustomerCreate(BaseModel):
+    name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+
+class Receivable(BaseModel):
+    """The mirror image of an unpaid bank-transfer invoice (what the
+    business owes suppliers) - what a customer owes the business.
+    customer_name is always present and denormalized (typed freely or
+    copied from a Customer) so recording one never requires creating a
+    Customer record first."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: Optional[str] = None
+    user_id: str
+    customer_id: Optional[str] = None
+    customer_name: str
+    description: Optional[str] = None
+    amount: float
+    due_date: Optional[str] = None  # "YYYY-MM-DD"
+    is_paid: bool = False
+    paid_amount: float = 0
+    paid_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ReceivableCreate(BaseModel):
+    customer_id: Optional[str] = None
+    customer_name: str
+    description: Optional[str] = None
+    amount: float = Field(gt=0)
+    due_date: Optional[str] = None
+
+class ReceivableUpdate(BaseModel):
+    customer_name: Optional[str] = None
+    description: Optional[str] = None
+    amount: Optional[float] = Field(default=None, gt=0)
+    due_date: Optional[str] = None
+    is_paid: Optional[bool] = None
+    paid_amount: Optional[float] = Field(default=None, ge=0)
+
+@api_router.post("/customers", response_model=Customer)
+async def create_customer(payload: CustomerCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    company_id, _ = await get_company_scope(current_user)
+    customer = Customer(user_id=current_user.user_id, company_id=company_id, **payload.dict())
+    await db.customers.insert_one(customer.dict())
+    return customer
+
+@api_router.get("/customers", response_model=List[Customer])
+async def get_customers(search: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, query = await get_company_scope(current_user)
+    if search:
+        query["name"] = {"$regex": re.escape(search), "$options": "i"}
+    customers = await db.customers.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    return [Customer(**c) for c in customers]
+
+@api_router.put("/customers/{customer_id}", response_model=Customer)
+async def update_customer(customer_id: str, payload: CustomerUpdate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    update_data = {k: v for k, v in payload.dict().items() if v is not None}
+    if update_data:
+        result = await db.customers.update_one({"id": customer_id, **scope}, {"$set": update_data})
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Клиентът не е намерен")
+    customer = await db.customers.find_one({"id": customer_id, **scope}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Клиентът не е намерен")
+    return Customer(**customer)
+
+@api_router.delete("/customers/{customer_id}")
+async def delete_customer(customer_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    result = await db.customers.delete_one({"id": customer_id, **scope})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Клиентът не е намерен")
+    return {"message": "Клиентът е изтрит"}
+
+@api_router.post("/receivables", response_model=Receivable)
+async def create_receivable(payload: ReceivableCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    company_id, _ = await get_company_scope(current_user)
+    receivable = Receivable(user_id=current_user.user_id, company_id=company_id, **payload.dict())
+    await db.receivables.insert_one(receivable.dict())
+    return receivable
+
+@api_router.get("/receivables", response_model=List[Receivable])
+async def get_receivables(
+    status: Optional[str] = None,  # unpaid | overdue | paid
+    current_user: User = Depends(get_current_user),
+):
+    require_permission(current_user, "add_revenue")
+    _, query = await get_company_scope(current_user)
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if status == "paid":
+        query["is_paid"] = True
+    elif status == "unpaid":
+        query["is_paid"] = False
+    elif status == "overdue":
+        query["is_paid"] = False
+        query["due_date"] = {"$ne": None, "$lt": now_str}
+    # Unlike invoices' period filter, overdue/unpaid receivables are
+    # always shown regardless of when they were created - a receivable
+    # from two months ago that's still unpaid is still owed today.
+    receivables = await db.receivables.find(query, {"_id": 0}).sort("due_date", 1).to_list(1000)
+    return [Receivable(**r) for r in receivables]
+
+@api_router.get("/receivables/summary")
+async def get_receivables_summary(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, query = await get_company_scope(current_user)
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    unpaid = await db.receivables.find({**query, "is_paid": False}, {"_id": 0, "amount": 1, "due_date": 1}).to_list(10000)
+    total_owed = sum(r.get("amount", 0) for r in unpaid)
+    overdue = [r for r in unpaid if r.get("due_date") and r["due_date"] < now_str]
+    total_overdue = sum(r.get("amount", 0) for r in overdue)
+    return {
+        "total_owed": round(total_owed, 2),
+        "unpaid_count": len(unpaid),
+        "total_overdue": round(total_overdue, 2),
+        "overdue_count": len(overdue),
+    }
+
+@api_router.put("/receivables/{receivable_id}", response_model=Receivable)
+async def update_receivable(receivable_id: str, payload: ReceivableUpdate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    existing = await db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+
+    update_data = {k: v for k, v in payload.dict(exclude_unset=True).items() if v is not None}
+    if update_data.get("is_paid") is True and not existing.get("is_paid"):
+        update_data["paid_at"] = datetime.now(timezone.utc)
+        update_data.setdefault("paid_amount", existing.get("amount", 0))
+    await db.receivables.update_one({"id": receivable_id, **scope}, {"$set": update_data})
+    receivable = await db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
+    return Receivable(**receivable)
+
+@api_router.delete("/receivables/{receivable_id}")
+async def delete_receivable(receivable_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    result = await db.receivables.delete_one({"id": receivable_id, **scope})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    return {"message": "Записът е изтрит"}
+
 # ===================== NON-INVOICE EXPENSE ENDPOINTS =====================
 
 @api_router.post("/expenses", response_model=NonInvoiceExpense)
@@ -8908,6 +9080,10 @@ async def create_indexes():
         # (mounted in app/_layout.tsx), so this one matters more than its
         # small row size suggests.
         await db.price_alerts.create_index([("company_id", 1), ("status", 1), ("created_at", -1)])
+
+        # Customers & receivables
+        await db.customers.create_index([("company_id", 1), ("name", 1)])
+        await db.receivables.create_index([("company_id", 1), ("is_paid", 1), ("due_date", 1)])
         
         # Users indexes
         await db.users.create_index([("email", 1)], unique=True, sparse=True)
