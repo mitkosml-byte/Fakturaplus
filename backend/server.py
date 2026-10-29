@@ -6424,6 +6424,71 @@ async def get_item_by_supplier(
         "recommendation": recommendation
     }
 
+@api_router.get("/items/reorder-nudges")
+async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
+    """Module 5 audit finding: scanned purchase history already encodes a
+    recurring item's typical reorder cadence - the gap between consecutive
+    invoice_dates for the same item/supplier, entirely derivable from data
+    already captured by scanning invoices. Deliberately NOT stock/
+    inventory tracking (no on-hand quantities, no "run out at X units"
+    math) - it only notices a pattern in purchase timing and asks the
+    question a human assistant would: "it's been longer than usual since
+    you last bought X - still good on it?" """
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"nudges": []}
+
+    from collections import defaultdict
+
+    records = await db.item_price_history.find(
+        {"company_id": company_id}, {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1}
+    ).to_list(10000)
+
+    groups = defaultdict(list)
+    for r in records:
+        date = r.get("invoice_date")
+        if isinstance(date, datetime):
+            groups[(r["item_name"], r["supplier"])].append(date)
+
+    now = datetime.now(timezone.utc)
+    nudges = []
+    # Needs at least 4 purchases to call anything a "usual" cadence -
+    # same minimum-sample-size reasoning as ForecastService's trend gate.
+    MIN_PURCHASES_FOR_CADENCE = 4
+    for (item_name, supplier), dates in groups.items():
+        if len(dates) < MIN_PURCHASES_FOR_CADENCE:
+            continue
+        dates_sorted = sorted(d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d for d in dates)
+        gaps = [(dates_sorted[i + 1] - dates_sorted[i]).days for i in range(len(dates_sorted) - 1)]
+        if any(g <= 0 for g in gaps):
+            continue
+        median_gap = statistics.median(gaps)
+        mean_gap = statistics.mean(gaps)
+        if median_gap <= 0 or mean_gap <= 0:
+            continue
+        # Coefficient of variation - too irregular a pattern (a one-off
+        # bulk order mixed with ad-hoc purchases) isn't a "usual" cadence
+        # worth nudging about, even with enough purchase COUNT.
+        stdev_gap = statistics.stdev(gaps) if len(gaps) > 1 else 0
+        if (stdev_gap / mean_gap) > 0.6:
+            continue
+
+        last_date = dates_sorted[-1]
+        days_since_last = (now - last_date).days
+        if days_since_last > median_gap * 1.5:
+            nudges.append({
+                "item_name": item_name,
+                "supplier": supplier,
+                "median_days_between": round(median_gap),
+                "days_since_last": days_since_last,
+                "last_purchase_date": last_date.strftime("%Y-%m-%d"),
+            })
+
+    # Most overdue relative to its own usual cadence first.
+    nudges.sort(key=lambda n: n["days_since_last"] - n["median_days_between"], reverse=True)
+    return {"nudges": nudges[:10]}
+
 # ===================== AI ITEM MERGING =====================
 
 class ItemMergeGroup(BaseModel):

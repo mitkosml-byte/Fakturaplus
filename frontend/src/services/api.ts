@@ -783,6 +783,12 @@ class ApiService {
     return this.fetch(`/statistics/items${query ? `?${query}` : ''}`);
   }
 
+  async getReorderNudges(): Promise<{
+    nudges: { item_name: string; supplier: string; median_days_between: number; days_since_last: number; last_purchase_date: string }[];
+  }> {
+    return this.fetch('/items/reorder-nudges');
+  }
+
   async getItemBySupplier(itemName: string): Promise<{
     item_name: string;
     suppliers: any[];

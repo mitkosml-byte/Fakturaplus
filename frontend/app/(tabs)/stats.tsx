@@ -133,6 +133,7 @@ export default function StatsScreen() {
   const [previousSummary, setPreviousSummary] = useState<Summary | null>(null);
   const [topSuppliers, setTopSuppliers] = useState<SupplierStats[]>([]);
   const [topItems, setTopItems] = useState<any[]>([]);
+  const [reorderNudges, setReorderNudges] = useState<Awaited<ReturnType<typeof api.getReorderNudges>>['nudges']>([]);
   const [expenseForecast, setExpenseForecast] = useState<any>(null);
   const [revenueForecast, setRevenueForecast] = useState<any>(null);
   const [roiTrend, setRoiTrend] = useState<any[]>([]);
@@ -164,12 +165,14 @@ export default function StatsScreen() {
 
     if (hasPermission('view_statistics')) {
       try {
-        const [supplierData, itemData] = await Promise.all([
+        const [supplierData, itemData, nudgesData] = await Promise.all([
           api.getSupplierOverview(),
           api.getItemStatistics({ top_n: 3 }),
+          api.getReorderNudges(),
         ]);
         setTopSuppliers((supplierData.top_by_amount || []).slice(0, 3));
         setTopItems(itemData.top_by_value || []);
+        setReorderNudges(nudgesData.nudges || []);
       } catch (error) {
         console.error('Error loading top suppliers/items:', error);
       }
@@ -1960,6 +1963,29 @@ export default function StatsScreen() {
                             </Text>
                             <Text style={styles.supplierTotalLabel}>{t('stats.totalValue')}</Text>
                           </View>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Reorder nudges - a pattern in purchase timing
+                        noticed from data already captured by scanning,
+                        not inventory/stock tracking. */}
+                    {reorderNudges.length > 0 && (
+                      <View style={styles.inflationCard}>
+                        <View style={styles.priceAlertsHeader}>
+                          <Ionicons name="repeat" size={24} color={COLORS.warning} />
+                          <Text style={styles.inflationTitle}>{t('stats.reorderNudgesTitle')}</Text>
+                        </View>
+                        <View style={{ gap: 8 }}>
+                          {reorderNudges.map((n, idx) => (
+                            <Text key={idx} style={styles.forecastHint}>
+                              {t('stats.reorderNudgeLine')
+                                .replace('{item}', n.item_name)
+                                .replace('{supplier}', n.supplier)
+                                .replace('{median}', String(n.median_days_between))
+                                .replace('{daysSince}', String(n.days_since_last))}
+                            </Text>
+                          ))}
                         </View>
                       </View>
                     )}

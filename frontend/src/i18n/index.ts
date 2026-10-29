@@ -2463,6 +2463,14 @@ export const translations: Translations = {
     bg: 'Обща инфлация на цените',
     en: 'Overall Price Inflation',
   },
+  'stats.reorderNudgesTitle': {
+    bg: 'Може би е време да поръчаш пак',
+    en: 'Might be time to reorder',
+  },
+  'stats.reorderNudgeLine': {
+    bg: '{item} ({supplier}) - обикновено на всеки {median} дни, последно преди {daysSince} дни',
+    en: '{item} ({supplier}) - usually every {median} days, last bought {daysSince} days ago',
+  },
   'stats.inflationPeriod.month': {
     bg: 'Месец',
     en: 'Month',
