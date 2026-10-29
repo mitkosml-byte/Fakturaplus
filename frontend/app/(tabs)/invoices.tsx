@@ -31,6 +31,9 @@ import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { ScanCreditsBadge, Expandable, PressableScale, CountUp, SkeletonRow, AnimatedEmptyIcon } from '../../src/components';
+import { ExportFormatModal } from '../../src/components/invoices/ExportFormatModal';
+import { ImageViewerModal } from '../../src/components/invoices/ImageViewerModal';
+import { PaymentModal } from '../../src/components/invoices/PaymentModal';
 import { COLORS } from '../../src/theme/colors';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
 import { DURATION, EASING } from '../../src/theme/motion';
@@ -775,37 +778,11 @@ export default function InvoicesScreen() {
           )}
 
           {/* Export Modal */}
-      <Modal visible={exportModalVisible} animationType="fade" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{t('invoices.exportTitle')}</Text>
-
-            <TouchableOpacity style={styles.exportOption} onPress={() => handleExport('excel')}>
-              <View style={[styles.exportIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Ionicons name="document" size={24} color={COLORS.success} />
-              </View>
-              <View>
-                <Text style={styles.exportOptionTitle}>{t('invoices.excelTitle')}</Text>
-                <Text style={styles.exportOptionHint}>{t('invoices.excelHint')}</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.exportOption} onPress={() => handleExport('pdf')}>
-              <View style={[styles.exportIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-                <Ionicons name="document-text" size={24} color={COLORS.danger} />
-              </View>
-              <View>
-                <Text style={styles.exportOptionTitle}>PDF</Text>
-                <Text style={styles.exportOptionHint}>{t('invoices.pdfHint')}</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.cancelButton} onPress={() => setExportModalVisible(false)}>
-              <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <ExportFormatModal
+        visible={exportModalVisible}
+        onClose={() => setExportModalVisible(false)}
+        onExport={handleExport}
+      />
 
       <ExcelImportModal
         visible={importModalVisible}
@@ -1227,92 +1204,24 @@ export default function InvoicesScreen() {
 
       {/* Full-screen scanned page viewer - opened by tapping a thumbnail in
           the detail modal above. */}
-      <Modal visible={viewerPageIndex !== null} animationType="fade" transparent>
-        <View style={styles.pageViewerOverlay}>
-          <TouchableOpacity
-            style={styles.pageViewerClose}
-            onPress={() => setViewerPageIndex(null)}
-            accessibilityLabel={t('common.close')}
-          >
-            <Ionicons name="close" size={28} color="white" />
-          </TouchableOpacity>
-          {viewerPageIndex !== null && (
-            <>
-              <Image
-                source={{ uri: scannedPages[viewerPageIndex] }}
-                style={styles.pageViewerImage}
-                resizeMode="contain"
-              />
-              {scannedPages.length > 1 && (
-                <View style={styles.pageViewerNav}>
-                  <TouchableOpacity
-                    style={styles.pageViewerNavButton}
-                    disabled={viewerPageIndex === 0}
-                    onPress={() => setViewerPageIndex((i) => (i !== null ? Math.max(0, i - 1) : i))}
-                  >
-                    <Ionicons name="chevron-back" size={24} color={viewerPageIndex === 0 ? COLORS.borderLight : 'white'} />
-                  </TouchableOpacity>
-                  <Text style={styles.pageViewerNavText}>{viewerPageIndex + 1} / {scannedPages.length}</Text>
-                  <TouchableOpacity
-                    style={styles.pageViewerNavButton}
-                    disabled={viewerPageIndex === scannedPages.length - 1}
-                    onPress={() => setViewerPageIndex((i) => (i !== null ? Math.min(scannedPages.length - 1, i + 1) : i))}
-                  >
-                    <Ionicons name="chevron-forward" size={24} color={viewerPageIndex === scannedPages.length - 1 ? COLORS.borderLight : 'white'} />
-                  </TouchableOpacity>
-                </View>
-              )}
-            </>
-          )}
-        </View>
-      </Modal>
+      <ImageViewerModal
+        pages={scannedPages}
+        pageIndex={viewerPageIndex}
+        onChangeIndex={setViewerPageIndex}
+      />
 
       {/* Record/edit payment amount - edit-in-place, same convention as the
           daily-revenue form: the field shows what's already paid, and
           saving REPLACES that value rather than adding to it. */}
-      <Modal visible={paymentModalVisible} animationType="fade" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {selectedInvoice && selectedInvoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
-              </Text>
-              <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
-                <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {selectedInvoice && (
-              <>
-                <View style={styles.editNoticeBanner}>
-                  <Ionicons name="information-circle" size={18} color={COLORS.primary} />
-                  <Text style={styles.editNoticeText}>{t('invoices.paidAmountEditNotice')}</Text>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('invoices.paidAmountLabel')}</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={paymentAmountInput}
-                    onChangeText={setPaymentAmountInput}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                    placeholderTextColor={COLORS.textMuted}
-                    autoFocus
-                  />
-                  <Text style={styles.inputHint}>
-                    {t('invoices.totalAmount')}: {selectedInvoice.total_amount.toFixed(2)} €
-                  </Text>
-                </View>
-
-                <TouchableOpacity style={styles.submitButton} onPress={handleSavePaymentAmount} disabled={updatingPayment}>
-                  {updatingPayment ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      <PaymentModal
+        visible={paymentModalVisible}
+        onClose={() => setPaymentModalVisible(false)}
+        invoice={selectedInvoice}
+        amountInput={paymentAmountInput}
+        onChangeAmountInput={setPaymentAmountInput}
+        onSave={handleSavePaymentAmount}
+        saving={updatingPayment}
+      />
         </SafeAreaView>
       </View>
     </ImageBackground>
@@ -1610,13 +1519,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 24,
   },
-  modalContent: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 24,
-    padding: 24,
-    width: '100%',
-    maxWidth: 340,
-  },
   detailModalContent: {
     backgroundColor: COLORS.surface,
     borderRadius: 24,
@@ -1640,21 +1542,6 @@ const styles = StyleSheet.create({
     color: 'white',
     marginBottom: 20,
   },
-  editNoticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: 'rgba(139, 92, 246, 0.12)',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 16,
-  },
-  editNoticeText: {
-    flex: 1,
-    fontSize: 12,
-    color: COLORS.primaryLight,
-    lineHeight: 16,
-  },
   inputGroup: {
     marginBottom: 16,
   },
@@ -1672,11 +1559,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     color: 'white',
-  },
-  inputHint: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 6,
   },
   submitButton: {
     backgroundColor: COLORS.primary,
@@ -1747,41 +1629,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  exportOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    marginBottom: 12,
-    gap: 16,
-  },
-  exportIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  exportOptionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-  },
-  exportOptionHint: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  cancelButton: {
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  cancelButtonText: {
-    color: COLORS.textSecondary,
-    fontSize: 16,
-  },
   detailSection: {
     marginBottom: 16,
   },
@@ -1810,37 +1657,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 10,
     fontWeight: '700',
-  },
-  pageViewerOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pageViewerClose: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    zIndex: 1,
-    padding: 8,
-  },
-  pageViewerImage: {
-    width: '100%',
-    height: '80%',
-  },
-  pageViewerNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 24,
-    marginTop: 16,
-  },
-  pageViewerNavButton: {
-    padding: 8,
-  },
-  pageViewerNavText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
   },
   protocolBanner: {
     flexDirection: 'row',
