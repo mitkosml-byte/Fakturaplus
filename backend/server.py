@@ -2802,8 +2802,7 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
         })
 
     # Get company_id for supplier matching
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     # Scan-credit gate - the one real variable cost in the whole app (see
     # SCAN CREDITS below). Checked before the AI call is made, not after,
@@ -3320,8 +3319,7 @@ async def next_protocol_number(company_id: Optional[str], user_id: str, year: in
 async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_invoices")
     # Get user's company_id
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     # Merge with an already-known counterparty regardless of punctuation or
     # letter case, so this also applies to manually-typed/edited invoices,
@@ -4274,8 +4272,7 @@ async def create_personal_expense(
     if current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Само титулярът може да управлява лични разходи")
     
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         raise HTTPException(status_code=400, detail="Няма свързана фирма")
@@ -6176,8 +6173,7 @@ async def export_statistics_pdf(
     suppliers_data = await get_supplier_statistics(start_date=start_date, end_date=end_date, current_user=current_user)
     items_data = await get_item_statistics(start_date=start_date, end_date=end_date, top_n=10, current_user=current_user)
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     company_name = ""
     if company_id:
         company = await db.companies.find_one({"id": company_id})
@@ -6661,22 +6657,21 @@ async def get_price_alerts(
     # per-invoice (with invoice_id set) to show "+X% vs last purchase"
     # badges on line items for ANY user who can view that invoice, not
     # just users with the advanced-statistics permission.
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, scope = await get_company_scope(current_user)
 
     if not company_id:
         return {"alerts": [], "total": 0, "unread_count": 0}
 
-    query = {"company_id": company_id}
+    query = dict(scope)
     if status:
         query["status"] = status
     if invoice_id:
         query["invoice_id"] = invoice_id
 
     alerts = await db.price_alerts.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
-    
+
     # Count unread
-    unread_count = await db.price_alerts.count_documents({"company_id": company_id, "status": "unread"})
+    unread_count = await db.price_alerts.count_documents({**scope, "status": "unread"})
     
     return {
         "alerts": alerts,
@@ -6697,11 +6692,10 @@ async def update_price_alert(
     if status not in ["read", "dismissed"]:
         raise HTTPException(status_code=400, detail="Невалиден статус")
     
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
+    _, scope = await get_company_scope(current_user)
+
     result = await db.price_alerts.update_one(
-        {"id": alert_id, "company_id": company_id},
+        {"id": alert_id, **scope},
         {"$set": {"status": status}}
     )
 
@@ -6717,8 +6711,7 @@ async def update_price_alert(
 @api_router.get("/items/price-alert-settings")
 async def get_price_alert_settings(current_user: User = Depends(get_current_user)):
     """Връща настройки за ценови аларми"""
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     defaults = {"threshold_percent": 10.0, "min_absolute_change": 2.0, "alert_on_decrease": False, "enabled": True}
     if not company_id:
@@ -6749,8 +6742,7 @@ async def update_price_alert_settings(
     require_permission(current_user, "view_statistics")
     body = await request.json()
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         raise HTTPException(status_code=400, detail="Нямате фирма")
@@ -6831,8 +6823,7 @@ async def get_item_price_history(
     require_permission(current_user, "view_statistics")
     from urllib.parse import unquote
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         return {"history": [], "statistics": {}}
@@ -6910,8 +6901,7 @@ async def get_item_statistics(
     require_permission(current_user, "view_statistics")
     from collections import defaultdict
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         return {
@@ -7040,8 +7030,7 @@ async def get_price_inflation(
     require_permission(current_user, "view_statistics")
     from collections import defaultdict
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     empty_response = {
         "period": {"start_date": start_date, "end_date": end_date},
@@ -7118,8 +7107,7 @@ async def get_item_by_supplier(
     from collections import defaultdict
     from urllib.parse import unquote
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         return {"item_name": item_name, "suppliers": []}
@@ -7387,8 +7375,7 @@ async def ai_merge_similar_items(
     # everyone's item stats rely on, not something any authenticated member
     # should be able to trigger regardless of their actual permissions.
     require_permission(current_user, "view_statistics")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     if not company_id:
         return {"merged_groups": [], "total_merged": 0}
@@ -7402,8 +7389,7 @@ async def ai_merge_similar_items(
 async def get_merge_mappings(current_user: User = Depends(get_current_user)):
     """Връща текущите сливания на продукти"""
     require_permission(current_user, "view_statistics")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         return {"mappings": []}
@@ -7424,8 +7410,7 @@ async def delete_merge_mapping(
     require_permission(current_user, "view_statistics")
     from urllib.parse import unquote
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         raise HTTPException(status_code=404, detail="Фирмата не е намерена")
@@ -7454,8 +7439,7 @@ async def get_merged_item_statistics(
     require_permission(current_user, "view_statistics")
     from collections import defaultdict
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         return {
@@ -7724,8 +7708,7 @@ class BudgetCreate(BaseModel):
 async def get_budgets(current_user: User = Depends(get_current_user)):
     """Get all budgets for company"""
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         return {"budgets": []}
@@ -7737,8 +7720,7 @@ async def get_budgets(current_user: User = Depends(get_current_user)):
 async def create_budget(budget: BudgetCreate, current_user: User = Depends(get_current_user)):
     """Create or update budget for a month"""
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         raise HTTPException(status_code=400, detail="No company associated")
@@ -7849,8 +7831,7 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
 async def get_budget_status(current_user: User = Depends(get_current_user)):
     """Get current month budget status"""
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     if not company_id:
         return {"has_budget": False}
@@ -7875,8 +7856,7 @@ async def get_recurring_expenses(current_user: User = Depends(get_current_user))
     # manage_budget) - without it, a member lacking that permission could
     # still call the API directly.
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         return {"recurring_expenses": []}
@@ -7895,8 +7875,7 @@ async def create_recurring_expense(
 ):
     """Create recurring expense"""
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     if not company_id:
         raise HTTPException(status_code=400, detail="No company associated")
@@ -7924,8 +7903,7 @@ async def create_recurring_expense(
 async def delete_recurring_expense(expense_id: str, current_user: User = Depends(get_current_user)):
     """Delete recurring expense"""
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     
     result = await db.recurring_expenses.delete_one({"id": expense_id, "company_id": company_id})
     
@@ -7952,8 +7930,7 @@ async def get_expense_forecast(
     back the forecast's own history window reaches; omitting both keeps
     the original 6-month default."""
     require_permission(current_user, "view_statistics")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     if not company_id:
         return {"error": "No company"}
@@ -7977,8 +7954,7 @@ async def get_revenue_forecast(
     frontend's own gate for the forecast card on the stats screen. See
     get_expense_forecast above for lookback_days/start_date/end_date."""
     require_permission(current_user, "view_statistics")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     if not company_id:
         return {"error": "No company"}
@@ -8125,15 +8101,13 @@ async def get_payroll_rates_dict(company_id: Optional[str]) -> dict:
 @api_router.get("/payroll/rates")
 async def get_payroll_rates(current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     return await get_payroll_rates_dict(company_id)
 
 @api_router.put("/payroll/rates")
 async def update_payroll_rates(request: Request, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="Нямате фирма")
 
@@ -8152,8 +8126,7 @@ async def update_payroll_rates(request: Request, current_user: User = Depends(ge
 @api_router.post("/employees", response_model=Employee)
 async def create_employee(employee: EmployeeCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     employee_obj = Employee(user_id=current_user.user_id, company_id=company_id, **employee.dict())
     await db.employees.insert_one(employee_obj.dict())
@@ -8162,10 +8135,13 @@ async def create_employee(employee: EmployeeCreate, current_user: User = Depends
 @api_router.get("/employees", response_model=List[Employee])
 async def get_employees(active_only: bool = False, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    # Uses the same get_company_scope-based scope as update/delete_employee
+    # and the payroll endpoints below (not simple_scope_query) - otherwise a
+    # legacy pre-company-id employee record would still be reachable by ID
+    # through those, but invisible in this very list (Module 1 audit finding).
+    _, scope = await get_company_scope(current_user)
 
-    query = simple_scope_query(company_id, current_user.user_id)
+    query = dict(scope)
     if active_only:
         query["active"] = True
 
@@ -8280,8 +8256,7 @@ async def get_payroll_entries(
     current_user: User = Depends(get_current_user)
 ):
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     query = simple_scope_query(company_id, current_user.user_id)
     if year:
@@ -8705,8 +8680,7 @@ async def get_asset_categories(current_user: User = Depends(get_current_user)):
 @api_router.post("/assets", response_model=FixedAsset)
 async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    company_id, _ = await get_company_scope(current_user)
 
     category_info = ASSET_CATEGORY_INFO[asset.category.value]
     rate = asset.annual_depreciation_rate_percent
@@ -8743,11 +8717,13 @@ async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get
 @api_router.get("/assets")
 async def get_assets(status: Optional[str] = None, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    # get_company_scope-based scope, matching update/dispose/delete_asset
+    # below (not simple_scope_query) - otherwise a legacy pre-company-id
+    # asset would still be reachable by ID through those, but invisible in
+    # this very list (Module 1 audit finding).
+    _, scope = await get_company_scope(current_user)
 
-    query = simple_scope_query(company_id, current_user.user_id)
-    assets = await db.assets.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    assets = await db.assets.find(scope, {"_id": 0}).sort("created_at", -1).to_list(1000)
     enriched = [enrich_asset_with_depreciation(a) for a in assets]
     if status:
         enriched = [a for a in enriched if a["status"] == status]
@@ -8756,11 +8732,9 @@ async def get_assets(status: Optional[str] = None, current_user: User = Depends(
 @api_router.get("/assets/summary")
 async def get_assets_summary(current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+    _, scope = await get_company_scope(current_user)
 
-    query = simple_scope_query(company_id, current_user.user_id)
-    assets = await db.assets.find(query, {"_id": 0}).to_list(1000)
+    assets = await db.assets.find(scope, {"_id": 0}).to_list(1000)
     enriched = [enrich_asset_with_depreciation(a) for a in assets]
 
     active = [a for a in enriched if a["status"] != "disposed"]

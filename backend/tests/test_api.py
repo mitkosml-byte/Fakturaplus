@@ -1207,3 +1207,64 @@ def test_proactive_signals(client):
     assert r.status_code == 200, r.text
     bare_signal_keys = {s["key"] for s in r.json()["signals"]}
     assert not bare_signal_keys & {"budget", "receivables", "price_alerts", "reorder", "forecast_revenue", "forecast_expense", "scan_credits"}
+
+
+def test_legacy_scope_consistency(client):
+    """Module 1 audit finding: 40 endpoints built their own company_id
+    lookup inline instead of the shared get_company_scope()/scope helper,
+    which also matches a record that predates a collection's company_id
+    field (company_id=None, but owned by a CURRENT member of the
+    company) - a ghost record otherwise reachable by ID through a
+    sibling endpoint (update/delete) but invisible in the list. Simulates
+    that legacy shape directly against the DB for price_alerts, employees
+    and assets, and confirms the list endpoints (get_price_alerts,
+    get_employees, get_assets/get_assets_summary) now see it."""
+    owner = h(STATE["owner_token"])
+    me = client.get("/api/auth/me", headers=owner).json()
+    owner_user_id = me["user_id"]
+
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timezone as tz
+
+    async def _insert_legacy_records():
+        await server_module.db.price_alerts.insert_one({
+            "id": f"legacy-alert-{uuid_module.uuid4().hex[:8]}", "company_id": None, "user_id": owner_user_id,
+            "status": "unread", "item_name": "Legacy Item", "supplier": "Legacy Supplier",
+            "invoice_id": "legacy-inv", "invoice_number": "LEGACY-1",
+            "old_price": 1.0, "new_price": 2.0, "change_percent": 100.0, "direction": "increase",
+            "baseline_purchase_count": 1, "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.employees.insert_one({
+            "id": f"legacy-emp-{uuid_module.uuid4().hex[:8]}", "user_id": owner_user_id, "company_id": None,
+            "name": "Legacy Employee", "base_salary": 1000.0, "agreement_type": "gross",
+            "food_vouchers": 0, "additional_insurance": 0, "active": True,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.assets.insert_one({
+            "id": f"legacy-asset-{uuid_module.uuid4().hex[:8]}", "user_id": owner_user_id, "company_id": None,
+            "inventory_number": "LEGACY-1", "name": "Legacy Asset", "category": "cat_i",
+            "acquisition_date": "2020-01-01", "in_service_date": "2020-01-01",
+            "acquisition_value": 1000.0, "annual_depreciation_rate_percent": 10.0,
+            "status": "active", "created_at": server_module.datetime.now(tz.utc),
+            "monthly_depreciation": 0, "accumulated_depreciation": 0, "net_book_value": 1000.0,
+        })
+
+    asyncio.run(_insert_legacy_records())
+
+    r = client.get("/api/items/price-alerts", headers=owner)
+    assert r.status_code == 200, r.text
+    assert any(a["item_name"] == "Legacy Item" for a in r.json()["alerts"])
+
+    r = client.get("/api/employees", headers=owner)
+    assert r.status_code == 200, r.text
+    assert any(e["name"] == "Legacy Employee" for e in r.json())
+
+    r = client.get("/api/assets", headers=owner)
+    assert r.status_code == 200, r.text
+    assert any(a["name"] == "Legacy Asset" for a in r.json())
+
+    r = client.get("/api/assets/summary", headers=owner)
+    assert r.status_code == 200, r.text
+    assert r.json()["active_count"] >= 1
