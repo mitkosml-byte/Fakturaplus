@@ -2695,57 +2695,6 @@ async def log_ai_usage(company_id: Optional[str], endpoint: str, response, extra
     except Exception as e:
         logger.warning(f"Failed to log AI usage for {endpoint}: {e}")
 
-@api_router.get("/admin/ai-usage-summary")
-async def get_ai_usage_summary(days: int = 30, current_user: User = Depends(get_current_user)):
-    """Real AI-cost summary built from logged response.usage data (see
-    log_ai_usage above) - the measurement channel this app uses instead of
-    Anthropic's own Usage/Cost Admin API, which it has no admin key for.
-    Costs are an ESTIMATE at Claude Opus 5.5's currently published rates
-    (fetched from platform.claude.com/docs/en/about-claude/pricing on
-    2026-10-28) - re-check that page if the real bill ever looks off, since
-    rates can change and this endpoint doesn't re-fetch them."""
-    require_permission(current_user, "manage_budget")
-    from collections import defaultdict
-
-    _, scope = await get_company_scope(current_user)
-    since = datetime.now(timezone.utc) - timedelta(days=days)
-    entries = await db.ai_usage_log.find({**scope, "created_at": {"$gte": since}}, {"_id": 0}).to_list(100000)
-
-    RATES_USD_PER_MTOK = {"input": 4.0, "output": 20.0, "cache_creation": 5.0, "cache_read": 0.20}
-
-    by_endpoint = defaultdict(lambda: {
-        "calls": 0, "input_tokens": 0, "output_tokens": 0,
-        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
-    })
-    for e in entries:
-        bucket = by_endpoint[e.get("endpoint", "unknown")]
-        bucket["calls"] += 1
-        bucket["input_tokens"] += e.get("input_tokens", 0)
-        bucket["output_tokens"] += e.get("output_tokens", 0)
-        bucket["cache_creation_input_tokens"] += e.get("cache_creation_input_tokens", 0)
-        bucket["cache_read_input_tokens"] += e.get("cache_read_input_tokens", 0)
-
-    def estimate_cost(b: dict) -> float:
-        return (
-            b["input_tokens"] / 1_000_000 * RATES_USD_PER_MTOK["input"] +
-            b["output_tokens"] / 1_000_000 * RATES_USD_PER_MTOK["output"] +
-            b["cache_creation_input_tokens"] / 1_000_000 * RATES_USD_PER_MTOK["cache_creation"] +
-            b["cache_read_input_tokens"] / 1_000_000 * RATES_USD_PER_MTOK["cache_read"]
-        )
-
-    breakdown = []
-    total_cost = 0.0
-    for endpoint, bucket in by_endpoint.items():
-        cost = estimate_cost(bucket)
-        total_cost += cost
-        breakdown.append({"endpoint": endpoint, "estimated_cost_usd": round(cost, 4), **bucket})
-    breakdown.sort(key=lambda x: x["estimated_cost_usd"], reverse=True)
-
-    return {
-        "days": days,
-        "total_estimated_cost_usd": round(total_cost, 4),
-        "by_endpoint": breakdown,
-    }
 
 @api_router.post("/ocr/scan", response_model=OCRResult)
 @limiter.limit("20/minute")
@@ -9707,6 +9656,9 @@ async def health():
 
 # Include the router
 app.include_router(api_router)
+
+from routers import admin
+app.include_router(admin.router)
 
 _cors_origins_env = os.environ.get("CORS_ORIGINS", "")
 if _cors_origins_env:
