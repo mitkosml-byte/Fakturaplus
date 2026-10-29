@@ -346,6 +346,17 @@ export default function ProfileScreen() {
               onPress: () => router.push('/receivables'),
             }]
           : []),
+        ...(hasPermission('add_revenue')
+          ? [{
+              key: 'billing-documents',
+              title: t('billingDocuments.title'),
+              subtitle: t('profile.billingDocumentsDesc'),
+              icon: 'document-text' as const,
+              iconBg: 'rgba(16, 185, 129, 0.15)',
+              iconColor: COLORS.success,
+              onPress: () => router.push('/billing-documents'),
+            }]
+          : []),
         ...(hasPermission('view_statistics')
           ? [{
               key: 'protocols',

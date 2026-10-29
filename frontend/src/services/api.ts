@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -534,6 +534,30 @@ class ApiService {
 
   async deleteReceivable(id: string): Promise<void> {
     await this.fetch(`/receivables/${id}`, { method: 'DELETE' });
+  }
+
+  // Billing documents (non-fiscal bill/quote) - Module 7 Finding #3.
+  async createBillingDocument(doc: {
+    doc_type: 'quote' | 'bill';
+    customer_id?: string;
+    customer_name: string;
+    items: { name: string; quantity: number; unit: string; unit_price: number }[];
+    notes?: string;
+    issue_date?: string;
+  }): Promise<BillingDocument> {
+    return this.fetch('/billing-documents', { method: 'POST', body: JSON.stringify(doc) });
+  }
+
+  async getBillingDocuments(): Promise<BillingDocument[]> {
+    return this.fetch('/billing-documents');
+  }
+
+  async deleteBillingDocument(id: string): Promise<void> {
+    await this.fetch(`/billing-documents/${id}`, { method: 'DELETE' });
+  }
+
+  getBillingDocumentPdfUrl(id: string): string {
+    return `/api/billing-documents/${id}/pdf`;
   }
 
   // Statistics

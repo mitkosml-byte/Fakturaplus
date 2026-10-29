@@ -200,6 +200,57 @@ def test_customers_and_receivables(client):
     assert r.status_code == 403
 
 
+def test_billing_documents(client):
+    """Module 7 Finding #3 (decided): a non-fiscal bill/quote - a quote
+    never touches receivables, a bill automatically creates one (Module
+    11's "full non-fiscal loop")."""
+    owner = h(STATE["owner_token"])
+
+    # A quote is just a document - no money owed yet, no receivable.
+    r = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "quote", "customer_name": "Оферта Клиент",
+        "items": [{"name": "Монтаж", "quantity": 2, "unit": "час", "unit_price": 30}],
+    })
+    assert r.status_code == 200, r.text
+    quote = r.json()
+    assert quote["total_amount"] == 60
+    assert quote["receivable_id"] is None
+
+    # A bill IS money owed - must auto-create a matching receivable.
+    r = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "bill", "customer_name": "Сметка Клиент",
+        "items": [{"name": "Труд", "quantity": 1, "unit": "бр.", "unit_price": 100}],
+        "notes": "Поправка на инсталация",
+    })
+    assert r.status_code == 200, r.text
+    bill = r.json()
+    assert bill["total_amount"] == 100
+    assert bill["receivable_id"] is not None
+
+    r = client.get("/api/receivables?status=unpaid", headers=owner)
+    assert r.status_code == 200
+    matching = [x for x in r.json() if x["id"] == bill["receivable_id"]]
+    assert len(matching) == 1 and matching[0]["amount"] == 100 and matching[0]["customer_name"] == "Сметка Клиент"
+
+    # Empty items list must be rejected, not silently accepted as a 0-total doc.
+    r = client.post("/api/billing-documents", headers=owner, json={"customer_name": "x", "items": []})
+    assert r.status_code == 422
+
+    # PDF export must actually return a PDF.
+    r = client.get(f"/api/billing-documents/{bill['id']}/pdf", headers=owner)
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF")
+
+    r = client.get("/api/billing-documents", headers=owner)
+    assert r.status_code == 200 and len(r.json()) >= 2
+
+    r = client.delete(f"/api/billing-documents/{quote['id']}", headers=owner)
+    assert r.status_code == 200
+    r = client.get(f"/api/billing-documents/{quote['id']}", headers=owner)
+    assert r.status_code == 404
+
+
 def test_expenses(client):
     owner = h(STATE["owner_token"])
     r = client.post("/api/expenses", headers=owner, json={"description": "Гориво", "amount": 50, "date": "2026-09-10"})

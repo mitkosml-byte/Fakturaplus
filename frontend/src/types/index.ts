@@ -168,6 +168,28 @@ export interface Receivable {
   created_at: string;
 }
 
+export interface BillingDocumentItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+}
+
+export interface BillingDocument {
+  id: string;
+  company_id: string | null;
+  user_id: string;
+  doc_type: 'quote' | 'bill';
+  customer_id?: string | null;
+  customer_name: string;
+  items: BillingDocumentItem[];
+  notes?: string | null;
+  issue_date: string;
+  total_amount: number;
+  receivable_id?: string | null;
+  created_at: string;
+}
+
 export interface OCRItemResult {
   name: string;
   quantity: number;

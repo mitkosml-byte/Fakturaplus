@@ -4087,6 +4087,124 @@ async def delete_receivable(receivable_id: str, current_user: User = Depends(get
         raise HTTPException(status_code=404, detail="Записът не е намерен")
     return {"message": "Записът е изтрит"}
 
+# ===================== BILLING DOCUMENTS (non-fiscal bill/quote) =========
+# Module 7, Finding #3 (decided: build the non-fiscal version). A simple
+# document a craftsman or service business can hand a customer for a job -
+# explicitly NOT a sequentially-numbered VAT invoice, no fiscal metadata,
+# no NAP-declaration implications. Issuing a "bill" automatically creates
+# a Receivable (Module 11's "full non-fiscal loop": quote -> job -> bill
+# -> paid), so the owner doesn't have to record the same amount twice.
+
+class BillingDocumentType(str, Enum):
+    QUOTE = "quote"
+    BILL = "bill"
+
+class BillingDocumentItem(BaseModel):
+    name: str
+    quantity: float = Field(default=1, gt=0)
+    unit: str = "бр."
+    unit_price: float = Field(ge=0)
+
+class BillingDocument(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: Optional[str] = None
+    user_id: str
+    doc_type: BillingDocumentType = BillingDocumentType.BILL
+    customer_id: Optional[str] = None
+    customer_name: str
+    items: List[BillingDocumentItem] = []
+    notes: Optional[str] = None
+    issue_date: str  # "YYYY-MM-DD"
+    total_amount: float = 0
+    receivable_id: Optional[str] = None  # set when this doc created a receivable (bills only)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class BillingDocumentCreate(BaseModel):
+    doc_type: BillingDocumentType = BillingDocumentType.BILL
+    customer_id: Optional[str] = None
+    customer_name: str
+    items: List[BillingDocumentItem] = Field(min_length=1)
+    notes: Optional[str] = None
+    issue_date: Optional[str] = None
+
+@api_router.post("/billing-documents", response_model=BillingDocument)
+async def create_billing_document(payload: BillingDocumentCreate, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    company_id, _ = await get_company_scope(current_user)
+    total_amount = round(sum(item.quantity * item.unit_price for item in payload.items), 2)
+    issue_date = payload.issue_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    document = BillingDocument(
+        user_id=current_user.user_id, company_id=company_id, total_amount=total_amount,
+        issue_date=issue_date, **payload.dict(exclude={"issue_date"}),
+    )
+
+    # A "bill" (not a quote) is money actually owed - automatically record
+    # it as a receivable instead of making the owner re-enter the same
+    # amount a second time.
+    if document.doc_type == BillingDocumentType.BILL:
+        receivable = Receivable(
+            user_id=current_user.user_id, company_id=company_id,
+            customer_id=document.customer_id, customer_name=document.customer_name,
+            description=f"Сметка от {issue_date}" + (f" - {payload.notes}" if payload.notes else ""),
+            amount=total_amount, due_date=None,
+        )
+        await db.receivables.insert_one(receivable.dict())
+        document.receivable_id = receivable.id
+
+    await db.billing_documents.insert_one(document.dict())
+    return document
+
+@api_router.get("/billing-documents", response_model=List[BillingDocument])
+async def get_billing_documents(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, query = await get_company_scope(current_user)
+    docs = await db.billing_documents.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [BillingDocument(**d) for d in docs]
+
+@api_router.get("/billing-documents/{document_id}", response_model=BillingDocument)
+async def get_billing_document(document_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    document = await db.billing_documents.find_one({"id": document_id, **scope}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="Документът не е намерен")
+    return BillingDocument(**document)
+
+@api_router.get("/billing-documents/{document_id}/pdf")
+async def export_billing_document_pdf(document_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    document = await db.billing_documents.find_one({"id": document_id, **scope}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="Документът не е намерен")
+
+    company_name = ""
+    if current_user.company_id:
+        company = await db.companies.find_one({"id": current_user.company_id})
+        company_name = company.get("name", "") if company else ""
+
+    try:
+        pdf_data = await asyncio.to_thread(ExportService.generate_billing_document_pdf, document, company_name)
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PDF export not available")
+
+    doc_label = "offerta" if document["doc_type"] == "quote" else "smetka"
+    filename = f"{doc_label}_{document_id[:8]}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_data), media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+@api_router.delete("/billing-documents/{document_id}")
+async def delete_billing_document(document_id: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    result = await db.billing_documents.delete_one({"id": document_id, **scope})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Документът не е намерен")
+    return {"message": "Документът е изтрит"}
+
 # ===================== NON-INVOICE EXPENSE ENDPOINTS =====================
 
 @api_router.post("/expenses", response_model=NonInvoiceExpense)
@@ -9084,6 +9202,7 @@ async def create_indexes():
         # Customers & receivables
         await db.customers.create_index([("company_id", 1), ("name", 1)])
         await db.receivables.create_index([("company_id", 1), ("is_paid", 1), ("due_date", 1)])
+        await db.billing_documents.create_index([("company_id", 1), ("created_at", -1)])
         
         # Users indexes
         await db.users.create_index([("email", 1)], unique=True, sparse=True)

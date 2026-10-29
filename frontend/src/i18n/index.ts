@@ -471,6 +471,62 @@ export const translations: Translations = {
     bg: 'Да изтрия ли този запис?',
     en: 'Delete this entry?',
   },
+  'billingDocuments.title': {
+    bg: 'Оферти и сметки',
+    en: 'Quotes & bills',
+  },
+  'billingDocuments.add': {
+    bg: 'Добави',
+    en: 'Add',
+  },
+  'billingDocuments.addNew': {
+    bg: 'Нов документ',
+    en: 'New document',
+  },
+  'billingDocuments.typeBill': {
+    bg: 'Сметка',
+    en: 'Bill',
+  },
+  'billingDocuments.typeQuote': {
+    bg: 'Оферта',
+    en: 'Quote',
+  },
+  'billingDocuments.items': {
+    bg: 'Артикули/услуги',
+    en: 'Items/services',
+  },
+  'billingDocuments.addItem': {
+    bg: 'Добави ред',
+    en: 'Add row',
+  },
+  'billingDocuments.itemsRequired': {
+    bg: 'Добави поне един артикул с валидна цена',
+    en: 'Add at least one item with a valid price',
+  },
+  'billingDocuments.empty': {
+    bg: 'Няма оферти или сметки още - добави първата с бутона горе',
+    en: 'No quotes or bills yet - add the first one above',
+  },
+  'billingDocuments.billSaved': {
+    bg: 'Сметката е записана',
+    en: 'Bill saved',
+  },
+  'billingDocuments.quoteSaved': {
+    bg: 'Офертата е записана',
+    en: 'Quote saved',
+  },
+  'billingDocuments.deleted': {
+    bg: 'Документът е изтрит',
+    en: 'Document deleted',
+  },
+  'billingDocuments.deleteConfirm': {
+    bg: 'Да изтрия ли този документ?',
+    en: 'Delete this document?',
+  },
+  'billingDocuments.downloadError': {
+    bg: 'Грешка при изтегляне на PDF',
+    en: 'Error downloading the PDF',
+  },
   'expenses.searchPlaceholder': {
     bg: 'Търси по описание...',
     en: 'Search by description...',
@@ -3624,6 +3680,7 @@ export const translations: Translations = {
 
   'profile.assetsDesc': { bg: 'Регистър на дълготрайните активи и амортизации', en: 'Fixed assets register and depreciation' },
   'profile.receivablesDesc': { bg: 'Кой колко ти дължи и от кога', en: 'Who owes you how much, and since when' },
+  'profile.billingDocumentsDesc': { bg: 'Нефискални оферти и сметки за клиенти', en: 'Non-fiscal quotes and bills for customers' },
   'assets.title': { bg: 'Дълготрайни активи (ДМА)', en: 'Fixed assets' },
   'assets.depreciationThisMonth': { bg: 'Амортизации за месеца', en: 'Depreciation this month' },
   'assets.netBookValue': { bg: 'Балансова стойност', en: 'Net book value' },
