@@ -184,6 +184,42 @@ export const translations: Translations = {
     en: 'Profile',
   },
   
+  // Morning briefing card (top of Home) - synthesizes unpaid invoices,
+  // price alerts, budget status and today's revenue vs. usual into one
+  // glanceable card instead of four separate tabs.
+  'briefing.title': {
+    bg: 'Дневен преглед',
+    en: 'Daily briefing',
+  },
+  'briefing.allClear': {
+    bg: 'Нищо спешно днес - всичко изглежда наред.',
+    en: 'Nothing urgent today - everything looks fine.',
+  },
+  'briefing.unpaid': {
+    bg: '{count} неплатени фактури',
+    en: '{count} unpaid invoices',
+  },
+  'briefing.unpaidOverdue': {
+    bg: '{count} неплатени фактури, {overdue} просрочени',
+    en: '{count} unpaid invoices, {overdue} overdue',
+  },
+  'briefing.priceAlerts': {
+    bg: '{count} известия за промяна в цените',
+    en: '{count} price-change alerts',
+  },
+  'briefing.budget': {
+    bg: 'Бюджетът е изразходван {percent}%',
+    en: 'Budget is {percent}% used',
+  },
+  'briefing.revenueUp': {
+    bg: 'Оборотът днес е с {percent}% над обичайното',
+    en: "Today's revenue is {percent}% above usual",
+  },
+  'briefing.revenueDown': {
+    bg: 'Оборотът днес е с {percent}% под обичайното',
+    en: "Today's revenue is {percent}% below usual",
+  },
+
   // Home Screen
   'home.welcome': {
     bg: 'Добре дошли!',

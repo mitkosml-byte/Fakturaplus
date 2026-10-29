@@ -27,7 +27,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser } from '../../src/components';
+import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard } from '../../src/components';
 import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
@@ -482,6 +482,7 @@ export default function HomeScreen() {
   };
 
   const today = format(new Date(), "d MMMM yyyy 'г.'" , { locale: bg });
+  const avgDailyTurnover = (summary?.total_income || 0) / openDaysThisMonth;
 
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -504,6 +505,12 @@ export default function HomeScreen() {
                 </View>
               </View>
             </View>
+
+            <MorningBriefingCard
+              summary={summary}
+              avgDailyTurnover={avgDailyTurnover}
+              refreshSignal={summary}
+            />
 
             <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
 
@@ -650,7 +657,7 @@ export default function HomeScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </View>
           <CountUp
-            value={(summary?.total_income || 0) / openDaysThisMonth}
+            value={avgDailyTurnover}
             formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
             style={styles.avgTurnoverValue}
           />

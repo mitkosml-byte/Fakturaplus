@@ -26,3 +26,4 @@ export { AnimatedEmptyIcon } from './AnimatedEmptyIcon';
 export { CelebrationGlow } from './CelebrationGlow';
 export { PersonalWalletTeaser } from './PersonalWalletTeaser';
 export { WalletAlertPopup } from './WalletAlertPopup';
+export { MorningBriefingCard } from './MorningBriefingCard';
