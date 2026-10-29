@@ -245,6 +245,30 @@ export const translations: Translations = {
     bg: 'Фискален',
     en: 'Fiscal',
   },
+  'historyHub.title': {
+    bg: 'История и справки',
+    en: 'History & records',
+  },
+  'historyHub.subtitle': {
+    bg: 'Всичко на едно място - кредити, разходи, джобче, клиенти',
+    en: 'Everything in one place - credits, expenses, pocket money, customers',
+  },
+  'historyHub.scanCreditsDesc': {
+    bg: 'Баланс и история на кредитите за сканиране',
+    en: 'Scan-credit balance and transaction history',
+  },
+  'historyHub.offBookExpensesDesc': {
+    bg: 'История на разходите „в канала"',
+    en: 'Off-book expense history',
+  },
+  'historyHub.pocketMoneyDesc': {
+    bg: 'История на Джобчето по дни',
+    en: 'Day-by-day pocket-money history',
+  },
+  'historyHub.personalExpensesDesc': {
+    bg: 'Лични вложения и лично тефтерче',
+    en: 'Personal investments and personal wallet',
+  },
   'pocketMoney.historyTitle': {
     bg: 'История на Джобчето',
     en: 'Pocket money history',
@@ -2147,6 +2171,30 @@ export const translations: Translations = {
   },
 
   // Onboarding tutorial (shown once on first login, reopenable via the "?" button)
+  'tutorial.businessTypeQuestion': {
+    bg: 'Какъв е вашият бизнес?',
+    en: "What's your business?",
+  },
+  'tutorial.businessTypeSubtitle': {
+    bg: 'За да подредим обиколката според това, което ви е най-полезно.',
+    en: "So we can order the tour around what's most useful to you.",
+  },
+  'tutorial.businessTypeRetail': {
+    bg: 'Търговия на дребно',
+    en: 'Retail shop',
+  },
+  'tutorial.businessTypeFood': {
+    bg: 'Храни и напитки',
+    en: 'Food & drink',
+  },
+  'tutorial.businessTypeCraftsman': {
+    bg: 'Услуги / занаятчия',
+    en: 'Services / craftsman',
+  },
+  'tutorial.businessTypeOther': {
+    bg: 'Друго',
+    en: 'Other',
+  },
   'tutorial.step1Title': {
     bg: 'Добре дошли във Фактура+!',
     en: 'Welcome to Fakturaplus!',

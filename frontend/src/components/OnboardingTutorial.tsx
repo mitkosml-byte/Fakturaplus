@@ -22,6 +22,34 @@ const STEPS = [
   { icon: 'help-buoy', titleKey: 'tutorial.step6Title', textKey: 'tutorial.step6Text' },
 ] as const;
 
+// Module 3 audit finding: the same 6-step tour ran for every business in
+// the same fixed order, even though which feature matters most varies a
+// lot (a restaurant cares about daily revenue entry first, a craftsman
+// about scanning supplier invoices first). Per the audit's recommended
+// fix, this stays a SINGLE tour - one branch question up front reorders
+// which 2-3 of the middle, business-relevant steps (scan / revenue-entry
+// / stats) lead, rather than building a separate tour per business type.
+// The intro (sparkles, index 0) always opens and the permanent help
+// reminder (help-buoy, index 5) always closes.
+const BUSINESS_TYPES = [
+  { key: 'retail', icon: 'storefront', labelKey: 'tutorial.businessTypeRetail' },
+  { key: 'food', icon: 'restaurant', labelKey: 'tutorial.businessTypeFood' },
+  { key: 'craftsman', icon: 'construct', labelKey: 'tutorial.businessTypeCraftsman' },
+  { key: 'other', icon: 'ellipsis-horizontal', labelKey: 'tutorial.businessTypeOther' },
+] as const;
+
+const STEP_ORDER_BY_BUSINESS_TYPE: Record<string, number[]> = {
+  retail: [1, 2, 3, 4],
+  food: [2, 1, 3, 4],
+  craftsman: [1, 3, 2, 4],
+  other: [1, 2, 3, 4],
+};
+
+function buildSteps(businessType: string | null) {
+  const middleOrder = STEP_ORDER_BY_BUSINESS_TYPE[businessType ?? 'other'] || [1, 2, 3, 4];
+  return [STEPS[0], ...middleOrder.map((i) => STEPS[i]), STEPS[5]];
+}
+
 const HIDDEN_ON_SEGMENTS = ['login', 'forgot-password', 'help'];
 
 // Every tab-root screen (Home, Scan, Invoices, Stats, Profile) already has a
@@ -42,6 +70,8 @@ export function OnboardingTutorial() {
   const insets = useSafeAreaInsets();
   const { isVisible, markSeen, checkAndMaybeOpen } = useOnboardingStore();
   const [step, setStep] = React.useState(0);
+  const [businessType, setBusinessType] = React.useState<string | null>(null);
+  const [branchAnswered, setBranchAnswered] = React.useState(false);
 
   useEffect(() => {
     if (isAuthenticated && user?.user_id) {
@@ -50,8 +80,19 @@ export function OnboardingTutorial() {
   }, [isAuthenticated, user?.user_id]);
 
   useEffect(() => {
-    if (isVisible) setStep(0);
+    if (isVisible) {
+      setStep(0);
+      setBusinessType(null);
+      setBranchAnswered(false);
+    }
   }, [isVisible]);
+
+  const orderedSteps = React.useMemo(() => buildSteps(businessType), [businessType]);
+
+  const chooseBusinessType = (type: string | null) => {
+    setBusinessType(type);
+    setBranchAnswered(true);
+  };
 
   const hideFloatingButton = !isAuthenticated || HIDDEN_ON_SEGMENTS.includes(segments[0] as string);
   const isTabRoot = TAB_ROUTES.includes(pathname);
@@ -62,7 +103,7 @@ export function OnboardingTutorial() {
   };
 
   const goNext = () => {
-    if (step < STEPS.length - 1) {
+    if (step < orderedSteps.length - 1) {
       setStep(step + 1);
     } else {
       finish();
@@ -73,8 +114,8 @@ export function OnboardingTutorial() {
     if (step > 0) setStep(step - 1);
   };
 
-  const current = STEPS[step];
-  const isLastStep = step === STEPS.length - 1;
+  const current = orderedSteps[step];
+  const isLastStep = step === orderedSteps.length - 1;
 
   return (
     <>
@@ -96,37 +137,67 @@ export function OnboardingTutorial() {
               <Ionicons name="close" size={22} color={COLORS.textMuted} />
             </TouchableOpacity>
 
-            <View style={styles.iconCircle}>
-              <Ionicons name={current.icon as any} size={32} color={COLORS.primary} />
-            </View>
+            {!branchAnswered ? (
+              <>
+                <View style={styles.iconCircle}>
+                  <Ionicons name="compass" size={32} color={COLORS.primary} />
+                </View>
 
-            <Text style={styles.title}>{t(current.titleKey)}</Text>
-            <Text style={styles.text}>{t(current.textKey)}</Text>
+                <Text style={styles.title}>{t('tutorial.businessTypeQuestion')}</Text>
+                <Text style={styles.text}>{t('tutorial.businessTypeSubtitle')}</Text>
 
-            <View style={styles.dotsRow}>
-              {STEPS.map((_, i) => (
-                <View key={i} style={[styles.dot, i === step && styles.dotActive]} />
-              ))}
-            </View>
+                <View style={styles.businessTypeGrid}>
+                  {BUSINESS_TYPES.map((bt) => (
+                    <TouchableOpacity
+                      key={bt.key}
+                      style={styles.businessTypeOption}
+                      onPress={() => chooseBusinessType(bt.key)}
+                    >
+                      <Ionicons name={bt.icon as any} size={22} color={COLORS.primary} />
+                      <Text style={styles.businessTypeOptionText}>{t(bt.labelKey)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
-            <Text style={styles.stepCounter}>
-              {t('tutorial.stepCounter').replace('{current}', String(step + 1)).replace('{total}', String(STEPS.length))}
-            </Text>
-
-            <View style={styles.actions}>
-              {step === 0 ? (
-                <TouchableOpacity style={styles.secondaryBtn} onPress={finish}>
+                <TouchableOpacity style={styles.secondaryBtn} onPress={() => chooseBusinessType(null)}>
                   <Text style={styles.secondaryBtnText}>{t('tutorial.skip')}</Text>
                 </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={styles.secondaryBtn} onPress={goBack}>
-                  <Text style={styles.secondaryBtnText}>{t('tutorial.back')}</Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity style={styles.primaryBtn} onPress={goNext}>
-                <Text style={styles.primaryBtnText}>{isLastStep ? t('tutorial.done') : t('tutorial.next')}</Text>
-              </TouchableOpacity>
-            </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.iconCircle}>
+                  <Ionicons name={current.icon as any} size={32} color={COLORS.primary} />
+                </View>
+
+                <Text style={styles.title}>{t(current.titleKey)}</Text>
+                <Text style={styles.text}>{t(current.textKey)}</Text>
+
+                <View style={styles.dotsRow}>
+                  {orderedSteps.map((_, i) => (
+                    <View key={i} style={[styles.dot, i === step && styles.dotActive]} />
+                  ))}
+                </View>
+
+                <Text style={styles.stepCounter}>
+                  {t('tutorial.stepCounter').replace('{current}', String(step + 1)).replace('{total}', String(orderedSteps.length))}
+                </Text>
+
+                <View style={styles.actions}>
+                  {step === 0 ? (
+                    <TouchableOpacity style={styles.secondaryBtn} onPress={finish}>
+                      <Text style={styles.secondaryBtnText}>{t('tutorial.skip')}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity style={styles.secondaryBtn} onPress={goBack}>
+                      <Text style={styles.secondaryBtnText}>{t('tutorial.back')}</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity style={styles.primaryBtn} onPress={goNext}>
+                    <Text style={styles.primaryBtnText}>{isLastStep ? t('tutorial.done') : t('tutorial.next')}</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -196,6 +267,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 21,
     marginBottom: 18,
+  },
+  businessTypeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    width: '100%',
+    marginBottom: 16,
+  },
+  businessTypeOption: {
+    flexBasis: '47%',
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.25)',
+  },
+  businessTypeOptionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'white',
+    textAlign: 'center',
   },
   dotsRow: {
     flexDirection: 'row',

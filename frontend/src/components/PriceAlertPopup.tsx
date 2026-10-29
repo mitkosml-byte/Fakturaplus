@@ -1,19 +1,27 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useSegments } from 'expo-router';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
-import { ModalBlurBackdrop } from './ModalBlurBackdrop';
 import { Toast } from '../utils/toast';
 
-// Surfaces unread price-change alerts "loudly" as a blocking popup, on top
-// of their existing passive listing in Statistics -> Items. Re-checks
-// whenever the user returns to a screen (segments change) rather than on a
-// timer, since that's the cheapest reliable proxy for "app is in active use"
-// available without push infrastructure.
+// Surfaces unread price-change alerts, on top of their existing passive
+// listing in Statistics -> Items. Re-checks whenever the user returns to
+// a screen (segments change) rather than on a timer, since that's the
+// cheapest reliable proxy for "app is in active use" available without
+// push infrastructure.
+//
+// Module 3 audit finding: this used to be a Modal (a full backdrop that
+// blocks every tap on the screen behind it) for something that usually
+// isn't urgent - a price moving a few percent almost never needs the
+// user's immediate, undivided attention the way an error or a confirm
+// dialog does. It's now a floating card anchored to the top of the
+// screen with no backdrop at all: the rest of the app underneath stays
+// fully visible and tappable, and this can be read (or ignored and
+// scrolled past) at the user's own pace.
 //
 // "Seen" state lives ONLY in the backend's own `status` field - there used
 // to be a second, parallel "seen" cache in local AsyncStorage, which is
@@ -89,10 +97,8 @@ export function PriceAlertPopup() {
   if (!visible || alerts.length === 0) return null;
 
   return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={closePopup}>
-      <View style={styles.overlay}>
-        <ModalBlurBackdrop />
-        <View style={styles.card}>
+    <View style={styles.floatingWrap} pointerEvents="box-none">
+      <View style={styles.card}>
           <View style={styles.header}>
             <Ionicons name="alert-circle" size={28} color={COLORS.danger} />
             <Text style={styles.title}>{t('priceAlertPopup.title')}</Text>
@@ -165,28 +171,31 @@ export function PriceAlertPopup() {
               <Text style={styles.primaryBtnText}>{t('priceAlertPopup.viewDetails')}</Text>
             </TouchableOpacity>
           </View>
-        </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+  floatingWrap: {
+    position: 'absolute',
+    top: 56,
+    left: 16,
+    right: 16,
+    zIndex: 50,
+    elevation: 10,
   },
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: 20,
     padding: 20,
-    width: '100%',
-    maxWidth: 420,
-    maxHeight: '80%',
+    maxHeight: '70%',
     borderWidth: 1,
     borderColor: '#EF444440',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
   },
   header: {
     flexDirection: 'row',

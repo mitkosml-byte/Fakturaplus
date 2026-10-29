@@ -291,6 +291,19 @@ export default function ProfileScreen() {
       label: t('profile.category.accounting'),
       icon: 'calculator-outline',
       items: [
+        // One central hub for every history/records screen - previously
+        // each one only existed scattered under its own Home stat card,
+        // modal button, or menu item, with no single place that listed
+        // them all (Module 3 audit finding).
+        {
+          key: 'historyHub',
+          title: t('historyHub.title'),
+          subtitle: t('historyHub.subtitle'),
+          icon: 'time-outline' as const,
+          iconBg: 'rgba(20, 184, 166, 0.15)',
+          iconColor: COLORS.teal,
+          onPress: () => router.push('/history-hub'),
+        },
         ...(hasPermission('manage_budget')
           ? [{
               key: 'budget',
