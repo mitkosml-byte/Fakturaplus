@@ -2852,57 +2852,7 @@ class BudgetCreate(BaseModel):
     expense_limit: float
     alert_threshold: float = 80.0
 
-@api_router.get("/budget")
-async def get_budgets(current_user: User = Depends(get_current_user)):
-    """Get all budgets for company"""
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    
-    if not company_id:
-        return {"budgets": []}
-    
-    budgets = await db.budgets.find({"company_id": company_id}, {"_id": 0}).sort("month", -1).to_list(24)
-    return {"budgets": budgets}
 
-@api_router.post("/budget")
-async def create_budget(budget: BudgetCreate, current_user: User = Depends(get_current_user)):
-    """Create or update budget for a month"""
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    
-    if not company_id:
-        raise HTTPException(status_code=400, detail="No company associated")
-    
-    # Check if budget exists for this month
-    existing = await db.budgets.find_one({"company_id": company_id, "month": budget.month})
-    
-    if existing:
-        await db.budgets.update_one(
-            {"company_id": company_id, "month": budget.month},
-            {
-                "$set": {"expense_limit": budget.expense_limit, "alert_threshold": budget.alert_threshold},
-                # A changed limit/threshold invalidates any push already
-                # sent against the OLD numbers - e.g. lowering the limit
-                # should let the threshold alert fire again even if it
-                # already fired once this month under the previous, higher
-                # limit, instead of staying silent for the rest of the month.
-                "$unset": {"alert_sent": "", "exceeded_sent": ""},
-            }
-        )
-    else:
-        budget_doc = {
-            "id": str(uuid.uuid4()),
-            "company_id": company_id,
-            "month": budget.month,
-            "expense_limit": budget.expense_limit,
-            "alert_threshold": budget.alert_threshold,
-            "alert_sent": False,
-            "exceeded_sent": False,
-            "created_at": datetime.now(timezone.utc)
-        }
-        await db.budgets.insert_one(budget_doc)
-    
-    return {"message": "Budget saved"}
 
 async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
     """Shared by the live /budget/status endpoint and the background
@@ -2975,18 +2925,6 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
         "is_exceeded": is_exceeded
     }
 
-@api_router.get("/budget/status")
-async def get_budget_status(current_user: User = Depends(get_current_user)):
-    """Get current month budget status"""
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-
-    if not company_id:
-        return {"has_budget": False}
-
-    current_month = datetime.now().strftime("%Y-%m")
-    status = await compute_budget_status(company_id, current_month)
-    return status if status else {"has_budget": False}
 
 # ===================== RECURRING EXPENSES =====================
 
@@ -2996,69 +2934,8 @@ class RecurringExpenseCreate(BaseModel):
     day_of_month: int  # 1-28
     category: Optional[str] = None
 
-@api_router.get("/recurring-expenses")
-async def get_recurring_expenses(current_user: User = Depends(get_current_user)):
-    """Get recurring expenses"""
-    # Same gate as the /budget endpoints this feature lives alongside in
-    # budget.tsx (which already hides the whole screen without
-    # manage_budget) - without it, a member lacking that permission could
-    # still call the API directly.
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    
-    if not company_id:
-        return {"recurring_expenses": []}
-    
-    expenses = await db.recurring_expenses.find(
-        {"company_id": company_id},
-        {"_id": 0}
-    ).to_list(100)
-    
-    return {"recurring_expenses": expenses}
 
-@api_router.post("/recurring-expenses")
-async def create_recurring_expense(
-    expense: RecurringExpenseCreate,
-    current_user: User = Depends(get_current_user)
-):
-    """Create recurring expense"""
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    
-    if not company_id:
-        raise HTTPException(status_code=400, detail="No company associated")
-    
-    if expense.day_of_month < 1 or expense.day_of_month > 28:
-        raise HTTPException(status_code=400, detail="Day must be between 1 and 28")
-    
-    expense_doc = {
-        "id": str(uuid.uuid4()),
-        "company_id": company_id,
-        "user_id": current_user.user_id,
-        "description": expense.description,
-        "amount": expense.amount,
-        "day_of_month": expense.day_of_month,
-        "category": expense.category,
-        "is_active": True,
-        "last_generated": None,
-        "created_at": datetime.now(timezone.utc)
-    }
-    
-    await db.recurring_expenses.insert_one(expense_doc)
-    return {"message": "Recurring expense created", "id": expense_doc["id"]}
 
-@api_router.delete("/recurring-expenses/{expense_id}")
-async def delete_recurring_expense(expense_id: str, current_user: User = Depends(get_current_user)):
-    """Delete recurring expense"""
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    
-    result = await db.recurring_expenses.delete_one({"id": expense_id, "company_id": company_id})
-    
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Expense not found")
-    
-    return {"message": "Deleted"}
 
 # ===================== FORECAST ENDPOINTS =====================
 
@@ -3198,183 +3075,15 @@ async def get_payroll_rates_dict(company_id: Optional[str]) -> dict:
         return dict(DEFAULT_PAYROLL_RATES)
     return {**DEFAULT_PAYROLL_RATES, **rates}
 
-@api_router.get("/payroll/rates")
-async def get_payroll_rates(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    return await get_payroll_rates_dict(company_id)
 
-@api_router.put("/payroll/rates")
-async def update_payroll_rates(request: Request, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Нямате фирма")
 
-    body = await request.json()
-    update_data = {k: float(v) for k, v in body.items() if k in DEFAULT_PAYROLL_RATES}
 
-    existing = await db.payroll_rates.find_one({"company_id": company_id})
-    if existing:
-        await db.payroll_rates.update_one({"company_id": company_id}, {"$set": update_data})
-    else:
-        rates = PayrollRates(company_id=company_id, **{**DEFAULT_PAYROLL_RATES, **update_data})
-        await db.payroll_rates.insert_one(rates.dict())
 
-    return await get_payroll_rates_dict(company_id)
 
-@api_router.post("/employees", response_model=Employee)
-async def create_employee(employee: EmployeeCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
 
-    employee_obj = Employee(user_id=current_user.user_id, company_id=company_id, **employee.dict())
-    await db.employees.insert_one(employee_obj.dict())
-    return employee_obj
 
-@api_router.get("/employees", response_model=List[Employee])
-async def get_employees(active_only: bool = False, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    # Uses the same get_company_scope-based scope as update/delete_employee
-    # and the payroll endpoints below (not simple_scope_query) - otherwise a
-    # legacy pre-company-id employee record would still be reachable by ID
-    # through those, but invisible in this very list (Module 1 audit finding).
-    _, scope = await get_company_scope(current_user)
 
-    query = dict(scope)
-    if active_only:
-        query["active"] = True
 
-    employees = await db.employees.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
-    return [Employee(**e) for e in employees]
-
-@api_router.put("/employees/{employee_id}", response_model=Employee)
-async def update_employee(employee_id: str, update: EmployeeUpdate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    update_data = {k: v for k, v in update.dict().items() if v is not None}
-    _, scope = await get_company_scope(current_user)
-    result = await db.employees.update_one({"id": employee_id, **scope}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Служителят не е намерен")
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    return Employee(**employee)
-
-@api_router.delete("/employees/{employee_id}")
-async def delete_employee(employee_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.employees.delete_one({"id": employee_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Служителят не е намерен")
-    return {"message": "Служителят е изтрит"}
-
-@api_router.post("/payroll/preview")
-async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
-    """Изчислява разбивка без да записва - за преглед преди потвърждение."""
-    require_permission(current_user, "manage_budget")
-    company_id, scope = await get_company_scope(current_user)
-    employee = await db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Служителят не е намерен")
-
-    rates = await get_payroll_rates_dict(company_id)
-
-    base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
-
-    return calculate_payroll(
-        base_amount=base_amount,
-        agreement_type=employee["agreement_type"],
-        rates=rates,
-        bonus_amount=entry.bonus_amount,
-        food_vouchers=employee.get("food_vouchers", 0),
-        additional_insurance=employee.get("additional_insurance", 0),
-    )
-
-@api_router.post("/payroll")
-async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, scope = await get_company_scope(current_user)
-    employee = await db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Служителят не е намерен")
-
-    rates = await get_payroll_rates_dict(company_id)
-
-    base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
-
-    breakdown = calculate_payroll(
-        base_amount=base_amount,
-        agreement_type=employee["agreement_type"],
-        rates=rates,
-        bonus_amount=entry.bonus_amount,
-        food_vouchers=employee.get("food_vouchers", 0),
-        additional_insurance=employee.get("additional_insurance", 0),
-    )
-
-    existing = await db.payroll_entries.find_one({
-        "employee_id": entry.employee_id,
-        "period_month": entry.period_month,
-        "period_year": entry.period_year,
-    })
-    if existing:
-        raise HTTPException(status_code=409, detail="Вече има ведомост за този служител за този месец")
-
-    doc = {
-        "id": str(uuid.uuid4()),
-        "user_id": current_user.user_id,
-        "company_id": company_id,
-        "employee_id": entry.employee_id,
-        "employee_name": employee["name"],
-        "period_month": entry.period_month,
-        "period_year": entry.period_year,
-        "bonus_amount": round(entry.bonus_amount, 2),
-        "notes": entry.notes,
-        "image_base64": entry.image_base64,
-        "created_at": datetime.now(timezone.utc),
-        **breakdown,
-    }
-    await db.payroll_entries.insert_one(doc)
-
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="create",
-        entity_type="payroll",
-        entity_id=doc["id"],
-        company_id=company_id,
-        details={"employee": employee["name"], "period": f"{entry.period_month}/{entry.period_year}", "total_employer_cost": breakdown["total_employer_cost"]}
-    )
-
-    doc.pop("_id", None)
-    doc.pop("image_base64", None)
-    return doc
-
-@api_router.get("/payroll")
-async def get_payroll_entries(
-    year: Optional[int] = None,
-    month: Optional[int] = None,
-    current_user: User = Depends(get_current_user)
-):
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-
-    query = simple_scope_query(company_id, current_user.user_id)
-    if year:
-        query["period_year"] = year
-    if month:
-        query["period_month"] = month
-
-    entries = await db.payroll_entries.find(query, {"_id": 0, "image_base64": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(1000)
-    return entries
-
-@api_router.delete("/payroll/{entry_id}")
-async def delete_payroll_entry(entry_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.payroll_entries.delete_one({"id": entry_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Записът не е намерен")
-    return {"message": "Записът е изтрит"}
 
 async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, start_date: Optional[str], end_date: Optional[str]) -> float:
     """Сумира total_employer_cost на всички ведомостни записи, чийто месец
@@ -3475,11 +3184,6 @@ def _holiday_name_for_date(date_str: str) -> Optional[str]:
             return h["name"]
     return None
 
-@api_router.get("/holidays")
-async def get_holidays(year: int, current_user: User = Depends(get_current_user)):
-    """Официалният календар на неработните дни за годината - публична
-    информация, не се филтрира по фирма."""
-    return get_bulgarian_public_holidays(year)
 
 class EmployeeHolidayWork(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -3526,93 +3230,11 @@ async def _get_employee_for_company(employee_id: str, company_id: Optional[str],
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
     return employee
 
-@api_router.post("/employees/holiday-work", response_model=EmployeeHolidayWork)
-async def create_holiday_work(payload: EmployeeHolidayWorkCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    employee = await _get_employee_for_company(payload.employee_id, company_id, current_user)
 
-    holiday_name = _holiday_name_for_date(payload.date)
-    if not holiday_name:
-        raise HTTPException(status_code=400, detail="Избраната дата не е официален празник")
 
-    entry = EmployeeHolidayWork(
-        company_id=company_id or "",
-        employee_id=payload.employee_id,
-        employee_name=employee["name"],
-        date=payload.date,
-        holiday_name=holiday_name,
-        note=payload.note,
-    )
-    await db.employee_holiday_work.insert_one(entry.dict())
-    return entry
 
-@api_router.get("/employees/holiday-work", response_model=List[EmployeeHolidayWork])
-async def list_holiday_work(start_date: Optional[str] = None, end_date: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    query = dict(scope)
-    if start_date or end_date:
-        query["date"] = {}
-        if start_date:
-            query["date"]["$gte"] = start_date
-        if end_date:
-            query["date"]["$lte"] = end_date
-    entries = await db.employee_holiday_work.find(query, {"_id": 0}).sort("date", 1).to_list(10000)
-    return [EmployeeHolidayWork(**e) for e in entries]
 
-@api_router.delete("/employees/holiday-work/{entry_id}")
-async def delete_holiday_work(entry_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.employee_holiday_work.delete_one({"id": entry_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Записът не е намерен")
-    return {"message": "Записът е изтрит"}
 
-@api_router.post("/employees/leave", response_model=EmployeeLeave)
-async def create_leave(payload: EmployeeLeaveCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    employee = await _get_employee_for_company(payload.employee_id, company_id, current_user)
-
-    if payload.end_date < payload.start_date:
-        raise HTTPException(status_code=400, detail="Крайната дата е преди началната")
-
-    entry = EmployeeLeave(
-        company_id=company_id or "",
-        employee_id=payload.employee_id,
-        employee_name=employee["name"],
-        leave_type=payload.leave_type,
-        start_date=payload.start_date,
-        end_date=payload.end_date,
-        note=payload.note,
-    )
-    await db.employee_leave.insert_one(entry.dict())
-    return entry
-
-@api_router.get("/employees/leave", response_model=List[EmployeeLeave])
-async def list_leave(start_date: Optional[str] = None, end_date: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    query = dict(scope)
-    # Overlap match - a leave period only needs to intersect the requested
-    # window, not fall entirely inside it (e.g. leave spanning month-end).
-    if start_date:
-        query["end_date"] = {"$gte": start_date}
-    if end_date:
-        query["start_date"] = {"$lte": end_date}
-    entries = await db.employee_leave.find(query, {"_id": 0}).sort("start_date", 1).to_list(10000)
-    return [EmployeeLeave(**e) for e in entries]
-
-@api_router.delete("/employees/leave/{entry_id}")
-async def delete_leave(entry_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.employee_leave.delete_one({"id": entry_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Записът не е намерен")
-    return {"message": "Записът е изтрит"}
 
 # ===================== FIXED ASSETS / ДЪЛГОТРАЙНИ АКТИВИ (ДМА) =====================
 
@@ -3770,143 +3392,12 @@ async def next_asset_inventory_number(company_id: Optional[str], user_id: str) -
     )
     return f"ДМА-{result['seq']:04d}"
 
-@api_router.get("/assets/categories")
-async def get_asset_categories(current_user: User = Depends(get_current_user)):
-    return {
-        "categories": [{"value": k, **v} for k, v in ASSET_CATEGORY_INFO.items()],
-        "low_value_threshold": ASSET_LOW_VALUE_THRESHOLD_EUR,
-    }
 
-@api_router.post("/assets", response_model=FixedAsset)
-async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
 
-    category_info = ASSET_CATEGORY_INFO[asset.category.value]
-    rate = asset.annual_depreciation_rate_percent
-    if rate is None:
-        rate = category_info["max_rate"]
-    elif rate > category_info["max_rate"] and asset.category.value != "cat_vi":
-        raise HTTPException(status_code=400, detail=f"Нормата не може да надвишава {category_info['max_rate']}% за {category_info['label']}")
-    elif rate <= 0:
-        raise HTTPException(status_code=400, detail="Нормата трябва да е положително число")
 
-    inventory_number = await next_asset_inventory_number(company_id, current_user.user_id)
 
-    asset_obj = FixedAsset(
-        user_id=current_user.user_id,
-        company_id=company_id,
-        inventory_number=inventory_number,
-        annual_depreciation_rate_percent=rate,
-        **asset.dict(exclude={"annual_depreciation_rate_percent"})
-    )
-    await db.assets.insert_one(asset_obj.dict())
 
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="create",
-        entity_type="asset",
-        entity_id=asset_obj.id,
-        company_id=company_id,
-        details={"name": asset_obj.name, "inventory_number": inventory_number, "acquisition_value": asset_obj.acquisition_value}
-    )
 
-    return enrich_asset_with_depreciation(asset_obj.dict())
-
-@api_router.get("/assets")
-async def get_assets(status: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    # get_company_scope-based scope, matching update/dispose/delete_asset
-    # below (not simple_scope_query) - otherwise a legacy pre-company-id
-    # asset would still be reachable by ID through those, but invisible in
-    # this very list (Module 1 audit finding).
-    _, scope = await get_company_scope(current_user)
-
-    assets = await db.assets.find(scope, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    enriched = [enrich_asset_with_depreciation(a) for a in assets]
-    if status:
-        enriched = [a for a in enriched if a["status"] == status]
-    return enriched
-
-@api_router.get("/assets/summary")
-async def get_assets_summary(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-
-    assets = await db.assets.find(scope, {"_id": 0}).to_list(1000)
-    enriched = [enrich_asset_with_depreciation(a) for a in assets]
-
-    active = [a for a in enriched if a["status"] != "disposed"]
-    disposed = [a for a in enriched if a["status"] == "disposed"]
-
-    return {
-        "total_acquisition_value": round(sum(a["acquisition_value"] for a in active), 2),
-        "total_accumulated_depreciation": round(sum(a["accumulated_depreciation"] for a in active), 2),
-        "total_net_book_value": round(sum(a["net_book_value"] for a in active), 2),
-        "monthly_depreciation_total": round(sum(a["monthly_depreciation"] for a in active if a["status"] == "active"), 2),
-        "active_count": len(active),
-        "disposed_count": len(disposed),
-    }
-
-@api_router.put("/assets/{asset_id}", response_model=FixedAsset)
-async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    existing = await db.assets.find_one({"id": asset_id, **scope}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Активът не е намерен")
-
-    update_data = {k: v for k, v in update.dict().items() if v is not None}
-
-    category = update_data.get("category", existing["category"])
-    if "annual_depreciation_rate_percent" in update_data:
-        category_info = ASSET_CATEGORY_INFO[category]
-        if update_data["annual_depreciation_rate_percent"] > category_info["max_rate"] and category != "cat_vi":
-            raise HTTPException(status_code=400, detail=f"Нормата не може да надвишава {category_info['max_rate']}% за {category_info['label']}")
-
-    await db.assets.update_one({"id": asset_id, **scope}, {"$set": update_data})
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    return enrich_asset_with_depreciation(asset)
-
-@api_router.post("/assets/{asset_id}/dispose", response_model=FixedAsset)
-async def dispose_asset(asset_id: str, request: AssetDisposeRequest, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, scope = await get_company_scope(current_user)
-    existing = await db.assets.find_one({"id": asset_id, **scope}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Активът не е намерен")
-
-    await db.assets.update_one(
-        {"id": asset_id, **scope},
-        {"$set": {
-            "status": "disposed",
-            "disposal_date": request.disposal_date,
-            "disposal_reason": request.disposal_reason,
-        }}
-    )
-
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="dispose",
-        entity_type="asset",
-        entity_id=asset_id,
-        company_id=company_id,
-        details={"name": existing["name"], "reason": request.disposal_reason}
-    )
-
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    return enrich_asset_with_depreciation(asset)
-
-@api_router.delete("/assets/{asset_id}")
-async def delete_asset(asset_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.assets.delete_one({"id": asset_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Активът не е намерен")
-    return {"message": "Активът е изтрит"}
 
 async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: str, start_date: Optional[str], end_date: Optional[str]) -> float:
     """Сумира амортизацията за всички активи, чиито месечни начисления
@@ -4808,6 +4299,13 @@ async def health():
 # Include the router
 app.include_router(api_router)
 
+from routers import budget
+app.include_router(budget.router)
+from routers import payroll
+app.include_router(payroll.router)
+from routers import assets
+app.include_router(assets.router)
+
 # Cross-router dependencies for code that stays in server.py itself (the
 # proactive-engine signal builders) or hasn't been extracted yet (the bulk
 # import commit handler) but calls another domain's route-handler function
@@ -4820,6 +4318,9 @@ from routers.receivables import get_receivables_summary
 from routers.price_tracking import get_reorder_nudges
 from routers.invoices import create_invoice
 from routers.revenue_expenses import create_daily_revenue, create_expense
+from routers.budget import create_budget
+from routers.assets import create_asset
+from routers.payroll import create_payroll_entry
 
 from routers import scan_credits
 app.include_router(scan_credits.router)
