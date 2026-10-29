@@ -3555,219 +3555,21 @@ class CalendarEvent(BaseModel):
     reminder_sent: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-@api_router.get("/collab/members")
-async def list_collab_members(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    if not current_user.company_id:
-        return []
-    return await get_team_members(current_user.company_id)
 
-@api_router.post("/calendar/events", response_model=CalendarEvent)
-async def create_calendar_event(payload: CalendarEventCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    if not current_user.company_id:
-        raise HTTPException(status_code=400, detail="Нямате активна фирма")
-    if payload.visibility not in ("personal", "shared"):
-        raise HTTPException(status_code=400, detail="Невалидна видимост")
-    event = CalendarEvent(
-        company_id=current_user.company_id,
-        creator_id=current_user.user_id,
-        creator_name=current_user.name,
-        **payload.dict(),
-    )
-    await db.calendar_events.insert_one(event.dict())
-    return event
 
-@api_router.get("/calendar/events", response_model=List[CalendarEvent])
-async def list_calendar_events(start: Optional[str] = None, end: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    if not current_user.company_id:
-        return []
-    query: Dict[str, Any] = {
-        "company_id": current_user.company_id,
-        "$or": [{"visibility": "shared"}, {"creator_id": current_user.user_id}],
-    }
-    date_filter: Dict[str, Any] = {}
-    if start:
-        date_filter["$gte"] = start
-    if end:
-        date_filter["$lte"] = end
-    if date_filter:
-        query["event_date"] = date_filter
-    events = await db.calendar_events.find(query, {"_id": 0}).sort("event_date", 1).to_list(1000)
-    return events
 
-@api_router.put("/calendar/events/{event_id}", response_model=CalendarEvent)
-async def update_calendar_event(event_id: str, payload: CalendarEventUpdate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    existing = await db.calendar_events.find_one({"id": event_id, "company_id": current_user.company_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Събитието не е намерено")
-    if existing["creator_id"] != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Само създателят може да редактира това събитие")
 
-    update_data = {k: v for k, v in payload.dict(exclude_unset=True).items()}
-    if "visibility" in update_data and update_data["visibility"] not in ("personal", "shared"):
-        raise HTTPException(status_code=400, detail="Невалидна видимост")
-    # Any change to when the reminder should fire (or whether one exists at
-    # all) needs to re-arm it - otherwise an edit made after the original
-    # time had already passed would never send a reminder for the new time.
-    if {"event_date", "event_time", "reminder_minutes_before"} & update_data.keys():
-        update_data["reminder_sent"] = False
-    if update_data:
-        await db.calendar_events.update_one({"id": event_id}, {"$set": update_data})
-    return await db.calendar_events.find_one({"id": event_id}, {"_id": 0})
 
-@api_router.delete("/calendar/events/{event_id}")
-async def delete_calendar_event(event_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    existing = await db.calendar_events.find_one({"id": event_id, "company_id": current_user.company_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Събитието не е намерено")
-    if existing["creator_id"] != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Само създателят може да изтрива това събитие")
-    await db.calendar_events.delete_one({"id": event_id})
-    return {"message": "Изтрито"}
 
-@api_router.get("/messages/conversations")
-async def list_conversations(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    if not current_user.company_id:
-        return []
 
-    team_id = _team_channel_id(current_user.company_id)
-    members = await get_team_members(current_user.company_id)
-    member_by_id = {m["user_id"]: m for m in members}
 
-    dm_conversations = await db.dm_conversations.find(
-        {"company_id": current_user.company_id, "participant_ids": current_user.user_id}, {"_id": 0}
-    ).to_list(200)
 
-    conversation_ids = [team_id] + [c["id"] for c in dm_conversations]
-    reads = await db.conversation_reads.find(
-        {"conversation_id": {"$in": conversation_ids}, "user_id": current_user.user_id}, {"_id": 0}
-    ).to_list(len(conversation_ids))
-    last_read = {r["conversation_id"]: r["last_read_at"] for r in reads}
-
-    async def summarize(conversation_id: str, name: str, picture: Optional[str]):
-        last_message = await db.messages.find_one(
-            {"conversation_id": conversation_id}, {"_id": 0}, sort=[("created_at", -1)]
-        )
-        unread_query: Dict[str, Any] = {"conversation_id": conversation_id, "sender_id": {"$ne": current_user.user_id}}
-        if conversation_id in last_read:
-            unread_query["created_at"] = {"$gt": last_read[conversation_id]}
-        unread_count = await db.messages.count_documents(unread_query)
-        return {
-            "conversation_id": conversation_id,
-            "name": name,
-            "picture": picture,
-            "last_message": last_message["text"] if last_message else None,
-            "last_message_at": last_message["created_at"] if last_message else None,
-            "unread_count": unread_count,
-        }
-
-    result = [await summarize(team_id, "Екипен чат", None)]
-    for c in dm_conversations:
-        other_id = next((uid for uid in c["participant_ids"] if uid != current_user.user_id), None)
-        other = member_by_id.get(other_id)
-        name = other["name"] if other else "Потребител"
-        picture = other["picture"] if other else None
-        result.append(await summarize(c["id"], name, picture))
-
-    result.sort(key=lambda c: c["last_message_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-    return result
-
-@api_router.post("/messages/dm/start")
-async def start_dm(request: Request, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    body = await request.json()
-    other_user_id = body.get("user_id")
-    if not other_user_id or other_user_id == current_user.user_id:
-        raise HTTPException(status_code=400, detail="Невалиден получател")
-    members = await get_team_members(current_user.company_id or "")
-    if not any(m["user_id"] == other_user_id for m in members):
-        raise HTTPException(status_code=404, detail="Потребителят не е намерен в екипа")
-    conversation_id = await get_or_create_dm_conversation(current_user.company_id, current_user.user_id, other_user_id)
-    return {"conversation_id": conversation_id}
-
-@api_router.get("/messages/{conversation_id}")
-async def get_messages(conversation_id: str, before: Optional[str] = None, limit: int = 50, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    await get_conversation_recipients(current_user, conversation_id)
-    query: Dict[str, Any] = {"company_id": current_user.company_id, "conversation_id": conversation_id}
-    if before:
-        query["created_at"] = {"$lt": datetime.fromisoformat(before.replace("Z", "+00:00"))}
-    messages = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(min(limit, 200))
-    messages.reverse()
-    return messages
-
-@api_router.post("/messages/{conversation_id}")
-async def send_message(conversation_id: str, request: Request, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    body = await request.json()
-    text = (body.get("text") or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Съобщението е празно")
-    text = text[:2000]
-
-    recipients = await get_conversation_recipients(current_user, conversation_id)
-
-    now = datetime.now(timezone.utc)
-    message = {
-        "id": str(uuid.uuid4()),
-        "company_id": current_user.company_id,
-        "conversation_id": conversation_id,
-        "sender_id": current_user.user_id,
-        "sender_name": current_user.name,
-        "text": text,
-        "created_at": now,
-    }
-    await db.messages.insert_one(dict(message))
-    await db.conversation_reads.update_one(
-        {"conversation_id": conversation_id, "user_id": current_user.user_id},
-        {"$set": {"last_read_at": now, "company_id": current_user.company_id}},
-        upsert=True,
-    )
-    background_tasks.add_task(notify_new_message, conversation_id, current_user, text, recipients)
-    return message
-
-@api_router.post("/messages/{conversation_id}/read")
-async def mark_conversation_read(conversation_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    await get_conversation_recipients(current_user, conversation_id)
-    await db.conversation_reads.update_one(
-        {"conversation_id": conversation_id, "user_id": current_user.user_id},
-        {"$set": {"last_read_at": datetime.now(timezone.utc), "company_id": current_user.company_id}},
-        upsert=True,
-    )
-    return {"message": "OK"}
 
 class PushSubscriptionIn(BaseModel):
     endpoint: str
     keys: Dict[str, str]
 
-@api_router.post("/push/subscribe")
-async def push_subscribe(payload: PushSubscriptionIn, current_user: User = Depends(get_current_user)):
-    await db.push_subscriptions.update_one(
-        {"endpoint": payload.endpoint},
-        {"$set": {
-            "user_id": current_user.user_id,
-            "company_id": current_user.company_id,
-            "endpoint": payload.endpoint,
-            "keys": payload.keys,
-            "updated_at": datetime.now(timezone.utc),
-        }},
-        upsert=True,
-    )
-    return {"message": "OK"}
 
-@api_router.post("/push/unsubscribe")
-async def push_unsubscribe(request: Request, current_user: User = Depends(get_current_user)):
-    body = await request.json()
-    endpoint = body.get("endpoint")
-    if endpoint:
-        await db.push_subscriptions.delete_one({"endpoint": endpoint, "user_id": current_user.user_id})
-    return {"message": "OK"}
 
 # ===================== IN-APP FEEDBACK =====================
 
@@ -3775,34 +3577,7 @@ class FeedbackCreate(BaseModel):
     message: str = Field(..., min_length=3, max_length=2000)
     is_anonymous: bool = False
 
-@api_router.post("/feedback")
-async def submit_feedback(payload: FeedbackCreate, current_user: User = Depends(get_current_user)):
-    doc = {
-        "id": str(uuid.uuid4()),
-        "message": payload.message,
-        "is_anonymous": payload.is_anonymous,
-        "created_at": datetime.now(timezone.utc),
-    }
-    # An anonymous submission carries no identity at all, by design - not
-    # even for internal linking - so the choice the user made in the app is
-    # actually honored, not just hidden in the UI.
-    if not payload.is_anonymous:
-        doc["user_name"] = current_user.name
-        doc["user_email"] = current_user.email
-        doc["company_id"] = current_user.company_id
-    await db.feedback_submissions.insert_one(doc)
-    return {"message": "OK"}
 
-@api_router.get("/feedback")
-async def list_feedback(current_user: User = Depends(get_current_user)):
-    # There's no support domain/inbox yet (see privacy-policy.tsx note) - this
-    # is a stopgap so submitted feedback is actually reachable in the
-    # meantime, restricted to the app's own developer rather than any
-    # company's owner.
-    if current_user.email != ADMIN_EMAIL:
-        raise HTTPException(status_code=403, detail="Няма достъп")
-    items = await db.feedback_submissions.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return items
 
 async def _calendar_reminder_tick():
     """One pass over due-and-unsent calendar reminders. Split out from the
@@ -4080,133 +3855,11 @@ _IMPORT_PERMISSIONS = {
 class ImportCommitRequest(BaseModel):
     rows: List[dict]
 
-@api_router.get("/import/template/{entity}")
-async def get_import_template(entity: str, current_user: User = Depends(get_current_user)):
-    if entity not in import_service.ENTITY_TEMPLATES:
-        raise HTTPException(status_code=404, detail="Непознат тип за импорт")
-    require_permission(current_user, _IMPORT_PERMISSIONS[entity])
-    try:
-        data = import_service.build_template(entity)
-    except import_service.ImportFileError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    filename = f"shablon_{entity}.xlsx"
-    return Response(
-        content=data,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
 
-@api_router.post("/import/{entity}/preview")
-@limiter.limit("20/minute")
-async def import_preview(entity: str, request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    if entity not in import_service.ENTITY_TEMPLATES:
-        raise HTTPException(status_code=404, detail="Непознат тип за импорт")
-    require_permission(current_user, _IMPORT_PERMISSIONS[entity])
 
-    content = await file.read()
-    try:
-        df = import_service.read_uploaded_table(content, file.filename or "")
-    except import_service.ImportFileError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    context: Dict[str, Any] = {}
-    if entity == "payroll":
-        _, scope = await get_company_scope(current_user)
-        employees = await db.employees.find(scope, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
-        context["employees_by_name"] = {e["name"].strip().lower(): e["id"] for e in employees}
-
-    try:
-        return import_service.preview_rows(entity, df, context)
-    except import_service.ImportFileError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@api_router.post("/import/{entity}/commit")
-@limiter.limit("10/minute")
-async def import_commit(entity: str, request: Request, payload: ImportCommitRequest, current_user: User = Depends(get_current_user)):
-    if entity not in import_service.ENTITY_TEMPLATES:
-        raise HTTPException(status_code=404, detail="Непознат тип за импорт")
-    require_permission(current_user, _IMPORT_PERMISSIONS[entity])
-
-    imported = 0
-    failed = []
-    bg_tasks = BackgroundTasks()
-
-    # Short Bulgarian reasons for the validation-error types a bad import
-    # row actually hits (missing/negative/wrong-type cells), so a failed
-    # row shows something a non-technical user can act on instead of a
-    # raw Python/Pydantic exception string.
-    VALIDATION_ERROR_REASONS = {
-        "missing": "липсва задължително поле",
-        "greater_than": "трябва да е положително число",
-        "greater_than_equal": "не може да е отрицателно число",
-        "less_than_equal": "стойността е твърде голяма",
-        "float_parsing": "не е валидно число",
-        "int_parsing": "не е валидно цяло число",
-    }
-
-    def describe_validation_error(e: ValidationError) -> str:
-        parts = []
-        for err in e.errors():
-            field = ".".join(str(p) for p in err.get("loc", []))
-            reason = VALIDATION_ERROR_REASONS.get(err.get("type"), "невалидна стойност")
-            parts.append(f"{field}: {reason}" if field else reason)
-        return "; ".join(parts) or "невалидни данни в реда"
-
-    for index, row_data in enumerate(payload.rows):
-        try:
-            if entity == "invoices":
-                await create_invoice(invoice=InvoiceCreate(**row_data), background_tasks=bg_tasks, current_user=current_user)
-            elif entity == "assets":
-                await create_asset(asset=FixedAssetCreate(**row_data), current_user=current_user)
-            elif entity == "budget":
-                await create_budget(budget=BudgetCreate(**row_data), current_user=current_user)
-            elif entity == "daily_revenue":
-                await create_daily_revenue(revenue=DailyRevenueCreate(**row_data), current_user=current_user)
-            elif entity == "expenses":
-                await create_expense(expense=NonInvoiceExpenseCreate(**row_data), current_user=current_user)
-            elif entity == "payroll":
-                await create_payroll_entry(entry=PayrollEntryCreate(**row_data), current_user=current_user)
-            imported += 1
-        except HTTPException as e:
-            failed.append({"index": index, "message": e.detail})
-        except ValidationError as e:
-            failed.append({"index": index, "message": describe_validation_error(e)})
-        except Exception:
-            failed.append({"index": index, "message": "Редът не можа да бъде обработен"})
-
-    if entity == "invoices":
-        # No HTTP response cycle will run these for us since create_invoice
-        # was called directly rather than as the request handler.
-        await bg_tasks()
-
-    return {"imported": imported, "failed": failed, "total": len(payload.rows)}
 
 # ===================== AUDIT LOG =====================
 
-@api_router.get("/audit-logs")
-async def get_audit_logs(
-    action: Optional[str] = None,
-    entity_type: Optional[str] = None,
-    search: Optional[str] = None,
-    limit: int = 50,
-    current_user: User = Depends(get_current_user)
-):
-    """Get audit logs (Owner/Accountant only - see ROLE_PERMISSIONS)"""
-    require_permission(current_user, "view_audit_log")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1, "role": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Нямате фирма")
-
-    logs = await audit_service.get_logs(
-        company_id=company_id,
-        action=action,
-        entity_type=entity_type,
-        search=search,
-        limit=limit
-    )
-
-    return {"logs": logs}
 
 # ===================== DATABASE INDEXES =====================
 
@@ -4298,6 +3951,13 @@ async def health():
 
 # Include the router
 app.include_router(api_router)
+
+from routers import collaboration
+app.include_router(collaboration.router)
+from routers import import_data
+app.include_router(import_data.router)
+from routers import audit
+app.include_router(audit.router)
 
 from routers import budget
 app.include_router(budget.router)
