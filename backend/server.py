@@ -5364,6 +5364,293 @@ async def ask_my_numbers(
 
     return BusinessChatResponse(answer=answer, digest=digest)
 
+# ===================== PROACTIVE SECOND BRAIN ENGINE (Module 11, Finding #1) =====================
+# Every piece of intelligence this audit found - the forecast engine,
+# price alerts, scan-credit runway, budget thresholds, reorder nudges,
+# receivables due dates - already existed as its own separate signal,
+# each bolted onto the push pipeline independently. This is the one
+# ranking layer over all of them: it recomputes each signal fresh, scores
+# how urgent it is, and returns one ordered "here's what matters today"
+# list - the single source both GET /proactive/signals (the Home
+# morning-briefing card) and the once-daily digest push below read from,
+# so a sixth or seventh signal later is one more builder in the list, not
+# a new push pipeline bolted on separately.
+#
+# This deliberately does NOT replace any of the existing dedicated push
+# triggers (budget alert, VAT threshold, scan-credit depletion, calendar
+# reminders) - those already have their own proven per-signal dedup and
+# are still the right way to fire the instant something genuinely urgent
+# crosses a line. This engine is the layer above them.
+
+# Below this priority, a signal is real but not worth interrupting anyone
+# with a push - it still shows in GET /proactive/signals for whenever
+# they next open the app. Tuned deliberately high: a once-daily digest
+# that fires on every minor thing is exactly the notification-fatigue
+# failure mode this engine exists to avoid.
+PROACTIVE_PUSH_WORTHY_PRIORITY = 70
+
+async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -> Optional[dict]:
+    unpaid_invoices = await db.invoices.find(
+        {**scope, "payment_method": "bank_transfer", "is_paid": False},
+        {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1},
+    ).to_list(1000)
+    if not unpaid_invoices:
+        return None
+    now_ts = datetime.now(timezone.utc)
+
+    def _is_overdue(inv):
+        due = inv.get("payment_due_date")
+        if not due:
+            return False
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=timezone.utc)
+        return due < now_ts
+
+    overdue = [inv for inv in unpaid_invoices if _is_overdue(inv)]
+    total_unpaid = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in unpaid_invoices)
+    if overdue:
+        return {
+            "key": "unpaid_invoices", "severity": "critical", "priority": 90,
+            "title": "Просрочени фактури към доставчици",
+            "detail": f"{len(overdue)} от {len(unpaid_invoices)} неплатени фактури са просрочени - общо {total_unpaid:.2f} €.",
+            "route": "/(tabs)/invoices",
+        }
+    return {
+        "key": "unpaid_invoices", "severity": "warning", "priority": 45,
+        "title": "Неплатени фактури към доставчици",
+        "detail": f"{len(unpaid_invoices)} неплатени фактури на обща стойност {total_unpaid:.2f} €.",
+        "route": "/(tabs)/invoices",
+    }
+
+async def _signal_receivables(company_id, scope, current_user, visibility) -> Optional[dict]:
+    if "add_revenue" not in set(current_user.permissions or []):
+        return None
+    summary = await get_receivables_summary(current_user)
+    if summary["unpaid_count"] == 0:
+        return None
+    if summary["overdue_count"] > 0:
+        return {
+            "key": "receivables", "severity": "critical", "priority": 85,
+            "title": "Просрочени вземания от клиенти",
+            "detail": f"{summary['overdue_count']} клиенти дължат просрочено общо {summary['total_overdue']:.2f} €.",
+            "route": "/receivables",
+        }
+    return {
+        "key": "receivables", "severity": "info", "priority": 35,
+        "title": "Чакащи плащания от клиенти",
+        "detail": f"{summary['unpaid_count']} неплатени вземания на стойност {summary['total_owed']:.2f} €.",
+        "route": "/receivables",
+    }
+
+async def _signal_scan_credits(company_id, scope, current_user, visibility) -> Optional[dict]:
+    if "manage_invoices" not in set(current_user.permissions or []):
+        return None
+    forecast = await scan_credit_service.get_depletion_forecast(current_user.company_id, current_user.user_id)
+    if forecast["insufficient_data"] or forecast["days_remaining"] is None:
+        return None
+    days = forecast["days_remaining"]
+    if days > 7:
+        return None
+    severity = "critical" if days <= 1 else "warning"
+    priority = 92 if days <= 1 else (75 if days <= 3 else 55)
+    body = (
+        "Кредитите ти за сканиране вече са на привършване." if days <= 0 else
+        f"При текущия темп кредитите ти за сканиране ще свършат за около {days} {'ден' if days == 1 else 'дни'}."
+    )
+    return {"key": "scan_credits", "severity": severity, "priority": priority,
+            "title": "Кредитите за сканиране свършват", "detail": body, "route": "/scan-credits"}
+
+async def _signal_budget(company_id, scope, current_user, visibility) -> Optional[dict]:
+    if not company_id or "manage_budget" not in set(current_user.permissions or []):
+        return None
+    status = await compute_budget_status(company_id, datetime.now(timezone.utc).strftime("%Y-%m"))
+    if not status:
+        return None
+    if status["is_exceeded"]:
+        return {
+            "key": "budget", "severity": "critical", "priority": 88,
+            "title": "Бюджетът е надхвърлен",
+            "detail": f"Разходите вече са {status['total_spent']:.2f} € при лимит {status['expense_limit']:.2f} €.",
+            "route": "/budget",
+        }
+    if status["is_alert"]:
+        return {
+            "key": "budget", "severity": "warning", "priority": 65,
+            "title": "Приближаваш бюджетния лимит",
+            "detail": f"Разходите са на {status['percent_used']:.0f}% от лимита от {status['expense_limit']:.2f} €.",
+            "route": "/budget",
+        }
+    return None
+
+async def _signal_price_alerts(company_id, scope, current_user, visibility) -> Optional[dict]:
+    if "view_statistics" not in set(current_user.permissions or []):
+        return None
+    unread_count = await db.price_alerts.count_documents({**scope, "status": "unread"})
+    if unread_count == 0:
+        return None
+    return {
+        "key": "price_alerts", "severity": "warning" if unread_count >= 3 else "info",
+        "priority": min(72, 40 + unread_count * 6),
+        "title": "Промени в цените на доставчици",
+        "detail": f"{unread_count} непрочетени известия за промяна в цените.",
+        "route": "/(tabs)/stats",
+    }
+
+async def _signal_reorder(company_id, scope, current_user, visibility) -> Optional[dict]:
+    if "view_statistics" not in set(current_user.permissions or []):
+        return None
+    data = await get_reorder_nudges(current_user)
+    nudges = data.get("nudges") or []
+    if not nudges:
+        return None
+    top = nudges[0]
+    return {
+        "key": "reorder", "severity": "info", "priority": 38,
+        "title": "Време е за нова поръчка",
+        "detail": f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни - вече мина {top['days_since_last']}.",
+        "route": "/(tabs)/stats",
+    }
+
+async def _signal_forecast(company_id, scope, current_user, visibility) -> Optional[dict]:
+    if not company_id or "view_statistics" not in set(current_user.permissions or []):
+        return None
+    revenue_forecast = await forecast_service.get_revenue_forecast(company_id, months_ahead=1)
+    if (
+        revenue_forecast["trend"] == "decreasing"
+        and revenue_forecast["confidence"] >= 0.5
+        and abs(revenue_forecast["trend_percent"]) >= 15
+    ):
+        return {
+            "key": "forecast_revenue", "severity": "warning", "priority": 60,
+            "title": "Оборотът показва низходяща тенденция",
+            "detail": f"Оборотът ти намалява с около {abs(revenue_forecast['trend_percent']):.0f}% спрямо предходния период.",
+            "route": "/(tabs)/stats",
+        }
+    expense_forecast = await forecast_service.get_expense_forecast(
+        company_id, months_ahead=1, include_off_book_expenses=visibility["off_book_expenses"]
+    )
+    if (
+        expense_forecast["trend"] == "increasing"
+        and expense_forecast["confidence"] >= 0.5
+        and abs(expense_forecast["trend_percent"]) >= 15
+    ):
+        return {
+            "key": "forecast_expense", "severity": "warning", "priority": 58,
+            "title": "Разходите показват възходяща тенденция",
+            "detail": f"Разходите ти нарастват с около {abs(expense_forecast['trend_percent']):.0f}% спрямо предходния период.",
+            "route": "/(tabs)/stats",
+        }
+    return None
+
+_PROACTIVE_SIGNAL_BUILDERS = [
+    _signal_unpaid_invoices, _signal_receivables, _signal_scan_credits,
+    _signal_budget, _signal_price_alerts, _signal_reorder, _signal_forecast,
+]
+
+async def get_proactive_signals(current_user: User) -> List[dict]:
+    """Computes and ranks every signal this viewer is allowed to see - shared
+    by GET /proactive/signals (the Home card) and the daily digest push
+    tick below. Each builder softly skips itself (returns None) when the
+    viewer lacks the relevant permission or the underlying endpoint it
+    reuses has nothing to report - a missing permission for one signal
+    never fails the whole list, and a crash in one builder (logged, never
+    raised) never hides every other signal."""
+    company_id, scope = await get_company_scope(current_user)
+    visibility = get_financial_visibility(current_user)
+    signals = []
+    for builder in _PROACTIVE_SIGNAL_BUILDERS:
+        try:
+            signal = await builder(company_id, scope, current_user, visibility)
+            if signal:
+                signals.append(signal)
+        except Exception:
+            logger.exception(f"Proactive engine: {builder.__name__} failed")
+    signals.sort(key=lambda s: s["priority"], reverse=True)
+    return signals
+
+@api_router.get("/proactive/signals")
+async def list_proactive_signals(current_user: User = Depends(get_current_user)):
+    return {"signals": await get_proactive_signals(current_user)}
+
+# At most once per company per this cooldown, regardless of how many
+# signals are push-worthy or how often the hourly tick below runs -
+# mirrors the existing loops' "check often, fire rarely" dedup pattern,
+# via a dedicated state doc rather than a per-signal flag, since this
+# push is about the ranked TOP signal across all of them, not any single one.
+PROACTIVE_DIGEST_COOLDOWN = timedelta(hours=20)
+
+async def _proactive_digest_tick():
+    """Once-daily ranked digest push: for every company, recomputes the
+    same ranked signals GET /proactive/signals returns (using the owner's
+    own permissions - the most-privileged view available, so a signal
+    gated on manage_budget/add_revenue etc. is still considered) and,
+    only if the single highest-ranked signal clears
+    PROACTIVE_PUSH_WORTHY_PRIORITY, sends ONE push naming it plus how many
+    other things are also waiting. Recipients are everyone with
+    view_statistics, same selection as the existing price-alert push."""
+    owners = await db.users.find(
+        {"role": "owner", "company_id": {"$ne": None}}, {"_id": 0}
+    ).to_list(10000)
+    now = datetime.now(timezone.utc)
+
+    for owner_doc in owners:
+        company_id = owner_doc.get("company_id")
+        if not company_id:
+            continue
+
+        state = await db.proactive_digest_state.find_one({"company_id": company_id}, {"_id": 0, "last_sent_at": 1})
+        if state and state.get("last_sent_at"):
+            last_sent_at = state["last_sent_at"]
+            if last_sent_at.tzinfo is None:
+                last_sent_at = last_sent_at.replace(tzinfo=timezone.utc)
+            if now - last_sent_at < PROACTIVE_DIGEST_COOLDOWN:
+                continue
+
+        try:
+            owner_user = User(**sanitize_user(dict(owner_doc)))
+        except Exception:
+            logger.exception(f"Proactive digest: could not construct owner user for company {company_id}")
+            continue
+
+        signals = await get_proactive_signals(owner_user)
+        if not signals or signals[0]["priority"] < PROACTIVE_PUSH_WORTHY_PRIORITY:
+            continue
+
+        top = signals[0]
+        others = len(signals) - 1
+        body = top["detail"] if others <= 0 else f"{top['detail']} (+{others} друго изискващо внимание)"
+
+        recipients = await db.users.find(
+            {"company_id": company_id, "permissions": "view_statistics"}, {"_id": 0, "user_id": 1}
+        ).to_list(100)
+        recipient_ids = [r["user_id"] for r in recipients]
+        if not recipient_ids:
+            continue
+
+        await push_service.send_to_users(
+            db, recipient_ids, title=f"Днешен преглед: {top['title']}", body=body,
+            data={"type": "proactive_digest", "signal_key": top["key"]},
+        )
+        await db.proactive_digest_state.update_one(
+            {"company_id": company_id},
+            {"$set": {"company_id": company_id, "last_sent_at": now, "last_signal_key": top["key"]}},
+            upsert=True,
+        )
+
+async def _proactive_digest_loop():
+    while True:
+        try:
+            await _proactive_digest_tick()
+        except Exception as e:
+            logger.error(f"Proactive digest loop error: {e}")
+        # Hourly check, daily send (PROACTIVE_DIGEST_COOLDOWN) - same
+        # reasoning as the budget/notification-settings loops above.
+        await asyncio.sleep(3600)
+
+@app.on_event("startup")
+async def start_proactive_digest_loop():
+    asyncio.create_task(_proactive_digest_loop())
+
 @api_router.get("/statistics/chart-data")
 async def get_chart_data(
     period: str = "week",  # week, month, year
@@ -9388,7 +9675,10 @@ async def create_indexes():
         await db.customers.create_index([("company_id", 1), ("name", 1)])
         await db.receivables.create_index([("company_id", 1), ("is_paid", 1), ("due_date", 1)])
         await db.billing_documents.create_index([("company_id", 1), ("created_at", -1)])
-        
+
+        # Proactive engine digest push dedup (one state doc per company)
+        await db.proactive_digest_state.create_index([("company_id", 1)], unique=True)
+
         # Users indexes
         await db.users.create_index([("email", 1)], unique=True, sparse=True)
         await db.users.create_index([("company_id", 1)])

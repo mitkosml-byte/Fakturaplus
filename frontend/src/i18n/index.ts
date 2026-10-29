@@ -184,9 +184,10 @@ export const translations: Translations = {
     en: 'Profile',
   },
   
-  // Morning briefing card (top of Home) - synthesizes unpaid invoices,
-  // price alerts, budget status and today's revenue vs. usual into one
-  // glanceable card instead of four separate tabs.
+  // Morning briefing card (top of Home) - renders whatever the backend's
+  // unified Proactive Second Brain engine (GET /proactive/signals) ranks
+  // highest; signal title/detail text itself comes from the backend
+  // (Bulgarian-only, same as every other push notification in the app).
   'briefing.title': {
     bg: 'Дневен преглед',
     en: 'Daily briefing',
@@ -195,31 +196,6 @@ export const translations: Translations = {
     bg: 'Нищо спешно днес - всичко изглежда наред.',
     en: 'Nothing urgent today - everything looks fine.',
   },
-  'briefing.unpaid': {
-    bg: '{count} неплатени фактури',
-    en: '{count} unpaid invoices',
-  },
-  'briefing.unpaidOverdue': {
-    bg: '{count} неплатени фактури, {overdue} просрочени',
-    en: '{count} unpaid invoices, {overdue} overdue',
-  },
-  'briefing.priceAlerts': {
-    bg: '{count} известия за промяна в цените',
-    en: '{count} price-change alerts',
-  },
-  'briefing.budget': {
-    bg: 'Бюджетът е изразходван {percent}%',
-    en: 'Budget is {percent}% used',
-  },
-  'briefing.revenueUp': {
-    bg: 'Оборотът днес е с {percent}% над обичайното',
-    en: "Today's revenue is {percent}% above usual",
-  },
-  'briefing.revenueDown': {
-    bg: 'Оборотът днес е с {percent}% под обичайното',
-    en: "Today's revenue is {percent}% below usual",
-  },
-
   // "Ask your own numbers" chat (Module 4 Finding #3) - plain-language Q&A
   // scoped strictly to the company's own stored data.
   'askMyNumbers.title': {

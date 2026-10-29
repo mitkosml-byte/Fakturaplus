@@ -190,6 +190,17 @@ export interface BillingDocument {
   created_at: string;
 }
 
+// Proactive Second Brain engine (Module 11 Finding #1) - one ranked
+// signal list over every other piece of intelligence the app computes.
+export interface ProactiveSignal {
+  key: string;
+  severity: 'critical' | 'warning' | 'info';
+  priority: number;
+  title: string;
+  detail: string;
+  route: string;
+}
+
 // "Ask your own numbers" chat (Module 4 Finding #3)
 export interface BusinessChatDigestPeriod {
   label: string;

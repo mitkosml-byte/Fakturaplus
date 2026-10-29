@@ -1159,3 +1159,51 @@ def test_ask_my_numbers(client):
         "/api/ai/ask-my-numbers", headers=h(no_stats_staff_token), json={"question": "Как съм този месец?"}
     )
     assert r.status_code == 403
+
+
+def test_proactive_signals(client):
+    """Module 11 Finding #1: one ranked signal list over every other
+    signal this audit built. Never an all-or-nothing 403 - each signal is
+    permission-gated individually inside get_proactive_signals - and
+    whatever it does return must be sorted most-urgent first."""
+    owner = h(STATE["owner_token"])
+    r = client.get("/api/proactive/signals", headers=owner)
+    assert r.status_code == 200, r.text
+    signals = r.json()["signals"]
+    priorities = [s["priority"] for s in signals]
+    assert priorities == sorted(priorities, reverse=True)
+    for s in signals:
+        assert set(s.keys()) >= {"key", "severity", "priority", "title", "detail", "route"}
+
+    # A staff member with no revenue/budget/stats-adjacent permission at
+    # all still gets 200 (never all-or-nothing) - just a narrower list,
+    # since unpaid-invoices (the one signal with no extra permission gate)
+    # can still apply regardless.
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+
+    bare_staff_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    bare_staff_token = uuid_module.uuid4().hex
+
+    async def _make_bare_staff():
+        me = client.get("/api/auth/me", headers=owner).json()
+        await server_module.db.users.insert_one({
+            "user_id": bare_staff_id, "email": f"{bare_staff_id}@test.com", "name": "Bare Staff",
+            "role": "staff", "company_id": me["company_id"], "permissions": ["view_personal_wallet"],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": bare_staff_id, "session_token": bare_staff_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+
+    asyncio.run(_make_bare_staff())
+    r = client.get("/api/proactive/signals", headers=h(bare_staff_token))
+    assert r.status_code == 200, r.text
+    bare_signal_keys = {s["key"] for s in r.json()["signals"]}
+    assert not bare_signal_keys & {"budget", "receivables", "price_alerts", "reorder", "forecast_revenue", "forecast_expense", "scan_credits"}

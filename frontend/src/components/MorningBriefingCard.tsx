@@ -3,127 +3,58 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTranslation } from '../i18n';
-import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
-import { Summary } from '../types';
+import { ProactiveSignal } from '../types';
 import { COLORS } from '../theme/colors';
 
-// Module 4 audit finding: FACTURA+ already computes everything needed for
-// a daily "how is my business doing" check - unpaid invoices, today's
-// price alerts, today's revenue vs. the usual pattern, budget status -
-// but each one only ever surfaced on its own separate tab. This card pulls
-// them into one glanceable place at the top of Home, reusing data Home
-// already computes (summary, avgDailyTurnover) plus the existing
-// price-alert/budget endpoints - no new backend logic, just one
-// aggregated view.
+// Module 4 Finding #3 (Home card) + Module 11 Finding #1 (the engine
+// behind it): this card used to compute its own ad-hoc mix of unpaid
+// invoices/price alerts/budget/today's-revenue-vs-average locally. It now
+// simply renders whatever the backend's unified Proactive Second Brain
+// engine (GET /proactive/signals) ranks highest - the same ranked list
+// that engine's once-daily digest push reads from - so a new signal added
+// there (a sixth or seventh source) shows up here automatically, with no
+// change needed in this component.
 type Props = {
-  summary: Summary | null;
-  avgDailyTurnover: number;
   // Any value that changes whenever Home's own data reloads (its `summary`
   // object works) - adding revenue/an expense right on Home should refresh
-  // this card's own figures too, not just on the next screen focus.
+  // this card's own signals too, not just on the next screen focus.
   refreshSignal?: unknown;
 };
 
-type Row = {
-  key: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  text: string;
-  onPress: () => void;
+const SEVERITY_ICON: Record<ProactiveSignal['severity'], keyof typeof Ionicons.glyphMap> = {
+  critical: 'alert-circle',
+  warning: 'time-outline',
+  info: 'information-circle-outline',
 };
 
-// A revenue swing has to be a real gap either way to be worth a row - a
-// few percent either side of normal isn't news, it's just how retail days
-// naturally vary.
-const REVENUE_GAP_THRESHOLD_PERCENT = 15;
+const SEVERITY_COLOR: Record<ProactiveSignal['severity'], string> = {
+  critical: COLORS.danger,
+  warning: COLORS.warning,
+  info: COLORS.info,
+};
 
-export function MorningBriefingCard({ summary, avgDailyTurnover, refreshSignal }: Props) {
+export function MorningBriefingCard({ refreshSignal }: Props) {
   const { t } = useTranslation();
-  const { hasPermission } = useAuth();
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
-  const [todayRevenue, setTodayRevenue] = useState<number | null>(null);
-  const [unreadAlerts, setUnreadAlerts] = useState(0);
-  const [budgetStatus, setBudgetStatus] = useState<any>(null);
-
-  const canSeeAlerts = hasPermission('view_statistics');
-  const canSeeBudget = hasPermission('manage_budget');
+  const [signals, setSignals] = useState<ProactiveSignal[]>([]);
 
   const refresh = useCallback(() => {
     setLoading(true);
-    Promise.all([
-      api.getTodayRevenue().then((d) => d.fiscal_revenue).catch(() => null),
-      canSeeAlerts ? api.getPriceAlerts('unread').then((d) => d.unread_count).catch(() => 0) : Promise.resolve(0),
-      canSeeBudget ? api.getBudgetStatus().catch(() => null) : Promise.resolve(null),
-    ]).then(([revenue, alertCount, budget]) => {
-      setTodayRevenue(revenue);
-      setUnreadAlerts(alertCount);
-      setBudgetStatus(budget && budget.has_budget ? budget : null);
-    }).finally(() => setLoading(false));
-  }, [canSeeAlerts, canSeeBudget]);
+    api.getProactiveSignals()
+      .then((data) => setSignals(data.signals || []))
+      .catch(() => setSignals([]))
+      .finally(() => setLoading(false));
+  }, []);
 
   useFocusEffect(refresh);
-  // t()/refresh() are recreated every render - only refreshSignal should retrigger this.
+  // refresh() is recreated every render - only refreshSignal should retrigger this.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { refresh(); }, [refreshSignal]);
 
-  const rows: Row[] = [];
-
-  if ((summary?.unpaid_invoice_count || 0) > 0) {
-    const overdue = summary?.overdue_invoice_count || 0;
-    rows.push({
-      key: 'unpaid',
-      icon: overdue > 0 ? 'alert-circle' : 'time-outline',
-      color: overdue > 0 ? COLORS.danger : COLORS.warning,
-      text: overdue > 0
-        ? t('briefing.unpaidOverdue')
-            .replace('{count}', String(summary!.unpaid_invoice_count))
-            .replace('{overdue}', String(overdue))
-        : t('briefing.unpaid').replace('{count}', String(summary!.unpaid_invoice_count)),
-      onPress: () => router.push({ pathname: '/(tabs)/invoices', params: { paymentFilter: 'unpaid' } }),
-    });
-  }
-
-  if (unreadAlerts > 0) {
-    rows.push({
-      key: 'alerts',
-      icon: 'pricetag',
-      color: COLORS.warning,
-      text: t('briefing.priceAlerts').replace('{count}', String(unreadAlerts)),
-      onPress: () => router.push('/(tabs)/stats'),
-    });
-  }
-
-  if (budgetStatus && (budgetStatus.is_exceeded || budgetStatus.is_alert)) {
-    rows.push({
-      key: 'budget',
-      icon: 'wallet',
-      color: budgetStatus.is_exceeded ? COLORS.danger : COLORS.warning,
-      text: t('briefing.budget').replace('{percent}', String(budgetStatus.percent_used)),
-      onPress: () => router.push('/budget'),
-    });
-  }
-
-  if (todayRevenue !== null && avgDailyTurnover > 0) {
-    const diffPercent = ((todayRevenue - avgDailyTurnover) / avgDailyTurnover) * 100;
-    if (Math.abs(diffPercent) >= REVENUE_GAP_THRESHOLD_PERCENT) {
-      const isUp = diffPercent >= 0;
-      rows.push({
-        key: 'revenue',
-        icon: isUp ? 'trending-up' : 'trending-down',
-        color: isUp ? COLORS.success : COLORS.danger,
-        text: (isUp ? t('briefing.revenueUp') : t('briefing.revenueDown')).replace(
-          '{percent}',
-          String(Math.round(Math.abs(diffPercent)))
-        ),
-        onPress: () => router.push('/(tabs)/stats'),
-      });
-    }
-  }
-
-  if (loading && rows.length === 0) {
+  if (loading && signals.length === 0) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
         <ActivityIndicator size="small" color={COLORS.primary} />
@@ -138,18 +69,25 @@ export function MorningBriefingCard({ summary, avgDailyTurnover, refreshSignal }
         <Text style={styles.title}>{t('briefing.title')}</Text>
       </View>
 
-      {rows.length === 0 ? (
+      {signals.length === 0 ? (
         <View style={styles.allClearRow}>
           <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
           <Text style={styles.allClearText}>{t('briefing.allClear')}</Text>
         </View>
       ) : (
-        rows.map((row) => (
-          <TouchableOpacity key={row.key} style={styles.row} onPress={row.onPress}>
-            <View style={[styles.rowIcon, { backgroundColor: `${row.color}26` }]}>
-              <Ionicons name={row.icon} size={16} color={row.color} />
+        signals.map((signal) => (
+          <TouchableOpacity
+            key={signal.key}
+            style={styles.row}
+            onPress={() => router.push(signal.route as any)}
+          >
+            <View style={[styles.rowIcon, { backgroundColor: `${SEVERITY_COLOR[signal.severity]}26` }]}>
+              <Ionicons name={SEVERITY_ICON[signal.severity]} size={16} color={SEVERITY_COLOR[signal.severity]} />
             </View>
-            <Text style={styles.rowText}>{row.text}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>{signal.title}</Text>
+              <Text style={styles.rowDetail}>{signal.detail}</Text>
+            </View>
             <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
           </TouchableOpacity>
         ))
@@ -205,9 +143,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowText: {
-    flex: 1,
+  rowTitle: {
     fontSize: 13,
+    fontWeight: '600',
     color: 'white',
+  },
+  rowDetail: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 1,
   },
 });

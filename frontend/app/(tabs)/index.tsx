@@ -506,11 +506,7 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            <MorningBriefingCard
-              summary={summary}
-              avgDailyTurnover={avgDailyTurnover}
-              refreshSignal={summary}
-            />
+            <MorningBriefingCard refreshSignal={summary} />
 
             <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
 
