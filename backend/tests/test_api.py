@@ -569,17 +569,42 @@ def test_feedback_box(client):
 
 def test_scan_credits(client):
     """Fakturaplus's whole monetization surface - see ScanCreditService's
-    module docstring. Uses its own freshly-registered owner/company so the
-    balance assertions below aren't order-dependent on what other tests in
-    this module may or may not have scanned."""
+    module docstring. Uses its own fresh owner/company so the balance
+    assertions below aren't order-dependent on what other tests in this
+    module may or may not have scanned.
+
+    The owner is created directly against the DB (same shortcut
+    test_cross_tenant_isolation and test_csrf_protection use), not via the
+    rate-limited POST /auth/register - this test still goes through
+    register() once below for the staff invite/accept flow, which is the
+    one part of this test actually worth exercising as real HTTP calls;
+    the owner's own identity isn't."""
     import asyncio
+    import uuid
+    from datetime import timedelta, timezone
     import server
 
     owner_email = f"master_credits_owner_{TS}@test.com"
-    r = client.post("/api/auth/register", json={"name": "Credits Owner", "email": owner_email, "password": "Passw0rd1"})
-    assert r.status_code == 200
-    owner_token = r.json()["session_token"]
-    owner_id = r.json()["user"]["user_id"]
+    owner_id = f"user_{uuid.uuid4().hex[:12]}"
+    owner_token = uuid.uuid4().hex
+
+    async def _make_owner():
+        company = server.Company(name="Credits Owner Co", eik=f"TEST{uuid.uuid4().hex[:9].upper()}")
+        await server.db.companies.insert_one(company.dict())
+        await server.db.users.insert_one({
+            "user_id": owner_id, "email": owner_email, "name": "Credits Owner",
+            "role": "owner", "company_id": company.id, "permissions": list(server.ROLE_PERMISSIONS["owner"]),
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server.datetime.now(timezone.utc),
+        })
+        await server.db.user_sessions.insert_one({
+            "user_id": owner_id, "session_token": owner_token,
+            "expires_at": server.datetime.now(timezone.utc) + timedelta(days=7),
+            "created_at": server.datetime.now(timezone.utc),
+        })
+
+    asyncio.run(_make_owner())
     owner = h(owner_token)
 
     # Fresh company starts with the full free monthly quota and nothing purchased.

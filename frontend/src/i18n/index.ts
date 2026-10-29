@@ -2109,6 +2109,46 @@ export const translations: Translations = {
     bg: 'На база последните 6 месеца',
     en: 'Based on the last 6 months',
   },
+  'stats.forecastHint1m': {
+    bg: 'На база последния 1 месец',
+    en: 'Based on the last 1 month',
+  },
+  'stats.forecastHint3m': {
+    bg: 'На база последните 3 месеца',
+    en: 'Based on the last 3 months',
+  },
+  'stats.forecastHint6m': {
+    bg: 'На база последните 6 месеца',
+    en: 'Based on the last 6 months',
+  },
+  'stats.forecastHint12m': {
+    bg: 'На база последните 12 месеца',
+    en: 'Based on the last 12 months',
+  },
+  'stats.forecastRange1m': {
+    bg: '1 мес.',
+    en: '1 mo',
+  },
+  'stats.forecastRange3m': {
+    bg: '3 мес.',
+    en: '3 mo',
+  },
+  'stats.forecastRange6m': {
+    bg: '6 мес.',
+    en: '6 mo',
+  },
+  'stats.forecastRange12m': {
+    bg: '12 мес.',
+    en: '12 mo',
+  },
+  'stats.forecastInsufficientData': {
+    bg: 'Все още се учим от твоя бизнес - прогнозата ще стане по-точна с още история (поне 4 месеца данни).',
+    en: "Still learning your business - the forecast gets sharper with more history (at least 4 months of data).",
+  },
+  'stats.forecastAverageOnly': {
+    bg: 'Средно на месец',
+    en: 'Monthly average',
+  },
   'stats.forecastRevenue': {
     bg: 'Очакван оборот',
     en: 'Expected revenue',

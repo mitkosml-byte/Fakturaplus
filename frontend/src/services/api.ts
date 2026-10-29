@@ -16,6 +16,24 @@ function readCsrfTokenCookie(): string | null {
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+// Matches ForecastService's _resolve_window: either a lookback preset
+// (in days - 30/90/180/365 for roughly 1/3/6/12 months) or an explicit
+// custom start/end, never both at once.
+export type ForecastRange =
+  | { lookbackDays: number; startDate?: undefined; endDate?: undefined }
+  | { lookbackDays?: undefined; startDate: string; endDate: string };
+
+function forecastRangeQuery(range?: ForecastRange): string {
+  if (!range) return '';
+  if (range.startDate && range.endDate) {
+    return `&start_date=${range.startDate}&end_date=${range.endDate}`;
+  }
+  if (range.lookbackDays) {
+    return `&lookback_days=${range.lookbackDays}`;
+  }
+  return '';
+}
+
 // Bulgarian labels for the field names that actually show up in
 // validation errors across invoices/expenses/items, so a rejected save
 // names the field the way the user sees it on screen, not its Python
@@ -832,12 +850,12 @@ class ApiService {
   }
 
   // Forecast API
-  async getExpenseForecast(monthsAhead: number = 3): Promise<any> {
-    return this.fetch(`/forecast/expenses?months_ahead=${monthsAhead}`);
+  async getExpenseForecast(monthsAhead: number = 3, range?: ForecastRange): Promise<any> {
+    return this.fetch(`/forecast/expenses?months_ahead=${monthsAhead}${forecastRangeQuery(range)}`);
   }
 
-  async getRevenueForecast(monthsAhead: number = 3): Promise<any> {
-    return this.fetch(`/forecast/revenue?months_ahead=${monthsAhead}`);
+  async getRevenueForecast(monthsAhead: number = 3, range?: ForecastRange): Promise<any> {
+    return this.fetch(`/forecast/revenue?months_ahead=${monthsAhead}${forecastRangeQuery(range)}`);
   }
 
   // Audit Logs

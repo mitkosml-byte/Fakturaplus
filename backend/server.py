@@ -7104,10 +7104,18 @@ async def delete_recurring_expense(expense_id: str, current_user: User = Depends
 @api_router.get("/forecast/expenses")
 async def get_expense_forecast(
     months_ahead: int = 3,
+    lookback_days: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     """Get expense forecast. Gated on view_statistics, matching the
-    frontend's own gate for the forecast card on the stats screen."""
+    frontend's own gate for the forecast card on the stats screen.
+
+    lookback_days (a preset - 30/90/180/365 for roughly 1/3/6/12 months)
+    or an explicit start_date/end_date (a custom period) controls how far
+    back the forecast's own history window reaches; omitting both keeps
+    the original 6-month default."""
     require_permission(current_user, "view_statistics")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
@@ -7119,15 +7127,20 @@ async def get_expense_forecast(
     return await forecast_service.get_expense_forecast(
         company_id, months_ahead,
         include_off_book_expenses=visibility["off_book_expenses"],
+        lookback_days=lookback_days, start_date=start_date, end_date=end_date,
     )
 
 @api_router.get("/forecast/revenue")
 async def get_revenue_forecast(
     months_ahead: int = 3,
+    lookback_days: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     """Get revenue forecast. Gated on view_statistics, matching the
-    frontend's own gate for the forecast card on the stats screen."""
+    frontend's own gate for the forecast card on the stats screen. See
+    get_expense_forecast above for lookback_days/start_date/end_date."""
     require_permission(current_user, "view_statistics")
     user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
     company_id = user_doc.get("company_id") if user_doc else None
@@ -7135,7 +7148,10 @@ async def get_revenue_forecast(
     if not company_id:
         return {"error": "No company"}
 
-    return await forecast_service.get_revenue_forecast(company_id, months_ahead)
+    return await forecast_service.get_revenue_forecast(
+        company_id, months_ahead,
+        lookback_days=lookback_days, start_date=start_date, end_date=end_date,
+    )
 
 # ===================== PAYROLL / ВЕДОМОСТ ЗА ЗАПЛАТИ =====================
 

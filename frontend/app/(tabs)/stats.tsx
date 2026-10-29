@@ -136,6 +136,11 @@ export default function StatsScreen() {
   const [expenseForecast, setExpenseForecast] = useState<any>(null);
   const [revenueForecast, setRevenueForecast] = useState<any>(null);
   const [roiTrend, setRoiTrend] = useState<any[]>([]);
+  // How far back the forecast looks for its trend/average - a hardcoded
+  // 6 months used to be the only option, which made the forecast blind
+  // (and its "trend" noise) for any company under 6 months old. Days,
+  // not a month count, to match ForecastService's lookback_days param.
+  const [forecastRangeDays, setForecastRangeDays] = useState<number>(180);
 
   const loadData = useCallback(async () => {
     try {
@@ -171,8 +176,8 @@ export default function StatsScreen() {
 
       try {
         const [expFc, revFc] = await Promise.all([
-          api.getExpenseForecast(1),
-          api.getRevenueForecast(1),
+          api.getExpenseForecast(1, { lookbackDays: forecastRangeDays }),
+          api.getRevenueForecast(1, { lookbackDays: forecastRangeDays }),
         ]);
         setExpenseForecast(expFc);
         setRevenueForecast(revFc);
@@ -189,7 +194,7 @@ export default function StatsScreen() {
         console.error('Error loading ROI trend:', error);
       }
     }
-  }, [period, summaryPeriodState, hasPermission, isOwner]);
+  }, [period, summaryPeriodState, hasPermission, isOwner, forecastRangeDays]);
 
   const loadSupplierStats = useCallback(async () => {
     setLoadingSuppliers(true);
@@ -1354,35 +1359,95 @@ export default function StatsScreen() {
                       <Ionicons name="analytics" size={22} color={COLORS.primary} />
                       <Text style={styles.chartTitle}>{t('stats.forecastTitle')}</Text>
                     </View>
-                    <Text style={styles.forecastHint}>{t('stats.forecastHint')}</Text>
+
+                    {/* Lookback range - was a hardcoded 6 months with no
+                        way to change it, which made the forecast blind
+                        (and its trend noisy) for a company under 6
+                        months old. Same button pattern as the price
+                        inflation period selector above. */}
+                    <View style={styles.rankingSelector}>
+                      {([
+                        { days: 30, labelKey: 'stats.forecastRange1m' },
+                        { days: 90, labelKey: 'stats.forecastRange3m' },
+                        { days: 180, labelKey: 'stats.forecastRange6m' },
+                        { days: 365, labelKey: 'stats.forecastRange12m' },
+                      ] as const).map((opt) => (
+                        <TouchableOpacity
+                          key={opt.days}
+                          style={[styles.rankingButton, forecastRangeDays === opt.days && styles.rankingButtonActive]}
+                          onPress={() => setForecastRangeDays(opt.days)}
+                        >
+                          <Text style={[styles.rankingButtonText, forecastRangeDays === opt.days && styles.rankingButtonTextActive]}>
+                            {t(opt.labelKey)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    <Text style={styles.forecastHint}>
+                      {t(
+                        forecastRangeDays === 30 ? 'stats.forecastHint1m'
+                          : forecastRangeDays === 90 ? 'stats.forecastHint3m'
+                          : forecastRangeDays === 365 ? 'stats.forecastHint12m'
+                          : 'stats.forecastHint6m'
+                      )}
+                    </Text>
                     <View style={styles.forecastRow}>
                       {revenueForecast?.forecast?.[0] && (
                         <View style={styles.forecastCard}>
-                          <Ionicons name="trending-up" size={20} color={COLORS.success} />
-                          <Text style={styles.forecastLabel}>{t('stats.forecastRevenue')}</Text>
-                          <Text style={[styles.forecastValue, { color: COLORS.success }]}>
-                            {revenueForecast.forecast[0].predicted_amount.toFixed(0)} €
-                          </Text>
-                          <Text style={styles.forecastTrend}>
-                            {revenueForecast.trend === 'increasing' ? '📈' : revenueForecast.trend === 'decreasing' ? '📉' : '➖'}
-                            {' '}{revenueForecast.trend_percent > 0 ? '+' : ''}{revenueForecast.trend_percent}%
-                          </Text>
+                          {revenueForecast.trend === 'insufficient_data' ? (
+                            <>
+                              <Ionicons name="hourglass-outline" size={20} color={COLORS.textMuted} />
+                              <Text style={styles.forecastLabel}>{t('stats.forecastAverageOnly')} · {t('stats.forecastRevenue')}</Text>
+                              <Text style={[styles.forecastValue, { color: COLORS.textMuted }]}>
+                                {revenueForecast.avg_monthly.toFixed(0)} €
+                              </Text>
+                            </>
+                          ) : (
+                            <>
+                              <Ionicons name="trending-up" size={20} color={COLORS.success} />
+                              <Text style={styles.forecastLabel}>{t('stats.forecastRevenue')}</Text>
+                              <Text style={[styles.forecastValue, { color: COLORS.success }]}>
+                                {revenueForecast.forecast[0].predicted_amount.toFixed(0)} €
+                              </Text>
+                              <Text style={styles.forecastTrend}>
+                                {revenueForecast.trend === 'increasing' ? '📈' : revenueForecast.trend === 'decreasing' ? '📉' : '➖'}
+                                {' '}{revenueForecast.trend_percent > 0 ? '+' : ''}{revenueForecast.trend_percent}%
+                              </Text>
+                            </>
+                          )}
                         </View>
                       )}
                       {expenseForecast?.forecast?.[0] && (
                         <View style={styles.forecastCard}>
-                          <Ionicons name="trending-down" size={20} color={COLORS.danger} />
-                          <Text style={styles.forecastLabel}>{t('stats.forecastExpense')}</Text>
-                          <Text style={[styles.forecastValue, { color: COLORS.danger }]}>
-                            {expenseForecast.forecast[0].predicted_amount.toFixed(0)} €
-                          </Text>
-                          <Text style={styles.forecastTrend}>
-                            {expenseForecast.trend === 'increasing' ? '📈' : expenseForecast.trend === 'decreasing' ? '📉' : '➖'}
-                            {' '}{expenseForecast.trend_percent > 0 ? '+' : ''}{expenseForecast.trend_percent}%
-                          </Text>
+                          {expenseForecast.trend === 'insufficient_data' ? (
+                            <>
+                              <Ionicons name="hourglass-outline" size={20} color={COLORS.textMuted} />
+                              <Text style={styles.forecastLabel}>{t('stats.forecastAverageOnly')} · {t('stats.forecastExpense')}</Text>
+                              <Text style={[styles.forecastValue, { color: COLORS.textMuted }]}>
+                                {expenseForecast.avg_monthly.toFixed(0)} €
+                              </Text>
+                            </>
+                          ) : (
+                            <>
+                              <Ionicons name="trending-down" size={20} color={COLORS.danger} />
+                              <Text style={styles.forecastLabel}>{t('stats.forecastExpense')}</Text>
+                              <Text style={[styles.forecastValue, { color: COLORS.danger }]}>
+                                {expenseForecast.forecast[0].predicted_amount.toFixed(0)} €
+                              </Text>
+                              <Text style={styles.forecastTrend}>
+                                {expenseForecast.trend === 'increasing' ? '📈' : expenseForecast.trend === 'decreasing' ? '📉' : '➖'}
+                                {' '}{expenseForecast.trend_percent > 0 ? '+' : ''}{expenseForecast.trend_percent}%
+                              </Text>
+                            </>
+                          )}
                         </View>
                       )}
                     </View>
+
+                    {(revenueForecast?.trend === 'insufficient_data' || expenseForecast?.trend === 'insufficient_data') && (
+                      <Text style={styles.forecastHint}>{t('stats.forecastInsufficientData')}</Text>
+                    )}
                   </View>
                 )}
 

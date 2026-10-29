@@ -221,9 +221,15 @@ class ScanCreditService:
 
     async def get_history(self, company_id: Optional[str], user_id: str, limit: int = 200) -> List[dict]:
         scope = self.scope_id(company_id, user_id)
+        # created_at alone ties when two transactions land in the same
+        # clock tick (plausible for two calls made back to back, and the
+        # actual cause of an intermittent test failure here) - _id is
+        # excluded from the result but still sortable, and is itself
+        # monotonically increasing by insertion order, so it's a reliable
+        # tiebreaker for "which of these actually happened first".
         return await self.db.scan_transactions.find(
             {"scope_id": scope}, {"_id": 0}
-        ).sort("created_at", -1).limit(limit).to_list(limit)
+        ).sort([("created_at", -1), ("_id", -1)]).limit(limit).to_list(limit)
 
     async def _log_transaction(
         self, scope: str, company_id: Optional[str], user_id: str, user_name: str,
