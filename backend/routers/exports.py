@@ -32,6 +32,13 @@ from server import (
 )
 import server
 
+# Cross-domain reuse: export_statistics_pdf below calls these other
+# domains' route handlers directly as internal helpers (the same
+# already-existing reuse pattern as /import/{entity}/commit), rather than
+# re-deriving the same aggregates a second way.
+from routers.statistics import get_summary, get_supplier_statistics
+from routers.price_tracking import get_item_statistics
+
 router = APIRouter(prefix="/api")
 
 @router.get("/export/statistics/pdf")
