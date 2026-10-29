@@ -682,14 +682,18 @@ export default function HomeScreen() {
             <CountUp value={summary?.total_fiscal_revenue || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
             <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
           </View>
-          <View style={styles.statItem}>
+          <TouchableOpacity
+            style={styles.statItem}
+            onPress={() => router.push('/pocket-money-history')}
+            disabled={summary?.total_pocket_money === null}
+          >
             {summary && summary.total_pocket_money === null ? (
               <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
             ) : (
               <CountUp value={summary?.total_pocket_money || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
             )}
             <Text style={styles.statLabel}>{t('home.pocket')}</Text>
-          </View>
+          </TouchableOpacity>
           <View style={[styles.statItem, { overflow: 'visible' }]}>
             <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
             {summary && summary.profit === null ? (

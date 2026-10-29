@@ -245,6 +245,14 @@ export const translations: Translations = {
     bg: 'Фискален',
     en: 'Fiscal',
   },
+  'pocketMoney.historyTitle': {
+    bg: 'История на Джобчето',
+    en: 'Pocket money history',
+  },
+  'pocketMoney.empty': {
+    bg: 'Няма записи с Джобче за този период',
+    en: 'No pocket-money entries for this period',
+  },
   'home.pocket': {
     bg: 'Джобче',
     en: 'Pocket',
