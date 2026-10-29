@@ -86,6 +86,11 @@ export default function InvoicesScreen() {
   const params = useLocalSearchParams<{ paymentFilter?: string; invoiceId?: string }>();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  // Set only when the backend's true match count exceeds what was
+  // actually returned (it caps at 1,000 by default) - lets the banner
+  // below tell the user some invoices aren't shown instead of silently
+  // looking like a complete, if short, list.
+  const [invoicesTotalCount, setInvoicesTotalCount] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
@@ -173,13 +178,15 @@ export default function InvoicesScreen() {
   const loadInvoices = useCallback(async () => {
     try {
       const { start, end } = getPeriodRange(periodPreset, customStartDate, customEndDate);
-      const data = await api.getInvoices({
+      const { invoices: data, totalCount } = await api.getInvoicesPage({
         ...(searchQuery ? { search: searchQuery } : {}),
         ...(start ? { start_date: start } : {}),
         ...(end ? { end_date: end } : {}),
         ...(paymentFilter !== 'all' ? { payment_status: paymentFilter } : {}),
+        limit: 1000,
       });
       setInvoices(data);
+      setInvoicesTotalCount(totalCount > data.length ? totalCount : null);
     } catch (error) {
       console.error('Error loading invoices:', error);
     } finally {
@@ -683,6 +690,19 @@ export default function InvoicesScreen() {
               </ScrollView>
             </>
           </Expandable>
+
+          {/* Truncation banner - the backend caps matches per page; this is
+              the only signal the user gets that the list isn't complete. */}
+          {invoicesTotalCount !== null && (
+            <View style={styles.eikBanner}>
+              <Ionicons name="information-circle" size={18} color={COLORS.warning} />
+              <Text style={styles.eikBannerText}>
+                {t('invoices.truncatedBanner')
+                  .replace('{shown}', String(invoices.length))
+                  .replace('{total}', String(invoicesTotalCount))}
+              </Text>
+            </View>
+          )}
 
           {/* ЕИК issues banner */}
           {eikIssueCount > 0 && (

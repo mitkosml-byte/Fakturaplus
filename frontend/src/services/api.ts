@@ -3,6 +3,19 @@ import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartData
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+// Reads the csrf_token cookie the backend sets alongside the (httponly)
+// session cookie - see server.py's set_session_cookies. Only meaningful on
+// web: native builds authenticate via the Bearer token below, never a
+// cookie, so the backend's CSRF check never triggers for them and this
+// always returns null there (document doesn't exist on native anyway).
+function readCsrfTokenCookie(): string | null {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 // Bulgarian labels for the field names that actually show up in
 // validation errors across invoices/expenses/items, so a rejected save
 // names the field the way the user sees it on screen, not its Python
@@ -77,6 +90,14 @@ class ApiService {
 
     if (this.token) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const method = (options.method || 'GET').toUpperCase();
+    if (MUTATING_METHODS.has(method)) {
+      const csrfToken = readCsrfTokenCookie();
+      if (csrfToken) {
+        (headers as Record<string, string>)['X-CSRF-Token'] = csrfToken;
+      }
     }
 
     const response = await fetch(`${API_URL}/api${endpoint}`, {
@@ -321,6 +342,50 @@ class ApiService {
     if (params?.payment_status) queryParams.set('payment_status', params.payment_status);
     const query = queryParams.toString();
     return this.fetch(`/invoices${query ? `?${query}` : ''}`);
+  }
+
+  // Same filters as getInvoices, plus limit/offset, and also returns the
+  // true total match count (X-Total-Count) so a caller can tell whether
+  // the returned page is everything or there's more to load - the backend
+  // used to cap silently at 1000 with no way to know invoices were missing.
+  async getInvoicesPage(params?: {
+    supplier?: string;
+    invoice_number?: string;
+    search?: string;
+    start_date?: string;
+    end_date?: string;
+    payment_status?: 'paid' | 'unpaid' | 'partial' | 'overdue';
+    limit?: number;
+    offset?: number;
+  }): Promise<{ invoices: Invoice[]; totalCount: number }> {
+    const queryParams = new URLSearchParams();
+    if (params?.supplier) queryParams.set('supplier', params.supplier);
+    if (params?.invoice_number) queryParams.set('invoice_number', params.invoice_number);
+    if (params?.search) queryParams.set('search', params.search);
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    if (params?.payment_status) queryParams.set('payment_status', params.payment_status);
+    if (params?.limit != null) queryParams.set('limit', String(params.limit));
+    if (params?.offset != null) queryParams.set('offset', String(params.offset));
+    const query = queryParams.toString();
+
+    const response = await fetch(`${API_URL}/api/invoices${query ? `?${query}` : ''}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      },
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
+      const err = new Error(formatApiErrorDetail(error.detail)) as Error & { status?: number };
+      err.status = response.status;
+      throw err;
+    }
+    const invoices: Invoice[] = await response.json();
+    const totalHeader = response.headers.get('X-Total-Count');
+    const totalCount = totalHeader ? parseInt(totalHeader, 10) : invoices.length;
+    return { invoices, totalCount };
   }
 
   async createInvoice(invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at' | 'is_paid' | 'paid_amount' | 'paid_at'>): Promise<Invoice> {

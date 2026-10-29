@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Response, Request, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -582,6 +582,11 @@ class NotificationSettings(BaseModel):
     vat_threshold_amount: float = 0
     periodic_enabled: bool = False
     periodic_dates: List[int] = []  # Days of month (1-31)
+    # Dedup state for the background checks below - never set by the
+    # client, only by _notification_settings_tick (and reset by
+    # update_notification_settings when the threshold itself changes).
+    vat_threshold_sent_at: Optional[datetime] = None
+    periodic_last_sent_date: Optional[str] = None  # "YYYY-MM-DD"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -614,6 +619,44 @@ class OCRResult(BaseModel):
 # ===================== AUTH HELPERS =====================
 
 VALID_ROLES = {"owner", "manager", "staff", "accountant"}
+
+CSRF_COOKIE_NAME = "csrf_token"
+CSRF_HEADER_NAME = "x-csrf-token"
+SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+
+def set_session_cookies(response: Response, session_token: str) -> str:
+    """Sets both halves of the session: the httponly session_token cookie
+    (as before) plus a second, JS-readable csrf_token cookie the web
+    frontend echoes back as a header on state-changing requests - a
+    double-submit CSRF defense, needed specifically because samesite="none"
+    (required for the cross-origin frontend/backend split) gives up the
+    browser's own default CSRF protection. Returns the csrf token so a
+    caller that also needs it (none today) can reuse it without re-reading
+    the cookie."""
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=SESSION_MAX_AGE_SECONDS,
+        path="/"
+    )
+    csrf_token = uuid.uuid4().hex
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=csrf_token,
+        httponly=False,  # the frontend must be able to read this one
+        secure=True,
+        samesite="none",
+        max_age=SESSION_MAX_AGE_SECONDS,
+        path="/"
+    )
+    return csrf_token
+
+def clear_session_cookies(response: Response) -> None:
+    response.delete_cookie(key="session_token", path="/")
+    response.delete_cookie(key=CSRF_COOKIE_NAME, path="/")
 
 async def repair_invalid_role(user_doc: dict) -> dict:
     """Поправя легаси/невалидни стойности на role (напр. от стари версии на схемата).
@@ -947,11 +990,15 @@ async def request_owner_status_change(company_id: str, target_user: dict, reques
     action_doc.pop("_id", None)
     return action_doc
 
-async def execute_owner_action(action: dict):
+async def execute_owner_action(action: dict, executed_by: Optional[User] = None):
+    target_before = await db.users.find_one({"user_id": action["target_user_id"]}, {"_id": 0})
+
     if action["action"] == "remove":
+        new_role = "staff"
+        permissions = resolve_permissions("staff", None)
         await db.users.update_one(
             {"user_id": action["target_user_id"]},
-            {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
+            {"$unset": {"company_id": ""}, "$set": {"role": new_role, "permissions": permissions}}
         )
     else:
         new_role = action["action"]
@@ -961,6 +1008,27 @@ async def execute_owner_action(action: dict):
             {"$set": {"role": new_role, "permissions": permissions, "permissions_schema_version": PERMISSIONS_SCHEMA_VERSION}}
         )
         await ensure_membership(action["target_user_id"], action["company_id"], new_role, permissions)
+
+    # This is a multi-owner-approved change to another owner's role/access -
+    # exactly the kind of action the audit log must never be silent about.
+    # The acting identity is whichever owner's approval completed the
+    # required sign-off; the full approval chain goes in details.
+    await audit_service.log_action(
+        user_id=executed_by.user_id if executed_by else action["requested_by"],
+        user_name=executed_by.name if executed_by else action.get("requested_by_name", ""),
+        action="update_role",
+        entity_type="user",
+        entity_id=action["target_user_id"],
+        company_id=action["company_id"],
+        details={
+            "target_name": action.get("target_name") or (target_before or {}).get("name"),
+            "old_role": (target_before or {}).get("role"),
+            "new_role": new_role,
+            "via": "owner_action_approval",
+            "requested_by_name": action.get("requested_by_name"),
+            "approved_by": action.get("approved_by", []),
+        },
+    )
 
 async def get_session_token(request: Request) -> Optional[str]:
     # Check cookie first
@@ -1015,7 +1083,7 @@ async def logout(request: Request, response: Response):
     session_token = await get_session_token(request)
     if session_token:
         await db.user_sessions.delete_one({"session_token": session_token})
-    response.delete_cookie(key="session_token", path="/")
+    clear_session_cookies(response)
     return {"message": "Успешно излязохте"}
 
 # ===================== BULGARIAN TAX ID (EIK/BULSTAT) VALIDATION =====================
@@ -1187,16 +1255,8 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
     }
     await db.user_sessions.insert_one(session_doc)
 
-    # Set cookie
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=7 * 24 * 60 * 60,
-        path="/"
-    )
+    # Set cookies (session + CSRF double-submit)
+    set_session_cookies(response, session_token)
 
     user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     return {"user": sanitize_user(user_doc), "session_token": session_token, "invite_error": invite_error}
@@ -1233,16 +1293,8 @@ async def login_user(request: Request, user_data: UserLogin, response: Response)
     }
     await db.user_sessions.insert_one(session_doc)
     
-    # Set cookie
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=7 * 24 * 60 * 60,
-        path="/"
-    )
+    # Set cookies (session + CSRF double-submit)
+    set_session_cookies(response, session_token)
     
     user_doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
     return {"user": sanitize_user(user_doc), "session_token": session_token}
@@ -1402,6 +1454,25 @@ async def update_user_role(user_id: str, request: Request, current_user: User = 
     # in sync, in case this user held accountant-level access here.
     await ensure_membership(user_id, current_user.company_id, role, permissions)
 
+    # Role/permission changes are the single most sensitive action a company
+    # owner can take - this is the one place GET /audit-logs must be able to
+    # answer "who changed whose access, and to what" from.
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="update_role",
+        entity_type="user",
+        entity_id=user_id,
+        company_id=current_user.company_id,
+        details={
+            "target_name": target_user.get("name"),
+            "old_role": target_user.get("role"),
+            "new_role": role,
+            "old_permissions": target_user.get("permissions", []),
+            "new_permissions": permissions,
+        },
+    )
+
     return {"status": "executed", "message": "Ролята е обновена"}
 
 @api_router.get("/auth/users")
@@ -1548,7 +1619,7 @@ async def approve_owner_action(action_id: str, current_user: User = Depends(get_
     all_approved = set(action["required_approver_ids"]).issubset(set(approved_by))
     update = {"approved_by": approved_by}
     if all_approved:
-        await execute_owner_action(action)
+        await execute_owner_action(action, executed_by=current_user)
         update["status"] = "executed"
         update["resolved_at"] = datetime.now(timezone.utc)
     await db.owner_actions.update_one({"id": action_id}, {"$set": update})
@@ -1899,9 +1970,16 @@ async def update_notification_settings(
 ):
     update_data = {k: v for k, v in settings_update.dict().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc)
-    
+
     existing = await db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    
+
+    # A raised/changed threshold deserves a fresh evaluation, not silence
+    # until the OLD threshold's single already-sent alert would have fired
+    # again under a completely different number - same convention as
+    # budgets' alert_sent/exceeded_sent reset in create_budget.
+    if existing and "vat_threshold_amount" in update_data and update_data["vat_threshold_amount"] != existing.get("vat_threshold_amount"):
+        update_data["vat_threshold_sent_at"] = None
+
     if not existing:
         # Create new settings
         new_settings = NotificationSettings(user_id=current_user.user_id, **update_data)
@@ -2947,7 +3025,7 @@ async def export_scan_credits_history(request: Request, current_user: User = Dep
     if current_user.company_id:
         company = await db.companies.find_one({"id": current_user.company_id})
         company_name = company.get("name", "") if company else ""
-    excel_data = ExportService.generate_scan_credits_excel(rows, company_name)
+    excel_data = await asyncio.to_thread(ExportService.generate_scan_credits_excel, rows, company_name)
     await audit_service.log_action(
         user_id=current_user.user_id, user_name=current_user.name,
         action="export", entity_type="scan_credits_history",
@@ -3449,6 +3527,9 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
             alert.invoice_id = invoice_obj.id
             await db.price_alerts.insert_one(alert.dict())
 
+        if price_alerts:
+            background_tasks.add_task(send_price_alert_pushes, company_id, price_alerts)
+
         # Keep raw-material grouping fresh automatically, without the user
         # having to trigger it - throttled inside the task itself.
         background_tasks.add_task(maybe_schedule_ai_item_merge, company_id)
@@ -3467,12 +3548,15 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
 
 @api_router.get("/invoices", response_model=List[Invoice])
 async def get_invoices(
+    response: Response,
     supplier: Optional[str] = None,
     invoice_number: Optional[str] = None,
     search: Optional[str] = None,  # matches supplier OR invoice_number, unlike the two above which AND together
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     payment_status: Optional[str] = None,  # paid | unpaid | partial | overdue
+    limit: int = 1000,
+    offset: int = 0,
     current_user: User = Depends(get_current_user)
 ):
     # Same gate as creating/editing/deleting an invoice - there's no
@@ -3511,7 +3595,19 @@ async def get_invoices(
         query["payment_method"] = "bank_transfer"
         query["payment_due_date"] = {"$lt": datetime.now(timezone.utc)}
 
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(1000)
+    # Previously a hardcoded .to_list(1000) with no way to go further -
+    # once a company passed 1,000 matching invoices, the oldest ones became
+    # permanently invisible with no error, no indicator, nothing. Now a
+    # real (capped) limit/offset, plus X-Total-Count so a caller - today
+    # just a diagnostic, eventually the frontend's own "load more" - can
+    # tell whether it's seeing everything.
+    clamped_limit = max(1, min(limit, 5000))
+    clamped_offset = max(0, offset)
+    total_count = await db.invoices.count_documents(query)
+    response.headers["X-Total-Count"] = str(total_count)
+    invoices = await db.invoices.find(
+        query, {"_id": 0, "image_base64": 0, "image_base64s": 0}
+    ).sort("date", -1).skip(clamped_offset).limit(clamped_limit).to_list(clamped_limit)
     return [Invoice(**inv) for inv in invoices]
 
 @api_router.get("/invoices/protocols/reverse-charge")
@@ -5322,7 +5418,8 @@ async def export_statistics_pdf(
         period_label = f"Период: {start_date[:10]} - {end_date[:10]}"
 
     try:
-        pdf_data = ExportService.generate_statistics_pdf(
+        pdf_data = await asyncio.to_thread(
+            ExportService.generate_statistics_pdf,
             stats=stats,
             top_suppliers=suppliers_data.get("top_by_amount", []),
             top_items=items_data.get("top_by_value", []),
@@ -5404,7 +5501,8 @@ async def export_vat_ledger_excel(
     period_label = f"Период: {start_date} - {end_date}"
 
     try:
-        excel_data = ExportService.generate_vat_ledger_excel(
+        excel_data = await asyncio.to_thread(
+            ExportService.generate_vat_ledger_excel,
             purchases=purchases,
             sales=sales,
             company_name=company_name,
@@ -5465,7 +5563,8 @@ async def export_employee_compliance_excel(
     period_label = f"Период: {start_date} - {end_date}"
 
     try:
-        excel_data = ExportService.generate_employee_compliance_excel(
+        excel_data = await asyncio.to_thread(
+            ExportService.generate_employee_compliance_excel,
             holiday_work=holiday_work,
             leave=leave,
             company_name=company_name,
@@ -6654,6 +6753,35 @@ audit_service = AuditService(db)
 forecast_service = ForecastService(db)
 scan_credit_service = ScanCreditService(db)
 
+async def send_price_alert_pushes(company_id: str, alerts: List["PriceAlert"]):
+    """Fire-and-forget background task: pushes a real phone notification for
+    price alerts raised by the invoice just scanned, mirroring
+    _budget_alert_tick's push pattern below. Alerts reaching this point are
+    already filtered by price_alert_settings/price_alert_mutes (see
+    create_invoice), so every alert here is one the push should fire for -
+    no further muting check is needed."""
+    if not alerts:
+        return
+    recipients = await db.users.find(
+        {"company_id": company_id, "permissions": "manage_invoices"}, {"_id": 0, "user_id": 1}
+    ).to_list(100)
+    recipient_ids = [r["user_id"] for r in recipients]
+    if not recipient_ids:
+        return
+
+    if len(alerts) == 1:
+        a = alerts[0]
+        title = "Промяна в цена"
+        body = f"{a.item_name} при {a.supplier}: {a.old_price:.2f} → {a.new_price:.2f} € ({a.change_percent:+.1f}%)"
+    else:
+        title = "Промени в цени"
+        body = f"{len(alerts)} артикула с променена цена в последната сканирана фактура."
+
+    await push_service.send_to_users(
+        db, recipient_ids, title=title, body=body,
+        data={"type": "price_alert"},
+    )
+
 @api_router.get("/export/invoices/excel")
 @limiter.limit("20/minute")
 async def export_invoices_excel(
@@ -6682,7 +6810,7 @@ async def export_invoices_excel(
         company_name = company.get("name", "") if company else ""
     
     try:
-        excel_data = ExportService.generate_invoices_excel(invoices, company_name)
+        excel_data = await asyncio.to_thread(ExportService.generate_invoices_excel, invoices, company_name)
         
         # Log export
         await audit_service.log_action(
@@ -6730,7 +6858,7 @@ async def export_invoices_pdf(
         company_name = company.get("name", "") if company else ""
     
     try:
-        pdf_data = ExportService.generate_invoices_pdf(invoices, company_name)
+        pdf_data = await asyncio.to_thread(ExportService.generate_invoices_pdf, invoices, company_name)
         
         await audit_service.log_action(
             user_id=current_user.user_id,
@@ -8376,6 +8504,89 @@ async def _budget_alert_loop():
 async def start_budget_alert_loop():
     asyncio.create_task(_budget_alert_loop())
 
+async def _notification_settings_tick():
+    """One pass over NotificationSettings with either check enabled: a
+    VAT-threshold crossing (an approximate trailing-12-month revenue figure
+    against the user's own threshold) or a periodic reminder on today's
+    date. Mirrors _budget_alert_tick's push-and-dedupe pattern above -
+    these two toggles existed in the UI and database with nothing reading
+    them until now (Module 7 audit finding).
+
+    The VAT-threshold figure is a rough approximation (trailing 365 days
+    from today, not a precise any-12-consecutive-months legal calculation)
+    and is explicitly worded as such - this is a heads-up nudge, never a
+    compliance determination, consistent with the app never talking to NAP
+    directly."""
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+    year_ago_str = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+
+    settings_docs = await db.notification_settings.find(
+        {"$or": [{"vat_threshold_enabled": True}, {"periodic_enabled": True}]},
+        {"_id": 0},
+    ).to_list(1000)
+
+    for settings in settings_docs:
+        user_id = settings["user_id"]
+
+        if (
+            settings.get("vat_threshold_enabled")
+            and settings.get("vat_threshold_amount", 0) > 0
+            and not settings.get("vat_threshold_sent_at")
+        ):
+            revenues = await db.daily_revenue.find(
+                {"user_id": user_id, "date": {"$gte": year_ago_str}},
+                {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1},
+            ).to_list(10000)
+            trailing_12mo_revenue = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
+
+            if trailing_12mo_revenue >= settings["vat_threshold_amount"]:
+                await push_service.send_to_user(
+                    db, user_id,
+                    title="ДДС прагът е надхвърлен",
+                    body=(
+                        f"Оборотът ти за последните 12 месеца е ориентировъчно {trailing_12mo_revenue:.2f} € - "
+                        f"над зададения праг от {settings['vat_threshold_amount']:.2f} €. "
+                        f"Това е насочващо изчисление, провери точния праг с НАП или счетоводител."
+                    ),
+                    data={"type": "vat_threshold"},
+                )
+                await db.notification_settings.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"vat_threshold_sent_at": now}},
+                )
+
+        periodic_dates = settings.get("periodic_dates") or []
+        if (
+            settings.get("periodic_enabled")
+            and now.day in periodic_dates
+            and settings.get("periodic_last_sent_date") != today_str
+        ):
+            await push_service.send_to_user(
+                db, user_id,
+                title="Напомняне",
+                body="Днес е една от датите, на които си поискал периодично напомняне от Фактура+.",
+                data={"type": "periodic_reminder"},
+            )
+            await db.notification_settings.update_one(
+                {"user_id": user_id},
+                {"$set": {"periodic_last_sent_date": today_str}},
+            )
+
+async def _notification_settings_loop():
+    while True:
+        try:
+            await _notification_settings_tick()
+        except Exception as e:
+            logger.error(f"Notification settings loop error: {e}")
+        # Hourly is plenty - a day-granularity date check and a slow-moving
+        # revenue threshold, same reasoning as the budget loop above.
+        await asyncio.sleep(3600)
+
+@app.on_event("startup")
+async def start_notification_settings_loop():
+    asyncio.create_task(_notification_settings_loop())
+
 # ===================== BULK IMPORT (CSV/EXCEL) =====================
 # Each entity's commit step calls the EXISTING create_* route function per
 # row instead of re-implementing its business logic (duplicate detection,
@@ -8544,6 +8755,11 @@ async def create_indexes():
         # Price history indexes
         await db.item_price_history.create_index([("company_id", 1), ("item_name", 1)])
         await db.item_price_history.create_index([("company_id", 1), ("supplier", 1)])
+
+        # Price alerts - read on every app open via GET /items/price-alerts
+        # (mounted in app/_layout.tsx), so this one matters more than its
+        # small row size suggests.
+        await db.price_alerts.create_index([("company_id", 1), ("status", 1), ("created_at", -1)])
         
         # Users indexes
         await db.users.create_index([("email", 1)], unique=True, sparse=True)
@@ -8621,6 +8837,57 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def csrf_protection_middleware(request: Request, call_next):
+    """Double-submit CSRF check for cookie-authenticated, state-changing
+    requests. samesite="none" on the session cookie (required because the
+    frontend and backend sit on different origins) gives up the browser's
+    own default CSRF protection, so this fills that gap explicitly.
+
+    Only applies when a session_token COOKIE is present - the mobile
+    client's Authorization-header path isn't vulnerable the way a
+    browser-attached cookie is (a browser never auto-attaches a custom
+    header cross-site), so it's untouched by this check.
+
+    Also skipped whenever a (non-empty) Authorization header is present,
+    on either platform: every client - the native app via its stored
+    token, and the web app too, since it calls api.setToken() right after
+    login the same way - already sends one on every authenticated
+    request, and an attacker's forged cross-site request can never
+    include a legitimate-looking one (reading it to forge the header
+    would require reading something only same-origin JS can read, exactly
+    like the csrf_token cookie below; and setting a custom Authorization
+    header cross-origin forces the same CORS-preflight-against-the-
+    allowlist rejection as a custom CSRF header would). This keeps the
+    check from ever firing on normal traffic while still closing the real
+    gap: a request authenticated purely by an auto-attached cookie, with
+    no Authorization header at all - which is exactly what an attacker's
+    forged request looks like, and also exactly the one path this
+    double-submit check exists to cover.
+
+    Rollout note: for the requests this does apply to, a header is
+    required outright (blocks both a plain cross-site form, which cannot
+    set custom headers at all, and a cross-origin fetch(), which the
+    existing CORS allowlist already turns away at the preflight before
+    any custom header matters) but a MISSING csrf_token cookie does not
+    itself fail the request - only a cookie that's present and doesn't
+    match the header does. This grandfathers in sessions created before
+    this check existed (no csrf_token cookie yet) instead of locking out
+    every already-logged-in browser tab the moment this deploys; they get
+    the real cookie-matched check on their next login, same as everyone
+    else."""
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        session_cookie = request.cookies.get("session_token")
+        auth_header = request.headers.get("Authorization")
+        if session_cookie and not auth_header:
+            csrf_header = request.headers.get(CSRF_HEADER_NAME)
+            if not csrf_header:
+                return JSONResponse(status_code=403, content={"detail": "Невалиден CSRF токен"})
+            csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
+            if csrf_cookie and csrf_header != csrf_cookie:
+                return JSONResponse(status_code=403, content={"detail": "Невалиден CSRF токен"})
+    return await call_next(request)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

@@ -1637,6 +1637,10 @@ export const translations: Translations = {
     bg: 'Филтри',
     en: 'Filters',
   },
+  'invoices.truncatedBanner': {
+    bg: 'Показани са {shown} от {total} фактури. Прецизирай период или търсене, за да видиш останалите.',
+    en: 'Showing {shown} of {total} invoices. Narrow the date range or search to see the rest.',
+  },
   'invoices.filtersActive': {
     bg: 'активни',
     en: 'active',

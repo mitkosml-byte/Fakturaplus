@@ -827,3 +827,107 @@ def test_cross_tenant_isolation(client):
 
     r = client.get("/api/statistics/summary?start_date=2026-09-01&end_date=2026-09-30", headers=x)
     assert r.status_code == 200 and r.json()["total_fiscal_revenue"] == 50
+
+
+def test_set_session_cookies_shape():
+    """Pure unit check of the cookie-setting helper itself, independent of
+    any endpoint or rate limit: session_token stays httponly (never
+    readable by page JS), csrf_token is deliberately NOT httponly (the
+    frontend must be able to read and echo it back), and both carry
+    secure + samesite=none, required for the cross-origin frontend/
+    backend split this app runs under."""
+    from fastapi import Response
+    import server
+
+    resp = Response()
+    csrf_value = server.set_session_cookies(resp, "fake-session-token")
+    set_cookie_headers = [v.decode() for k, v in resp.headers.raw if k == b"set-cookie"]
+    assert len(set_cookie_headers) == 2
+
+    session_header = next(h for h in set_cookie_headers if h.startswith("session_token="))
+    csrf_header = next(h for h in set_cookie_headers if h.startswith(f"{server.CSRF_COOKIE_NAME}="))
+    assert "httponly" in session_header.lower()
+    assert "httponly" not in csrf_header.lower()
+    assert "secure" in session_header.lower() and "secure" in csrf_header.lower()
+    assert "samesite=none" in session_header.lower() and "samesite=none" in csrf_header.lower()
+    assert csrf_value in csrf_header
+
+
+def test_csrf_protection(client):
+    """A request authenticated purely by a session cookie, with no
+    Authorization header - exactly what a forged cross-site request looks
+    like - must carry a matching X-CSRF-Token header or be rejected.
+    Every other test in this module authenticates via the Authorization
+    header instead (see `h()`), which the middleware always lets through
+    untouched; this is the one test exercising the cookie-only path the
+    double-submit check actually exists to cover.
+
+    The session here is created directly against the DB, like
+    test_cross_tenant_isolation's tenants, rather than through the
+    rate-limited POST /auth/register this module's other tests have
+    already used up to its 5/minute cap - and the cookies are passed
+    explicitly per request rather than relying on the TestClient cookie
+    jar, which (correctly, like a real browser) won't store a Secure
+    cookie over the plain-http test transport anyway."""
+    import uuid
+    import server
+    from datetime import timedelta, timezone
+
+    user_id = f"csrf_user_{uuid.uuid4().hex[:12]}"
+    session_token = uuid.uuid4().hex
+    csrf_token = uuid.uuid4().hex
+
+    async def _setup():
+        company = server.Company(name="CSRF Test Co", eik=f"TEST{uuid.uuid4().hex[:9].upper()}")
+        await server.db.companies.insert_one(company.dict())
+        await server.db.users.insert_one({
+            "user_id": user_id, "email": f"{user_id}@test.com", "name": "CSRF Tester",
+            "role": "owner", "company_id": company.id, "permissions": list(server.ROLE_PERMISSIONS["owner"]),
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server.datetime.now(timezone.utc),
+        })
+        await server.db.user_sessions.insert_one({
+            "user_id": user_id, "session_token": session_token,
+            "expires_at": server.datetime.now(timezone.utc) + timedelta(days=7),
+            "created_at": server.datetime.now(timezone.utc),
+        })
+
+    import asyncio
+    asyncio.run(_setup())
+
+    cookies_only = {"session_token": session_token}
+    cookies_and_csrf = {"session_token": session_token, "csrf_token": csrf_token}
+
+    # Cookie-only (no Authorization, no CSRF header) - must be rejected.
+    r = client.post(
+        "/api/calendar/events", json={"title": "x", "event_date": "2026-01-01"},
+        cookies=cookies_only,
+    )
+    assert r.status_code == 403
+
+    # Cookie-only, but with the matching X-CSRF-Token header - must succeed.
+    r = client.post(
+        "/api/calendar/events", json={"title": "x", "event_date": "2026-01-01"},
+        cookies=cookies_and_csrf, headers={"X-CSRF-Token": csrf_token},
+    )
+    assert r.status_code == 200, r.text
+
+    # Cookie-only, with a non-matching CSRF header - must still be rejected.
+    r = client.post(
+        "/api/calendar/events", json={"title": "y", "event_date": "2026-01-02"},
+        cookies=cookies_and_csrf, headers={"X-CSRF-Token": "not-the-right-value"},
+    )
+    assert r.status_code == 403
+
+    # GET is a safe method - never gated, cookie-only or not.
+    r = client.get("/api/calendar/events", cookies=cookies_only)
+    assert r.status_code == 200
+
+    # The Authorization-header path (every other test in this file) is
+    # never gated by this check, even without any CSRF header or cookie.
+    r = client.post(
+        "/api/calendar/events", headers=h(STATE["owner_token"]),
+        json={"title": "z", "event_date": "2026-01-03"},
+    )
+    assert r.status_code == 200, r.text
