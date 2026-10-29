@@ -5179,6 +5179,191 @@ async def get_summary(
         "financial_visibility": visibility,
     }
 
+# ===================== "ASK YOUR OWN NUMBERS" AI CHAT (Module 4, Finding #3) =====================
+# Explicitly NOT a general chatbot and never talks to NAP or any outside
+# system - it answers only from the company's own stored invoices/
+# expenses/revenue. The model never queries the database itself: this
+# module computes a small, company-scoped digest of real numbers FIRST
+# (the exact same visibility rules as /statistics/summary above), then
+# asks the model only to phrase an answer FROM that digest. That's what
+# keeps the hard part - scoping/safety - in this Python code instead of
+# in anything the model decides to do, and it's also why the API always
+# hands the digest back alongside the answer: the frontend shows the real
+# numbers behind the answer, never a bare verdict.
+
+async def _business_digest_period(
+    company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str, visibility: dict
+) -> dict:
+    """One period's totals for the chat digest - same figures and the same
+    visibility redaction as /statistics/summary, computed directly so a
+    viewer without view_profit/view_off_book_expenses etc. gets exactly the
+    same redaction here as everywhere else in the app."""
+    inv_start = datetime.fromisoformat(f"{start_date}T00:00:00+00:00")
+    inv_end = datetime.fromisoformat(f"{end_date}T23:59:59+00:00")
+
+    invoices = await db.invoices.find(
+        {**scope, "date": {"$gte": inv_start, "$lte": inv_end}}, {"_id": 0, "total_amount": 1}
+    ).to_list(10000)
+    revenues = await db.daily_revenue.find(
+        {**scope, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}
+    ).to_list(10000)
+    expenses = await db.expenses.find(
+        {**scope, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0, "amount": 1}
+    ).to_list(10000)
+
+    total_payroll_cost = await get_payroll_cost_for_period(company_id, user_id, start_date, end_date)
+    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, user_id, start_date, end_date)
+
+    total_invoice_amount = sum(i.get("total_amount", 0) for i in invoices)
+    total_fiscal_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues)
+    total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues) if visibility["pocket_money"] else 0
+    total_off_book_expenses = sum(e.get("amount", 0) for e in expenses) if visibility["off_book_expenses"] else 0
+
+    total_income = total_fiscal_revenue + total_pocket_money
+    total_expense = total_invoice_amount + total_off_book_expenses + total_payroll_cost + total_depreciation_expense
+    profit = round(total_income - total_expense, 2) if visibility["profit"] else None
+
+    return {
+        "revenue": round(total_income, 2),
+        "expenses": round(total_expense, 2),
+        "profit": profit,
+        "invoice_count": len(invoices),
+    }
+
+async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: str, visibility: dict, limit: int = 8) -> List[dict]:
+    """Top suppliers (invoices) and, only if this viewer may see them, top
+    off-book expense descriptions - for 'what are my biggest expenses'
+    style questions."""
+    from collections import defaultdict
+
+    inv_start = datetime.fromisoformat(f"{start_date}T00:00:00+00:00")
+    inv_end = datetime.fromisoformat(f"{end_date}T23:59:59+00:00")
+    invoices = await db.invoices.find(
+        {**scope, "date": {"$gte": inv_start, "$lte": inv_end}}, {"_id": 0, "total_amount": 1, "supplier": 1}
+    ).to_list(10000)
+
+    by_name: Dict[str, float] = defaultdict(float)
+    for inv in invoices:
+        by_name[inv.get("supplier") or "—"] += inv.get("total_amount", 0)
+    items = [{"name": name, "amount": round(amount, 2), "source": "invoice"} for name, amount in by_name.items()]
+
+    if visibility["off_book_expenses"]:
+        expenses = await db.expenses.find(
+            {**scope, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0, "amount": 1, "description": 1}
+        ).to_list(10000)
+        by_desc: Dict[str, float] = defaultdict(float)
+        for exp in expenses:
+            by_desc[exp.get("description") or "—"] += exp.get("amount", 0)
+        items += [{"name": name, "amount": round(amount, 2), "source": "off_book"} for name, amount in by_desc.items()]
+
+    items.sort(key=lambda x: x["amount"], reverse=True)
+    return items[:limit]
+
+class BusinessChatQuery(BaseModel):
+    question: str
+
+class BusinessChatResponse(BaseModel):
+    answer: str
+    digest: dict
+
+@api_router.post("/ai/ask-my-numbers", response_model=BusinessChatResponse)
+@limiter.limit("15/minute")
+async def ask_my_numbers(
+    request: Request,
+    query: BusinessChatQuery,
+    current_user: User = Depends(get_current_user),
+):
+    require_permission(current_user, "view_statistics")
+    question = query.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Въпросът не може да бъде празен.")
+    if len(question) > 500:
+        raise HTTPException(status_code=400, detail="Въпросът е твърде дълъг.")
+    if not AI_FEATURES_ENABLED:
+        raise HTTPException(status_code=503, detail="AI функцията не е конфигурирана на сървъра.")
+
+    company_id, scope = await get_company_scope(current_user)
+    visibility = get_financial_visibility(current_user)
+
+    now = datetime.now(timezone.utc)
+    this_month_start = now.replace(day=1).strftime("%Y-%m-%d")
+    this_month_end = now.strftime("%Y-%m-%d")
+    last_month_last_day = now.replace(day=1) - timedelta(days=1)
+    last_month_start = last_month_last_day.replace(day=1).strftime("%Y-%m-%d")
+    last_month_end = last_month_last_day.strftime("%Y-%m-%d")
+
+    this_month = await _business_digest_period(company_id, scope, current_user.user_id, this_month_start, this_month_end, visibility)
+    last_month = await _business_digest_period(company_id, scope, current_user.user_id, last_month_start, last_month_end, visibility)
+    top_expenses = await _business_digest_top_expenses(scope, this_month_start, this_month_end, visibility)
+
+    # Outstanding payables - always company-wide, same reasoning as
+    # /statistics/summary: an invoice from two months ago that's still
+    # unpaid is still owed today.
+    unpaid_invoices = await db.invoices.find(
+        {**scope, "payment_method": "bank_transfer", "is_paid": False},
+        {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1},
+    ).to_list(1000)
+    now_ts = datetime.now(timezone.utc)
+
+    def _is_overdue(inv):
+        due = inv.get("payment_due_date")
+        if not due:
+            return False
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=timezone.utc)
+        return due < now_ts
+
+    unpaid = {
+        "count": len(unpaid_invoices),
+        "overdue_count": sum(1 for inv in unpaid_invoices if _is_overdue(inv)),
+        "total_unpaid_amount": round(sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in unpaid_invoices), 2),
+    }
+
+    budget = None
+    if company_id and "manage_budget" in set(current_user.permissions or []):
+        budget_status = await compute_budget_status(company_id, now.strftime("%Y-%m"))
+        if budget_status:
+            budget = {
+                "expense_limit": budget_status["expense_limit"],
+                "total_spent": budget_status["total_spent"],
+                "percent_used": budget_status["percent_used"],
+            }
+
+    digest = {
+        "this_month": {"label": this_month_start[:7], **this_month},
+        "last_month": {"label": last_month_start[:7], **last_month},
+        "top_expenses_this_month": top_expenses,
+        "unpaid_invoices": unpaid,
+        "budget": budget,
+    }
+
+    system_prompt = (
+        "Ти си асистент на малък бизнес във Фактура+, който отговаря САМО въз основа на подадените му по-долу "
+        "реални данни за тази фирма (JSON). Никога не отговаряй с измислени или закръглени наизуст числа - "
+        "цитирай само числата от JSON-а. Ако въпросът иска нещо извън тези данни (НАП, данъчни декларации, "
+        "конкуренти, обща информация извън тази фирма), кажи ясно, че не разполагаш с тази информация. "
+        "Отговаряй кратко (до 4 изречения), на български, сумите винаги в евро (€). Профитът (profit) може да "
+        "е null - това означава, че този потребител няма права да го вижда; в такъв случай кажи, че печалбата "
+        "не е видима за него, вместо да я извеждаш или предполагаш."
+    )
+    prompt = f"Данни за фирмата (JSON):\n{json.dumps(digest, ensure_ascii=False)}\n\nВъпрос: {question}"
+
+    try:
+        response = await anthropic_client.messages.create(
+            model="claude-opus-5-5",
+            max_tokens=400,
+            system=system_prompt,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        await log_ai_usage(company_id, "ask_my_numbers", response)
+        answer = next((b.text for b in response.content if b.type == "text"), "").strip()
+        if not answer:
+            raise RuntimeError("empty AI response")
+    except Exception as e:
+        raise ai_exception_to_http(e, "Ask-my-numbers error")
+
+    return BusinessChatResponse(answer=answer, digest=digest)
+
 @api_router.get("/statistics/chart-data")
 async def get_chart_data(
     period: str = "week",  # week, month, year

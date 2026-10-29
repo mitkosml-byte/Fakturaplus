@@ -190,6 +190,42 @@ export interface BillingDocument {
   created_at: string;
 }
 
+// "Ask your own numbers" chat (Module 4 Finding #3)
+export interface BusinessChatDigestPeriod {
+  label: string;
+  revenue: number;
+  expenses: number;
+  profit: number | null;
+  invoice_count: number;
+}
+
+export interface BusinessChatDigestExpenseItem {
+  name: string;
+  amount: number;
+  source: 'invoice' | 'off_book';
+}
+
+export interface BusinessChatDigest {
+  this_month: BusinessChatDigestPeriod;
+  last_month: BusinessChatDigestPeriod;
+  top_expenses_this_month: BusinessChatDigestExpenseItem[];
+  unpaid_invoices: {
+    count: number;
+    overdue_count: number;
+    total_unpaid_amount: number;
+  };
+  budget: {
+    expense_limit: number;
+    total_spent: number;
+    percent_used: number;
+  } | null;
+}
+
+export interface BusinessChatResponse {
+  answer: string;
+  digest: BusinessChatDigest;
+}
+
 export interface OCRItemResult {
   name: string;
   quantity: number;

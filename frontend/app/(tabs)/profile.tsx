@@ -304,6 +304,21 @@ export default function ProfileScreen() {
           iconColor: COLORS.teal,
           onPress: () => router.push('/history-hub'),
         },
+        // Module 4 Finding #3: plain-language Q&A over the company's own
+        // stored data - the one delivery channel (dashboard + proactive
+        // alert + conversational layer) the audit found FACTURA+ was
+        // missing relative to every strong product researched.
+        ...(hasPermission('view_statistics')
+          ? [{
+              key: 'askMyNumbers',
+              title: t('askMyNumbers.title'),
+              subtitle: t('askMyNumbers.subtitle'),
+              icon: 'chatbubbles-outline' as const,
+              iconBg: 'rgba(16, 185, 129, 0.15)',
+              iconColor: COLORS.success,
+              onPress: () => router.push('/ask-my-numbers'),
+            }]
+          : []),
         ...(hasPermission('manage_budget')
           ? [{
               key: 'budget',

@@ -220,6 +220,81 @@ export const translations: Translations = {
     en: "Today's revenue is {percent}% below usual",
   },
 
+  // "Ask your own numbers" chat (Module 4 Finding #3) - plain-language Q&A
+  // scoped strictly to the company's own stored data.
+  'askMyNumbers.title': {
+    bg: 'Попитай за числата си',
+    en: 'Ask about your numbers',
+  },
+  'askMyNumbers.subtitle': {
+    bg: 'Прост въпрос, отговор само по твоите данни',
+    en: 'A plain question, answered only from your own data',
+  },
+  'askMyNumbers.disclaimer': {
+    bg: 'Отговаря само въз основа на въведените данни на тази фирма. Не се свързва с НАП и не вижда нищо извън фирмата ти.',
+    en: "Answers only from this company's own stored data. Never talks to NAP or anything outside your company.",
+  },
+  'askMyNumbers.placeholder': {
+    bg: 'Напиши въпрос...',
+    en: 'Type a question...',
+  },
+  'askMyNumbers.emptyTitle': {
+    bg: 'Питай с прости думи',
+    en: 'Ask in plain language',
+  },
+  'askMyNumbers.suggestion1': {
+    bg: 'Какви са най-големите ми разходи този месец?',
+    en: 'What are my biggest expenses this month?',
+  },
+  'askMyNumbers.suggestion2': {
+    bg: 'Сравни ме със миналия месец',
+    en: 'Compare me to last month',
+  },
+  'askMyNumbers.numbersTitle': {
+    bg: 'Числата зад отговора',
+    en: 'The numbers behind this answer',
+  },
+  'askMyNumbers.thisMonth': {
+    bg: 'Този месец',
+    en: 'This month',
+  },
+  'askMyNumbers.lastMonth': {
+    bg: 'Миналия месец',
+    en: 'Last month',
+  },
+  'askMyNumbers.revenue': {
+    bg: 'Оборот',
+    en: 'Revenue',
+  },
+  'askMyNumbers.expenses': {
+    bg: 'Разходи',
+    en: 'Expenses',
+  },
+  'askMyNumbers.profit': {
+    bg: 'Печалба',
+    en: 'Profit',
+  },
+  'askMyNumbers.profitHidden': {
+    bg: 'скрита за теб',
+    en: 'hidden from you',
+  },
+  'askMyNumbers.topExpenses': {
+    bg: 'Най-големи разходи',
+    en: 'Biggest expenses',
+  },
+  'askMyNumbers.unpaid': {
+    bg: '{count} неплатени фактури ({overdue} просрочени) - {amount} €',
+    en: '{count} unpaid invoices ({overdue} overdue) - {amount} €',
+  },
+  'askMyNumbers.budget': {
+    bg: 'Бюджет: {percent}% от {limit} €',
+    en: 'Budget: {percent}% of {limit} €',
+  },
+  'askMyNumbers.genericError': {
+    bg: 'Нещо се обърка. Опитай отново.',
+    en: 'Something went wrong. Try again.',
+  },
+
   // Home Screen
   'home.welcome': {
     bg: 'Добре дошли!',

@@ -1102,3 +1102,60 @@ def test_csrf_protection(client):
         json={"title": "z", "event_date": "2026-01-03"},
     )
     assert r.status_code == 200, r.text
+
+
+def test_ask_my_numbers(client):
+    """Module 4 Finding #3: the plain-language 'ask your own numbers' chat
+    surface. AI_FEATURES_ENABLED is forced False for the whole test session
+    (see conftest), so a well-formed request can never reach a real
+    Anthropic call here - the point of this test is that the digest
+    computation (the actual company-scoped, permission-redacted logic this
+    endpoint adds) runs cleanly before that gate, and that validation/
+    permission checks happen in the right order ahead of it."""
+    owner = h(STATE["owner_token"])
+
+    # Empty/missing question - rejected before anything else.
+    r = client.post("/api/ai/ask-my-numbers", headers=owner, json={"question": "   "})
+    assert r.status_code == 400
+
+    r = client.post("/api/ai/ask-my-numbers", headers=owner, json={"question": "x" * 501})
+    assert r.status_code == 400
+
+    # Well-formed question from a permitted user reaches the AI-disabled
+    # gate (503), proving the digest built without error along the way.
+    r = client.post("/api/ai/ask-my-numbers", headers=owner, json={"question": "Какви са най-големите ми разходи?"})
+    assert r.status_code == 503, r.text
+
+    # A staff member without view_statistics must be refused before the
+    # digest is even built - same direct-DB staff shortcut as
+    # test_customers_and_receivables, with a non-empty permissions list
+    # that simply excludes view_statistics (an empty list would be
+    # silently backfilled to the role's default set by sanitize_user).
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+
+    no_stats_staff_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    no_stats_staff_token = uuid_module.uuid4().hex
+
+    async def _make_no_stats_staff():
+        me = client.get("/api/auth/me", headers=owner).json()
+        await server_module.db.users.insert_one({
+            "user_id": no_stats_staff_id, "email": f"{no_stats_staff_id}@test.com", "name": "No Stats Staff",
+            "role": "staff", "company_id": me["company_id"], "permissions": ["add_revenue"],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": no_stats_staff_id, "session_token": no_stats_staff_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+
+    asyncio.run(_make_no_stats_staff())
+    r = client.post(
+        "/api/ai/ask-my-numbers", headers=h(no_stats_staff_token), json={"question": "Как съм този месец?"}
+    )
+    assert r.status_code == 403
