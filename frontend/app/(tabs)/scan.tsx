@@ -62,6 +62,12 @@ export default function ScanScreen() {
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
   const [ocrCorrections, setOcrCorrections] = useState<string[]>([]);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
+  // "You've paid less for this before" - previously only a buried
+  // drill-down in Stats, now surfaced right where a price actually gets
+  // typed in, by reusing the same per-item/per-supplier history lookup.
+  // Keyed by the item's index in `items` (its name alone isn't a stable
+  // key - two rows can share a name before the user's edited them apart).
+  const [itemPriceNotes, setItemPriceNotes] = useState<Record<number, { lastPrice: number; changePercent: number }>>({});
 
   // Form fields (editable after OCR)
   const [supplier, setSupplier] = useState('');
@@ -217,6 +223,36 @@ export default function ScanScreen() {
     }
   };
 
+  // Looks up each recognized item's price history from THIS supplier and
+  // flags a meaningful change (same >=10%/>=2 threshold the saved-invoice
+  // price-alert uses) right in the review screen, before the scan is even
+  // saved - reuses the existing per-item/per-supplier statistics lookup,
+  // no new backend endpoint needed. Best-effort: a failed lookup (e.g. a
+  // viewer without view_statistics) just leaves that item without a note,
+  // never blocks the scan.
+  const loadItemPriceNotes = async (ocrItems: { name: string; unit_price: number }[], supplierName: string) => {
+    const normalizedSupplier = supplierName.trim().toLowerCase();
+    const results = await Promise.all(
+      ocrItems.map(async (item) => {
+        try {
+          const data = await api.getItemBySupplier(item.name);
+          const match = data.suppliers.find((s) => s.supplier.trim().toLowerCase() === normalizedSupplier);
+          if (!match || !match.last_price || match.last_price <= 0) return null;
+          const changePercent = ((item.unit_price - match.last_price) / match.last_price) * 100;
+          if (Math.abs(changePercent) < 10 || Math.abs(item.unit_price - match.last_price) < 2) return null;
+          return { lastPrice: match.last_price, changePercent };
+        } catch {
+          return null;
+        }
+      })
+    );
+    const notes: Record<number, { lastPrice: number; changePercent: number }> = {};
+    results.forEach((note, index) => {
+      if (note) notes[index] = note;
+    });
+    setItemPriceNotes(notes);
+  };
+
   const processImages = async (images: string[]) => {
     setIsScanning(true);
     setOcrCorrections([]);
@@ -247,6 +283,8 @@ export default function ScanScreen() {
           unit: item.unit || 'бр.',
           unit_price: String(item.unit_price),
         })));
+        setItemPriceNotes({});
+        loadItemPriceNotes(result.items, result.supplier);
       }
       
       // Set invoice date from OCR if available - and flag it clearly when
@@ -897,6 +935,17 @@ export default function ScanScreen() {
                               <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
                             </TouchableOpacity>
                           </View>
+                          {itemPriceNotes[index] && (
+                            <Text style={[
+                              styles.itemPriceNote,
+                              { color: itemPriceNotes[index].changePercent > 0 ? COLORS.danger : COLORS.success },
+                            ]}>
+                              {itemPriceNotes[index].changePercent > 0 ? '▲' : '▼'}{' '}
+                              {t('scan.priceNote')
+                                .replace('{percent}', Math.abs(itemPriceNotes[index].changePercent).toFixed(0))
+                                .replace('{lastPrice}', itemPriceNotes[index].lastPrice.toFixed(2))}
+                            </Text>
+                          )}
                         </View>
                       ))
                     )}
@@ -1395,6 +1444,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
+  },
+  itemPriceNote: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 6,
   },
   itemSmallInput: {
     flex: 1,

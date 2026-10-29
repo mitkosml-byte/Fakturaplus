@@ -641,6 +641,10 @@ export const translations: Translations = {
     bg: 'Цена',
     en: 'Price',
   },
+  'scan.priceNote': {
+    bg: '{percent}% спрямо последно {lastPrice} €',
+    en: '{percent}% vs last time ({lastPrice} €)',
+  },
   'scan.notesPlaceholder': {
     bg: 'Допълнителни бележки...',
     en: 'Additional notes...',

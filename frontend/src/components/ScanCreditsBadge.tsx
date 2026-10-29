@@ -28,14 +28,22 @@ export function ScanCreditsBadge() {
 
   if (remaining === null) return null;
 
+  // Previously only turned amber at exactly zero - the first the owner
+  // ever heard about running low was the scan they couldn't make. A
+  // small absolute cutoff (not a percentage of the total, which would
+  // warn "3 left" differently for a 10-scan free account than a 150-scan
+  // purchased one, when 3 is 3 either way) gives real advance notice.
+  const isLow = remaining > 0 && remaining <= 3;
+  const isEmpty = remaining === 0;
+
   return (
     <TouchableOpacity
-      style={[styles.badge, remaining === 0 && styles.badgeEmpty]}
+      style={[styles.badge, (isLow || isEmpty) && styles.badgeEmpty]}
       onPress={() => router.push('/scan-credits')}
       accessibilityLabel={`${remaining}`}
     >
-      <Ionicons name="scan-outline" size={14} color={remaining === 0 ? COLORS.warning : COLORS.teal} />
-      <Text style={[styles.text, remaining === 0 && styles.textEmpty]}>{remaining}</Text>
+      <Ionicons name="scan-outline" size={14} color={(isLow || isEmpty) ? COLORS.warning : COLORS.teal} />
+      <Text style={[styles.text, (isLow || isEmpty) && styles.textEmpty]}>{remaining}</Text>
     </TouchableOpacity>
   );
 }
