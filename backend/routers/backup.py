@@ -6,6 +6,30 @@ after module load, so this file always accesses them as `server.db` /
 stay correct when server.py's test fixture monkeypatches them."""
 from fastapi import APIRouter
 from server import *
+from server import (
+    _eik_check_digit,
+    _compare_key,
+    _similarity,
+    _scan_packages_catalogue,
+    _require_billing_enabled,
+    _month_bounds,
+    _compute_month_profit,
+    _business_digest_period,
+    _business_digest_top_expenses,
+    _signal_unpaid_invoices,
+    _signal_receivables,
+    _signal_scan_credits,
+    _signal_budget,
+    _signal_price_alerts,
+    _signal_reorder,
+    _signal_forecast,
+    _orthodox_easter,
+    _holiday_name_for_date,
+    _get_employee_for_company,
+    _ym_add,
+    _ym_diff,
+    _team_channel_id,
+)
 import server
 
 router = APIRouter(prefix="/api")
