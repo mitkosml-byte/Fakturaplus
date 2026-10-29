@@ -18,7 +18,7 @@ Balance changes come in two kinds, kept strictly separate for security:
     /webhooks/stripe in server.py), so a tampered or replayed client
     request can never mint itself free credits.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 import uuid
 from pymongo.errors import DuplicateKeyError
@@ -100,6 +100,7 @@ class ScanCreditService:
                     "auto_reload_enabled": False,
                     "auto_reload_package_id": None,
                     "auto_reload_subscription_id": None,
+                    "depletion_alert_sent_at": None,
                     "created_at": now,
                 }
             },
@@ -112,9 +113,15 @@ class ScanCreditService:
             free_reset_at = free_reset_at.replace(tzinfo=timezone.utc)
 
         if free_reset_at <= now:
+            # A fresh month's quota means any "about to run out" alert
+            # from last month no longer applies - let it fire again if
+            # the new month's usage pattern earns it.
             updated = await self.db.scan_balances.find_one_and_update(
                 {"_id": scope, "free_reset_at": {"$lte": now}},
-                {"$set": {"free_remaining": FREE_SCANS_PER_MONTH, "free_reset_at": _next_month(now)}},
+                {"$set": {
+                    "free_remaining": FREE_SCANS_PER_MONTH, "free_reset_at": _next_month(now),
+                    "depletion_alert_sent_at": None,
+                }},
                 return_document=True,
             )
             # Lost the race to another concurrent request that just reset
@@ -193,7 +200,11 @@ class ScanCreditService:
         credits never expire."""
         await self.get_or_create_balance(company_id, user_id)
         scope = self.scope_id(company_id, user_id)
-        await self.db.scan_balances.update_one({"_id": scope}, {"$inc": {"purchased_balance": scans}})
+        # A purchase changes the picture the depletion alert was sent
+        # about - let it fire again if the new balance still earns it.
+        await self.db.scan_balances.update_one(
+            {"_id": scope}, {"$inc": {"purchased_balance": scans}, "$set": {"depletion_alert_sent_at": None}}
+        )
         await self._log_transaction(
             scope=scope, company_id=company_id, user_id=user_id, user_name=user_name,
             type_="purchase", delta=scans, description=description,
@@ -218,6 +229,78 @@ class ScanCreditService:
     async def get_auto_reload_subscription_id(self, company_id: Optional[str], user_id: str) -> Optional[str]:
         doc = await self.get_or_create_balance(company_id, user_id)
         return doc.get("auto_reload_subscription_id")
+
+    async def get_depletion_forecast(
+        self, company_id: Optional[str], user_id: str, lookback_days: int = 30,
+    ) -> dict:
+        """"At your pace, that's about N days" - the Module 5 audit
+        finding that the scan-credit ledger already has everything needed
+        to predict a depletion date, nobody had asked it yet.
+
+        Adapted from (not a literal reuse of) the monthly-bucket
+        Theil-Sen trend in ForecastService: scan usage is a day-to-day
+        burn rate, not a monthly-cadence series, so the right average
+        here is "total scans used over the window / days in the window",
+        gated the same way in spirit - too little usage data to trust a
+        rate, and this says so explicitly instead of extrapolating from
+        one or two scans."""
+        scope = self.scope_id(company_id, user_id)
+        window_start = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+
+        usage = await self.db.scan_transactions.find(
+            {"scope_id": scope, "type": "scan_used", "created_at": {"$gte": datetime.now(timezone.utc) - timedelta(days=lookback_days)}},
+            {"_id": 0, "delta": 1},
+        ).to_list(10000)
+        scans_used = -sum(t.get("delta", 0) for t in usage)  # delta is negative per spend
+
+        balance = await self.get_or_create_balance(company_id, user_id)
+        total_remaining = balance["free_remaining"] + balance["purchased_balance"]
+
+        # Fewer than 3 scans in the window isn't enough to trust a rate -
+        # same "don't manufacture confidence out of noise" principle as
+        # ForecastService's MIN_MONTHS_FOR_TREND gate.
+        if scans_used < 3:
+            return {
+                "insufficient_data": True,
+                "scans_used_in_window": scans_used,
+                "lookback_days": lookback_days,
+                "total_remaining": total_remaining,
+                "daily_rate": None,
+                "days_remaining": None,
+                "estimated_depletion_date": None,
+            }
+
+        daily_rate = scans_used / lookback_days
+        days_remaining = round(total_remaining / daily_rate) if daily_rate > 0 else None
+        depletion_date = (
+            (datetime.now(timezone.utc) + timedelta(days=days_remaining)).strftime("%Y-%m-%d")
+            if days_remaining is not None else None
+        )
+
+        return {
+            "insufficient_data": False,
+            "scans_used_in_window": scans_used,
+            "lookback_days": lookback_days,
+            "total_remaining": total_remaining,
+            "daily_rate": round(daily_rate, 2),
+            "days_remaining": days_remaining,
+            "estimated_depletion_date": depletion_date,
+        }
+
+    async def list_balances_needing_depletion_check(self) -> List[dict]:
+        """Every balance that hasn't already been alerted this cycle
+        (depletion_alert_sent_at is None - see get_or_create_balance's
+        monthly reset and credit_purchase, both of which clear it again).
+        Used only by the background tick in server.py, never a per-request
+        path, so no scope filtering is needed here."""
+        return await self.db.scan_balances.find(
+            {"depletion_alert_sent_at": None}, {"_id": 1, "company_id": 1}
+        ).to_list(10000)
+
+    async def mark_depletion_alert_sent(self, scope: str) -> None:
+        await self.db.scan_balances.update_one(
+            {"_id": scope}, {"$set": {"depletion_alert_sent_at": datetime.now(timezone.utc)}}
+        )
 
     async def get_history(self, company_id: Optional[str], user_id: str, limit: int = 200) -> List[dict]:
         scope = self.scope_id(company_id, user_id)

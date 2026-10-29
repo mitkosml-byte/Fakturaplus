@@ -62,6 +62,7 @@ export default function ScanCreditsScreen() {
   const [packages, setPackages] = useState<ScanPackage[]>([]);
   const [history, setHistory] = useState<ScanTransaction[]>([]);
   const [buyingId, setBuyingId] = useState<string | null>(null);
+  const [depletionForecast, setDepletionForecast] = useState<Awaited<ReturnType<typeof api.getScanCreditsForecast>> | null>(null);
 
   const [customQuantity, setCustomQuantity] = useState(50);
   const [customBuying, setCustomBuying] = useState(false);
@@ -76,6 +77,10 @@ export default function ScanCreditsScreen() {
         api.getScanPackages(),
         api.getScanCreditsHistory(),
       ]);
+      // Separate, non-blocking - a forecast that can't be computed yet
+      // (too little usage history) must never stop the balance itself
+      // from showing.
+      api.getScanCreditsForecast().then(setDepletionForecast).catch(() => setDepletionForecast(null));
       const storedRaw = await AsyncStorage.getItem(LAST_FREE_REMAINING_KEY);
       const stored = storedRaw !== null ? parseInt(storedRaw, 10) : null;
       setRingAnimateFrom(stored !== null && stored !== balanceData.free_remaining ? stored : null);
@@ -233,6 +238,22 @@ export default function ScanCreditsScreen() {
                   </Text>
                 </View>
               </View>
+
+              {/* Depletion forecast - was just a static count with no
+                  sense of "is that a lot or a little for me"; reuses the
+                  same ledger to say when, not just how many. */}
+              {depletionForecast && !depletionForecast.insufficient_data && depletionForecast.days_remaining !== null && (
+                <Text
+                  style={[
+                    styles.depletionForecastText,
+                    depletionForecast.days_remaining <= 7 && styles.depletionForecastTextUrgent,
+                  ]}
+                >
+                  {depletionForecast.days_remaining <= 0
+                    ? t('scanCredits.depletionNow')
+                    : t('scanCredits.depletionForecast').replace('{days}', String(depletionForecast.days_remaining))}
+                </Text>
+              )}
             </View>
 
             {/* History card */}
@@ -437,6 +458,10 @@ const styles = StyleSheet.create({
   balanceTotal: { fontSize: 32, fontWeight: '700', color: 'white', lineHeight: 36 },
   balanceTotalLabel: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
   balanceSubtext: { fontSize: 11, color: COLORS.textMuted, marginTop: 6 },
+  depletionForecastText: {
+    fontSize: 12, color: COLORS.textSecondary, marginTop: 10, textAlign: 'center',
+  },
+  depletionForecastTextUrgent: { color: COLORS.danger, fontWeight: '600' },
   txRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
   txDescription: { flex: 1, fontSize: 12, color: COLORS.textSubtle },
   txDelta: { fontSize: 12, fontWeight: '600' },

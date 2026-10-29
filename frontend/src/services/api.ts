@@ -270,6 +270,18 @@ class ApiService {
     return this.fetch('/scan-credits');
   }
 
+  async getScanCreditsForecast(): Promise<{
+    insufficient_data: boolean;
+    scans_used_in_window: number;
+    lookback_days: number;
+    total_remaining: number;
+    daily_rate: number | null;
+    days_remaining: number | null;
+    estimated_depletion_date: string | null;
+  }> {
+    return this.fetch('/scan-credits/forecast');
+  }
+
   async getScanPackages(): Promise<ScanPackage[]> {
     return this.fetch('/scan-credits/packages');
   }

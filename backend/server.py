@@ -3007,6 +3007,14 @@ async def get_scan_credits(current_user: User = Depends(get_current_user)):
     summary = await scan_credit_service.get_balance_summary(current_user.company_id, current_user.user_id)
     return ScanBalanceOut(**summary)
 
+@api_router.get("/scan-credits/forecast")
+async def get_scan_credits_forecast(current_user: User = Depends(get_current_user)):
+    """"At your pace, that's about N days" - Module 5's audit finding
+    that the credit ledger already has what it needs to predict a
+    depletion date, turning a static low-balance warning into one with
+    an actual timeline."""
+    return await scan_credit_service.get_depletion_forecast(current_user.company_id, current_user.user_id)
+
 @api_router.get("/scan-credits/packages", response_model=List[ScanPackageOut])
 async def get_scan_packages(current_user: User = Depends(get_current_user)):
     return _scan_packages_catalogue()
@@ -8602,6 +8610,65 @@ async def _notification_settings_loop():
 @app.on_event("startup")
 async def start_notification_settings_loop():
     asyncio.create_task(_notification_settings_loop())
+
+async def _scan_credit_depletion_tick():
+    """Module 5 audit finding: the scan-credit ledger can already predict
+    a depletion date (ScanCreditService.get_depletion_forecast), but
+    nothing used it to warn anyone before the balance actually hit zero.
+    One pass over every balance not yet alerted this cycle; pushes once
+    when 3 days or fewer remain at the current pace, then stays quiet
+    until a purchase or the next monthly reset clears the flag (see
+    get_or_create_balance/credit_purchase)."""
+    DEPLETION_ALERT_THRESHOLD_DAYS = 3
+    balances = await scan_credit_service.list_balances_needing_depletion_check()
+
+    for balance in balances:
+        scope = balance["_id"]
+        company_id = balance.get("company_id")
+        # A company-scoped balance ignores the user_id argument entirely
+        # (see ScanCreditService.scope_id) - only a solo ("user:<id>")
+        # scope actually needs it, parsed back out of the scope string.
+        probe_user_id = scope.split("user:", 1)[1] if scope.startswith("user:") else "_"
+
+        forecast = await scan_credit_service.get_depletion_forecast(company_id, probe_user_id)
+        if forecast["insufficient_data"] or forecast["days_remaining"] is None:
+            continue
+        if forecast["days_remaining"] > DEPLETION_ALERT_THRESHOLD_DAYS:
+            continue
+
+        if company_id:
+            recipients = await db.users.find(
+                {"company_id": company_id, "permissions": "manage_invoices"}, {"_id": 0, "user_id": 1}
+            ).to_list(100)
+            recipient_ids = [r["user_id"] for r in recipients]
+        else:
+            recipient_ids = [probe_user_id]
+        if not recipient_ids:
+            continue
+
+        days = forecast["days_remaining"]
+        body = (
+            "Кредитите ти за сканиране вече са на привършване."
+            if days <= 0 else
+            f"При текущия темп кредитите ти за сканиране ще свършат за около {days} {'ден' if days == 1 else 'дни'}."
+        )
+        await push_service.send_to_users(
+            db, recipient_ids, title="Кредитите ти свършват", body=body,
+            data={"type": "scan_credit_depletion", "days_remaining": days},
+        )
+        await scan_credit_service.mark_depletion_alert_sent(scope)
+
+async def _scan_credit_depletion_loop():
+    while True:
+        try:
+            await _scan_credit_depletion_tick()
+        except Exception as e:
+            logger.error(f"Scan credit depletion loop error: {e}")
+        await asyncio.sleep(3600)
+
+@app.on_event("startup")
+async def start_scan_credit_depletion_loop():
+    asyncio.create_task(_scan_credit_depletion_loop())
 
 # ===================== BULK IMPORT (CSV/EXCEL) =====================
 # Each entity's commit step calls the EXISTING create_* route function per

@@ -674,6 +674,14 @@ export const translations: Translations = {
     bg: 'безплатните се подновяват на 1-во число',
     en: 'the free quota renews on the 1st',
   },
+  'scanCredits.depletionForecast': {
+    bg: 'При този темп ще ти стигнат за около {days} дни',
+    en: 'At this pace, that\'s about {days} days left',
+  },
+  'scanCredits.depletionNow': {
+    bg: 'При този темп кредитите ти вече са на привършване',
+    en: 'At this pace, your credits are about to run out',
+  },
   'scanCredits.recentTransactions': {
     bg: 'Последни транзакции',
     en: 'Recent transactions',
