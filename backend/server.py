@@ -166,7 +166,7 @@ app = FastAPI(
 
 # Add rate limiter
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]  # slowapi's documented handler; Starlette's stub wants Callable[[Request, Exception], ...]
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -1018,7 +1018,7 @@ async def request_owner_status_change(company_id: str, target_user: dict, reques
     return action_doc
 
 async def execute_owner_action(action: dict, executed_by: Optional[User] = None):
-    target_before = await db.users.find_one({"user_id": action["target_user_id"]}, {"_id": 0})
+    target_before: Optional[Dict[str, Any]] = await db.users.find_one({"user_id": action["target_user_id"]}, {"_id": 0})
 
     if action["action"] == "remove":
         new_role = "staff"
@@ -2069,14 +2069,14 @@ async def generate_roi_insights(
 Дай ЕДНА кратка препоръка (до 15 думи). Отговори директно с препоръката, без въвеждащ текст,
 и посочвай сумите винаги в евро (€), никога в лева."""
 
-        response = await anthropic_client.messages.create(
+        response = await anthropic_client.messages.create(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
             model="claude-opus-5-5",
             max_tokens=200,
             system="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български, като посочваш всички суми в евро (€), никога в лева.",
             messages=[{"role": "user", "content": prompt}],
         )
         await log_ai_usage(None, "roi_insights", response)
-        ai_recommendation = next((b.text for b in response.content if b.type == "text"), "").strip()
+        ai_recommendation = next((b.text for b in response.content if b.type == "text"), "").strip()  # type: ignore[union-attr]  # b.type == "text" guards this at runtime; mypy cannot narrow a discriminated union inside a generator expression
 
         if ai_recommendation and len(ai_recommendation) < 200:
             insights.append(f"💡 AI препоръка: {ai_recommendation}")
@@ -2293,7 +2293,7 @@ async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: 
     by_name: Dict[str, float] = defaultdict(float)
     for inv in invoices:
         by_name[inv.get("supplier") or "—"] += inv.get("total_amount", 0)
-    items = [{"name": name, "amount": round(amount, 2), "source": "invoice"} for name, amount in by_name.items()]
+    items: List[Dict[str, Any]] = [{"name": name, "amount": round(amount, 2), "source": "invoice"} for name, amount in by_name.items()]
 
     if visibility["off_book_expenses"]:
         expenses = await db.expenses.find(
@@ -2743,7 +2743,7 @@ async def run_ai_item_merge(company_id: str) -> dict:
 Групирай САМО ако очевидно става дума за същия продукт/суровина с различно изписване.
 Върни само групи с 2 или повече варианта - пропусни продукти без дубликат."""
 
-        response = await anthropic_client.messages.parse(
+        response = await anthropic_client.messages.parse(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
             model="claude-opus-5-5",
             max_tokens=8000,
             system="Ти си експертен асистент за анализ и групиране на продукти/суровини за малък бизнес в България.",
@@ -3512,7 +3512,7 @@ async def get_conversation_recipients(current_user: User, conversation_id: str) 
     Raises 404 if the conversation doesn't exist / isn't this company's,
     403 if it exists but current_user isn't a participant."""
     if conversation_id == _team_channel_id(current_user.company_id or ""):
-        members = await get_team_members(current_user.company_id)
+        members = await get_team_members(current_user.company_id or "")
         return [m["user_id"] for m in members if m["user_id"] != current_user.user_id]
 
     conversation = await db.dm_conversations.find_one(

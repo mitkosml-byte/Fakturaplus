@@ -19,14 +19,14 @@ Balance changes come in two kinds, kept strictly separate for security:
     request can never mint itself free credits.
 """
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import uuid
 from pymongo.errors import DuplicateKeyError
 
 # Fixed catalogue - bonus scans instead of a percentage discount (reads as
 # "pay for 44, get 50", no %-off arithmetic needed), with the largest pack
 # carrying the best per-scan rate. Prices are in EUR.
-SCAN_PACKAGES = {
+SCAN_PACKAGES: Dict[str, Dict[str, Any]] = {
     "small": {"id": "small", "name": "Малък", "paid_scans": 10, "bonus_scans": 0, "price_eur": 2.50},
     "medium": {"id": "medium", "name": "Среден", "paid_scans": 44, "bonus_scans": 6, "price_eur": 11.00},
     "large": {"id": "large", "name": "Голям", "paid_scans": 120, "bonus_scans": 30, "price_eur": 30.00},

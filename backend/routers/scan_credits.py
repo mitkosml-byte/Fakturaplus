@@ -38,7 +38,7 @@ router = APIRouter(prefix="/api")
 
 @router.post("/ocr/scan", response_model=OCRResult)
 @limiter.limit("20/minute")
-async def scan_invoice(request: Request, image_base64: str = None, current_user: User = Depends(get_current_user)):
+async def scan_invoice(request: Request, image_base64: Optional[str] = None, current_user: User = Depends(get_current_user)):
     # OCR only ever feeds a draft into POST /invoices (which already
     # requires manage_invoices) - gating the scan itself too means a member
     # without that permission can't burn the company's shared, paid scan
@@ -111,14 +111,14 @@ async def scan_invoice(request: Request, image_base64: str = None, current_user:
     )
 
     try:
-        response = await anthropic_client.messages.parse(
+        response = await anthropic_client.messages.parse(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
             model="claude-opus-5-5",
             max_tokens=8000,
             system=OCR_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",
                 "content": [
-                    *image_blocks,
+                    *image_blocks,  # type: ignore[list-item]  # built as plain dicts matching ImageBlockParam's shape; the SDK's content union is stricter than a dict literal can satisfy
                     {
                         "type": "text",
                         "text": prompt_text

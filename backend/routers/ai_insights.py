@@ -119,14 +119,14 @@ async def ask_my_numbers(
     prompt = f"Данни за фирмата (JSON):\n{json.dumps(digest, ensure_ascii=False)}\n\nВъпрос: {question}"
 
     try:
-        response = await anthropic_client.messages.create(
+        response = await anthropic_client.messages.create(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
             model="claude-opus-5-5",
             max_tokens=400,
             system=system_prompt,
             messages=[{"role": "user", "content": prompt}],
         )
         await log_ai_usage(company_id, "ask_my_numbers", response)
-        answer = next((b.text for b in response.content if b.type == "text"), "").strip()
+        answer = next((b.text for b in response.content if b.type == "text"), "").strip()  # type: ignore[union-attr]  # b.type == "text" guards this at runtime; mypy cannot narrow a discriminated union inside a generator expression
         if not answer:
             raise RuntimeError("empty AI response")
     except Exception as e:
