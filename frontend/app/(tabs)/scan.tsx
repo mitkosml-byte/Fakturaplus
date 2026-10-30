@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -73,6 +73,12 @@ export default function ScanScreen() {
   const [supplier, setSupplier] = useState('');
   const [supplierEik, setSupplierEik] = useState('');
   const [eikCheck, setEikCheck] = useState<{ valid: boolean; reason: string | null } | null>(null);
+  // Known suppliers (name + ЕИК) from this company's own invoice history -
+  // drives the autocomplete chips below the supplier field, so correcting
+  // an OCR misread or typing a supplier manually doesn't mean retyping an
+  // ЕИК that's already on file from a previous invoice. Loaded once, lazily
+  // (reuses the existing invoice list endpoint, no backend change).
+  const [supplierDirectory, setSupplierDirectory] = useState<{ name: string; eik: string; date: string }[]>([]);
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [amountWithoutVat, setAmountWithoutVat] = useState('');
   const [vatAmount, setVatAmount] = useState('');
@@ -135,6 +141,33 @@ export default function ScanScreen() {
     }, 500);
     return () => clearTimeout(timeout);
   }, [supplierEik]);
+
+  useEffect(() => {
+    if (scanMode !== 'purchase' || capturedImages.length === 0 || supplierDirectory.length > 0) return;
+    api.getInvoices({})
+      .then((invoices) => {
+        const byName = new Map<string, { name: string; eik: string; date: string }>();
+        invoices.forEach((inv) => {
+          const key = inv.supplier.trim().toLowerCase();
+          if (!key) return;
+          const existing = byName.get(key);
+          if (!existing || inv.date > existing.date) {
+            byName.set(key, { name: inv.supplier.trim(), eik: inv.supplier_eik || '', date: inv.date });
+          }
+        });
+        setSupplierDirectory(Array.from(byName.values()));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanMode, capturedImages.length]);
+
+  const supplierMatches = useMemo(() => {
+    const q = supplier.trim().toLowerCase();
+    if (!q) return [];
+    return supplierDirectory
+      .filter((s) => s.name.toLowerCase() !== q && s.name.toLowerCase().includes(q))
+      .slice(0, 5);
+  }, [supplier, supplierDirectory]);
 
   // Delegates to the phone's own camera app (via the OS camera picker)
   // instead of a custom in-page live preview. The in-page camera had no
@@ -687,6 +720,19 @@ export default function ScanScreen() {
                       placeholder={t('scan.companyNamePlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                     />
+                    {supplierMatches.length > 0 && (
+                      <View style={styles.supplierChipRow}>
+                        {supplierMatches.map((s) => (
+                          <TouchableOpacity
+                            key={s.name}
+                            style={styles.supplierChip}
+                            onPress={() => { setSupplier(s.name); setSupplierEik(s.eik); }}
+                          >
+                            <Text style={styles.supplierChipText} numberOfLines={1}>{s.name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
                   </StaggerReveal>
 
                   <StaggerReveal index={1} style={styles.inputGroup}>
@@ -1276,6 +1322,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.warning,
     marginTop: 6,
+  },
+  supplierChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  supplierChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    maxWidth: 200,
+  },
+  supplierChipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
   },
   vatTreatmentGrid: {
     flexDirection: 'row',
