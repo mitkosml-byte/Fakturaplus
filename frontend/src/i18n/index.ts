@@ -4081,6 +4081,23 @@ export const translations: Translations = {
     en: 'This will also remove the linked expense from total business expenses. Continue?',
   },
 
+  // Grid ("plug and play") week view - an alternative to the day-grouped
+  // list above, modeled after a paper weekly schedule: employees as rows,
+  // days as columns, a colored block per shift.
+  'schedule.viewList': { bg: 'Списък', en: 'List' },
+  'schedule.viewGrid': { bg: 'Решетка', en: 'Grid' },
+  'schedule.thisWeek': { bg: 'Тази седмица', en: 'This week' },
+  'schedule.gridEmptyTeam': { bg: 'Добавете служители в екипа, за да ги видите тук', en: 'Add team members to see them here' },
+  'schedule.gridTapHint': { bg: 'Докоснете празна клетка, за да добавите смяна', en: 'Tap an empty cell to add a shift' },
+  'schedule.edit': { bg: 'Редактирай', en: 'Edit' },
+  'schedule.adjustShort': { bg: 'Коригирай часове', en: 'Correct hours' },
+  'schedule.copyShift': { bg: 'Копирай в други дни', en: 'Copy to other days' },
+  'schedule.copyShiftTitle': { bg: 'Копиране на смяна', en: 'Copy shift' },
+  'schedule.copyShiftHint': { bg: 'Избери дните от тази седмица, в които да се приложи същата смяна', en: 'Pick the days this week to apply the same shift to' },
+  'schedule.copyShiftApply': { bg: 'Приложи', en: 'Apply' },
+  'schedule.copyShiftNoneSelected': { bg: 'Изберете поне един ден', en: 'Pick at least one day' },
+  'schedule.copyShiftResult': { bg: 'Добавени смени: {ok}, неуспешни: {fail}', en: 'Shifts added: {ok}, failed: {fail}' },
+
   // Calendar (shared team calendar - owner/manager/accountant)
   'calendar.title': { bg: 'Календар', en: 'Calendar' },
   'calendar.noEvents': { bg: 'Няма събития в този период', en: 'No events in this period' },

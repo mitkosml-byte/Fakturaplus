@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
-import { format } from 'date-fns';
+import { format, startOfWeek, addDays, addWeeks, subWeeks } from 'date-fns';
 import { Alert } from '../src/utils/alert';
 import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
@@ -21,7 +21,7 @@ import { ShiftOccurrence, ShiftRepeatPattern, ScheduleSummary, SchedulePayment }
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Avatar } from '../src/components';
-import { COLORS } from '../src/theme/colors';
+import { COLORS, CHART_PALETTE } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -38,6 +38,22 @@ function timeToDate(hhmm: string): Date {
   const d = new Date();
   d.setHours(h, m, 0, 0);
   return d;
+}
+// Trims a round-hour time to just the hour ("09:00" -> "9") so it fits a
+// narrow grid cell; anything with minutes is shown in full ("09:30").
+function compactTime(t: string): string {
+  return t.endsWith(':00') ? String(parseInt(t, 10)) : t;
+}
+// Deterministic color per team member (from the shared chart palette) so
+// the same person reads as the same color across every cell/chip in the
+// grid - mirrors how a manager color-codes names on a paper schedule.
+function employeeColor(userId: string): string {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
+  return CHART_PALETTE[hash % CHART_PALETTE.length];
+}
+function weekDates(monday: Date): Date[] {
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
 }
 
 type DirectoryEntry = { user_id: string; name: string; picture: string | null };
@@ -89,6 +105,17 @@ export default function WorkScheduleScreen() {
   const [monthEnd, setMonthEnd] = useState('');
   const [schedulePayment, setSchedulePayment] = useState<SchedulePayment | null>(null);
   const [payingBusy, setPayingBusy] = useState(false);
+
+  // Week grid ("plug and play" view) - employees x days, color per person,
+  // tap a cell to add/act on a shift instead of picking a member + date
+  // from the full form every time. Managers only; list view is the
+  // fallback and the only view a plain staff member ever sees.
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
+  const [gridWeekStart, setGridWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 1 }));
+  const [copyModalVisible, setCopyModalVisible] = useState(false);
+  const [copySource, setCopySource] = useState<ShiftOccurrence | null>(null);
+  const [copyTargetDates, setCopyTargetDates] = useState<string[]>([]);
+  const [copyApplying, setCopyApplying] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -270,6 +297,62 @@ export default function WorkScheduleScreen() {
     ]);
   };
 
+  const handleGridCellPress = (userId: string, dateKey: string, dayOccs: ShiftOccurrence[]) => {
+    if (dayOccs.length === 0) {
+      resetForm();
+      setFormUserId(userId);
+      setShiftDate(new Date(`${dateKey}T00:00:00`));
+      setModalVisible(true);
+      return;
+    }
+    const occ = dayOccs[0];
+    Alert.alert(`${occ.user_name} · ${occ.start_time}-${occ.end_time}`, undefined, [
+      { text: t('schedule.edit'), onPress: () => openEditModal(occ) },
+      { text: t('schedule.adjustShort'), onPress: () => openAdjustModal(occ) },
+      { text: t('schedule.copyShift'), onPress: () => openCopyModal(occ) },
+      { text: t('common.delete'), style: 'destructive', onPress: () => handleDelete(occ) },
+      { text: t('common.cancel'), style: 'cancel' },
+    ]);
+  };
+
+  const openCopyModal = (occ: ShiftOccurrence) => {
+    setCopySource(occ);
+    setCopyTargetDates([]);
+    setCopyModalVisible(true);
+  };
+
+  const handleApplyCopy = async () => {
+    if (!copySource) return;
+    if (copyTargetDates.length === 0) {
+      Alert.alert(t('common.error'), t('schedule.copyShiftNoneSelected'));
+      return;
+    }
+    setCopyApplying(true);
+    let ok = 0;
+    let fail = 0;
+    for (const dateKey of copyTargetDates) {
+      try {
+        await api.createShift({
+          user_id: copySource.user_id,
+          date: dateKey,
+          start_time: copySource.start_time,
+          end_time: copySource.end_time,
+          repeat_pattern: 'none',
+          hourly_rate: copySource.hourly_rate ?? undefined,
+          note: copySource.note ?? undefined,
+        });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setCopyApplying(false);
+    setCopyModalVisible(false);
+    if (ok > 0) Haptics.success();
+    Alert.alert(t('schedule.copyShiftTitle'), t('schedule.copyShiftResult').replace('{ok}', String(ok)).replace('{fail}', String(fail)));
+    await loadData();
+  };
+
   const handleMarkPaid = () => {
     if (!selectedUserId || !summary) return;
     Alert.alert(t('schedule.markPaidTitle'), t('schedule.markPaidConfirm').replace('{amount}', summary.estimated_pay.toFixed(2)), [
@@ -325,6 +408,15 @@ export default function WorkScheduleScreen() {
     }, {} as Record<string, ShiftOccurrence[]>)
   ).sort(([a], [b]) => a.localeCompare(b));
 
+  const occurrencesByUserDate: Record<string, Record<string, ShiftOccurrence[]>> = {};
+  occurrences.forEach((occ) => {
+    if (!occurrencesByUserDate[occ.user_id]) occurrencesByUserDate[occ.user_id] = {};
+    (occurrencesByUserDate[occ.user_id][occ.date] = occurrencesByUserDate[occ.user_id][occ.date] || []).push(occ);
+  });
+  const gridDays = weekDates(gridWeekStart);
+  const gridEmployees = selectedUserId ? directory.filter((d) => d.user_id === selectedUserId) : directory;
+  const showGrid = canManage && viewMode === 'grid';
+
   return (
     <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -350,6 +442,25 @@ export default function WorkScheduleScreen() {
             </View>
           ) : (
             <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 32 }}>
+              {canManage && (
+                <View style={styles.viewToggleRow}>
+                  <TouchableOpacity
+                    style={[styles.viewToggleBtn, viewMode === 'grid' && styles.viewToggleBtnActive]}
+                    onPress={() => setViewMode('grid')}
+                  >
+                    <Ionicons name="grid-outline" size={15} color={viewMode === 'grid' ? 'white' : COLORS.textSecondary} />
+                    <Text style={[styles.viewToggleText, viewMode === 'grid' && styles.viewToggleTextActive]}>{t('schedule.viewGrid')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.viewToggleBtn, viewMode === 'list' && styles.viewToggleBtnActive]}
+                    onPress={() => setViewMode('list')}
+                  >
+                    <Ionicons name="list-outline" size={15} color={viewMode === 'list' ? 'white' : COLORS.textSecondary} />
+                    <Text style={[styles.viewToggleText, viewMode === 'list' && styles.viewToggleTextActive]}>{t('schedule.viewList')}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {canManage && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
                   <View style={styles.chipRow}>
@@ -416,6 +527,90 @@ export default function WorkScheduleScreen() {
                 )
               )}
 
+              {showGrid ? (
+                <View style={styles.gridWrap}>
+                  <View style={styles.weekNav}>
+                    <TouchableOpacity onPress={() => setGridWeekStart(subWeeks(gridWeekStart, 1))} hitSlop={8}>
+                      <Ionicons name="chevron-back" size={20} color={COLORS.primaryLight} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setGridWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}>
+                      <Text style={styles.weekNavLabel}>
+                        {format(gridDays[0], 'd MMM', { locale: dateLocale })} - {format(gridDays[6], 'd MMM', { locale: dateLocale })}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setGridWeekStart(addWeeks(gridWeekStart, 1))} hitSlop={8}>
+                      <Ionicons name="chevron-forward" size={20} color={COLORS.primaryLight} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {gridEmployees.length === 0 ? (
+                    <View style={styles.emptyContainer}>
+                      <Ionicons name="people-outline" size={64} color={COLORS.border} />
+                      <Text style={styles.emptyText}>{t('schedule.gridEmptyTeam')}</Text>
+                    </View>
+                  ) : (
+                    <>
+                      <Text style={styles.gridHint}>{t('schedule.gridTapHint')}</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator>
+                        <View>
+                          <View style={styles.gridRow}>
+                            <View style={styles.gridLabelCell} />
+                            {gridDays.map((d) => (
+                              <View key={toDateStr(d)} style={styles.gridDayHeaderCell}>
+                                <Text style={styles.gridDayHeaderText}>{format(d, 'EEE', { locale: dateLocale })}</Text>
+                                <Text style={styles.gridDayHeaderDate}>{format(d, 'd.MM')}</Text>
+                              </View>
+                            ))}
+                          </View>
+                          {gridEmployees.map((emp) => {
+                            const color = employeeColor(emp.user_id);
+                            return (
+                              <View key={emp.user_id} style={styles.gridRow}>
+                                <View style={styles.gridLabelCell}>
+                                  <View style={[styles.gridColorDot, { backgroundColor: color }]} />
+                                  <Avatar uri={emp.picture} name={emp.name} size={20} />
+                                  <Text style={styles.gridLabelText} numberOfLines={1}>{emp.name}</Text>
+                                </View>
+                                {gridDays.map((d) => {
+                                  const dateKey = toDateStr(d);
+                                  const dayOccs = occurrencesByUserDate[emp.user_id]?.[dateKey] || [];
+                                  return (
+                                    <TouchableOpacity
+                                      key={dateKey}
+                                      style={styles.gridCell}
+                                      onPress={() => handleGridCellPress(emp.user_id, dateKey, dayOccs)}
+                                    >
+                                      {dayOccs.length === 0 ? (
+                                        <Ionicons name="add" size={14} color={COLORS.textMuted} />
+                                      ) : (
+                                        dayOccs.map((occ) => (
+                                          <View
+                                            key={occ.shift_id}
+                                            style={[styles.gridShiftChip, { backgroundColor: `${color}33`, borderColor: color }]}
+                                          >
+                                            <Text style={[styles.gridShiftChipText, { color }]} numberOfLines={1}>
+                                              {compactTime(occ.start_time)}-{compactTime(occ.end_time)}
+                                            </Text>
+                                            <View style={styles.gridChipIcons}>
+                                              {occ.leave_conflict && <View style={styles.gridConflictDot} />}
+                                              {occ.adjusted && <Ionicons name="calculator" size={8} color={COLORS.warning} />}
+                                            </View>
+                                          </View>
+                                        ))
+                                      )}
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
+                    </>
+                  )}
+                </View>
+              ) : (
+                <>
               {grouped.length === 0 && (
                 <View style={styles.emptyContainer}>
                   <Ionicons name="calendar-outline" size={64} color={COLORS.border} />
@@ -447,6 +642,9 @@ export default function WorkScheduleScreen() {
                           <View style={styles.shiftActions}>
                             <TouchableOpacity onPress={() => openAdjustModal(occ)} hitSlop={8}>
                               <Ionicons name="calculator-outline" size={18} color={COLORS.warning} />
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => openCopyModal(occ)} hitSlop={8}>
+                              <Ionicons name="copy-outline" size={18} color={COLORS.textSecondary} />
                             </TouchableOpacity>
                             <TouchableOpacity onPress={() => openEditModal(occ)} hitSlop={8}>
                               <Ionicons name="create-outline" size={18} color={COLORS.primary} />
@@ -498,6 +696,8 @@ export default function WorkScheduleScreen() {
                   ))}
                 </View>
               ))}
+                </>
+              )}
             </ScrollView>
           )}
 
@@ -667,6 +867,55 @@ export default function WorkScheduleScreen() {
             </View>
           </BottomSheet>
 
+          <BottomSheet visible={copyModalVisible} onClose={() => setCopyModalVisible(false)}>
+            <View style={styles.modalContent}>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                <Text style={styles.modalTitle}>{t('schedule.copyShiftTitle')}</Text>
+                {copySource && (
+                  <Text style={styles.hint}>
+                    {copySource.user_name} · {copySource.start_time}-{copySource.end_time}
+                  </Text>
+                )}
+                <Text style={[styles.inputLabel, { marginTop: 12 }]}>{t('schedule.copyShiftHint')}</Text>
+                <View style={styles.chipRow}>
+                  {copySource &&
+                    weekDates(startOfWeek(new Date(`${copySource.date}T00:00:00`), { weekStartsOn: 1 }))
+                      .filter((d) => toDateStr(d) !== copySource.date)
+                      .map((d) => {
+                        const dateKey = toDateStr(d);
+                        const active = copyTargetDates.includes(dateKey);
+                        return (
+                          <TouchableOpacity
+                            key={dateKey}
+                            style={[styles.chip, active && styles.chipActive]}
+                            onPress={() =>
+                              setCopyTargetDates((prev) =>
+                                active ? prev.filter((x) => x !== dateKey) : [...prev, dateKey]
+                              )
+                            }
+                          >
+                            <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                              {format(d, 'EEE d', { locale: dateLocale })}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, copyApplying && { opacity: 0.6 }]}
+                  onPress={handleApplyCopy}
+                  disabled={copyApplying}
+                >
+                  {copyApplying ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('schedule.copyShiftApply')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setCopyModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </BottomSheet>
+
           <DateTimePickerModal
             isVisible={datePickerVisible}
             mode="date"
@@ -759,6 +1008,66 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   paidText: { flex: 1, fontSize: 12, color: COLORS.textSecondary },
+  viewToggleRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  viewToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: COLORS.surface,
+  },
+  viewToggleBtnActive: { backgroundColor: COLORS.primary },
+  viewToggleText: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
+  viewToggleTextActive: { color: 'white' },
+  gridWrap: { marginBottom: 16 },
+  weekNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 10,
+  },
+  weekNavLabel: { fontSize: 14, fontWeight: '700', color: 'white', textTransform: 'capitalize' },
+  gridHint: { fontSize: 11, color: COLORS.textMuted, marginBottom: 8 },
+  gridRow: { flexDirection: 'row' },
+  gridLabelCell: {
+    width: 96,
+    paddingVertical: 6,
+    paddingRight: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  gridColorDot: { width: 6, height: 6, borderRadius: 3 },
+  gridLabelText: { fontSize: 11, color: COLORS.textSubtle, flexShrink: 1 },
+  gridDayHeaderCell: { width: 56, alignItems: 'center', paddingBottom: 8 },
+  gridDayHeaderText: { fontSize: 11, fontWeight: '700', color: COLORS.primaryLight, textTransform: 'capitalize' },
+  gridDayHeaderDate: { fontSize: 10, color: COLORS.textMuted, marginTop: 1 },
+  gridCell: {
+    width: 56,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    marginRight: 2,
+    marginBottom: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 2,
+  },
+  gridShiftChip: {
+    width: '100%',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 2,
+    alignItems: 'center',
+  },
+  gridShiftChipText: { fontSize: 10, fontWeight: '700' },
+  gridChipIcons: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 1 },
+  gridConflictDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: COLORS.danger },
   dayGroup: { marginBottom: 18 },
   dayHeader: {
     fontSize: 14,
