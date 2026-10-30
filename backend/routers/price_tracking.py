@@ -578,24 +578,31 @@ async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
     from collections import defaultdict
 
     records = await server.db.item_price_history.find(
-        {"company_id": company_id}, {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1}
+        {"company_id": company_id},
+        {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1, "unit_price": 1, "quantity": 1},
     ).to_list(10000)
 
     groups = defaultdict(list)
     for r in records:
         date = r.get("invoice_date")
         if isinstance(date, datetime):
-            groups[(r["item_name"], r["supplier"])].append(date)
+            groups[(r["item_name"], r["supplier"])].append(
+                (date, r.get("unit_price", 0) * r.get("quantity", 0))
+            )
 
     now = datetime.now(timezone.utc)
     nudges = []
     # Needs at least 4 purchases to call anything a "usual" cadence -
     # same minimum-sample-size reasoning as ForecastService's trend gate.
     MIN_PURCHASES_FOR_CADENCE = 4
-    for (item_name, supplier), dates in groups.items():
-        if len(dates) < MIN_PURCHASES_FOR_CADENCE:
+    for (item_name, supplier), entries in groups.items():
+        if len(entries) < MIN_PURCHASES_FOR_CADENCE:
             continue
-        dates_sorted = sorted(d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d for d in dates)
+        entries_sorted = sorted(
+            ((d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d, amount) for d, amount in entries),
+            key=lambda e: e[0],
+        )
+        dates_sorted = [e[0] for e in entries_sorted]
         gaps = [(dates_sorted[i + 1] - dates_sorted[i]).days for i in range(len(dates_sorted) - 1)]
         if any(g <= 0 for g in gaps):
             continue
@@ -613,16 +620,32 @@ async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
         last_date = dates_sorted[-1]
         days_since_last = (now - last_date).days
         if days_since_last > median_gap * 1.5:
+            avg_order_value = statistics.mean(amount for _, amount in entries_sorted)
+            overdue_ratio = days_since_last / median_gap
             nudges.append({
                 "item_name": item_name,
                 "supplier": supplier,
                 "median_days_between": round(median_gap),
                 "days_since_last": days_since_last,
                 "last_purchase_date": last_date.strftime("%Y-%m-%d"),
+                "avg_order_value": round(avg_order_value, 2),
+                # Not returned - only used to rank below. How overdue
+                # (as a multiple of its own usual cadence, not raw days -
+                # a weekly item twice as late matters more than a
+                # quarterly item a few days late) combined with how much
+                # this item usually costs to reorder, so a rarely-bought
+                # bulk ingredient genuinely worth flagging outranks an
+                # equally-overdue but economically trivial one instead of
+                # whichever happens to have the larger raw day gap.
+                "_impact_score": overdue_ratio * (avg_order_value if avg_order_value > 0 else 1.0),
             })
 
-    # Most overdue relative to its own usual cadence first.
-    nudges.sort(key=lambda n: n["days_since_last"] - n["median_days_between"], reverse=True)
+    # Most business-significant first: how overdue relative to its own
+    # cadence, weighted by what reordering it is usually worth - see
+    # _impact_score above.
+    nudges.sort(key=lambda n: n["_impact_score"], reverse=True)
+    for n in nudges:
+        del n["_impact_score"]
     return {"nudges": nudges[:10]}
 
 @router.post("/items/ai-merge")

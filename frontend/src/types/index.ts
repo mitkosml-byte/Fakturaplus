@@ -265,6 +265,7 @@ export interface BusinessChatDigest {
     item_name: string;
     days_since_last: number;
     median_days_between: number;
+    avg_order_value: number;
   }[];
 }
 

@@ -327,8 +327,8 @@ export const translations: Translations = {
     en: '{count} unread price alerts',
   },
   'askMyNumbers.reorderNudge': {
-    bg: '{item} - обичайно се поръчва на всеки {days} дни, последно преди {since} дни',
-    en: '{item} - usually reordered every {days} days, last ordered {since} days ago',
+    bg: '{item} - обичайно се поръчва на всеки {days} дни за ~{value} €, последно преди {since} дни',
+    en: '{item} - usually reordered every {days} days for ~{value} €, last ordered {since} days ago',
   },
   'askMyNumbers.genericError': {
     bg: 'Нещо се обърка. Опитай отново.',
@@ -2831,8 +2831,8 @@ export const translations: Translations = {
     en: 'Might be time to reorder',
   },
   'stats.reorderNudgeLine': {
-    bg: '{item} ({supplier}) - обикновено на всеки {median} дни, последно преди {daysSince} дни',
-    en: '{item} ({supplier}) - usually every {median} days, last bought {daysSince} days ago',
+    bg: '{item} ({supplier}) - обикновено на всеки {median} дни за ~{value} €, последно преди {daysSince} дни',
+    en: '{item} ({supplier}) - usually every {median} days for ~{value} €, last bought {daysSince} days ago',
   },
   'stats.inflationPeriod.month': {
     bg: 'Месец',

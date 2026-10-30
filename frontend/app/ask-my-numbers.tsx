@@ -284,6 +284,7 @@ export default function AskMyNumbersScreen() {
                                   {t('askMyNumbers.reorderNudge')
                                     .replace('{item}', n.item_name)
                                     .replace('{days}', String(n.median_days_between))
+                                    .replace('{value}', n.avg_order_value.toFixed(0))
                                     .replace('{since}', String(n.days_since_last))}
                                 </Text>
                               ))}

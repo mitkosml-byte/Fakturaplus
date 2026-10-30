@@ -2581,11 +2581,22 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> Option
     nudges = data.get("nudges") or []
     if not nudges:
         return None
+    # get_reorder_nudges already ranks by business impact (how overdue
+    # relative to its own cadence, weighted by what reordering it is
+    # usually worth) - nudges[0] is the single most worth surfacing, not
+    # just whichever item happens to have the largest raw day gap.
     top = nudges[0]
+    overdue_ratio = top["days_since_last"] / top["median_days_between"] if top["median_days_between"] else 1.5
+    # Kept well below every financial-risk signal's priority range
+    # (scan_credits/budget/unpaid go up to 90+) - this is a soft,
+    # pattern-based suggestion, never urgent enough to rank above an
+    # actual money problem, however overdue the pattern looks.
+    priority = min(50, round(30 + (overdue_ratio - 1.5) * 10))
+    value_note = f" (обичайно за ~{top['avg_order_value']:.0f} €)" if top.get("avg_order_value") else ""
     return {
-        "key": "reorder", "severity": "info", "priority": 38,
+        "key": "reorder", "severity": "info", "priority": priority,
         "title": "Време е за нова поръчка",
-        "detail": f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни - вече мина {top['days_since_last']}.",
+        "detail": f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни{value_note} - вече мина {top['days_since_last']}.",
         "route": "/(tabs)/stats",
     }
 

@@ -1350,6 +1350,70 @@ def test_proactive_signals(client):
     assert not bare_signal_keys & {"budget", "receivables", "price_alerts", "reorder", "forecast_revenue", "forecast_expense", "scan_credits"}
 
 
+def test_reorder_nudges_weighted_by_business_impact():
+    """Regression for the "defaults to whichever item has the largest raw
+    day gap" bug: a cheap, barely-tracked item purchased every 10 days and
+    now 40 days overdue used to always outrank an expensive item on the
+    same 10-day cadence that's merely 20 days overdue, even though the
+    second is both more overdue RELATIVE to its own cadence (2x vs 4x
+    matters less in isolation - see below) and worth far more to flag.
+    get_reorder_nudges must rank by overdue-ratio * avg_order_value, so
+    the economically significant item comes first and carries a non-zero
+    avg_order_value the UI/AI digest can show as context."""
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+    from routers.price_tracking import get_reorder_nudges
+
+    company_id = f"company_{uuid_module.uuid4().hex[:12]}"
+    user_id = f"user_{uuid_module.uuid4().hex[:12]}"
+
+    async def _run():
+        await server_module.db.users.insert_one({
+            "user_id": user_id, "email": f"{user_id}@test.com", "name": "Reorder Test User",
+            "role": "staff", "company_id": company_id, "permissions": ["view_statistics"],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        now = server_module.datetime.now(tz.utc)
+
+        def _history(item_name, days_ago_list, unit_price, quantity):
+            return [
+                {
+                    "company_id": company_id, "supplier": "Доставчик Х", "item_name": item_name,
+                    "unit_price": unit_price, "quantity": quantity, "unit": "бр",
+                    "invoice_id": "x", "invoice_number": "INV", "invoice_date": now - timedelta(days=d),
+                }
+                for d in days_ago_list
+            ]
+
+        # Expensive item: 10-day cadence, 20 days overdue (2x), 500 per order.
+        await server_module.db.item_price_history.insert_many(
+            _history("скъпа стока", [20, 30, 40, 50, 60], unit_price=100, quantity=5)
+        )
+        # Cheap item: same 10-day cadence, 40 days overdue (4x - larger RAW
+        # gap than the expensive item above), 5 per order.
+        await server_module.db.item_price_history.insert_many(
+            _history("евтина стока", [40, 50, 60, 70, 80], unit_price=1, quantity=5)
+        )
+
+        user = server_module.User(
+            user_id=user_id, email=f"{user_id}@test.com", name="Reorder Test User",
+            role="staff", company_id=company_id, permissions=["view_statistics"],
+        )
+        return await get_reorder_nudges(current_user=user)
+
+    result = asyncio.run(_run())
+    nudges = result["nudges"]
+    names = [n["item_name"] for n in nudges]
+    assert "скъпа стока" in names and "евтина стока" in names
+    assert names.index("скъпа стока") < names.index("евтина стока")
+    expensive = next(n for n in nudges if n["item_name"] == "скъпа стока")
+    assert expensive["avg_order_value"] == 500.0
+
+
 def test_legacy_scope_consistency(client):
     """Module 1 audit finding: 40 endpoints built their own company_id
     lookup inline instead of the shared get_company_scope()/scope helper,

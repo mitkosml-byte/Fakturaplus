@@ -161,7 +161,10 @@ async def build_business_chat_digest(current_user: User) -> dict:
     reorder_raw = await get_reorder_nudges(current_user=current_user)
     price_alerts_unread_count = price_alerts_raw.get("unread_count", 0)
     reorder_nudges = [
-        {"item_name": n["item_name"], "days_since_last": n["days_since_last"], "median_days_between": n["median_days_between"]}
+        {
+            "item_name": n["item_name"], "days_since_last": n["days_since_last"],
+            "median_days_between": n["median_days_between"], "avg_order_value": n.get("avg_order_value", 0),
+        }
         for n in reorder_raw.get("nudges", [])[:5]
     ]
 

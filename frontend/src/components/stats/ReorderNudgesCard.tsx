@@ -13,6 +13,7 @@ type Nudge = {
   supplier: string;
   median_days_between: number;
   days_since_last: number;
+  avg_order_value: number;
 };
 
 type Props = {
@@ -36,6 +37,7 @@ export function ReorderNudgesCard({ nudges }: Props) {
               .replace('{item}', n.item_name)
               .replace('{supplier}', n.supplier)
               .replace('{median}', String(n.median_days_between))
+              .replace('{value}', n.avg_order_value.toFixed(0))
               .replace('{daysSince}', String(n.days_since_last))}
           </Text>
         ))}

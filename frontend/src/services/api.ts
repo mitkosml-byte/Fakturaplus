@@ -851,7 +851,7 @@ class ApiService {
   }
 
   async getReorderNudges(): Promise<{
-    nudges: { item_name: string; supplier: string; median_days_between: number; days_since_last: number; last_purchase_date: string }[];
+    nudges: { item_name: string; supplier: string; median_days_between: number; days_since_last: number; last_purchase_date: string; avg_order_value: number }[];
   }> {
     return this.fetch('/items/reorder-nudges');
   }

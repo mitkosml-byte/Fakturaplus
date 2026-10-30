@@ -85,7 +85,13 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
               <Ionicons name={SEVERITY_ICON[signal.severity]} size={16} color={SEVERITY_COLOR[signal.severity]} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle}>{signal.title}</Text>
+              {/* "info" signals are soft, pattern-based suggestions (e.g.
+                  a reorder nudge), never an actual problem - the Daily
+                  Review used to give them the exact same bold title as a
+                  genuine critical/warning alert, making a minor restocking
+                  hint LOOK as urgent as overdue invoices or depleted scan
+                  credits. Only critical/warning get the bold treatment. */}
+              <Text style={signal.severity === 'info' ? styles.rowTitleSoft : styles.rowTitle}>{signal.title}</Text>
               <Text style={styles.rowDetail}>{signal.detail}</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
@@ -147,6 +153,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: 'white',
+  },
+  rowTitleSoft: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.textSecondary,
   },
   rowDetail: {
     fontSize: 12,
