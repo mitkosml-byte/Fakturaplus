@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -90,6 +90,40 @@ export default function BillingDocumentsScreen() {
 
   const addFormItem = () => setFormItems((prev) => [...prev, emptyFormItem()]);
   const removeFormItem = (index: number) => setFormItems((prev) => prev.filter((_, i) => i !== index));
+
+  // Ranks line items from this business's OWN past quotes/bills by how
+  // often each recurs, so a repeat product line (same name, unit, price
+  // charged to customers) is one tap instead of retyped - reuses the
+  // `documents` list already loaded for the history view below, no extra
+  // request needed.
+  const itemDirectory = useMemo(() => {
+    const byKey = new Map<string, { name: string; unit: string; unit_price: number; count: number; date: string }>();
+    documents.forEach((doc) => {
+      doc.items.forEach((it) => {
+        const key = it.name.trim().toLowerCase();
+        if (!key) return;
+        const existing = byKey.get(key);
+        if (!existing) {
+          byKey.set(key, { name: it.name.trim(), unit: it.unit, unit_price: it.unit_price, count: 1, date: doc.issue_date });
+        } else {
+          existing.count += 1;
+          if (doc.issue_date >= existing.date) {
+            existing.name = it.name.trim();
+            existing.unit = it.unit;
+            existing.unit_price = it.unit_price;
+            existing.date = doc.issue_date;
+          }
+        }
+      });
+    });
+    return Array.from(byKey.values()).sort((a, b) => b.count - a.count || (a.date < b.date ? 1 : -1));
+  }, [documents]);
+
+  const itemMatches = (name: string) => {
+    const q = name.trim().toLowerCase();
+    if (!q) return [];
+    return itemDirectory.filter((it) => it.name.toLowerCase() !== q && it.name.toLowerCase().includes(q)).slice(0, 5);
+  };
 
   const formTotal = formItems.reduce((sum, it) => {
     const qty = parseFloat(it.quantity) || 0;
@@ -267,6 +301,25 @@ export default function BillingDocumentsScreen() {
                       placeholder={t('scan.productNamePlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                     />
+                    {itemMatches(item.name).length > 0 && (
+                      <View style={styles.itemChipRow}>
+                        {itemMatches(item.name).map((match) => (
+                          <TouchableOpacity
+                            key={match.name}
+                            style={styles.itemChip}
+                            onPress={() => updateFormItem(index, {
+                              name: match.name,
+                              unit: match.unit,
+                              unit_price: String(match.unit_price),
+                            })}
+                          >
+                            <Text style={styles.itemChipText} numberOfLines={1}>
+                              {match.name} · {match.unit_price.toFixed(2)} €
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
                     <View style={styles.itemRowFields}>
                       <TextInput
                         style={[styles.input, styles.itemSmallInput]}
@@ -396,6 +449,17 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   itemNameInput: { marginBottom: 8 },
+  itemChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+  itemChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    maxWidth: 220,
+  },
+  itemChipText: { fontSize: 11, color: COLORS.textSecondary, fontWeight: '600' },
   itemRowFields: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   itemSmallInput: { flex: 1, paddingVertical: 10 },
   addItemButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
