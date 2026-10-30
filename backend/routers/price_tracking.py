@@ -137,7 +137,7 @@ async def update_price_alert_settings(
     if not company_id:
         raise HTTPException(status_code=400, detail="Нямате фирма")
     
-    update_data = {}
+    update_data: Dict[str, Any] = {}
     if "threshold_percent" in body:
         update_data["threshold_percent"] = float(body["threshold_percent"])
     if "min_absolute_change" in body:

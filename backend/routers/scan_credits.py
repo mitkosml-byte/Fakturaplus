@@ -354,7 +354,7 @@ async def set_scan_auto_reload(request: Request, payload: AutoReloadRequest, cur
         return {"auto_reload_enabled": False}
 
     _require_billing_enabled()
-    pkg = scan_credit_service_module.SCAN_PACKAGES.get(payload.package_id)
+    pkg = scan_credit_service_module.SCAN_PACKAGES.get(payload.package_id or "")
     if not pkg:
         raise HTTPException(status_code=400, detail="Непознат пакет")
     total_scans = pkg["paid_scans"] + pkg["bonus_scans"]
@@ -379,7 +379,7 @@ async def set_scan_auto_reload(request: Request, payload: AutoReloadRequest, cur
                 "user_id": current_user.user_id,
                 "user_name": current_user.name,
                 "purchase_type": "auto_reload_setup",
-                "package_id": payload.package_id,
+                "package_id": payload.package_id or "",
                 "scans": str(total_scans),
                 "price_eur": str(pkg["price_eur"]),
             },

@@ -168,7 +168,7 @@ async def start_dm(request: Request, current_user: User = Depends(get_current_us
     members = await get_team_members(current_user.company_id or "")
     if not any(m["user_id"] == other_user_id for m in members):
         raise HTTPException(status_code=404, detail="Потребителят не е намерен в екипа")
-    conversation_id = await get_or_create_dm_conversation(current_user.company_id, current_user.user_id, other_user_id)
+    conversation_id = await get_or_create_dm_conversation(current_user.company_id or "", current_user.user_id, other_user_id)
     return {"conversation_id": conversation_id}
 
 @router.get("/messages/{conversation_id}")

@@ -22,15 +22,14 @@ jobs:
         run: python -m pytest tests/ -v
 
   backend-typecheck:
-    name: Backend typecheck (mypy, informational)
+    name: Backend typecheck (mypy)
     runs-on: ubuntu-latest
     # Module 1 audit finding #3 ("thin test coverage, no static typing"):
-    # mypy as a cheap first pass. The backend has no type-annotation
-    # discipline yet, so this starts as visibility only - it reports
-    # every error but never fails the build. Tighten this (drop
-    # continue-on-error, fix the baseline incrementally) once the error
-    # count is low enough to hold the line on new errors.
-    continue-on-error: true
+    # mypy started here as an informational-only first pass (232 errors,
+    # continue-on-error). The baseline is now clean (0 errors - backend/
+    # mypy.ini documents the handful of confirmed library-stub/
+    # architecture false positives it suppresses), so this is a real,
+    # blocking gate: it now holds the line on NEW errors.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

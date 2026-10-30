@@ -221,6 +221,7 @@ def _parse_invoice_row(row: List[Any], table: ParsedTable, _ctx: Dict[str, Any])
     payment_method = _resolve_label(payment_method_raw, PAYMENT_METHOD_LABELS)
     due_date = _parse_date(_get(row, table, "Срок за плащане"))
     notes = _get(row, table, "Бележки")
+    assert date_val is not None  # guaranteed by the `if errors: return` guard above
 
     warnings: List[str] = []
     if vat_treatment_raw and not vat_treatment:

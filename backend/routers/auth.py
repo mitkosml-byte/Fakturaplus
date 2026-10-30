@@ -148,6 +148,7 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
     set_session_cookies(response, session_token)
 
     user_doc = await server.db.users.find_one({"user_id": user_id}, {"_id": 0})
+    assert user_doc is not None  # the user document was just inserted above under this same user_id
     return {"user": sanitize_user(user_doc), "session_token": session_token, "invite_error": invite_error}
 
 @router.post("/auth/login")

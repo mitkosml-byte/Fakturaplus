@@ -2,7 +2,7 @@
 import io
 import os
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Any
 import json
 
 try:
@@ -97,9 +97,9 @@ class ExportService:
             cell.border = thin_border
         
         # Data
-        total_without_vat = 0
-        total_vat = 0
-        total_amount = 0
+        total_without_vat = 0.0
+        total_vat = 0.0
+        total_amount = 0.0
         
         for row, inv in enumerate(invoices, 5):
             date_val = inv.get('date', '')
@@ -249,9 +249,9 @@ class ExportService:
         # Table data
         data = [["Дата", "Доставчик", "No Фактура", "Без ДДС", "ДДС", "Общо"]]
         
-        total_without_vat = 0
-        total_vat = 0
-        total_amount = 0
+        total_without_vat = 0.0
+        total_vat = 0.0
+        total_amount = 0.0
         
         for inv in invoices:
             date_val = inv.get('date', '')
@@ -517,8 +517,7 @@ class ExportService:
             values[9] = inv.get("total_amount", base + vat)
 
             date_val = inv.get("date")
-            is_datetime = isinstance(date_val, datetime)
-            date_str = date_val.strftime("%d.%m.%Y") if is_datetime else str(date_val)[:10]
+            date_str = date_val.strftime("%d.%m.%Y") if isinstance(date_val, datetime) else str(date_val)[:10]
             doc_type = "Протокол чл.117" if treatment == "reverse_charge" else "Фактура"
 
             protocol_number = ""
@@ -526,7 +525,7 @@ class ExportService:
             deadline_overdue = False
             if treatment == "reverse_charge":
                 protocol_number = inv.get("protocol_number") or ""
-                if is_datetime:
+                if isinstance(date_val, datetime):
                     deadline = date_val + timedelta(days=15)
                     deadline_str = deadline.strftime("%d.%m.%Y")
                     deadline_overdue = deadline < today
@@ -679,7 +678,7 @@ class ExportService:
             row = header_row + idx
             start_str = str(entry.get("start_date", ""))[:10]
             end_str = str(entry.get("end_date", ""))[:10]
-            days_count = ""
+            days_count: Any = ""
             try:
                 start_d = datetime.strptime(start_str, "%Y-%m-%d")
                 end_d = datetime.strptime(end_str, "%Y-%m-%d")
@@ -688,7 +687,7 @@ class ExportService:
                 end_str = end_d.strftime("%d.%m.%Y")
             except ValueError:
                 pass
-            leave_type_label = LEAVE_TYPE_LABELS.get(entry.get("leave_type"), entry.get("leave_type", ""))
+            leave_type_label = LEAVE_TYPE_LABELS.get(entry.get("leave_type") or "", entry.get("leave_type", ""))
             row_values = [idx, _excel_safe(entry.get("employee_name", "")), leave_type_label, start_str, end_str, days_count, _excel_safe(entry.get("note") or "")]
             for col, value in enumerate(row_values, 1):
                 ws2.cell(row=row, column=col, value=value)

@@ -688,6 +688,14 @@ def test_exports(client):
     r = client.get("/api/export/vat-ledger/excel", headers=owner)
     assert r.status_code == 200
 
+    # Exactly one of start_date/end_date, found by mypy while typing this
+    # endpoint's Optional params: used to crash with a 500 (None + str)
+    # instead of a clean validation error.
+    r = client.get("/api/export/vat-ledger/excel?start_date=2026-09-01", headers=owner)
+    assert r.status_code == 400
+    r = client.get("/api/export/vat-ledger/excel?end_date=2026-09-30", headers=owner)
+    assert r.status_code == 400
+
 
 def test_ocr_size_gate(client):
     """Regression check: no AI key locally, so this only confirms an

@@ -95,6 +95,8 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, current_user
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
     employee = await server.db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Служителят не е намерен")
     return Employee(**employee)
 
 @router.delete("/employees/{employee_id}")

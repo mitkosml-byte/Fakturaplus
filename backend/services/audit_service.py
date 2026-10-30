@@ -1,6 +1,6 @@
 """Audit logging service"""
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 import re
 import uuid
 
@@ -49,7 +49,7 @@ class AuditService:
             # A falsy company_id must never fall through to an empty query -
             # that would match (and leak) every company's audit trail.
             raise ValueError("company_id is required")
-        query = {"company_id": company_id}
+        query: Dict[str, Any] = {"company_id": company_id}
         if user_id:
             query["user_id"] = user_id
         if action:

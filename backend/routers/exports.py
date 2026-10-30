@@ -119,6 +119,8 @@ async def export_vat_ledger_excel(
         else:
             last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
         end_date = last_day.strftime("%Y-%m-%d")
+    elif not start_date or not end_date:
+        raise HTTPException(status_code=400, detail="Трябва да зададете и start_date, и end_date (или нито едно от двете за текущия месец)")
 
     company_id, scope = await get_company_scope(current_user)
 

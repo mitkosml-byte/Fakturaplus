@@ -327,6 +327,7 @@ async def switch_active_company(request: Request, current_user: User = Depends(g
 
     if target_company_id == current_user.company_id:
         user_doc = await server.db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+        assert user_doc is not None  # current_user was just authenticated from this same user_id
         return sanitize_user(user_doc)
 
     membership = await server.db.company_memberships.find_one({
