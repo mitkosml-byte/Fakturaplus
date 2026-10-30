@@ -72,6 +72,15 @@ export default function WorkScheduleScreen() {
   const [untilPickerVisible, setUntilPickerVisible] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Correcting actual hours/pay for ONE occurrence - separate from the
+  // edit-series form above, since it never touches the shift template.
+  const [adjustModalVisible, setAdjustModalVisible] = useState(false);
+  const [adjustingOcc, setAdjustingOcc] = useState<ShiftOccurrence | null>(null);
+  const [adjustHours, setAdjustHours] = useState('');
+  const [adjustRate, setAdjustRate] = useState('');
+  const [adjustReason, setAdjustReason] = useState('');
+  const [adjustSaving, setAdjustSaving] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
       const now = new Date();
@@ -189,6 +198,60 @@ export default function WorkScheduleScreen() {
     ]);
   };
 
+  const openAdjustModal = (occ: ShiftOccurrence) => {
+    setAdjustingOcc(occ);
+    setAdjustHours(String(occ.hours));
+    setAdjustRate(occ.hourly_rate != null ? String(occ.hourly_rate) : '');
+    setAdjustReason('');
+    setAdjustModalVisible(true);
+  };
+
+  const handleSaveAdjustment = async () => {
+    if (!adjustingOcc) return;
+    const hours = parseFloat(adjustHours);
+    if (!hours || hours <= 0) {
+      Alert.alert(t('common.error'), t('schedule.adjustHoursError'));
+      return;
+    }
+    if (!adjustReason.trim()) {
+      Alert.alert(t('common.error'), t('schedule.adjustReasonError'));
+      return;
+    }
+    setAdjustSaving(true);
+    try {
+      await api.adjustShiftOccurrence(adjustingOcc.shift_id, adjustingOcc.date, {
+        actual_hours: hours,
+        actual_hourly_rate: adjustRate.trim() ? parseFloat(adjustRate) : undefined,
+        reason: adjustReason.trim(),
+      });
+      setAdjustModalVisible(false);
+      Haptics.success();
+      await loadData();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message || t('schedule.adjustSaveError'));
+    } finally {
+      setAdjustSaving(false);
+    }
+  };
+
+  const handleRemoveAdjustment = (occ: ShiftOccurrence) => {
+    Alert.alert(t('schedule.revertTitle'), t('schedule.revertConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('schedule.revert'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.removeShiftAdjustment(occ.shift_id, occ.date);
+            await loadData();
+          } catch (error: any) {
+            Alert.alert(t('common.error'), error.message);
+          }
+        },
+      },
+    ]);
+  };
+
   if (!user) return <AccessDenied />;
 
   const grouped: [string, ShiftOccurrence[]][] = Object.entries(
@@ -280,10 +343,20 @@ export default function WorkScheduleScreen() {
                         <View style={styles.shiftTimeBlock}>
                           <Ionicons name="time-outline" size={16} color={COLORS.primary} />
                           <Text style={styles.shiftTime}>{occ.start_time} - {occ.end_time}</Text>
-                          <Text style={styles.shiftHours}>({occ.hours}ч)</Text>
+                          {occ.adjusted ? (
+                            <>
+                              <Text style={styles.shiftHoursStrike}>{occ.scheduled_hours}ч</Text>
+                              <Text style={styles.shiftHoursAdjusted}>→ {occ.hours}ч</Text>
+                            </>
+                          ) : (
+                            <Text style={styles.shiftHours}>({occ.hours}ч)</Text>
+                          )}
                         </View>
                         {canManage && (
                           <View style={styles.shiftActions}>
+                            <TouchableOpacity onPress={() => openAdjustModal(occ)} hitSlop={8}>
+                              <Ionicons name="calculator-outline" size={18} color={COLORS.warning} />
+                            </TouchableOpacity>
                             <TouchableOpacity onPress={() => openEditModal(occ)} hitSlop={8}>
                               <Ionicons name="create-outline" size={18} color={COLORS.primary} />
                             </TouchableOpacity>
@@ -314,6 +387,20 @@ export default function WorkScheduleScreen() {
                         <View style={styles.conflictRow}>
                           <Ionicons name="alert-circle" size={14} color={COLORS.danger} />
                           <Text style={styles.conflictText}>{t('schedule.leaveConflict')}</Text>
+                        </View>
+                      )}
+                      {occ.adjusted && (
+                        <View style={styles.adjustedRow}>
+                          <Ionicons name="calculator-outline" size={14} color={COLORS.warning} />
+                          <Text style={styles.adjustedText}>
+                            {t('schedule.adjustedBy').replace('{name}', occ.adjusted_by_name || '?')}
+                            {occ.adjustment_reason ? `: ${occ.adjustment_reason}` : ''}
+                          </Text>
+                          {canManage && (
+                            <TouchableOpacity onPress={() => handleRemoveAdjustment(occ)} hitSlop={8}>
+                              <Text style={styles.revertLink}>{t('schedule.revert')}</Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
                       )}
                     </View>
@@ -435,6 +522,60 @@ export default function WorkScheduleScreen() {
             </View>
           </BottomSheet>
 
+          <BottomSheet visible={adjustModalVisible} onClose={() => setAdjustModalVisible(false)}>
+            <View style={styles.modalContent}>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                <Text style={styles.modalTitle}>{t('schedule.adjustTitle')}</Text>
+                {adjustingOcc && (
+                  <Text style={styles.hint}>
+                    {format(new Date(`${adjustingOcc.date}T00:00:00`), 'd MMM yyyy', { locale: dateLocale })} · {adjustingOcc.user_name} · {t('schedule.scheduled')}: {adjustingOcc.scheduled_hours}ч
+                  </Text>
+                )}
+
+                <Text style={styles.inputLabel}>{t('schedule.actualHours')}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={adjustHours}
+                  onChangeText={setAdjustHours}
+                  keyboardType="decimal-pad"
+                  placeholder={t('schedule.hourlyRatePlaceholder')}
+                  placeholderTextColor={COLORS.textMuted}
+                />
+
+                <Text style={styles.inputLabel}>{t('schedule.actualRate')}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={adjustRate}
+                  onChangeText={setAdjustRate}
+                  keyboardType="decimal-pad"
+                  placeholder={t('schedule.hourlyRatePlaceholder')}
+                  placeholderTextColor={COLORS.textMuted}
+                />
+
+                <Text style={styles.inputLabel}>{t('schedule.adjustReason')}</Text>
+                <TextInput
+                  style={[styles.input, { height: 70 }]}
+                  value={adjustReason}
+                  onChangeText={setAdjustReason}
+                  placeholder={t('schedule.adjustReasonPlaceholder')}
+                  placeholderTextColor={COLORS.textMuted}
+                  multiline
+                />
+
+                <TouchableOpacity
+                  style={[styles.saveButton, adjustSaving && { opacity: 0.6 }]}
+                  onPress={handleSaveAdjustment}
+                  disabled={adjustSaving}
+                >
+                  {adjustSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setAdjustModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </BottomSheet>
+
           <DateTimePickerModal
             isVisible={datePickerVisible}
             mode="date"
@@ -524,6 +665,8 @@ const styles = StyleSheet.create({
   shiftTimeBlock: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   shiftTime: { fontSize: 15, fontWeight: '600', color: 'white' },
   shiftHours: { fontSize: 12, color: COLORS.textMuted },
+  shiftHoursStrike: { fontSize: 12, color: COLORS.textMuted, textDecorationLine: 'line-through' },
+  shiftHoursAdjusted: { fontSize: 12, color: COLORS.warning, fontWeight: '700' },
   shiftActions: { flexDirection: 'row', gap: 14 },
   shiftMemberRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   shiftMemberName: { fontSize: 13, color: COLORS.textSecondary },
@@ -541,6 +684,9 @@ const styles = StyleSheet.create({
   shiftNote: { fontSize: 12, color: COLORS.textSecondary, marginTop: 6, fontStyle: 'italic' },
   conflictRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   conflictText: { fontSize: 12, color: COLORS.danger, fontWeight: '600' },
+  adjustedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' },
+  adjustedText: { fontSize: 12, color: COLORS.warning, flexShrink: 1 },
+  revertLink: { fontSize: 12, color: COLORS.primary, fontWeight: '600', textDecorationLine: 'underline' },
   modalContent: {
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,

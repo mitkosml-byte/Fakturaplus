@@ -1582,6 +1582,124 @@ def test_work_schedule(client):
     assert r.status_code == 400
 
 
+def test_shift_adjustments(client):
+    """A manager corrects what actually happened on ONE occurrence of a
+    shift - for a dispute or inaccuracy - without touching the shift's
+    own template or any other occurrence of its recurring series. The
+    corrected hours/rate become authoritative for that date everywhere
+    (listing, summary), and deleting the correction reverts it back to
+    the scheduled value."""
+    # Direct DB insert rather than /api/auth/register - that endpoint is
+    # rate-limited (5/minute) and this session-scoped client shares one
+    # slowapi bucket across the WHOLE test session, which test_work_schedule
+    # above already spends a slot of (same pattern test_ask_my_numbers'
+    # no_stats_staff fixture already uses for the same reason).
+    owner = h(STATE["owner_token"])
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+
+    staff_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    staff_token = uuid_module.uuid4().hex
+
+    async def _make_adj_staff():
+        me = client.get("/api/auth/me", headers=owner).json()
+        await server_module.db.users.insert_one({
+            "user_id": staff_id, "email": f"{staff_id}@test.com", "name": "Adj Staff",
+            "role": "staff", "company_id": me["company_id"], "permissions": [],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": staff_id, "session_token": staff_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+
+    asyncio.run(_make_adj_staff())
+    staff = h(staff_token)
+
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": staff_id, "date": "2026-11-02", "start_time": "09:00", "end_time": "17:00",
+        "repeat_pattern": "weekly", "repeat_until": "2026-11-23", "hourly_rate": 10,
+    })
+    assert r.status_code == 200, r.text
+    shift_id = r.json()["id"]
+
+    # Scheduled (unadjusted): 4 weeks * 8h * 10 € = 320 €.
+    r = client.get(f"/api/schedule/summary?start=2026-11-01&end=2026-11-30&user_id={staff_id}", headers=owner)
+    assert r.json() == {"total_hours": 32, "estimated_pay": 320, "shift_count": 4}
+
+    # Staff can't correct their own hours - that's management's call.
+    r = client.put(f"/api/schedule/shifts/{shift_id}/occurrences/2026-11-09/adjustment", headers=staff, json={
+        "actual_hours": 6, "reason": "left early",
+    })
+    assert r.status_code == 403
+
+    # Manager corrects one occurrence (left 2h early that day).
+    r = client.put(f"/api/schedule/shifts/{shift_id}/occurrences/2026-11-09/adjustment", headers=owner, json={
+        "actual_hours": 6, "reason": "Напусна 2 часа по-рано поради неотложен личен ангажимент",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["actual_hours"] == 6
+
+    r = client.get("/api/schedule/shifts?start=2026-11-01&end=2026-11-30", headers=owner)
+    occ = r.json()["occurrences"]
+    adjusted = next(o for o in occ if o["date"] == "2026-11-09")
+    assert adjusted["hours"] == 6
+    assert adjusted["scheduled_hours"] == 8
+    assert adjusted["adjusted"] is True
+    assert adjusted["adjustment_reason"]
+    others = [o for o in occ if o["date"] != "2026-11-09"]
+    assert all(o["hours"] == 8 and o["adjusted"] is False for o in others)
+
+    # Summary reflects the correction: 3*8 + 6 = 30h, pay = 300 €.
+    r = client.get(f"/api/schedule/summary?start=2026-11-01&end=2026-11-30&user_id={staff_id}", headers=owner)
+    assert r.json() == {"total_hours": 30, "estimated_pay": 300, "shift_count": 4}
+
+    # Staff sees the correction - and why - on their OWN schedule. No secret corrections.
+    r = client.get("/api/schedule/shifts?start=2026-11-01&end=2026-11-30", headers=staff)
+    staff_adjusted = next(o for o in r.json()["occurrences"] if o["date"] == "2026-11-09")
+    assert staff_adjusted["adjusted"] is True
+
+    # A date that isn't actually part of this shift's series is rejected.
+    r = client.put(f"/api/schedule/shifts/{shift_id}/occurrences/2026-12-25/adjustment", headers=owner, json={
+        "actual_hours": 5, "reason": "x",
+    })
+    assert r.status_code == 400
+
+    # A blank reason is rejected - this exists for disputes, so it must say why.
+    r = client.put(f"/api/schedule/shifts/{shift_id}/occurrences/2026-11-16/adjustment", headers=owner, json={
+        "actual_hours": 5, "reason": "   ",
+    })
+    assert r.status_code == 400
+
+    # Overriding the rate too, for just this one occurrence.
+    r = client.put(f"/api/schedule/shifts/{shift_id}/occurrences/2026-11-16/adjustment", headers=owner, json={
+        "actual_hours": 8, "actual_hourly_rate": 15, "reason": "Extra отговорност този ден",
+    })
+    assert r.status_code == 200
+
+    # 8(2nd)+6(9th)+8(16th)+8(23rd)=30h; pay=80+60+120+80=340 (16th at 15 €/h).
+    r = client.get(f"/api/schedule/summary?start=2026-11-01&end=2026-11-30&user_id={staff_id}", headers=owner)
+    summary = r.json()
+    assert summary["total_hours"] == 30
+    assert summary["estimated_pay"] == 340
+
+    # Deleting the correction reverts that date back to the scheduled value.
+    r = client.delete(f"/api/schedule/shifts/{shift_id}/occurrences/2026-11-09/adjustment", headers=owner)
+    assert r.status_code == 200
+    r = client.get("/api/schedule/shifts?start=2026-11-01&end=2026-11-30", headers=owner)
+    reverted = next(o for o in r.json()["occurrences"] if o["date"] == "2026-11-09")
+    assert reverted["hours"] == 8
+    assert reverted["adjusted"] is False
+
+    r = client.delete(f"/api/schedule/shifts/{shift_id}/occurrences/2026-11-09/adjustment", headers=owner)
+    assert r.status_code == 404
+
+
 def test_legacy_scope_consistency(client):
     """Module 1 audit finding: 40 endpoints built their own company_id
     lookup inline instead of the shared get_company_scope()/scope helper,

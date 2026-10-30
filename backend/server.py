@@ -3519,6 +3519,32 @@ async def _leave_conflict_for(company_id: Optional[str], user_id: str, occ_date:
         {"_id": 0},
     )
 
+# A correction to ONE occurrence's hours/pay - e.g. the employee actually
+# left early, or the manager and employee disagree on the scheduled time
+# and settle on a different figure. Deliberately separate from WorkShift
+# itself: editing the shift template changes the PLAN (and every future
+# occurrence with it), while an adjustment corrects what actually
+# happened on one specific date, without touching the plan or any other
+# occurrence of a recurring series. At most one per (shift_id, date) -
+# re-adjusting the same date replaces the previous correction rather than
+# stacking a second one.
+class ShiftAdjustmentCreate(BaseModel):
+    actual_hours: float
+    actual_hourly_rate: Optional[float] = None  # None keeps the shift's own rate
+    reason: str  # required - this exists for disputes, so every correction must say why
+
+class ShiftAdjustment(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    shift_id: str
+    user_id: str
+    date: str
+    actual_hours: float
+    actual_hourly_rate: Optional[float] = None
+    reason: str
+    adjusted_by: str
+    adjusted_by_name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 
@@ -4216,6 +4242,7 @@ async def create_indexes():
 
         # Work schedule
         await db.work_shifts.create_index([("company_id", 1), ("user_id", 1)])
+        await db.shift_adjustments.create_index([("shift_id", 1), ("date", 1)], unique=True)
 
         # Scan credits (balance doc is keyed by its own scope _id already;
         # auto_reload_subscription_id is looked up by the Stripe webhook)

@@ -595,12 +595,26 @@ export interface ShiftOccurrence {
   date: string;
   start_time: string;
   end_time: string;
+  // The planned duration from start_time/end_time - stays fixed even
+  // once `hours` below is overridden by a correction.
+  scheduled_hours: number;
+  // The duration to actually use (hours worked + pay) - the scheduled
+  // duration, or the corrected one when `adjusted` is true.
   hours: number;
   hourly_rate?: number | null;
   note?: string | null;
   repeat_pattern: ShiftRepeatPattern;
   repeat_until?: string | null;
   leave_conflict: boolean;
+  adjusted: boolean;
+  adjustment_reason?: string | null;
+  adjusted_by_name?: string | null;
+}
+
+export interface ShiftAdjustmentCreate {
+  actual_hours: number;
+  actual_hourly_rate?: number | null;
+  reason: string;
 }
 
 export interface ScheduleSummary {

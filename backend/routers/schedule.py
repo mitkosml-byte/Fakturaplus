@@ -82,11 +82,27 @@ async def _resolve_occurrences(shifts: List[dict], company_id: Optional[str], st
     ).to_list(1000) if user_ids else []
     name_by_id = {u["user_id"]: u["name"] for u in users}
 
+    shift_ids = [s["id"] for s in shifts]
+    adjustment_rows = await server.db.shift_adjustments.find(
+        {"shift_id": {"$in": shift_ids}, "date": {"$gte": start, "$lte": end}}, {"_id": 0}
+    ).to_list(5000) if shift_ids else []
+    adjustment_by_key = {(a["shift_id"], a["date"]): a for a in adjustment_rows}
+
     occurrences = []
     for shift in shifts:
         dates = _expand_shift_occurrences(shift, start, end)
         for occ_date in dates:
             conflict = await _leave_conflict_for(company_id, shift["user_id"], occ_date)
+            scheduled_hours = _shift_hours(shift["start_time"], shift["end_time"])
+            adjustment = adjustment_by_key.get((shift["id"], occ_date))
+            # An adjustment corrects what actually happened on this one
+            # date - when present, it's authoritative over the plan
+            # (hours AND, if given, rate), without touching any other
+            # occurrence of the same recurring series.
+            effective_hours = adjustment["actual_hours"] if adjustment else scheduled_hours
+            effective_rate = shift.get("hourly_rate")
+            if adjustment and adjustment.get("actual_hourly_rate") is not None:
+                effective_rate = adjustment["actual_hourly_rate"]
             occurrences.append({
                 "shift_id": shift["id"],
                 "user_id": shift["user_id"],
@@ -94,12 +110,16 @@ async def _resolve_occurrences(shifts: List[dict], company_id: Optional[str], st
                 "date": occ_date,
                 "start_time": shift["start_time"],
                 "end_time": shift["end_time"],
-                "hours": _shift_hours(shift["start_time"], shift["end_time"]),
-                "hourly_rate": shift.get("hourly_rate"),
+                "scheduled_hours": scheduled_hours,
+                "hours": effective_hours,
+                "hourly_rate": effective_rate,
                 "note": shift.get("note"),
                 "repeat_pattern": shift.get("repeat_pattern", "none"),
                 "repeat_until": shift.get("repeat_until"),
                 "leave_conflict": conflict is not None,
+                "adjusted": adjustment is not None,
+                "adjustment_reason": adjustment.get("reason") if adjustment else None,
+                "adjusted_by_name": adjustment.get("adjusted_by_name") if adjustment else None,
             })
     occurrences.sort(key=lambda o: (o["date"], o["start_time"]))
     return occurrences
@@ -193,3 +213,77 @@ async def get_schedule_summary(
     total_hours = round(sum(o["hours"] for o in occurrences), 2)
     estimated_pay = round(sum(o["hours"] * (o["hourly_rate"] or 0) for o in occurrences), 2)
     return {"total_hours": total_hours, "estimated_pay": estimated_pay, "shift_count": len(occurrences)}
+
+
+@router.put("/schedule/shifts/{shift_id}/occurrences/{occ_date}/adjustment", response_model=ShiftAdjustment)
+async def adjust_shift_occurrence(
+    shift_id: str, occ_date: str, payload: ShiftAdjustmentCreate, current_user: User = Depends(get_current_user)
+):
+    """Corrects the hours (and optionally the rate) actually worked on ONE
+    occurrence of a shift - for a dispute or an inaccuracy, without
+    editing the shift's own template (which would change the plan for
+    every other occurrence of the same recurring series too). Re-running
+    this for the same (shift_id, occ_date) replaces the previous
+    correction rather than stacking a second one."""
+    require_permission(current_user, "manage_budget")
+    company_id, _ = await get_company_scope(current_user)
+    shift = await server.db.work_shifts.find_one({"id": shift_id, "company_id": company_id}, {"_id": 0})
+    if not shift:
+        raise HTTPException(status_code=404, detail="Смяната не е намерена")
+
+    # The date must be a real occurrence of this shift, not an arbitrary
+    # one - same narrow single-day expansion used by the generic listing,
+    # just bounded to one date.
+    if occ_date not in _expand_shift_occurrences(shift, occ_date, occ_date):
+        raise HTTPException(status_code=400, detail="Тази дата не е част от графика на тази смяна")
+    if payload.actual_hours <= 0:
+        raise HTTPException(status_code=400, detail="Отработените часове трябва да са положително число")
+    if not payload.reason.strip():
+        raise HTTPException(status_code=400, detail="Моля, посочете причина за корекцията")
+
+    adjustment = ShiftAdjustment(
+        company_id=company_id or "",
+        shift_id=shift_id,
+        user_id=shift["user_id"],
+        date=occ_date,
+        actual_hours=payload.actual_hours,
+        actual_hourly_rate=payload.actual_hourly_rate,
+        reason=payload.reason.strip(),
+        adjusted_by=current_user.user_id,
+        adjusted_by_name=current_user.name,
+    )
+    await server.db.shift_adjustments.update_one(
+        {"shift_id": shift_id, "date": occ_date},
+        {"$set": adjustment.model_dump()},
+        upsert=True,
+    )
+    # A correction to someone's pay is exactly the kind of action
+    # GET /audit-logs needs to be able to answer "who changed this, to
+    # what, and why" for - same reasoning as logging a role/permission
+    # change.
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="update",
+        entity_type="shift_adjustment",
+        entity_id=shift_id,
+        company_id=company_id,
+        details={
+            "date": occ_date, "employee_user_id": adjustment.user_id,
+            "actual_hours": payload.actual_hours, "actual_hourly_rate": payload.actual_hourly_rate,
+            "reason": adjustment.reason,
+        },
+    )
+    return adjustment
+
+
+@router.delete("/schedule/shifts/{shift_id}/occurrences/{occ_date}/adjustment")
+async def remove_shift_adjustment(shift_id: str, occ_date: str, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_budget")
+    company_id, _ = await get_company_scope(current_user)
+    result = await server.db.shift_adjustments.delete_one(
+        {"shift_id": shift_id, "date": occ_date, "company_id": company_id}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Няма корекция за тази дата")
+    return {"message": "Корекцията е премахната - часовете се връщат по график"}
