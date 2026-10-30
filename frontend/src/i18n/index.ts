@@ -4118,6 +4118,29 @@ export const translations: Translations = {
   'schedule.copyShiftNoneSelected': { bg: 'Изберете поне един ден', en: 'Pick at least one day' },
   'schedule.copyShiftResult': { bg: 'Добавени смени: {ok}, неуспешни: {fail}', en: 'Shifts added: {ok}, failed: {fail}' },
 
+  // Team member profile - opened by tapping an avatar (e.g. in the work
+  // schedule grid). Manager-only, aggregates identity + schedule stats +
+  // leave history, plus private positive/negative performance notes.
+  'teamProfile.loadError': { bg: 'Неуспешно зареждане на профила', en: 'Could not load the profile' },
+  'teamProfile.memberSince': { bg: 'В екипа от {date}', en: 'On the team since {date}' },
+  'teamProfile.position': { bg: 'Длъжност', en: 'Position' },
+  'teamProfile.hireDate': { bg: 'Нает на', en: 'Hired on' },
+  'teamProfile.noEmployeeLink': { bg: 'Няма свързан картон във ведомостта', en: 'Not linked to a payroll record' },
+  'teamProfile.thisMonth': { bg: 'Този месец', en: 'This month' },
+  'teamProfile.leaveCount': { bg: 'Отпуски (общо)', en: 'Leave entries (all time)' },
+  'teamProfile.holidayWorkCount': { bg: 'Работа на празник (общо)', en: 'Holiday work (all time)' },
+  'teamProfile.notesTitle': { bg: 'Бележки от мениджмънта', en: 'Management notes' },
+  'teamProfile.notesHint': { bg: 'Видими само за мениджъри - служителят не ги вижда', en: 'Visible only to managers - the team member never sees these' },
+  'teamProfile.netScore': { bg: 'Нетен резултат', en: 'Net score' },
+  'teamProfile.addPositive': { bg: 'Позитивна', en: 'Positive' },
+  'teamProfile.addNegative': { bg: 'Негативна', en: 'Negative' },
+  'teamProfile.notePlaceholder': { bg: 'Кратко описание за анализ...', en: 'A short note for later analysis...' },
+  'teamProfile.noteTextError': { bg: 'Въведете текст на бележката', en: 'Enter the note text' },
+  'teamProfile.noteSaveError': { bg: 'Неуспешно запазване на бележката', en: 'Could not save the note' },
+  'teamProfile.noNotes': { bg: 'Все още няма бележки', en: 'No notes yet' },
+  'teamProfile.deleteNoteTitle': { bg: 'Изтриване на бележка', en: 'Delete note' },
+  'teamProfile.deleteNoteConfirm': { bg: 'Тази бележка ще бъде изтрита безвъзвратно.', en: 'This note will be permanently deleted.' },
+
   // Calendar (shared team calendar - owner/manager/accountant)
   'calendar.title': { bg: 'Календар', en: 'Calendar' },
   'calendar.noEvents': { bg: 'Няма събития в този период', en: 'No events in this period' },

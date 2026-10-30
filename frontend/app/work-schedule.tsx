@@ -20,7 +20,7 @@ import { api } from '../src/services/api';
 import { ShiftOccurrence, ShiftRepeatPattern, ScheduleSummary, SchedulePayment } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, BottomSheet, Avatar } from '../src/components';
+import { AccessDenied, ScreenEnter, BottomSheet, Avatar, TeamMemberProfileSheet } from '../src/components';
 import { COLORS, CHART_PALETTE } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -116,6 +116,10 @@ export default function WorkScheduleScreen() {
   const [copySource, setCopySource] = useState<ShiftOccurrence | null>(null);
   const [copyTargetDates, setCopyTargetDates] = useState<string[]>([]);
   const [copyApplying, setCopyApplying] = useState(false);
+
+  // Opened by tapping a team member's avatar (grid label or list card) -
+  // manager-only aggregated profile + private positive/negative notes.
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -566,11 +570,11 @@ export default function WorkScheduleScreen() {
                             const color = employeeColor(emp.user_id);
                             return (
                               <View key={emp.user_id} style={styles.gridRow}>
-                                <View style={styles.gridLabelCell}>
+                                <TouchableOpacity style={styles.gridLabelCell} onPress={() => setProfileUserId(emp.user_id)}>
                                   <View style={[styles.gridColorDot, { backgroundColor: color }]} />
                                   <Avatar uri={emp.picture} name={emp.name} size={20} />
                                   <Text style={styles.gridLabelText} numberOfLines={1}>{emp.name}</Text>
-                                </View>
+                                </TouchableOpacity>
                                 {gridDays.map((d) => {
                                   const dateKey = toDateStr(d);
                                   const dayOccs = occurrencesByUserDate[emp.user_id]?.[dateKey] || [];
@@ -657,10 +661,10 @@ export default function WorkScheduleScreen() {
                       </View>
 
                       {(canManage && !selectedUserId) && (
-                        <View style={styles.shiftMemberRow}>
+                        <TouchableOpacity style={styles.shiftMemberRow} onPress={() => setProfileUserId(occ.user_id)}>
                           <Avatar uri={directory.find((d) => d.user_id === occ.user_id)?.picture} name={occ.user_name} size={18} />
                           <Text style={styles.shiftMemberName}>{occ.user_name}</Text>
-                        </View>
+                        </TouchableOpacity>
                       )}
 
                       <View style={styles.shiftFooter}>
@@ -943,6 +947,12 @@ export default function WorkScheduleScreen() {
             date={repeatUntil}
             onConfirm={(d) => { setRepeatUntil(d); setUntilPickerVisible(false); }}
             onCancel={() => setUntilPickerVisible(false)}
+          />
+
+          <TeamMemberProfileSheet
+            visible={!!profileUserId}
+            userId={profileUserId}
+            onClose={() => setProfileUserId(null)}
           />
         </SafeAreaView>
       </View>

@@ -30,3 +30,4 @@ export { MorningBriefingCard } from './MorningBriefingCard';
 export { Avatar } from './Avatar';
 export { SuggestionChips } from './SuggestionChips';
 export { SwipeableRow } from './SwipeableRow';
+export { TeamMemberProfileSheet } from './TeamMemberProfileSheet';

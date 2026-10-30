@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -1180,6 +1180,22 @@ class ApiService {
 
   async batchPay(payload: BatchPayRequest): Promise<{ results: BatchPayResultItem[] }> {
     return this.fetch('/pay-run/batch', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async getTeamMemberProfile(userId: string): Promise<TeamMemberProfile> {
+    return this.fetch(`/team/members/${encodeURIComponent(userId)}/profile`);
+  }
+
+  async getTeamNotes(userId: string): Promise<TeamNotesResponse> {
+    return this.fetch(`/team/notes?user_id=${encodeURIComponent(userId)}`);
+  }
+
+  async createTeamNote(payload: TeamNoteCreate): Promise<TeamNote> {
+    return this.fetch('/team/notes', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async deleteTeamNote(noteId: string): Promise<{ message: string }> {
+    return this.fetch(`/team/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' });
   }
 
   async previewPayroll(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number }): Promise<PayrollBreakdown> {

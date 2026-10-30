@@ -665,6 +665,63 @@ export interface BatchPayResultItem {
   amount?: number | null;
 }
 
+// Manager-only team member profile (opened from an avatar tap, e.g. the
+// work-schedule grid) + private positive/negative performance notes.
+export type TeamNoteType = 'positive' | 'negative';
+
+export interface TeamNoteCreate {
+  user_id: string;
+  note_type: TeamNoteType;
+  text: string;
+}
+
+export interface TeamNote {
+  id: string;
+  company_id: string;
+  user_id: string;
+  note_type: TeamNoteType;
+  text: string;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+}
+
+export interface TeamNotesResponse {
+  notes: TeamNote[];
+  positive_count: number;
+  negative_count: number;
+  net_score: number;
+}
+
+export interface TeamMemberIdentity {
+  user_id: string;
+  name: string;
+  email: string;
+  picture?: string | null;
+  role: 'owner' | 'manager' | 'staff' | 'accountant';
+  permissions: string[];
+  created_at: string;
+}
+
+// Deliberately narrower than the full Employee type - no salary/agreement
+// here, that stays in the Payroll screen where it already lives.
+export interface TeamMemberEmployeeInfo {
+  id: string;
+  name: string;
+  position?: string | null;
+  hire_date?: string | null;
+  active: boolean;
+}
+
+export interface TeamMemberProfile {
+  member: TeamMemberIdentity;
+  employee: TeamMemberEmployeeInfo | null;
+  schedule_summary: ScheduleSummary;
+  leave_entries: LeaveEntry[];
+  holiday_work_entries: HolidayWorkEntry[];
+  notes: TeamNotesResponse;
+}
+
 export interface PayrollRates {
   employee_rate_percent: number;
   employer_rate_percent: number;
