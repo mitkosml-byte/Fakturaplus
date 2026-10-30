@@ -17,7 +17,7 @@ import { format } from 'date-fns';
 import { Alert } from '../src/utils/alert';
 import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
-import { ShiftOccurrence, ShiftRepeatPattern, ScheduleSummary } from '../src/types';
+import { ShiftOccurrence, ShiftRepeatPattern, ScheduleSummary, SchedulePayment } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Avatar } from '../src/components';
@@ -81,13 +81,24 @@ export default function WorkScheduleScreen() {
   const [adjustReason, setAdjustReason] = useState('');
   const [adjustSaving, setAdjustSaving] = useState(false);
 
+  // "Mark as paid" for the currently selected member's current month -
+  // manager-only. monthStart/monthEnd are kept in state (not just local
+  // to loadData) so the pay action can reuse the exact same bounds the
+  // summary card was computed over.
+  const [monthStart, setMonthStart] = useState('');
+  const [monthEnd, setMonthEnd] = useState('');
+  const [schedulePayment, setSchedulePayment] = useState<SchedulePayment | null>(null);
+  const [payingBusy, setPayingBusy] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
       const now = new Date();
       const start = toDateStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
       const end = toDateStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 60));
-      const monthStart = toDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
-      const monthEnd = toDateStr(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+      const mStart = toDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
+      const mEnd = toDateStr(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+      setMonthStart(mStart);
+      setMonthEnd(mEnd);
 
       const filterUserId = canManage ? (selectedUserId || undefined) : undefined;
       const [occData, dir] = await Promise.all([
@@ -101,9 +112,16 @@ export default function WorkScheduleScreen() {
       // manager's "whole team" view rather than add up different
       // people's hours/pay into one meaningless total.
       if (!canManage || selectedUserId) {
-        setSummary(await api.getScheduleSummary(monthStart, monthEnd, filterUserId));
+        setSummary(await api.getScheduleSummary(mStart, mEnd, filterUserId));
       } else {
         setSummary(null);
+      }
+
+      if (canManage && selectedUserId) {
+        const { payments } = await api.getSchedulePayments(mStart, mEnd, selectedUserId);
+        setSchedulePayment(payments[0] || null);
+      } else {
+        setSchedulePayment(null);
       }
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
@@ -252,6 +270,52 @@ export default function WorkScheduleScreen() {
     ]);
   };
 
+  const handleMarkPaid = () => {
+    if (!selectedUserId || !summary) return;
+    Alert.alert(t('schedule.markPaidTitle'), t('schedule.markPaidConfirm').replace('{amount}', summary.estimated_pay.toFixed(2)), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('schedule.markPaid'),
+        onPress: async () => {
+          setPayingBusy(true);
+          try {
+            const payment = await api.createSchedulePayment({
+              user_id: selectedUserId, period_start: monthStart, period_end: monthEnd,
+            });
+            setSchedulePayment(payment);
+            Haptics.success();
+          } catch (error: any) {
+            Alert.alert(t('common.error'), error.message || t('schedule.markPaidError'));
+          } finally {
+            setPayingBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleUndoPayment = () => {
+    if (!schedulePayment) return;
+    Alert.alert(t('schedule.undoPaidTitle'), t('schedule.undoPaidConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          setPayingBusy(true);
+          try {
+            await api.deleteSchedulePayment(schedulePayment.id);
+            setSchedulePayment(null);
+          } catch (error: any) {
+            Alert.alert(t('common.error'), error.message);
+          } finally {
+            setPayingBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
   if (!user) return <AccessDenied />;
 
   const grouped: [string, ShiftOccurrence[]][] = Object.entries(
@@ -323,6 +387,33 @@ export default function WorkScheduleScreen() {
                     <Text style={styles.summaryLabel}>{t('schedule.shiftsThisMonth')}</Text>
                   </View>
                 </View>
+              )}
+
+              {canManage && selectedUserId && summary && summary.estimated_pay > 0 && (
+                schedulePayment ? (
+                  <View style={styles.paidCard}>
+                    <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+                    <Text style={styles.paidText}>
+                      {t('schedule.paidLabel')
+                        .replace('{amount}', schedulePayment.amount.toFixed(2))
+                        .replace('{date}', format(new Date(schedulePayment.created_at), 'd MMM yyyy', { locale: dateLocale }))}
+                    </Text>
+                    <TouchableOpacity onPress={handleUndoPayment} disabled={payingBusy} hitSlop={8}>
+                      <Text style={styles.revertLink}>{t('schedule.undoPaid')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity style={styles.markPaidButton} onPress={handleMarkPaid} disabled={payingBusy}>
+                    {payingBusy ? (
+                      <ActivityIndicator color="white" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="cash-outline" size={18} color="white" />
+                        <Text style={styles.markPaidButtonText}>{t('schedule.markPaid')}</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )
               )}
 
               {grouped.length === 0 && (
@@ -647,6 +738,27 @@ const styles = StyleSheet.create({
   summaryItem: { alignItems: 'center' },
   summaryValue: { fontSize: 18, fontWeight: 'bold', color: 'white' },
   summaryLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: 2, textAlign: 'center' },
+  markPaidButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.success,
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  markPaidButtonText: { color: 'white', fontWeight: 'bold', fontSize: 15 },
+  paidCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  paidText: { flex: 1, fontSize: 12, color: COLORS.textSecondary },
   dayGroup: { marginBottom: 18 },
   dayHeader: {
     fontSize: 14,

@@ -3892,6 +3892,7 @@ export const translations: Translations = {
   'payroll.process': { bg: 'Начисли за месеца', en: 'Process for this month' },
   'payroll.netAmount': { bg: 'Нетно за получаване', en: 'Net take-home' },
   'payroll.totalEmployerCost': { bg: 'Общ разход за работодателя', en: 'Total employer cost' },
+  'payroll.countedInExpenses': { bg: 'Отразява се в разходите', en: 'Counts toward expenses' },
   'payroll.removeEntry': { bg: 'Премахни начислението', en: 'Remove this entry' },
   'payroll.deleteEmployee': { bg: 'Изтрий служителя', en: 'Delete employee' },
   'payroll.deleteEmployeeConfirm': { bg: 'Служителят ще бъде изтрит, но вече начислените заплати остават в историята.', en: "The employee will be deleted, but past payroll entries stay in the history." },
@@ -4053,6 +4054,20 @@ export const translations: Translations = {
   'schedule.revert': { bg: 'Върни по график', en: 'Revert to scheduled' },
   'schedule.revertTitle': { bg: 'Връщане по график', en: 'Revert to scheduled' },
   'schedule.revertConfirm': { bg: 'Да върнем ли часовете по график за този ден?', en: "Revert this day's hours back to the schedule?" },
+  'schedule.markPaid': { bg: 'Маркирай като платено', en: 'Mark as paid' },
+  'schedule.markPaidTitle': { bg: 'Маркиране като платено', en: 'Mark as paid' },
+  'schedule.markPaidConfirm': {
+    bg: 'Това ще добави {amount} € като реален разход за този месец. Продължи?',
+    en: 'This will add {amount} € as a real expense for this month. Continue?',
+  },
+  'schedule.markPaidError': { bg: 'Неуспешно маркиране като платено', en: 'Could not mark as paid' },
+  'schedule.paidLabel': { bg: 'Платено {amount} € на {date}', en: 'Paid {amount} € on {date}' },
+  'schedule.undoPaid': { bg: 'Отмени', en: 'Undo' },
+  'schedule.undoPaidTitle': { bg: 'Отмяна на плащане', en: 'Undo payment' },
+  'schedule.undoPaidConfirm': {
+    bg: 'Това ще премахне и свързания разход от общите разходи. Продължи?',
+    en: 'This will also remove the linked expense from total business expenses. Continue?',
+  },
 
   // Calendar (shared team calendar - owner/manager/accountant)
   'calendar.title': { bg: 'Календар', en: 'Calendar' },

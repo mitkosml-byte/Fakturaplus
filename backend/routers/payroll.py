@@ -181,6 +181,12 @@ async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = D
         "notes": entry.notes,
         "image_base64": entry.image_base64,
         "created_at": datetime.now(timezone.utc),
+        # Whether this specific record should count toward total business
+        # expenses (get_payroll_cost_for_period) - on by default, since
+        # that's the real formal payroll cost. Lets the owner/accountant
+        # explicitly exclude one entry (e.g. a draft, or one already
+        # accounted for elsewhere) without deleting the record itself.
+        "counted_in_expenses": True,
         **breakdown,
     }
     await server.db.payroll_entries.insert_one(doc)
@@ -216,6 +222,25 @@ async def get_payroll_entries(
 
     entries = await server.db.payroll_entries.find(query, {"_id": 0, "image_base64": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(1000)
     return entries
+
+@router.put("/payroll/{entry_id}/counted-in-expenses")
+async def set_payroll_entry_counted_in_expenses(entry_id: str, request: Request, current_user: User = Depends(get_current_user)):
+    """Toggles whether this one payroll entry counts toward total business
+    expenses (get_payroll_cost_for_period) - gives the owner/accountant
+    explicit control per entry, same reasoning as Work Schedule's own
+    pay-as-expense toggle, without needing to delete/recreate the record."""
+    require_permission(current_user, "manage_budget")
+    body = await request.json()
+    counted = body.get("counted_in_expenses")
+    if not isinstance(counted, bool):
+        raise HTTPException(status_code=400, detail="counted_in_expenses трябва да е true/false")
+    _, scope = await get_company_scope(current_user)
+    result = await server.db.payroll_entries.update_one(
+        {"id": entry_id, **scope}, {"$set": {"counted_in_expenses": counted}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    return {"counted_in_expenses": counted}
 
 @router.delete("/payroll/{entry_id}")
 async def delete_payroll_entry(entry_id: str, current_user: User = Depends(get_current_user)):

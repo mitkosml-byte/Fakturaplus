@@ -1700,6 +1700,141 @@ def test_shift_adjustments(client):
     assert r.status_code == 404
 
 
+def test_payroll_counted_in_expenses_toggle(client):
+    """A payroll entry counts toward total business expenses
+    (get_payroll_cost_for_period, used by /statistics/summary) by
+    default - the owner/accountant can explicitly exclude one entry
+    without deleting it, and switch it back on again."""
+    owner = h(STATE["owner_token"])
+
+    r = client.post("/api/employees", headers=owner, json={"name": "Toggle Test Employee", "base_salary": 2000})
+    assert r.status_code == 200, r.text
+    employee_id = r.json()["id"]
+
+    r = client.post("/api/payroll", headers=owner, json={
+        "employee_id": employee_id, "period_month": 7, "period_year": 2026, "gross_amount": 2000,
+    })
+    assert r.status_code == 200, r.text
+    entry_id = r.json()["id"]
+    employer_cost = r.json()["total_employer_cost"]
+    assert entry_id and employer_cost > 0
+
+    r = client.get("/api/statistics/summary?start_date=2026-07-01&end_date=2026-07-31", headers=owner)
+    assert r.status_code == 200
+    baseline_payroll_cost = r.json()["total_payroll_cost"]
+    assert baseline_payroll_cost >= employer_cost
+
+    # Plain staff can't toggle it.
+    r = client.put(f"/api/payroll/{entry_id}/counted-in-expenses", headers=owner, json={"counted_in_expenses": "not-a-bool"})
+    assert r.status_code == 400
+
+    r = client.put(f"/api/payroll/{entry_id}/counted-in-expenses", headers=owner, json={"counted_in_expenses": False})
+    assert r.status_code == 200
+    assert r.json()["counted_in_expenses"] is False
+
+    r = client.get("/api/statistics/summary?start_date=2026-07-01&end_date=2026-07-31", headers=owner)
+    assert round(r.json()["total_payroll_cost"], 2) == round(baseline_payroll_cost - employer_cost, 2)
+
+    # Switching it back on restores it.
+    r = client.put(f"/api/payroll/{entry_id}/counted-in-expenses", headers=owner, json={"counted_in_expenses": True})
+    assert r.status_code == 200
+    r = client.get("/api/statistics/summary?start_date=2026-07-01&end_date=2026-07-31", headers=owner)
+    assert round(r.json()["total_payroll_cost"], 2) == round(baseline_payroll_cost, 2)
+
+    r = client.put("/api/payroll/nonexistent-id/counted-in-expenses", headers=owner, json={"counted_in_expenses": False})
+    assert r.status_code == 404
+
+
+def test_schedule_payments(client):
+    """Work Schedule's hours*rate estimate is never counted in business
+    expenses on its own (see test_work_schedule's isolation) - only once
+    a manager explicitly marks a period as paid, which creates a real
+    off-book expense /statistics/summary already totals, and a marker
+    that blocks the same days from ever being paid twice."""
+    owner = h(STATE["owner_token"])
+
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+
+    staff_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    staff_token = uuid_module.uuid4().hex
+
+    async def _make_pay_staff():
+        me = client.get("/api/auth/me", headers=owner).json()
+        await server_module.db.users.insert_one({
+            "user_id": staff_id, "email": f"{staff_id}@test.com", "name": "Pay Staff",
+            "role": "staff", "company_id": me["company_id"], "permissions": [],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": staff_id, "session_token": staff_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+
+    asyncio.run(_make_pay_staff())
+    staff = h(staff_token)
+
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": staff_id, "date": "2026-12-01", "start_time": "09:00", "end_time": "17:00",
+        "repeat_pattern": "weekly", "repeat_until": "2026-12-15", "hourly_rate": 12,
+    })
+    assert r.status_code == 200, r.text
+    # 3 weekly occurrences (1st, 8th, 15th) * 8h * 12 € = 288 €.
+
+    r = client.get("/api/statistics/summary?start_date=2026-12-01&end_date=2026-12-31", headers=owner)
+    assert r.status_code == 200
+    baseline_expense = r.json()["total_expense"]
+
+    # Staff can't mark their own schedule as paid.
+    r = client.post("/api/schedule/payments", headers=staff, json={
+        "user_id": staff_id, "period_start": "2026-12-01", "period_end": "2026-12-31",
+    })
+    assert r.status_code == 403
+
+    r = client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": staff_id, "period_start": "2026-12-01", "period_end": "2026-12-31",
+    })
+    assert r.status_code == 200, r.text
+    payment = r.json()
+    assert payment["total_hours"] == 24
+    assert payment["amount"] == 288
+
+    # The created expense is now counted in total business expense.
+    r = client.get("/api/statistics/summary?start_date=2026-12-01&end_date=2026-12-31", headers=owner)
+    assert round(r.json()["total_expense"], 2) == round(baseline_expense + 288, 2)
+
+    # The same (overlapping) period can't be paid again.
+    r = client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": staff_id, "period_start": "2026-12-10", "period_end": "2026-12-20",
+    })
+    assert r.status_code == 409
+
+    # A period with no scheduled hours is rejected.
+    r = client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": staff_id, "period_start": "2027-01-01", "period_end": "2027-01-31",
+    })
+    assert r.status_code == 400
+
+    # Staff sees their own payment history.
+    r = client.get("/api/schedule/payments?start=2026-12-01&end=2026-12-31", headers=staff)
+    assert r.status_code == 200
+    assert len(r.json()["payments"]) == 1
+
+    # Undoing the payment removes the expense too - the numbers fully revert.
+    r = client.delete(f"/api/schedule/payments/{payment['id']}", headers=owner)
+    assert r.status_code == 200
+    r = client.get("/api/statistics/summary?start_date=2026-12-01&end_date=2026-12-31", headers=owner)
+    assert round(r.json()["total_expense"], 2) == round(baseline_expense, 2)
+
+    r = client.delete(f"/api/schedule/payments/{payment['id']}", headers=owner)
+    assert r.status_code == 404
+
+
 def test_legacy_scope_consistency(client):
     """Module 1 audit finding: 40 endpoints built their own company_id
     lookup inline instead of the shared get_company_scope()/scope helper,

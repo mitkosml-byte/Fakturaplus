@@ -113,7 +113,13 @@ export default function PayrollScreen() {
   };
 
   const entryForEmployee = (employeeId: string) => entries.find((e) => e.employee_id === employeeId);
-  const totalCostThisMonth = entries.reduce((sum, e) => sum + e.total_employer_cost, 0);
+  // Matches the backend's own get_payroll_cost_for_period filter - an
+  // entry switched off here must disappear from this total too, or the
+  // screen would show a number that contradicts what actually counts
+  // toward business expenses elsewhere in the app.
+  const totalCostThisMonth = entries
+    .filter((e) => e.counted_in_expenses !== false)
+    .reduce((sum, e) => sum + e.total_employer_cost, 0);
 
   // ---- Employee CRUD ----
   const openNewEmployee = () => {
@@ -268,6 +274,16 @@ export default function PayrollScreen() {
     }
   };
 
+  const toggleCountedInExpenses = async (entry: PayrollEntry) => {
+    const next = !(entry.counted_in_expenses !== false);
+    try {
+      await api.setPayrollEntryCountedInExpenses(entry.id, next);
+      await loadData();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    }
+  };
+
   const deletePayrollEntry = (entry: PayrollEntry) => {
     Alert.alert(
       t('common.confirm'),
@@ -408,6 +424,14 @@ export default function PayrollScreen() {
                         <Text style={styles.entrySummaryLabel}>{t('payroll.totalEmployerCost')}</Text>
                         <Text style={[styles.entrySummaryValue, { color: COLORS.primary }]}>{entry.total_employer_cost.toFixed(2)} €</Text>
                       </View>
+                      <TouchableOpacity style={styles.countedToggleRow} onPress={() => toggleCountedInExpenses(entry)}>
+                        <Ionicons
+                          name={entry.counted_in_expenses !== false ? 'checkbox' : 'square-outline'}
+                          size={18}
+                          color={COLORS.primary}
+                        />
+                        <Text style={styles.countedToggleText}>{t('payroll.countedInExpenses')}</Text>
+                      </TouchableOpacity>
                       <TouchableOpacity style={styles.deleteEntryButton} onPress={() => deletePayrollEntry(entry)}>
                         <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
                         <Text style={styles.deleteEntryText}>{t('payroll.removeEntry')}</Text>
@@ -781,6 +805,8 @@ const styles = StyleSheet.create({
   entrySummaryValue: { fontSize: 13, fontWeight: '600', color: 'white' },
   deleteEntryButton: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, alignSelf: 'flex-start' },
   deleteEntryText: { fontSize: 11, color: COLORS.danger },
+  countedToggleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  countedToggleText: { fontSize: 12, color: COLORS.textSecondary },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 22 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: 'white', textAlign: 'center' },

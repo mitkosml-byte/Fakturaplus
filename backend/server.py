@@ -3263,12 +3263,19 @@ async def get_payroll_rates_dict(company_id: Optional[str]) -> dict:
 async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, start_date: Optional[str], end_date: Optional[str]) -> float:
     """Сумира total_employer_cost на всички ведомостни записи, чийто месец
     попада в зададения период - използвано в /statistics/summary и в
-    прогнозата за разходи, за да включат реалния разход за персонал."""
+    прогнозата за разходи, за да включат реалния разход за персонал.
+    Пропуска записи с counted_in_expenses=False - собственикът/
+    счетоводителят може изрично да изключи конкретна ведомост от общите
+    разходи (напр. дублиран или все още невярен запис), без да я трие."""
     query = simple_scope_query(company_id, user_id)
-    entries = await db.payroll_entries.find(query, {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1}).to_list(10000)
+    entries = await db.payroll_entries.find(
+        query, {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1, "counted_in_expenses": 1}
+    ).to_list(10000)
 
     total = 0.0
     for e in entries:
+        if e.get("counted_in_expenses") is False:
+            continue
         period_date = f"{e['period_year']}-{e['period_month']:02d}-01"
         if start_date and period_date < start_date[:10]:
             continue
@@ -3544,6 +3551,32 @@ class ShiftAdjustment(BaseModel):
     reason: str
     adjusted_by: str
     adjusted_by_name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Work Schedule's hours*rate estimate is deliberately NOT counted in
+# business expenses automatically (unlike the formal payroll entries
+# above) - the owner/manager decides WHEN that money has actually gone
+# out, by explicitly marking a period as paid. That action creates a
+# real off-book expense (same `expenses` collection /statistics/summary
+# already totals) and records this marker so the same period can't be
+# paid twice and the UI can show what's already been settled.
+class SchedulePaymentCreate(BaseModel):
+    user_id: str
+    period_start: str  # "YYYY-MM-DD"
+    period_end: str
+
+class SchedulePayment(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    user_id: str
+    user_name: str
+    period_start: str
+    period_end: str
+    total_hours: float
+    amount: float
+    expense_id: str  # the resulting db.expenses record - deleting the payment removes this too
+    paid_by: str
+    paid_by_name: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -4243,6 +4276,7 @@ async def create_indexes():
         # Work schedule
         await db.work_shifts.create_index([("company_id", 1), ("user_id", 1)])
         await db.shift_adjustments.create_index([("shift_id", 1), ("date", 1)], unique=True)
+        await db.schedule_payments.create_index([("company_id", 1), ("user_id", 1), ("period_start", 1)])
 
         # Scan credits (balance doc is keyed by its own scope _id already;
         # auto_reload_subscription_id is looked up by the Stripe webhook)

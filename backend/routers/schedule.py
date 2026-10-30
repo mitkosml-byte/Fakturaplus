@@ -287,3 +287,113 @@ async def remove_shift_adjustment(shift_id: str, occ_date: str, current_user: Us
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Няма корекция за тази дата")
     return {"message": "Корекцията е премахната - часовете се връщат по график"}
+
+
+@router.post("/schedule/payments", response_model=SchedulePayment)
+async def create_schedule_payment(payload: SchedulePaymentCreate, current_user: User = Depends(get_current_user)):
+    """Marks a period's scheduled (and any corrected) hours for one team
+    member as paid - unlike the formal payroll entries, Work Schedule's
+    hours*rate estimate is never counted in business expenses on its
+    own, only once a manager explicitly confirms it was actually paid.
+    Creates a real off-book expense for the computed amount, so it's
+    counted in /statistics/summary like any other cost, and records a
+    marker so the same days can't be paid twice."""
+    require_permission(current_user, "manage_budget")
+    company_id, scope = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате активна фирма")
+    if payload.period_end < payload.period_start:
+        raise HTTPException(status_code=400, detail="Крайната дата е преди началната")
+
+    member = await server.db.users.find_one({"user_id": payload.user_id, **scope}, {"_id": 0, "user_id": 1, "name": 1})
+    if not member:
+        raise HTTPException(status_code=404, detail="Потребителят не е намерен в тази фирма")
+
+    # A period that overlaps an already-paid one is rejected outright -
+    # the same days must never be paid (and expensed) twice.
+    overlap = await server.db.schedule_payments.find_one({
+        "company_id": company_id, "user_id": payload.user_id,
+        "period_start": {"$lte": payload.period_end}, "period_end": {"$gte": payload.period_start},
+    })
+    if overlap:
+        raise HTTPException(status_code=409, detail="Част от този период вече е маркирана като платена")
+
+    shifts = await server.db.work_shifts.find(
+        {"company_id": company_id, "user_id": payload.user_id}, {"_id": 0}
+    ).to_list(5000)
+    occurrences = await _resolve_occurrences(shifts, company_id, payload.period_start, payload.period_end)
+    total_hours = round(sum(o["hours"] for o in occurrences), 2)
+    amount = round(sum(o["hours"] * (o["hourly_rate"] or 0) for o in occurrences), 2)
+    if total_hours <= 0 or amount <= 0:
+        raise HTTPException(status_code=400, detail="Няма отработени часове с положителна сума за този период")
+
+    expense = NonInvoiceExpense(
+        user_id=current_user.user_id,
+        company_id=company_id,
+        description=f"Възнаграждение по график - {member['name']} ({payload.period_start} - {payload.period_end})",
+        amount=amount,
+        date=payload.period_end,
+    )
+    await server.db.expenses.insert_one(expense.model_dump())
+
+    payment = SchedulePayment(
+        company_id=company_id,
+        user_id=payload.user_id,
+        user_name=member["name"],
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+        total_hours=total_hours,
+        amount=amount,
+        expense_id=expense.id,
+        paid_by=current_user.user_id,
+        paid_by_name=current_user.name,
+    )
+    await server.db.schedule_payments.insert_one(payment.model_dump())
+
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="create",
+        entity_type="schedule_payment",
+        entity_id=payment.id,
+        company_id=company_id,
+        details={
+            "employee": member["name"], "period": f"{payload.period_start} - {payload.period_end}",
+            "amount": amount, "total_hours": total_hours,
+        },
+    )
+    return payment
+
+
+@router.get("/schedule/payments")
+async def list_schedule_payments(
+    start: str, end: str, user_id: Optional[str] = None, current_user: User = Depends(get_current_user)
+):
+    company_id, scope = await get_company_scope(current_user)
+    if not company_id:
+        return {"payments": []}
+
+    query: Dict[str, Any] = {"company_id": company_id, "period_start": {"$lte": end}, "period_end": {"$gte": start}}
+    if _can_manage_schedule(current_user):
+        if user_id:
+            query["user_id"] = user_id
+    else:
+        query["user_id"] = current_user.user_id
+
+    payments = await server.db.schedule_payments.find(query, {"_id": 0}).sort("period_start", 1).to_list(1000)
+    return {"payments": payments}
+
+
+@router.delete("/schedule/payments/{payment_id}")
+async def delete_schedule_payment(payment_id: str, current_user: User = Depends(get_current_user)):
+    """Undoes a payment marker AND removes the expense it created - a
+    whole reversal, not a partial one, so the two collections never
+    drift out of sync."""
+    require_permission(current_user, "manage_budget")
+    company_id, _ = await get_company_scope(current_user)
+    payment = await server.db.schedule_payments.find_one({"id": payment_id, "company_id": company_id}, {"_id": 0})
+    if not payment:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    await server.db.expenses.delete_one({"id": payment["expense_id"], "company_id": company_id})
+    await server.db.schedule_payments.delete_one({"id": payment_id})
+    return {"message": "Плащането е отменено"}

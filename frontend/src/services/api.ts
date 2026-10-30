@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -1155,6 +1155,27 @@ class ApiService {
 
   async removeShiftAdjustment(shiftId: string, date: string): Promise<void> {
     await this.fetch(`/schedule/shifts/${shiftId}/occurrences/${date}/adjustment`, { method: 'DELETE' });
+  }
+
+  async createSchedulePayment(payment: SchedulePaymentCreate): Promise<SchedulePayment> {
+    return this.fetch('/schedule/payments', { method: 'POST', body: JSON.stringify(payment) });
+  }
+
+  async getSchedulePayments(start: string, end: string, userId?: string): Promise<{ payments: SchedulePayment[] }> {
+    const query = new URLSearchParams({ start, end });
+    if (userId) query.set('user_id', userId);
+    return this.fetch(`/schedule/payments?${query.toString()}`);
+  }
+
+  async deleteSchedulePayment(id: string): Promise<void> {
+    await this.fetch(`/schedule/payments/${id}`, { method: 'DELETE' });
+  }
+
+  async setPayrollEntryCountedInExpenses(entryId: string, counted: boolean): Promise<{ counted_in_expenses: boolean }> {
+    return this.fetch(`/payroll/${entryId}/counted-in-expenses`, {
+      method: 'PUT',
+      body: JSON.stringify({ counted_in_expenses: counted }),
+    });
   }
 
   async previewPayroll(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number }): Promise<PayrollBreakdown> {

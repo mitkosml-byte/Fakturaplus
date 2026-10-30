@@ -623,6 +623,27 @@ export interface ScheduleSummary {
   shift_count: number;
 }
 
+export interface SchedulePaymentCreate {
+  user_id: string;
+  period_start: string;
+  period_end: string;
+}
+
+export interface SchedulePayment {
+  id: string;
+  company_id: string;
+  user_id: string;
+  user_name: string;
+  period_start: string;
+  period_end: string;
+  total_hours: number;
+  amount: number;
+  expense_id: string;
+  paid_by: string;
+  paid_by_name: string;
+  created_at: string;
+}
+
 export interface PayrollRates {
   employee_rate_percent: number;
   employer_rate_percent: number;
@@ -653,6 +674,10 @@ export interface PayrollEntry extends PayrollBreakdown {
   period_year: number;
   bonus_amount: number;
   notes?: string;
+  // Whether this entry counts toward total business expenses - absent
+  // on entries created before this field existed, which means "yes"
+  // (the same default new entries get), not "unknown".
+  counted_in_expenses?: boolean;
   created_at: string;
 }
 
