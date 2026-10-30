@@ -14,23 +14,25 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
-import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
 import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
-import { format, addDays, subDays } from 'date-fns';
+import { format } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, BottomSheet, useDirectionalReveal, PressableScale, Expandable, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard } from '../../src/components';
+import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard } from '../../src/components';
 import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
+import { PersonalExpenseModal } from '../../src/components/home/PersonalExpenseModal';
+import { RevenueModal } from '../../src/components/home/RevenueModal';
+import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -887,412 +889,80 @@ export default function HomeScreen() {
 
       {/* Personal Expense Modal (Owner Only) */}
       {isOwner && (
-        <BottomSheet visible={personalExpenseModalVisible} onClose={() => setPersonalExpenseModalVisible(false)}>
-            <View style={[styles.modalContent, { maxHeight: '90%' }]}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{t('personal.addExpense')}</Text>
-                <TouchableOpacity onPress={() => setPersonalExpenseModalVisible(false)}>
-                  <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-              </View>
-
-              <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.editNoticeBanner}>
-                <Ionicons name="information-circle" size={18} color={COLORS.primary} />
-                <Text style={styles.editNoticeText}>
-                  {t('personal.periodNotice').replace(
-                    '{period}',
-                    format(getPeriodBounds(periodState).start, 'LLLL yyyy', { locale: dateLocale })
-                  )}
-                </Text>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('personal.amount')}</Text>
-                <TextInput
-                  style={[styles.input, personalAmountError && styles.inputErrorBorder]}
-                  placeholder="0.00"
-                  placeholderTextColor={COLORS.textMuted}
-                  keyboardType="decimal-pad"
-                  value={personalAmount}
-                  onChangeText={(v) => { setPersonalAmount(v); setPersonalAmountError(false); }}
-                />
-                <Expandable expanded={personalAmountError}>
-                  <Text style={styles.fieldErrorText}>{t('budget.invalidAmount')}</Text>
-                </Expandable>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('personal.description')}</Text>
-                <TextInput
-                  style={[styles.input, personalDescriptionError && styles.inputErrorBorder]}
-                  placeholder={language === 'bg' ? 'напр. Наем, Заплати...' : 'e.g. Rent, Salaries...'}
-                  placeholderTextColor={COLORS.textMuted}
-                  value={personalDescription}
-                  onChangeText={(v) => { setPersonalDescription(v); setPersonalDescriptionError(false); }}
-                />
-                <Expandable expanded={personalDescriptionError}>
-                  <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
-                </Expandable>
-              </View>
-
-              {/* Expense Type Selector */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{language === 'bg' ? 'Тип' : 'Type'}</Text>
-                <View style={styles.typeSelector}>
-                  <TouchableOpacity
-                    style={[styles.typeButton, personalType === 'investment' && styles.typeButtonActive]}
-                    onPress={() => setPersonalType('investment')}
-                  >
-                    <Text style={[styles.typeButtonText, personalType === 'investment' && styles.typeButtonTextActive]}>
-                      {t('personal.typeInvestment')}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.typeButton, personalType === 'recurring' && styles.typeButtonActive]}
-                    onPress={() => setPersonalType('recurring')}
-                  >
-                    <Text style={[styles.typeButtonText, personalType === 'recurring' && styles.typeButtonTextActive]}>
-                      {t('personal.typeRecurring')}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.typeButton, personalType === 'one_time' && styles.typeButtonActive]}
-                    onPress={() => setPersonalType('one_time')}
-                  >
-                    <Text style={[styles.typeButtonText, personalType === 'one_time' && styles.typeButtonTextActive]}>
-                      {t('personal.typeOneTime')}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Category Selector */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{language === 'bg' ? 'Категория' : 'Category'}</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-                  {[
-                    { key: 'goods', label: t('personal.categoryGoods') },
-                    { key: 'service', label: t('personal.categoryService') },
-                    { key: 'personnel', label: t('personal.categoryPersonnel') },
-                    { key: 'rent', label: t('personal.categoryRent') },
-                    { key: 'extraordinary', label: t('personal.categoryExtraordinary') },
-                    { key: 'other', label: t('personal.categoryOther') },
-                  ].map((cat) => (
-                    <TouchableOpacity
-                      key={cat.key}
-                      style={[styles.categoryChip, personalCategory === cat.key && styles.categoryChipActive]}
-                      onPress={() => setPersonalCategory(cat.key)}
-                    >
-                      <Text style={[styles.categoryChipText, personalCategory === cat.key && styles.categoryChipTextActive]}>
-                        {cat.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-
-              <PressableScale style={styles.submitButton} onPress={handleCreatePersonalExpense} disabled={isSubmittingForm}>
-                {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
-              </PressableScale>
-              </ScrollView>
-            </View>
-        </BottomSheet>
+        <PersonalExpenseModal
+          visible={personalExpenseModalVisible}
+          onClose={() => setPersonalExpenseModalVisible(false)}
+          periodLabel={format(getPeriodBounds(periodState).start, 'LLLL yyyy', { locale: dateLocale })}
+          amount={personalAmount}
+          amountError={personalAmountError}
+          onChangeAmount={(v) => { setPersonalAmount(v); setPersonalAmountError(false); }}
+          description={personalDescription}
+          descriptionError={personalDescriptionError}
+          onChangeDescription={(v) => { setPersonalDescription(v); setPersonalDescriptionError(false); }}
+          type={personalType}
+          onChangeType={setPersonalType}
+          category={personalCategory}
+          onChangeCategory={setPersonalCategory}
+          isSubmitting={isSubmittingForm}
+          onSubmit={handleCreatePersonalExpense}
+          language={language}
+        />
       )}
 
       {/* Revenue Modal */}
-      <BottomSheet visible={revenueModalVisible} onClose={closeRevenueModal}>
-          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{t('home.dailyRevenue')}</Text>
-              <TouchableOpacity onPress={closeRevenueModal}>
-                <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-            {/* Date Picker */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('home.date')}</Text>
-              <View style={styles.datePickerContainer}>
-                <TouchableOpacity 
-                  style={styles.dateButton} 
-                  onPress={() => setRevenueDate(subDays(revenueDate, 1))}
-                >
-                  <Ionicons name="chevron-back" size={24} color={COLORS.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.dateDisplay}
-                  onPress={() => setRevenueDatePickerVisible(true)}
-                >
-                  <Ionicons name="calendar" size={20} color={COLORS.primary} />
-                  <Text style={styles.dateText}>
-                    {format(revenueDate, 'd MMMM yyyy', { locale: dateLocale })}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.dateButton} 
-                  onPress={() => setRevenueDate(addDays(revenueDate, 1))}
-                >
-                  <Ionicons name="chevron-forward" size={24} color={COLORS.primary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-            
-            {/* Calendar Date Picker Modal */}
-            <DateTimePickerModal
-              isVisible={isRevenueDatePickerVisible}
-              mode="date"
-              date={revenueDate}
-              onConfirm={(date) => {
-                setRevenueDate(date);
-                setRevenueDatePickerVisible(false);
-              }}
-              onCancel={() => setRevenueDatePickerVisible(false)}
-              confirmTextIOS={t('common.select')}
-              cancelTextIOS={t('common.cancel')}
-              locale={language}
-            />
-
-            {/* Explains the edit-in-place semantics up front, since it's not
-                the obvious default for a "add revenue" form. */}
-            <View style={styles.editNoticeBanner}>
-              <Ionicons name="information-circle" size={18} color={COLORS.primary} />
-              <Text style={styles.editNoticeText}>{t('home.editInPlaceNotice')}</Text>
-            </View>
-
-            {ocrAdditionNote && (
-              <View style={[styles.editNoticeBanner, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
-                <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
-                <Text style={[styles.editNoticeText, { color: COLORS.successLight }]}>{ocrAdditionNote}</Text>
-              </View>
-            )}
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('home.fiscalRevenueLabel')} (€)</Text>
-              <TextInput
-                style={styles.input}
-                value={fiscalRevenue}
-                onChangeText={setFiscalRevenue}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor={COLORS.textMuted}
-              />
-              <Text style={styles.inputHint}>{t('home.includesVAT')}</Text>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('home.cardRevenueLabel')} (€)</Text>
-              <TextInput
-                style={styles.input}
-                value={cardRevenue}
-                onChangeText={setCardRevenue}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor={COLORS.textMuted}
-              />
-              <Text style={styles.inputHint}>{t('home.cardRevenueHint')}</Text>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('home.vatRate')}</Text>
-              <View style={styles.vatRateRow}>
-                {[20, 9, 0].map((rate) => (
-                  <TouchableOpacity
-                    key={rate}
-                    style={[styles.vatRateChip, revenueVatRate === rate && styles.vatRateChipActive]}
-                    onPress={() => setRevenueVatRate(rate)}
-                  >
-                    <Text style={[styles.vatRateChipText, revenueVatRate === rate && styles.vatRateChipTextActive]}>
-                      {rate}%
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <Text style={styles.inputHint}>{t('home.vatRateHint')}</Text>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('home.pocketLabel')} (€)</Text>
-              <TextInput
-                style={styles.input}
-                value={pocketMoney}
-                onChangeText={setPocketMoney}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor={COLORS.textMuted}
-              />
-              <Text style={styles.inputHint}>{t('home.excludesVAT')}</Text>
-            </View>
-
-            <PressableScale style={styles.submitButton} onPress={handleAddRevenue} disabled={isSubmittingForm}>
-              {isSubmittingForm ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('home.save')}</Text>}
-            </PressableScale>
-            </ScrollView>
-          </View>
-      </BottomSheet>
+      <RevenueModal
+        visible={revenueModalVisible}
+        onClose={closeRevenueModal}
+        date={revenueDate}
+        onChangeDate={setRevenueDate}
+        isDatePickerVisible={isRevenueDatePickerVisible}
+        onOpenDatePicker={() => setRevenueDatePickerVisible(true)}
+        onCloseDatePicker={() => setRevenueDatePickerVisible(false)}
+        dateLocale={dateLocale}
+        language={language}
+        ocrAdditionNote={ocrAdditionNote}
+        fiscalRevenue={fiscalRevenue}
+        onChangeFiscalRevenue={setFiscalRevenue}
+        cardRevenue={cardRevenue}
+        onChangeCardRevenue={setCardRevenue}
+        vatRate={revenueVatRate}
+        onChangeVatRate={setRevenueVatRate}
+        pocketMoney={pocketMoney}
+        onChangePocketMoney={setPocketMoney}
+        isSubmitting={isSubmittingForm}
+        onSubmit={handleAddRevenue}
+      />
 
       {/* Expense Modal */}
-      <BottomSheet
+      <ExpenseModal
         visible={expenseModalVisible}
         onClose={() => {
           setExpenseModalVisible(false);
           setExpenseDate(getDefaultActionDate());
         }}
-      >
-          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{t('expenses.title')}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <TouchableOpacity
-                  style={styles.historyPersonalButton}
-                  onPress={() => {
-                    setExpenseModalVisible(false);
-                    router.push('/off-book-expenses');
-                  }}
-                >
-                  <Ionicons name="time-outline" size={16} color={COLORS.textSecondary} />
-                  <Text style={styles.historyPersonalText}>{t('expenses.history')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => {
-                  setExpenseModalVisible(false);
-                  setExpenseDate(getDefaultActionDate());
-                }}>
-                  <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Date Picker */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('home.date')}</Text>
-                <View style={styles.datePickerContainer}>
-                  <TouchableOpacity 
-                    style={styles.dateButton} 
-                    onPress={() => setExpenseDate(subDays(expenseDate, 1))}
-                  >
-                    <Ionicons name="chevron-back" size={24} color={COLORS.primary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.dateDisplay}
-                    onPress={() => setExpenseDatePickerVisible(true)}
-                  >
-                    <Ionicons name="calendar" size={20} color={COLORS.primary} />
-                    <Text style={styles.dateText}>
-                      {format(expenseDate, 'd MMMM yyyy', { locale: dateLocale })}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.dateButton} 
-                    onPress={() => setExpenseDate(addDays(expenseDate, 1))}
-                  >
-                    <Ionicons name="chevron-forward" size={24} color={COLORS.primary} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              
-              {/* Calendar Date Picker Modal */}
-              <DateTimePickerModal
-                isVisible={isExpenseDatePickerVisible}
-                mode="date"
-                date={expenseDate}
-                onConfirm={(date) => {
-                  setExpenseDate(date);
-                  setExpenseDatePickerVisible(false);
-                }}
-                onCancel={() => setExpenseDatePickerVisible(false)}
-                confirmTextIOS={t('common.select')}
-                cancelTextIOS={t('common.cancel')}
-                locale={language}
-              />
-
-              {/* Daily Expenses List */}
-              <View style={styles.dayExpensesSection}>
-                <Text style={styles.dayExpensesTitle}>
-                  {t('expenses.forDate')} {format(expenseDate, 'd MMM', { locale: dateLocale })}:
-                </Text>
-                
-                {loadingExpenses ? (
-                  <View style={styles.loadingContainer}>
-                    <ActivityIndicator color={COLORS.warning} />
-                  </View>
-                ) : dayExpenses.length > 0 ? (
-                  <>
-                    {dayExpenses.map((expense, index) => (
-                      <View key={expense.id} style={styles.expenseItem}>
-                        <View style={styles.expenseItemLeft}>
-                          <Text style={styles.expenseItemIndex}>{index + 1}.</Text>
-                          <Text style={styles.expenseItemDescription}>{expense.description}</Text>
-                        </View>
-                        <View style={styles.expenseItemRight}>
-                          <Text style={styles.expenseItemAmount}>{expense.amount.toFixed(2)} €</Text>
-                          <TouchableOpacity 
-                            style={styles.expenseDeleteButton}
-                            onPress={() => handleDeleteExpense(expense.id)}
-                          >
-                            <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    ))}
-                    <View style={styles.expensesTotalRow}>
-                      <Text style={styles.expensesTotalLabel}>{t('expenses.totalForDay')}:</Text>
-                      <Text style={styles.expensesTotalValue}>
-                        {dayExpenses.reduce((sum, e) => sum + e.amount, 0).toFixed(2)} €
-                      </Text>
-                    </View>
-                  </>
-                ) : (
-                  <Text style={styles.noExpensesText}>{t('expenses.noExpenses')}</Text>
-                )}
-              </View>
-
-              {/* Add New Expense Form */}
-              <View style={styles.addExpenseSection}>
-                <Text style={styles.addExpenseTitle}>{t('expenses.addNew')}:</Text>
-                
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('expenses.description')}</Text>
-                  <TextInput
-                    style={[styles.input, expenseDescriptionError && styles.inputErrorBorder]}
-                    value={expenseDescription}
-                    onChangeText={(v) => { setExpenseDescription(v); setExpenseDescriptionError(false); }}
-                    placeholder={t('expenses.placeholder')}
-                    placeholderTextColor={COLORS.textMuted}
-                  />
-                  <Expandable expanded={expenseDescriptionError}>
-                    <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
-                  </Expandable>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('expenses.amount')} (€)</Text>
-                  <TextInput
-                    style={[styles.input, expenseAmountError && styles.inputErrorBorder]}
-                    value={expenseAmount}
-                    onChangeText={(v) => { setExpenseAmount(v); setExpenseAmountError(false); }}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                    placeholderTextColor={COLORS.textMuted}
-                  />
-                  <Expandable expanded={expenseAmountError}>
-                    <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
-                  </Expandable>
-                </View>
-
-                <PressableScale style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={handleAddExpense} disabled={isSubmittingForm}>
-                  {isSubmittingForm ? <ActivityIndicator color="white" /> : (
-                    <>
-                      <Ionicons name="add-circle" size={20} color="white" />
-                      <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
-                    </>
-                  )}
-                </PressableScale>
-              </View>
-            </ScrollView>
-          </View>
-      </BottomSheet>
+        onViewHistory={() => {
+          setExpenseModalVisible(false);
+          router.push('/off-book-expenses');
+        }}
+        date={expenseDate}
+        onChangeDate={setExpenseDate}
+        isDatePickerVisible={isExpenseDatePickerVisible}
+        onOpenDatePicker={() => setExpenseDatePickerVisible(true)}
+        onCloseDatePicker={() => setExpenseDatePickerVisible(false)}
+        dateLocale={dateLocale}
+        language={language}
+        loadingExpenses={loadingExpenses}
+        dayExpenses={dayExpenses}
+        onDeleteExpense={handleDeleteExpense}
+        description={expenseDescription}
+        descriptionError={expenseDescriptionError}
+        onChangeDescription={(v) => { setExpenseDescription(v); setExpenseDescriptionError(false); }}
+        amount={expenseAmount}
+        amountError={expenseAmountError}
+        onChangeAmount={(v) => { setExpenseAmount(v); setExpenseAmountError(false); }}
+        isSubmitting={isSubmittingForm}
+        onSubmit={handleAddExpense}
+      />
 
       <ExcelImportModal
         visible={importRevenueModalVisible}
@@ -1590,227 +1260,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
-  modalContent: {
-    backgroundColor: COLORS.surface,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 16,
-    color: 'white',
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  // Motion Design System #12: a calm red border instead of a shake when a
-  // required field is missing - the Expandable error text below fades in
-  // alongside it and clears the instant the user starts typing.
-  inputErrorBorder: {
-    borderColor: COLORS.danger,
-  },
-  fieldErrorText: {
-    color: COLORS.danger,
-    fontSize: 12,
-    marginTop: 6,
-  },
-  inputHint: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 6,
-  },
-  vatRateRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  vatRateChip: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: COLORS.background,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  vatRateChipActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  vatRateChipText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    fontWeight: '500',
-  },
-  vatRateChipTextActive: {
-    color: 'white',
-  },
-  editNoticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: 'rgba(139, 92, 246, 0.12)',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-  },
-  editNoticeText: {
-    flex: 1,
-    fontSize: 12,
-    color: COLORS.primaryLight,
-    lineHeight: 17,
-  },
-  submitButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  submitButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  datePickerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    overflow: 'hidden',
-  },
-  dateButton: {
-    padding: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dateDisplay: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    gap: 8,
-  },
-  dateText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  loadingContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  dayExpensesSection: {
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
-  },
-  dayExpensesTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.warning,
-    marginBottom: 12,
-  },
-  expenseItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  expenseItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: 8,
-  },
-  expenseItemIndex: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    width: 20,
-  },
-  expenseItemDescription: {
-    fontSize: 14,
-    color: 'white',
-    flex: 1,
-  },
-  expenseItemRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  expenseItemAmount: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.warning,
-  },
-  expenseDeleteButton: {
-    padding: 4,
-  },
-  expensesTotalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(245, 158, 11, 0.3)',
-  },
-  expensesTotalLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-  },
-  expensesTotalValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: COLORS.warning,
-  },
-  noExpensesText: {
-    fontSize: 14,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    paddingVertical: 8,
-  },
-  addExpenseSection: {
-    marginTop: 8,
-  },
-  addExpenseTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 16,
-  },
   // Personal Expenses & ROI Styles
   roiSection: {
     backgroundColor: 'rgba(139, 92, 246, 0.1)',
@@ -1934,48 +1383,5 @@ const styles = StyleSheet.create({
   noRoiDataSubtext: {
     fontSize: 12,
     color: COLORS.textMuted,
-  },
-  typeSelector: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  typeButton: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: COLORS.background,
-    alignItems: 'center',
-  },
-  typeButtonActive: {
-    backgroundColor: COLORS.primary,
-  },
-  typeButtonText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    fontWeight: '500',
-  },
-  typeButtonTextActive: {
-    color: 'white',
-  },
-  categoryScroll: {
-    flexGrow: 0,
-  },
-  categoryChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: COLORS.background,
-    marginRight: 8,
-  },
-  categoryChipActive: {
-    backgroundColor: COLORS.primary,
-  },
-  categoryChipText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  categoryChipTextActive: {
-    color: 'white',
   },
 });
