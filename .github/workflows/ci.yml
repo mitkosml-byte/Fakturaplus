@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-tests:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Run pytest
+        working-directory: backend
+        run: python -m pytest tests/ -v
+
+  backend-typecheck:
+    name: Backend typecheck (mypy, informational)
+    runs-on: ubuntu-latest
+    # Module 1 audit finding #3 ("thin test coverage, no static typing"):
+    # mypy as a cheap first pass. The backend has no type-annotation
+    # discipline yet, so this starts as visibility only - it reports
+    # every error but never fails the build. Tighten this (drop
+    # continue-on-error, fix the baseline incrementally) once the error
+    # count is low enough to hold the line on new errors.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Run mypy
+        working-directory: backend
+        run: python -m mypy server.py routers/ --ignore-missing-imports
+
+  frontend-typecheck:
+    name: Frontend typecheck (tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run tsc --noEmit
+        working-directory: frontend
+        run: npx tsc --noEmit -p .
