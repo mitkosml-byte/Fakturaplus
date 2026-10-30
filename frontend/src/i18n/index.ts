@@ -179,9 +179,21 @@ export const translations: Translations = {
     bg: 'Статистики',
     en: 'Statistics',
   },
+  'nav.team': {
+    bg: 'Екип',
+    en: 'Team',
+  },
   'nav.profile': {
-    bg: 'Профил',
-    en: 'Profile',
+    bg: 'Акаунт',
+    en: 'Account',
+  },
+  'team.title': {
+    bg: 'Екип',
+    en: 'Team',
+  },
+  'team.subtitle': {
+    bg: 'Календар, съобщения и всичко, свързано с хората в екипа',
+    en: 'Calendar, messages, and everything about your team',
   },
   
   // Morning briefing card (top of Home) - renders whatever the backend's

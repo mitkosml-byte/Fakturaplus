@@ -251,28 +251,6 @@ export default function ProfileScreen() {
               onPress: () => router.push('/users-management'),
             }]
           : []),
-        ...(hasPermission('team_collaboration')
-          ? [{
-              key: 'calendar',
-              title: t('profile.calendar'),
-              subtitle: t('profile.calendarDesc'),
-              icon: 'calendar' as const,
-              iconBg: 'rgba(139, 92, 246, 0.15)',
-              iconColor: COLORS.primary,
-              onPress: () => router.push('/calendar'),
-            }]
-          : []),
-        ...(hasPermission('team_collaboration')
-          ? [{
-              key: 'messages',
-              title: t('profile.messages'),
-              subtitle: t('profile.messagesDesc'),
-              icon: 'chatbubbles' as const,
-              iconBg: 'rgba(16, 185, 129, 0.15)',
-              iconColor: COLORS.success,
-              onPress: () => router.push('/messages'),
-            }]
-          : []),
         ...(hasPermission('manage_company')
           ? [{
               key: 'closedDays',
@@ -304,98 +282,6 @@ export default function ProfileScreen() {
           iconColor: COLORS.teal,
           onPress: () => router.push('/history-hub'),
         },
-        // Module 4 Finding #3: plain-language Q&A over the company's own
-        // stored data - the one delivery channel (dashboard + proactive
-        // alert + conversational layer) the audit found FACTURA+ was
-        // missing relative to every strong product researched.
-        ...(hasPermission('view_statistics')
-          ? [{
-              key: 'askMyNumbers',
-              title: t('askMyNumbers.title'),
-              subtitle: t('askMyNumbers.subtitle'),
-              icon: 'chatbubbles-outline' as const,
-              iconBg: 'rgba(16, 185, 129, 0.15)',
-              iconColor: COLORS.success,
-              onPress: () => router.push('/ask-my-numbers'),
-            }]
-          : []),
-        ...(hasPermission('manage_budget')
-          ? [{
-              key: 'budget',
-              title: t('profile.budget'),
-              subtitle: t('profile.budgetDesc'),
-              icon: 'wallet' as const,
-              iconBg: 'rgba(139, 92, 246, 0.15)',
-              iconColor: COLORS.primary,
-              onPress: () => router.push('/budget'),
-            }]
-          : []),
-        ...(hasPermission('manage_budget')
-          ? [{
-              key: 'payroll',
-              title: t('payroll.title'),
-              subtitle: t('profile.payrollDesc'),
-              icon: 'people' as const,
-              iconBg: 'rgba(16, 185, 129, 0.15)',
-              iconColor: COLORS.success,
-              onPress: () => router.push('/payroll'),
-            }]
-          : []),
-        ...(hasPermission('manage_budget')
-          ? [{
-              key: 'absences',
-              title: t('absences.title'),
-              subtitle: t('profile.absencesDesc'),
-              icon: 'sunny' as const,
-              iconBg: 'rgba(245, 158, 11, 0.15)',
-              iconColor: COLORS.warning,
-              onPress: () => router.push('/employee-absences'),
-            }]
-          : []),
-        ...(hasPermission('manage_budget')
-          ? [{
-              key: 'assets',
-              title: t('assets.title'),
-              subtitle: t('profile.assetsDesc'),
-              icon: 'business' as const,
-              iconBg: 'rgba(245, 158, 11, 0.15)',
-              iconColor: COLORS.warning,
-              onPress: () => router.push('/assets'),
-            }]
-          : []),
-        ...(hasPermission('add_revenue')
-          ? [{
-              key: 'receivables',
-              title: t('receivables.title'),
-              subtitle: t('profile.receivablesDesc'),
-              icon: 'cash' as const,
-              iconBg: 'rgba(16, 185, 129, 0.15)',
-              iconColor: COLORS.success,
-              onPress: () => router.push('/receivables'),
-            }]
-          : []),
-        ...(hasPermission('add_revenue')
-          ? [{
-              key: 'billing-documents',
-              title: t('billingDocuments.title'),
-              subtitle: t('profile.billingDocumentsDesc'),
-              icon: 'document-text' as const,
-              iconBg: 'rgba(16, 185, 129, 0.15)',
-              iconColor: COLORS.success,
-              onPress: () => router.push('/billing-documents'),
-            }]
-          : []),
-        ...(hasPermission('view_statistics')
-          ? [{
-              key: 'protocols',
-              title: t('profile.protocols'),
-              subtitle: t('profile.protocolsDesc'),
-              icon: 'document-text' as const,
-              iconBg: 'rgba(139, 92, 246, 0.15)',
-              iconColor: COLORS.primary,
-              onPress: () => router.push('/protocols'),
-            }]
-          : []),
         ...(hasPermission('export_data')
           ? [{
               key: 'export',

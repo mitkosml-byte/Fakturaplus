@@ -563,6 +563,39 @@ export default function InvoicesScreen() {
             </View>
           </Animated.View>
 
+          {/* Navigation-architecture review (2026-10): Вземания/Документи/
+              Протоколи used to be buried in Profile's "accounting"
+              category - they're all documents/money with the outside
+              world, the same subject matter as the invoice list right
+              below, so a visible link belongs here instead. */}
+          {(hasPermission('add_revenue') || hasPermission('view_statistics')) && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.quickLinksRow}
+              contentContainerStyle={styles.quickLinksContent}
+            >
+              {hasPermission('add_revenue') && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/receivables')}>
+                  <Ionicons name="cash-outline" size={15} color={COLORS.success} />
+                  <Text style={styles.quickLinkChipText}>{t('receivables.title')}</Text>
+                </TouchableOpacity>
+              )}
+              {hasPermission('add_revenue') && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/billing-documents')}>
+                  <Ionicons name="document-text-outline" size={15} color={COLORS.success} />
+                  <Text style={styles.quickLinkChipText}>{t('billingDocuments.title')}</Text>
+                </TouchableOpacity>
+              )}
+              {hasPermission('view_statistics') && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/protocols')}>
+                  <Ionicons name="document-text-outline" size={15} color={COLORS.primary} />
+                  <Text style={styles.quickLinkChipText}>{t('profile.protocols')}</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          )}
+
           {/* Admin-only safety net for the confirm dialog above: whoever
               holds restore_deleted_data can undo a delete after the fact
               too, from the full snapshot kept on that invoice's audit log
@@ -938,6 +971,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.primary,
     fontWeight: '600',
+  },
+  quickLinksRow: {
+    marginTop: 12,
+    height: 36,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  quickLinksContent: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  quickLinkChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: COLORS.surface,
+    marginRight: 8,
+    flexShrink: 0,
+  },
+  quickLinkChipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
   periodChipsRow: {
     marginTop: 12,

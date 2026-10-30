@@ -823,6 +823,42 @@ export default function StatsScreen() {
               )}
             </Animated.View>
 
+            {/* Navigation-architecture review (2026-10): "Запитай числата
+                си" (AI chat), Бюджет and Активи used to be buried in
+                Profile's "accounting" category - they're all "understand
+                my numbers" tools, the same subject as this whole screen,
+                so a visible link belongs here instead. Plain action
+                buttons, not another ChipTabs selector - tapping one
+                navigates away, it doesn't become a persistent "active"
+                state on this screen. */}
+            {(hasPermission('view_statistics') || hasPermission('manage_budget')) && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.quickLinksRow}
+                contentContainerStyle={styles.quickLinksContent}
+              >
+                {hasPermission('view_statistics') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/ask-my-numbers')}>
+                    <Ionicons name="chatbubbles-outline" size={15} color={COLORS.success} />
+                    <Text style={styles.quickLinkChipText}>{t('askMyNumbers.title')}</Text>
+                  </TouchableOpacity>
+                )}
+                {hasPermission('manage_budget') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/budget')}>
+                    <Ionicons name="wallet-outline" size={15} color={COLORS.primary} />
+                    <Text style={styles.quickLinkChipText}>{t('profile.budget')}</Text>
+                  </TouchableOpacity>
+                )}
+                {hasPermission('manage_budget') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/assets')}>
+                    <Ionicons name="business-outline" size={15} color={COLORS.warning} />
+                    <Text style={styles.quickLinkChipText}>{t('assets.title')}</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            )}
+
             {/* Tab Selector */}
             <ChipTabs
               active={activeTab}
@@ -2016,6 +2052,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     marginTop: 4,
+  },
+  quickLinksRow: {
+    marginTop: 12,
+    height: 36,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  quickLinksContent: {
+    alignItems: 'center',
+  },
+  quickLinkChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: COLORS.surface,
+    marginRight: 8,
+    flexShrink: 0,
+  },
+  quickLinkChipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
   periodSelectorWrap: {
     marginBottom: 20,
