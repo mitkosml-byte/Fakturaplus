@@ -3579,6 +3579,28 @@ class SchedulePayment(BaseModel):
     paid_by_name: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+# Private, manager-only performance notes on a team member - never shown to
+# the team member themselves (unlike everything else in the app, which is
+# either self-facing or openly shared across the team). Any manager
+# (manage_budget) can add one; only the person who wrote a note can delete
+# it, so one manager's assessment can't be silently erased by another.
+TEAM_NOTE_TYPES = ("positive", "negative")
+
+class TeamNoteCreate(BaseModel):
+    user_id: str
+    note_type: str  # "positive" | "negative"
+    text: str
+
+class TeamNote(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    user_id: str
+    note_type: str
+    text: str
+    created_by: str
+    created_by_name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 
 
@@ -4277,6 +4299,7 @@ async def create_indexes():
         await db.work_shifts.create_index([("company_id", 1), ("user_id", 1)])
         await db.shift_adjustments.create_index([("shift_id", 1), ("date", 1)], unique=True)
         await db.schedule_payments.create_index([("company_id", 1), ("user_id", 1), ("period_start", 1)])
+        await db.team_notes.create_index([("company_id", 1), ("user_id", 1), ("created_at", -1)])
 
         # Scan credits (balance doc is keyed by its own scope _id already;
         # auto_reload_subscription_id is looked up by the Stripe webhook)
@@ -4317,6 +4340,8 @@ from routers import pay_run
 app.include_router(pay_run.router)
 from routers import assets
 app.include_router(assets.router)
+from routers import team_profile
+app.include_router(team_profile.router)
 
 # Cross-router dependencies for code that stays in server.py itself (the
 # proactive-engine signal builders) or hasn't been extracted yet (the bulk

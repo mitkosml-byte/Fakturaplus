@@ -1929,6 +1929,150 @@ def test_batch_pay_run(client):
     assert schedule_result["amount"] == 40
 
 
+def test_team_profile_and_notes(client):
+    """The work-schedule grid's avatar tap opens an aggregated, manager-only
+    profile (identity, linked payroll record, this month's schedule stats,
+    leave history) plus private positive/negative performance notes with a
+    net score - visible only to managers, never the team member themselves,
+    and deletable only by whoever wrote each note."""
+    owner = h(STATE["owner_token"])
+
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+
+    staff_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    staff_token = uuid_module.uuid4().hex
+    mgr_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    mgr_token = uuid_module.uuid4().hex
+
+    async def _make_profile_users():
+        me = client.get("/api/auth/me", headers=owner).json()
+        await server_module.db.users.insert_one({
+            "user_id": staff_id, "email": f"{staff_id}@test.com", "name": "Profile Staff",
+            "role": "staff", "company_id": me["company_id"], "permissions": [],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": staff_id, "session_token": staff_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.users.insert_one({
+            "user_id": mgr_id, "email": f"{mgr_id}@test.com", "name": "Co-Manager",
+            "role": "staff", "company_id": me["company_id"], "permissions": ["manage_budget"],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": mgr_id, "session_token": mgr_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+
+    asyncio.run(_make_profile_users())
+    staff = h(staff_token)
+    co_manager = h(mgr_token)
+
+    r = client.post("/api/employees", headers=owner, json={
+        "name": "Profile Staff", "position": "Barista", "base_salary": 1400, "linked_user_id": staff_id,
+    })
+    assert r.status_code == 200, r.text
+    employee_id = r.json()["id"]
+
+    r = client.post("/api/employees/leave", headers=owner, json={
+        "employee_id": employee_id, "leave_type": "sick", "start_date": "2025-01-05", "end_date": "2025-01-06",
+    })
+    assert r.status_code == 200, r.text
+
+    today_str = server_module.datetime.now(tz.utc).strftime("%Y-%m-%d")
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": staff_id, "date": today_str, "start_time": "09:00", "end_time": "17:00", "hourly_rate": 10,
+    })
+    assert r.status_code == 200, r.text
+
+    # Plain staff can't view anyone's profile or notes.
+    r = client.get(f"/api/team/members/{staff_id}/profile", headers=staff)
+    assert r.status_code == 403
+    r = client.get(f"/api/team/notes?user_id={staff_id}", headers=staff)
+    assert r.status_code == 403
+
+    r = client.get(f"/api/team/members/{staff_id}/profile", headers=owner)
+    assert r.status_code == 200, r.text
+    profile = r.json()
+    assert profile["member"]["user_id"] == staff_id
+    assert profile["employee"]["position"] == "Barista"
+    assert profile["schedule_summary"]["shift_count"] == 1
+    assert len(profile["leave_entries"]) == 1
+    assert profile["notes"]["net_score"] == 0
+
+    # Unknown user_id is a 404, not an empty profile.
+    r = client.get("/api/team/members/does-not-exist/profile", headers=owner)
+    assert r.status_code == 404
+
+    r = client.post("/api/team/notes", headers=owner, json={
+        "user_id": staff_id, "note_type": "positive", "text": "Great with customers.",
+    })
+    assert r.status_code == 200, r.text
+    owner_note_id = r.json()["id"]
+
+    r = client.post("/api/team/notes", headers=co_manager, json={
+        "user_id": staff_id, "note_type": "negative", "text": "Late twice this month.",
+    })
+    assert r.status_code == 200, r.text
+    mgr_note_id = r.json()["id"]
+
+    # Rejected inputs.
+    r = client.post("/api/team/notes", headers=owner, json={
+        "user_id": staff_id, "note_type": "neutral", "text": "x",
+    })
+    assert r.status_code == 400
+    r = client.post("/api/team/notes", headers=owner, json={
+        "user_id": staff_id, "note_type": "positive", "text": "   ",
+    })
+    assert r.status_code == 400
+    r = client.post("/api/team/notes", headers=owner, json={
+        "user_id": "does-not-exist", "note_type": "positive", "text": "x",
+    })
+    assert r.status_code == 404
+
+    # Staff can't write a note about themselves (or anyone) either.
+    r = client.post("/api/team/notes", headers=staff, json={
+        "user_id": staff_id, "note_type": "positive", "text": "x",
+    })
+    assert r.status_code == 403
+
+    r = client.get(f"/api/team/notes?user_id={staff_id}", headers=owner)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["positive_count"] == 1
+    assert body["negative_count"] == 1
+    assert body["net_score"] == 0
+    assert len(body["notes"]) == 2
+
+    # Only the author can delete their own note.
+    r = client.delete(f"/api/team/notes/{owner_note_id}", headers=co_manager)
+    assert r.status_code == 403
+    r = client.delete(f"/api/team/notes/{owner_note_id}", headers=owner)
+    assert r.status_code == 200
+    r = client.delete(f"/api/team/notes/{owner_note_id}", headers=owner)
+    assert r.status_code == 404
+
+    r = client.get(f"/api/team/notes?user_id={staff_id}", headers=owner)
+    assert r.json()["net_score"] == -1
+
+    # The aggregated profile reflects the remaining note's score too.
+    r = client.get(f"/api/team/members/{staff_id}/profile", headers=owner)
+    assert r.json()["notes"]["net_score"] == -1
+
+    r = client.delete(f"/api/team/notes/{mgr_note_id}", headers=co_manager)
+    assert r.status_code == 200
+
+
 def test_legacy_scope_consistency(client):
     """Module 1 audit finding: 40 endpoints built their own company_id
     lookup inline instead of the shared get_company_scope()/scope helper,
