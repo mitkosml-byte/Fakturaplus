@@ -52,13 +52,16 @@ function buildSteps(businessType: string | null) {
 
 const HIDDEN_ON_SEGMENTS = ['login', 'forgot-password', 'help'];
 
-// Every tab-root screen (Home, Scan, Invoices, Stats, Profile) already has a
-// tab bar eating into the bottom, and several also place a real "add" FAB at
-// bottom-right (employee-absences.tsx) or export/logout icons in the header
-// top-right (stats/invoices/profile) - bottom-left is the one corner none of
-// them use, so the help button lives there instead of fighting each screen's
-// own layout. Mirrors the tab-bar height constant from (tabs)/_layout.tsx.
-const TAB_ROUTES = ['/', '/scan', '/invoices', '/stats', '/profile'];
+// Every tab-root screen (Home, Scan, Invoices, Stats, Team, Profile) already
+// has a tab bar eating into the bottom, and several also place a real "add"
+// FAB at bottom-right (employee-absences.tsx) or export/logout icons in the
+// header top-right (stats/invoices/profile) - bottom-left is the one corner
+// none of them use, so the help button lives there instead of fighting each
+// screen's own layout. Mirrors the tab-bar height constant from
+// (tabs)/_layout.tsx - kept in sync with that file's own TAB_ROUTES list
+// (which also conditionally includes '/team'), since missing a route here
+// just means a wrong offset, not a wrong screen.
+const TAB_ROUTES = ['/', '/scan', '/invoices', '/stats', '/team', '/profile'];
 const TAB_BAR_HEIGHT = 70;
 
 export function OnboardingTutorial() {
