@@ -66,7 +66,16 @@ limiter = Limiter(key_func=get_remote_address)
 # unreachable at startup, which blocks the port binding that Render (and
 # any other host) waits on to consider the deploy alive.
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
+# Explicit generic parameter (as a STRING annotation - the installed
+# motor version's AsyncIOMotorClient isn't actually subscriptable at
+# runtime despite its .pyi stub declaring it generic, so a real
+# `AsyncIOMotorClient[Dict[str, Any]]` expression here would raise
+# TypeError on import; a string annotation is read by mypy but never
+# evaluated by Python). Without this, mypy can't infer _DocumentType
+# from this call and silently falls back to treating every
+# db.<collection>.find_one/find/etc. result as None - the single
+# largest source of noise in this file's type-check output.
+client: "AsyncIOMotorClient[Dict[str, Any]]" = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
 db = client[os.environ.get('DB_NAME', 'test_database')]
 
 # AI features (OCR scanning, AI item merge, AI ROI insights) run on the
