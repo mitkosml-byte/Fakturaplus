@@ -472,6 +472,18 @@ export const translations: Translations = {
     bg: 'Полетата по-долу показват вече записаното за тази дата. Промяна на стойност я замества с новата — не се добавя към старата.',
     en: "These fields show what's already logged for this date. Changing a value replaces it — it doesn't add to the old one.",
   },
+  'home.sameAsYesterday': {
+    bg: 'Както вчера',
+    en: 'Same as yesterday',
+  },
+  'home.sameAsYesterdayEmpty': {
+    bg: 'Няма записан оборот за вчера',
+    en: 'No revenue logged for yesterday',
+  },
+  'home.sameAsYesterdayApplied': {
+    bg: 'Попълнено от вчерашния оборот',
+    en: "Filled in from yesterday's revenue",
+  },
   'home.includesVAT': {
     bg: 'Влиза в ДДС',
     en: 'Includes VAT',

@@ -33,12 +33,15 @@ type Props = {
   onChangePocketMoney: (value: string) => void;
   isSubmitting: boolean;
   onSubmit: () => void;
+  onCopyYesterday: () => void;
+  copyingYesterday: boolean;
 };
 
 export function RevenueModal({
   visible, onClose, date, onChangeDate, isDatePickerVisible, onOpenDatePicker, onCloseDatePicker,
   dateLocale, language, ocrAdditionNote, fiscalRevenue, onChangeFiscalRevenue, cardRevenue,
   onChangeCardRevenue, vatRate, onChangeVatRate, pocketMoney, onChangePocketMoney, isSubmitting, onSubmit,
+  onCopyYesterday, copyingYesterday,
 }: Props) {
   const { t } = useTranslation();
 
@@ -89,6 +92,15 @@ export function RevenueModal({
             <Ionicons name="information-circle" size={18} color={COLORS.primary} />
             <Text style={styles.editNoticeText}>{t('home.editInPlaceNotice')}</Text>
           </View>
+
+          <TouchableOpacity style={styles.copyYesterdayButton} onPress={onCopyYesterday} disabled={copyingYesterday}>
+            {copyingYesterday ? (
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            ) : (
+              <Ionicons name="copy-outline" size={16} color={COLORS.primary} />
+            )}
+            <Text style={styles.copyYesterdayText}>{t('home.sameAsYesterday')}</Text>
+          </TouchableOpacity>
 
           {ocrAdditionNote && (
             <View style={[styles.editNoticeBanner, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
@@ -243,6 +255,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.primaryLight,
     lineHeight: 16,
+  },
+  copyYesterdayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    marginBottom: 16,
+  },
+  copyYesterdayText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primaryLight,
   },
   vatRateRow: {
     flexDirection: 'row',

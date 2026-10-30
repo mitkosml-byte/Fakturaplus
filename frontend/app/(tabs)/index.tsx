@@ -19,7 +19,7 @@ import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
 import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
-import { format } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -199,6 +199,33 @@ export default function HomeScreen() {
       return null;
     }
   }, []);
+
+  // One-tap "copy yesterday's split forward" for a steady-traffic day -
+  // reuses the same getRevenueByDate call loadCurrentDayRevenue already
+  // makes, just for revenueDate - 1, and overwrites the form the same way
+  // opening the modal pre-fills it.
+  const [copyingYesterday, setCopyingYesterday] = useState(false);
+  const handleCopyYesterday = async () => {
+    setCopyingYesterday(true);
+    try {
+      const yesterdayStr = format(subDays(revenueDate, 1), 'yyyy-MM-dd');
+      const data = await api.getRevenueByDate(yesterdayStr);
+      if (!data || (data.fiscal_revenue === 0 && data.card_revenue === 0 && data.pocket_money === 0)) {
+        Alert.alert(t('home.sameAsYesterday'), t('home.sameAsYesterdayEmpty'));
+        return;
+      }
+      setFiscalRevenue(data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
+      setPocketMoney(data.pocket_money > 0 ? data.pocket_money.toString() : '');
+      setCardRevenue(data.card_revenue > 0 ? data.card_revenue.toString() : '');
+      setRevenueVatRate(data.vat_rate_percent || 20);
+      Haptics.success();
+      Toast.success(t('home.sameAsYesterdayApplied'));
+    } catch {
+      Alert.alert(t('home.sameAsYesterday'), t('home.sameAsYesterdayEmpty'));
+    } finally {
+      setCopyingYesterday(false);
+    }
+  };
 
   // Tab screens stay mounted, so returning here (e.g. after scanning and
   // saving a new invoice) doesn't remount the screen - only re-fetching on
@@ -966,6 +993,8 @@ export default function HomeScreen() {
         onCloseDatePicker={() => setRevenueDatePickerVisible(false)}
         dateLocale={dateLocale}
         language={language}
+        onCopyYesterday={handleCopyYesterday}
+        copyingYesterday={copyingYesterday}
         ocrAdditionNote={ocrAdditionNote}
         fiscalRevenue={fiscalRevenue}
         onChangeFiscalRevenue={setFiscalRevenue}
