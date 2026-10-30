@@ -54,9 +54,9 @@ async def create_calendar_event(payload: CalendarEventCreate, current_user: User
         company_id=current_user.company_id,
         creator_id=current_user.user_id,
         creator_name=current_user.name,
-        **payload.dict(),
+        **payload.model_dump(),
     )
-    await server.db.calendar_events.insert_one(event.dict())
+    await server.db.calendar_events.insert_one(event.model_dump())
     return event
 
 @router.get("/calendar/events", response_model=List[CalendarEvent])
@@ -87,7 +87,7 @@ async def update_calendar_event(event_id: str, payload: CalendarEventUpdate, cur
     if existing["creator_id"] != current_user.user_id:
         raise HTTPException(status_code=403, detail="Само създателят може да редактира това събитие")
 
-    update_data = {k: v for k, v in payload.dict(exclude_unset=True).items()}
+    update_data = {k: v for k, v in payload.model_dump(exclude_unset=True).items()}
     if "visibility" in update_data and update_data["visibility"] not in ("personal", "shared"):
         raise HTTPException(status_code=400, detail="Невалидна видимост")
     # Any change to when the reminder should fire (or whether one exists at

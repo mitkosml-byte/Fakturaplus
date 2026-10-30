@@ -36,7 +36,7 @@ router = APIRouter(prefix="/api")
 
 @router.get("/auth/me")
 async def get_me(current_user: User = Depends(get_current_user)):
-    return current_user.dict()
+    return current_user.model_dump()
 
 @router.post("/auth/logout")
 async def logout(request: Request, response: Response):
@@ -110,7 +110,7 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
             name=company_name,
             eik=f"AUTO{uuid.uuid4().hex[:9].upper()}"
         )
-        await server.db.companies.insert_one(new_company.dict())
+        await server.db.companies.insert_one(new_company.model_dump())
         company_id = new_company.id
         role = "owner"
         permissions = resolve_permissions("owner", None)
@@ -230,7 +230,7 @@ async def forgot_password(request: Request, data: ForgotPasswordRequest):
         return generic_response
 
     reset_code = PasswordResetCode(user_id=user["user_id"])
-    await server.db.password_reset_codes.insert_one(reset_code.dict())
+    await server.db.password_reset_codes.insert_one(reset_code.model_dump())
 
     await send_email(
         to_email=user["email"],

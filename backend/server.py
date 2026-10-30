@@ -6,6 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ValidationError
 from typing import List, Optional, Dict, Any
@@ -129,12 +130,29 @@ async def send_email(to_email: str, subject: str, html_body: str) -> bool:
         logger.error(f"Failed to send email via Resend: {e}")
         return False
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup - calls resolved at runtime (the module finishes executing,
+    # defining each of these, well before the ASGI server ever fires this
+    # event), in the same order the old @app.on_event("startup") handlers
+    # below used to register in.
+    await start_proactive_digest_loop()
+    await start_calendar_reminder_loop()
+    await start_budget_alert_loop()
+    await start_notification_settings_loop()
+    await start_scan_credit_depletion_loop()
+    await create_indexes()
+    yield
+    # Shutdown
+    await shutdown_db_client()
+
 # Create the main app
 app = FastAPI(
     title="Invoice Manager API",
     version="1.0.0",
     docs_url=None if IS_PRODUCTION else "/docs",
-    redoc_url=None if IS_PRODUCTION else "/redoc"
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    lifespan=lifespan,
 )
 
 # Add rate limiter
@@ -2568,7 +2586,6 @@ async def _proactive_digest_loop():
         # reasoning as the budget/notification-settings loops above.
         await asyncio.sleep(3600)
 
-@app.on_event("startup")
 async def start_proactive_digest_loop():
     asyncio.create_task(_proactive_digest_loop())
 
@@ -3610,7 +3627,6 @@ async def _calendar_reminder_loop():
             logger.error(f"Calendar reminder loop error: {e}")
         await asyncio.sleep(180)
 
-@app.on_event("startup")
 async def start_calendar_reminder_loop():
     # In-process only - if this dyno is asleep (free-tier idle scale-down) a
     # reminder simply fires on the next request that wakes it instead of
@@ -3691,7 +3707,6 @@ async def _budget_alert_loop():
         # reminder, there's no "exact minute" to hit.
         await asyncio.sleep(3600)
 
-@app.on_event("startup")
 async def start_budget_alert_loop():
     asyncio.create_task(_budget_alert_loop())
 
@@ -3774,7 +3789,6 @@ async def _notification_settings_loop():
         # revenue threshold, same reasoning as the budget loop above.
         await asyncio.sleep(3600)
 
-@app.on_event("startup")
 async def start_notification_settings_loop():
     asyncio.create_task(_notification_settings_loop())
 
@@ -3833,7 +3847,6 @@ async def _scan_credit_depletion_loop():
             logger.error(f"Scan credit depletion loop error: {e}")
         await asyncio.sleep(3600)
 
-@app.on_event("startup")
 async def start_scan_credit_depletion_loop():
     asyncio.create_task(_scan_credit_depletion_loop())
 
@@ -3863,7 +3876,6 @@ class ImportCommitRequest(BaseModel):
 
 # ===================== DATABASE INDEXES =====================
 
-@app.on_event("startup")
 async def create_indexes():
     """Create database indexes for performance"""
     try:
@@ -4087,6 +4099,5 @@ async def csrf_protection_middleware(request: Request, call_next):
                 return JSONResponse(status_code=403, content={"detail": "Невалиден CSRF токен"})
     return await call_next(request)
 
-@app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()

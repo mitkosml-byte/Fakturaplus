@@ -57,7 +57,7 @@ async def update_payroll_rates(request: Request, current_user: User = Depends(ge
         await server.db.payroll_rates.update_one({"company_id": company_id}, {"$set": update_data})
     else:
         rates = PayrollRates(company_id=company_id, **{**DEFAULT_PAYROLL_RATES, **update_data})
-        await server.db.payroll_rates.insert_one(rates.dict())
+        await server.db.payroll_rates.insert_one(rates.model_dump())
 
     return await get_payroll_rates_dict(company_id)
 
@@ -66,8 +66,8 @@ async def create_employee(employee: EmployeeCreate, current_user: User = Depends
     require_permission(current_user, "manage_budget")
     company_id, _ = await get_company_scope(current_user)
 
-    employee_obj = Employee(user_id=current_user.user_id, company_id=company_id, **employee.dict())
-    await server.db.employees.insert_one(employee_obj.dict())
+    employee_obj = Employee(user_id=current_user.user_id, company_id=company_id, **employee.model_dump())
+    await server.db.employees.insert_one(employee_obj.model_dump())
     return employee_obj
 
 @router.get("/employees", response_model=List[Employee])
@@ -89,7 +89,7 @@ async def get_employees(active_only: bool = False, current_user: User = Depends(
 @router.put("/employees/{employee_id}", response_model=Employee)
 async def update_employee(employee_id: str, update: EmployeeUpdate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    update_data = {k: v for k, v in update.dict().items() if v is not None}
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     _, scope = await get_company_scope(current_user)
     result = await server.db.employees.update_one({"id": employee_id, **scope}, {"$set": update_data})
     if result.matched_count == 0:
@@ -238,7 +238,7 @@ async def create_holiday_work(payload: EmployeeHolidayWorkCreate, current_user: 
         holiday_name=holiday_name,
         note=payload.note,
     )
-    await server.db.employee_holiday_work.insert_one(entry.dict())
+    await server.db.employee_holiday_work.insert_one(entry.model_dump())
     return entry
 
 @router.get("/employees/holiday-work", response_model=List[EmployeeHolidayWork])
@@ -282,7 +282,7 @@ async def create_leave(payload: EmployeeLeaveCreate, current_user: User = Depend
         end_date=payload.end_date,
         note=payload.note,
     )
-    await server.db.employee_leave.insert_one(entry.dict())
+    await server.db.employee_leave.insert_one(entry.model_dump())
     return entry
 
 @router.get("/employees/leave", response_model=List[EmployeeLeave])

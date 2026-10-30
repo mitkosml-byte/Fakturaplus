@@ -38,8 +38,8 @@ router = APIRouter(prefix="/api")
 async def create_customer(payload: CustomerCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     company_id, _ = await get_company_scope(current_user)
-    customer = Customer(user_id=current_user.user_id, company_id=company_id, **payload.dict())
-    await server.db.customers.insert_one(customer.dict())
+    customer = Customer(user_id=current_user.user_id, company_id=company_id, **payload.model_dump())
+    await server.db.customers.insert_one(customer.model_dump())
     return customer
 
 @router.get("/customers", response_model=List[Customer])
@@ -55,7 +55,7 @@ async def get_customers(search: Optional[str] = None, current_user: User = Depen
 async def update_customer(customer_id: str, payload: CustomerUpdate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     _, scope = await get_company_scope(current_user)
-    update_data = {k: v for k, v in payload.dict().items() if v is not None}
+    update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     if update_data:
         result = await server.db.customers.update_one({"id": customer_id, **scope}, {"$set": update_data})
         if result.matched_count == 0:
@@ -78,8 +78,8 @@ async def delete_customer(customer_id: str, current_user: User = Depends(get_cur
 async def create_receivable(payload: ReceivableCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     company_id, _ = await get_company_scope(current_user)
-    receivable = Receivable(user_id=current_user.user_id, company_id=company_id, **payload.dict())
-    await server.db.receivables.insert_one(receivable.dict())
+    receivable = Receivable(user_id=current_user.user_id, company_id=company_id, **payload.model_dump())
+    await server.db.receivables.insert_one(receivable.model_dump())
     return receivable
 
 @router.get("/receivables", response_model=List[Receivable])
@@ -127,7 +127,7 @@ async def update_receivable(receivable_id: str, payload: ReceivableUpdate, curre
     if not existing:
         raise HTTPException(status_code=404, detail="Записът не е намерен")
 
-    update_data = {k: v for k, v in payload.dict(exclude_unset=True).items() if v is not None}
+    update_data = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     if update_data.get("is_paid") is True and not existing.get("is_paid"):
         update_data["paid_at"] = datetime.now(timezone.utc)
         update_data.setdefault("paid_amount", existing.get("amount", 0))
@@ -153,7 +153,7 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
 
     document = BillingDocument(
         user_id=current_user.user_id, company_id=company_id, total_amount=total_amount,
-        issue_date=issue_date, **payload.dict(exclude={"issue_date"}),
+        issue_date=issue_date, **payload.model_dump(exclude={"issue_date"}),
     )
 
     # A "bill" (not a quote) is money actually owed - automatically record
@@ -166,10 +166,10 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
             description=f"Сметка от {issue_date}" + (f" - {payload.notes}" if payload.notes else ""),
             amount=total_amount, due_date=None,
         )
-        await server.db.receivables.insert_one(receivable.dict())
+        await server.db.receivables.insert_one(receivable.model_dump())
         document.receivable_id = receivable.id
 
-    await server.db.billing_documents.insert_one(document.dict())
+    await server.db.billing_documents.insert_one(document.model_dump())
     return document
 
 @router.get("/billing-documents", response_model=List[BillingDocument])

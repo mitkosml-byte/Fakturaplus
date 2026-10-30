@@ -64,9 +64,9 @@ async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get
         company_id=company_id,
         inventory_number=inventory_number,
         annual_depreciation_rate_percent=rate,
-        **asset.dict(exclude={"annual_depreciation_rate_percent"})
+        **asset.model_dump(exclude={"annual_depreciation_rate_percent"})
     )
-    await server.db.assets.insert_one(asset_obj.dict())
+    await server.db.assets.insert_one(asset_obj.model_dump())
 
     await audit_service.log_action(
         user_id=current_user.user_id,
@@ -78,7 +78,7 @@ async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get
         details={"name": asset_obj.name, "inventory_number": inventory_number, "acquisition_value": asset_obj.acquisition_value}
     )
 
-    return enrich_asset_with_depreciation(asset_obj.dict())
+    return enrich_asset_with_depreciation(asset_obj.model_dump())
 
 @router.get("/assets")
 async def get_assets(status: Optional[str] = None, current_user: User = Depends(get_current_user)):
@@ -123,7 +123,7 @@ async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: Us
     if not existing:
         raise HTTPException(status_code=404, detail="Активът не е намерен")
 
-    update_data = {k: v for k, v in update.dict().items() if v is not None}
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
 
     category = update_data.get("category", existing["category"])
     if "annual_depreciation_rate_percent" in update_data:

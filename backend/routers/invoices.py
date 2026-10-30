@@ -80,7 +80,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
                 detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече съществува в системата!"
             )
     
-    invoice_dict = invoice.dict()
+    invoice_dict = invoice.model_dump()
     invoice_date = datetime.fromisoformat(invoice_dict["date"].replace("Z", "+00:00"))
 
     # Suggest a VAT treatment when the caller didn't set one, based on the
@@ -129,7 +129,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     if invoice.items:
         items_list = []
         for item in invoice.items:
-            item_dict = item.dict()
+            item_dict = item.model_dump()
             # Calculate total_price if not provided
             if item_dict.get("total_price") is None:
                 item_dict["total_price"] = item_dict["quantity"] * item_dict["unit_price"]
@@ -218,7 +218,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
                     invoice_number=invoice.invoice_number,
                     invoice_date=invoice_date
                 )
-                await server.db.item_price_history.insert_one(price_history.dict())
+                await server.db.item_price_history.insert_one(price_history.model_dump())
     
     invoice_obj = Invoice(
         user_id=current_user.user_id,
@@ -231,7 +231,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         payment_due_date=payment_due_date,
         **{k: v for k, v in invoice_dict.items() if k not in ["date", "items", "payment_due_date"]}
     )
-    await server.db.invoices.insert_one(invoice_obj.dict())
+    await server.db.invoices.insert_one(invoice_obj.model_dump())
     
     # Update price history and alerts with invoice_id
     if company_id and invoice.items:
@@ -250,7 +250,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         # Save alerts with invoice_id
         for alert in price_alerts:
             alert.invoice_id = invoice_obj.id
-            await server.db.price_alerts.insert_one(alert.dict())
+            await server.db.price_alerts.insert_one(alert.model_dump())
 
         if price_alerts:
             background_tasks.add_task(send_price_alert_pushes, company_id, price_alerts)
@@ -360,7 +360,7 @@ async def get_invoice(invoice_id: str, current_user: User = Depends(get_current_
 @router.put("/invoices/{invoice_id}", response_model=Invoice)
 async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_invoices")
-    update_data = {k: v for k, v in invoice_update.dict().items() if v is not None}
+    update_data = {k: v for k, v in invoice_update.model_dump().items() if v is not None}
     if "date" in update_data:
         update_data["date"] = datetime.fromisoformat(update_data["date"].replace("Z", "+00:00"))
     if "payment_due_date" in update_data:

@@ -115,7 +115,7 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
         expense_count=len(expenses)
     )
     
-    await server.db.backup_metadata.insert_one(metadata.dict())
+    await server.db.backup_metadata.insert_one(metadata.model_dump())
     
     return backup_data
 
@@ -171,7 +171,7 @@ async def restore_backup(request: Request, backup_data: BackupRestoreRequest, cu
         try:
             if invoice.id in existing_invoice_ids:
                 continue
-            doc = invoice.dict()
+            doc = invoice.model_dump()
             doc["user_id"] = current_user.user_id
             doc["company_id"] = company_id
             doc["date"] = datetime.fromisoformat(doc["date"].replace("Z", "+00:00"))
@@ -191,7 +191,7 @@ async def restore_backup(request: Request, backup_data: BackupRestoreRequest, cu
         try:
             if revenue.id in existing_revenue_ids:
                 continue
-            doc = revenue.dict()
+            doc = revenue.model_dump()
             doc["user_id"] = current_user.user_id
             doc["company_id"] = company_id
             doc["date"] = doc["date"][:10]
@@ -210,7 +210,7 @@ async def restore_backup(request: Request, backup_data: BackupRestoreRequest, cu
         try:
             if expense.id in existing_expense_ids:
                 continue
-            doc = expense.dict()
+            doc = expense.model_dump()
             doc["user_id"] = current_user.user_id
             doc["company_id"] = company_id
             doc["date"] = doc["date"][:10]

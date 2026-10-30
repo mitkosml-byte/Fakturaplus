@@ -144,7 +144,7 @@ async def create_invitation(invitation_data: InvitationCreate, current_user: Use
         permissions=resolve_permissions(invitation_data.role, invitation_data.permissions),
     )
     
-    await server.db.invitations.insert_one(invitation.dict())
+    await server.db.invitations.insert_one(invitation.model_dump())
     
     # Get company name for response
     company = await server.db.companies.find_one({"id": current_user.company_id}, {"name": 1})
@@ -401,7 +401,7 @@ async def get_notification_settings(current_user: User = Depends(get_current_use
     if not settings:
         # Create default settings
         default_settings = NotificationSettings(user_id=current_user.user_id)
-        await server.db.notification_settings.insert_one(default_settings.dict())
+        await server.db.notification_settings.insert_one(default_settings.model_dump())
         return default_settings
     return NotificationSettings(**settings)
 
@@ -410,7 +410,7 @@ async def update_notification_settings(
     settings_update: NotificationSettingsUpdate,
     current_user: User = Depends(get_current_user)
 ):
-    update_data = {k: v for k, v in settings_update.dict().items() if v is not None}
+    update_data = {k: v for k, v in settings_update.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc)
 
     existing = await server.db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
@@ -425,7 +425,7 @@ async def update_notification_settings(
     if not existing:
         # Create new settings
         new_settings = NotificationSettings(user_id=current_user.user_id, **update_data)
-        await server.db.notification_settings.insert_one(new_settings.dict())
+        await server.db.notification_settings.insert_one(new_settings.model_dump())
         return new_settings
     
     await server.db.notification_settings.update_one(
@@ -449,7 +449,7 @@ async def create_or_update_company(company_data: CompanyCreate, current_user: Us
             raise HTTPException(status_code=403, detail="Само титулярят може да редактира данните на фирмата")
         
         # Update existing company
-        update_data = {k: v for k, v in company_data.dict().items() if v is not None}
+        update_data = {k: v for k, v in company_data.model_dump().items() if v is not None}
         update_data["updated_at"] = datetime.now(timezone.utc)
         
         # Don't allow EIK change if company has other users
@@ -477,8 +477,8 @@ async def create_or_update_company(company_data: CompanyCreate, current_user: Us
             raise HTTPException(status_code=400, detail="Фирма с този ЕИК вече съществува. Използвайте код за присъединяване.")
         
         # Create new company
-        company = Company(**company_data.dict())
-        await server.db.companies.insert_one(company.dict())
+        company = Company(**company_data.model_dump())
+        await server.db.companies.insert_one(company.model_dump())
         
         # Link current user to this company as owner
         await server.db.users.update_one(
@@ -502,8 +502,8 @@ async def create_additional_company(company_data: CompanyCreate, current_user: U
     if existing_company:
         raise HTTPException(status_code=400, detail="Фирма с този ЕИК вече съществува. Използвайте код за присъединяване.")
 
-    company = Company(**company_data.dict())
-    await server.db.companies.insert_one(company.dict())
+    company = Company(**company_data.model_dump())
+    await server.db.companies.insert_one(company.model_dump())
 
     if current_user.company_id:
         await ensure_membership(current_user.user_id, current_user.company_id, current_user.role, current_user.permissions)
@@ -541,7 +541,7 @@ async def update_company(company_update: CompanyUpdate, current_user: User = Dep
     if user_doc.get("role") != "owner":
         raise HTTPException(status_code=403, detail="Само титулярят може да редактира данните на фирмата")
 
-    update_data = {k: v for k, v in company_update.dict().items() if v is not None}
+    update_data = {k: v for k, v in company_update.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="Няма данни за обновяване")
     
@@ -584,8 +584,8 @@ async def upsert_closed_date_exception(payload: ClosedDateExceptionUpsert, curre
         saved = await server.db.closed_date_exceptions.find_one({"company_id": company_id, "date": payload.date}, {"_id": 0})
     else:
         exception = ClosedDateException(company_id=company_id, date=payload.date, closed=payload.closed, label=payload.label)
-        await server.db.closed_date_exceptions.insert_one(exception.dict())
-        saved = exception.dict()
+        await server.db.closed_date_exceptions.insert_one(exception.model_dump())
+        saved = exception.model_dump()
     return ClosedDateException(**saved)
 
 @router.delete("/company/closed-date-exceptions/{date}")

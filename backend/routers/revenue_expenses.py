@@ -73,7 +73,7 @@ async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User =
         card_revenue=revenue.card_revenue,
         vat_rate_percent=revenue.vat_rate_percent
     )
-    await server.db.daily_revenue.insert_one(revenue_obj.dict())
+    await server.db.daily_revenue.insert_one(revenue_obj.model_dump())
     return revenue_obj
 
 @router.get("/daily-revenue/today")
@@ -154,9 +154,9 @@ async def create_expense(expense: NonInvoiceExpenseCreate, current_user: User = 
     expense_obj = NonInvoiceExpense(
         user_id=current_user.user_id,
         company_id=company_id,
-        **expense.dict()
+        **expense.model_dump()
     )
-    await server.db.expenses.insert_one(expense_obj.dict())
+    await server.db.expenses.insert_one(expense_obj.model_dump())
     return expense_obj
 
 @router.get("/expenses", response_model=List[NonInvoiceExpense])
@@ -183,7 +183,7 @@ async def get_expenses(
 async def update_expense(expense_id: str, update: NonInvoiceExpenseUpdate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_expenses")
     _, scope = await get_company_scope(current_user)
-    update_data = {k: v for k, v in update.dict(exclude_unset=True).items()}
+    update_data = {k: v for k, v in update.model_dump(exclude_unset=True).items()}
     if update_data:
         result = await server.db.expenses.update_one({"id": expense_id, **scope}, {"$set": update_data})
         if result.matched_count == 0:
@@ -231,7 +231,7 @@ async def create_personal_expense(
         notes=expense.notes
     )
     
-    await server.db.personal_expenses.insert_one(expense_obj.dict())
+    await server.db.personal_expenses.insert_one(expense_obj.model_dump())
     return {"message": "Личният разход е записан", "id": expense_obj.id}
 
 @router.get("/personal-expenses")

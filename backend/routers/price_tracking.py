@@ -156,7 +156,7 @@ async def update_price_alert_settings(
         )
     else:
         settings = PriceAlertSettings(company_id=company_id, **update_data)
-        await server.db.price_alert_settings.insert_one(settings.dict())
+        await server.db.price_alert_settings.insert_one(settings.model_dump())
 
     return {"message": "Настройките са запазени"}
 
@@ -186,8 +186,8 @@ async def create_price_alert_mute(payload: PriceAlertMuteCreate, current_user: U
         return {"mute": existing}
 
     mute = PriceAlertMute(company_id=company_id, item_name=normalized_name, supplier=payload.supplier)
-    await server.db.price_alert_mutes.insert_one(mute.dict())
-    return {"mute": mute.dict()}
+    await server.db.price_alert_mutes.insert_one(mute.model_dump())
+    return {"mute": mute.model_dump()}
 
 @router.delete("/items/price-alert-mutes/{mute_id}")
 async def delete_price_alert_mute(mute_id: str, current_user: User = Depends(get_current_user)):

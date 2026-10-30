@@ -25,7 +25,7 @@ async def _make_user(label: str) -> tuple:
     rate-limited) then move this user into the real team below, exactly as
     production's invite flow would."""
     company = server.Company(name=f"{label} Co", eik=f"TEST{uuid.uuid4().hex[:9].upper()}")
-    await server.db.companies.insert_one(company.dict())
+    await server.db.companies.insert_one(company.model_dump())
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     email = f"{label.lower()}_{TS}@test.com"
     await server.db.users.insert_one({

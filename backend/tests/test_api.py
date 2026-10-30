@@ -736,7 +736,7 @@ def test_scan_credits(client):
 
     async def _make_owner():
         company = server.Company(name="Credits Owner Co", eik=f"TEST{uuid.uuid4().hex[:9].upper()}")
-        await server.db.companies.insert_one(company.dict())
+        await server.db.companies.insert_one(company.model_dump())
         await server.db.users.insert_one({
             "user_id": owner_id, "email": owner_email, "name": "Credits Owner",
             "role": "owner", "company_id": company.id, "permissions": list(server.ROLE_PERMISSIONS["owner"]),
@@ -887,7 +887,7 @@ def test_cross_tenant_isolation(client):
 
     async def _make_tenant(label: str) -> tuple:
         company = server.Company(name=f"{label} Co", eik=f"TEST{uuid.uuid4().hex[:9].upper()}")
-        await server.db.companies.insert_one(company.dict())
+        await server.db.companies.insert_one(company.model_dump())
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         await server.db.users.insert_one({
             "user_id": user_id,
@@ -1050,7 +1050,7 @@ def test_csrf_protection(client):
 
     async def _setup():
         company = server.Company(name="CSRF Test Co", eik=f"TEST{uuid.uuid4().hex[:9].upper()}")
-        await server.db.companies.insert_one(company.dict())
+        await server.db.companies.insert_one(company.model_dump())
         await server.db.users.insert_one({
             "user_id": user_id, "email": f"{user_id}@test.com", "name": "CSRF Tester",
             "role": "owner", "company_id": company.id, "permissions": list(server.ROLE_PERMISSIONS["owner"]),

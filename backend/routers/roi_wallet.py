@@ -266,7 +266,7 @@ async def create_personal_wallet_entry(
         recurring_until=entry.recurring_until,
         notes=entry.notes,
     )
-    await server.db.personal_wallet_entries.insert_one(entry_obj.dict())
+    await server.db.personal_wallet_entries.insert_one(entry_obj.model_dump())
 
     await audit_service.log_action(
         user_id=current_user.user_id, user_name=current_user.name,
@@ -313,7 +313,7 @@ async def update_personal_wallet_entry(
     if not existing:
         raise HTTPException(status_code=404, detail="Записът не е намерен")
 
-    update_data = {k: (v.value if hasattr(v, "value") else v) for k, v in update.dict(exclude_unset=True).items()}
+    update_data = {k: (v.value if hasattr(v, "value") else v) for k, v in update.model_dump(exclude_unset=True).items()}
     update_data["updated_at"] = datetime.now(timezone.utc)
     await server.db.personal_wallet_entries.update_one({"id": entry_id, "company_id": company_id}, {"$set": update_data})
 
