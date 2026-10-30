@@ -349,6 +349,9 @@ export default function PayrollScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('payroll.title')}</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity onPress={() => router.push('/pay-run')} style={styles.backButton} accessibilityLabel={t('payroll.payTeam')}>
+              <Ionicons name="cash-outline" size={22} color="white" />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('import.button')}>
               <Ionicons name="cloud-upload-outline" size={22} color="white" />
             </TouchableOpacity>

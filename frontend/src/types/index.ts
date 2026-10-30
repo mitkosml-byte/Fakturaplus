@@ -644,6 +644,27 @@ export interface SchedulePayment {
   created_at: string;
 }
 
+// Pays several team members in one action - some on a fixed monthly
+// salary (formal payroll), others hourly (Work Schedule) - see pay-run.tsx.
+export interface BatchPayrollItem {
+  employee_id: string;
+  period_month: number;
+  period_year: number;
+}
+
+export interface BatchPayRequest {
+  payroll_entries: BatchPayrollItem[];
+  schedule_payments: SchedulePaymentCreate[];
+}
+
+export interface BatchPayResultItem {
+  kind: 'payroll' | 'schedule';
+  label: string;
+  success: boolean;
+  error?: string | null;
+  amount?: number | null;
+}
+
 export interface PayrollRates {
   employee_rate_percent: number;
   employer_rate_percent: number;

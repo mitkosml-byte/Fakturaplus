@@ -1835,6 +1835,100 @@ def test_schedule_payments(client):
     assert r.status_code == 404
 
 
+def test_batch_pay_run(client):
+    """One action pays a mix of fixed-salary (formal payroll) and hourly
+    (Work Schedule) team members, reusing the exact same single-item
+    endpoints under the hood - a failing item (duplicate payroll entry)
+    must never block the rest of the batch."""
+    owner = h(STATE["owner_token"])
+
+    r = client.post("/api/employees", headers=owner, json={"name": "Batch Salary Employee", "base_salary": 1800})
+    assert r.status_code == 200, r.text
+    employee_id = r.json()["id"]
+
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+
+    staff_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    staff_token = uuid_module.uuid4().hex
+
+    async def _make_batch_staff():
+        me = client.get("/api/auth/me", headers=owner).json()
+        await server_module.db.users.insert_one({
+            "user_id": staff_id, "email": f"{staff_id}@test.com", "name": "Batch Hourly Staff",
+            "role": "staff", "company_id": me["company_id"], "permissions": [],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": staff_id, "session_token": staff_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+
+    asyncio.run(_make_batch_staff())
+    staff = h(staff_token)
+
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": staff_id, "date": "2027-03-01", "start_time": "09:00", "end_time": "17:00",
+        "repeat_pattern": "weekly", "repeat_until": "2027-03-15", "hourly_rate": 10,
+    })
+    assert r.status_code == 200, r.text
+    # 3 weekly occurrences * 8h * 10 € = 240 €.
+
+    # Plain staff can't run a batch pay (manage_budget only).
+    r = client.post("/api/pay-run/batch", headers=staff, json={
+        "payroll_entries": [{"employee_id": employee_id, "period_month": 3, "period_year": 2027}],
+        "schedule_payments": [{"user_id": staff_id, "period_start": "2027-03-01", "period_end": "2027-03-31"}],
+    })
+    assert r.status_code == 403
+
+    r = client.post("/api/pay-run/batch", headers=owner, json={
+        "payroll_entries": [{"employee_id": employee_id, "period_month": 3, "period_year": 2027}],
+        "schedule_payments": [{"user_id": staff_id, "period_start": "2027-03-01", "period_end": "2027-03-31"}],
+    })
+    assert r.status_code == 200, r.text
+    results = r.json()["results"]
+    assert len(results) == 2
+    payroll_result = next(x for x in results if x["kind"] == "payroll")
+    schedule_result = next(x for x in results if x["kind"] == "schedule")
+    assert payroll_result["success"] is True
+    assert payroll_result["label"] == "Batch Salary Employee"
+    assert payroll_result["amount"] > 0
+    assert schedule_result["success"] is True
+    assert schedule_result["label"] == "Batch Hourly Staff"
+    assert schedule_result["amount"] == 240
+
+    # Both records genuinely exist now.
+    r = client.get("/api/payroll?year=2027&month=3", headers=owner)
+    assert any(e["employee_id"] == employee_id for e in r.json())
+    r = client.get("/api/schedule/payments?start=2027-03-01&end=2027-03-31", headers=owner)
+    assert len(r.json()["payments"]) == 1
+
+    # Re-running the SAME payroll item fails (already exists this month),
+    # but a NEW, non-overlapping schedule item in the same batch still
+    # succeeds - one failure never blocks the rest.
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": staff_id, "date": "2027-04-01", "start_time": "09:00", "end_time": "13:00", "hourly_rate": 10,
+    })
+    assert r.status_code == 200
+    r = client.post("/api/pay-run/batch", headers=owner, json={
+        "payroll_entries": [{"employee_id": employee_id, "period_month": 3, "period_year": 2027}],
+        "schedule_payments": [{"user_id": staff_id, "period_start": "2027-04-01", "period_end": "2027-04-30"}],
+    })
+    assert r.status_code == 200, r.text
+    results = r.json()["results"]
+    payroll_result = next(x for x in results if x["kind"] == "payroll")
+    schedule_result = next(x for x in results if x["kind"] == "schedule")
+    assert payroll_result["success"] is False
+    assert payroll_result["label"] == "Batch Salary Employee"
+    assert schedule_result["success"] is True
+    assert schedule_result["amount"] == 40
+
+
 def test_legacy_scope_consistency(client):
     """Module 1 audit finding: 40 endpoints built their own company_id
     lookup inline instead of the shared get_company_scope()/scope helper,

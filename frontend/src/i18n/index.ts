@@ -3893,6 +3893,18 @@ export const translations: Translations = {
   'payroll.netAmount': { bg: 'Нетно за получаване', en: 'Net take-home' },
   'payroll.totalEmployerCost': { bg: 'Общ разход за работодателя', en: 'Total employer cost' },
   'payroll.countedInExpenses': { bg: 'Отразява се в разходите', en: 'Counts toward expenses' },
+  'payroll.payTeam': { bg: 'Плати екипа', en: 'Pay the team' },
+
+  // Pay run - one action for everyone due this month, mixing fixed
+  // salary (formal payroll) and hourly (Work Schedule) team members.
+  'payRun.title': { bg: 'Плащане на екипа', en: 'Pay the team' },
+  'payRun.allPaid': { bg: 'Всички са платени за този месец', en: 'Everyone is paid for this month' },
+  'payRun.fixedSalary': { bg: 'Фиксирана заплата', en: 'Fixed salary' },
+  'payRun.hourly': { bg: 'Почасово по график', en: 'Hourly (Work Schedule)' },
+  'payRun.pickAtLeastOne': { bg: 'Изберете поне един служител', en: 'Pick at least one person' },
+  'payRun.processError': { bg: 'Неуспешно обработване на плащанията', en: 'Could not process the payments' },
+  'payRun.resultsTitle': { bg: 'Резултат', en: 'Result' },
+  'payRun.processSelected': { bg: 'Плати {count} ({amount} €)', en: 'Pay {count} ({amount} €)' },
   'payroll.removeEntry': { bg: 'Премахни начислението', en: 'Remove this entry' },
   'payroll.deleteEmployee': { bg: 'Изтрий служителя', en: 'Delete employee' },
   'payroll.deleteEmployeeConfirm': { bg: 'Служителят ще бъде изтрит, но вече начислените заплати остават в историята.', en: "The employee will be deleted, but past payroll entries stay in the history." },

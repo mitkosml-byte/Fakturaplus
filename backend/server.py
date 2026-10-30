@@ -4313,6 +4313,8 @@ from routers import payroll
 app.include_router(payroll.router)
 from routers import schedule
 app.include_router(schedule.router)
+from routers import pay_run
+app.include_router(pay_run.router)
 from routers import assets
 app.include_router(assets.router)
 
