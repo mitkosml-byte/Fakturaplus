@@ -230,6 +230,17 @@ export interface BusinessChatDigest {
     total_spent: number;
     percent_used: number;
   } | null;
+  receivables: {
+    total_owed: number;
+    unpaid_count: number;
+    total_overdue: number;
+    overdue_count: number;
+  } | null;
+}
+
+export interface BusinessChatHistoryTurn {
+  role: 'user' | 'assistant';
+  text: string;
 }
 
 export interface BusinessChatResponse {

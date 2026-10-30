@@ -9,7 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ValidationError
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from enum import Enum
 import uuid
 from datetime import datetime, timezone, timedelta, date
@@ -2307,8 +2307,39 @@ async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: 
     items.sort(key=lambda x: x["amount"], reverse=True)
     return items[:limit]
 
+async def _business_digest_receivables(scope: dict) -> dict:
+    """What customers owe the business - the mirror image of
+    unpaid_invoices above, and a glaring gap in the original digest: a
+    question like 'кой ми дължи пари?' had no data to answer from at all.
+    Same aggregation as GET /receivables/summary, kept in sync by hand
+    since that endpoint lives in routers/receivables.py (star-imported
+    from here, not the other way around)."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    unpaid = await db.receivables.find({**scope, "is_paid": False}, {"_id": 0, "amount": 1, "due_date": 1}).to_list(10000)
+    total_owed = sum(r.get("amount", 0) for r in unpaid)
+    overdue = [r for r in unpaid if r.get("due_date") and r["due_date"] < now_str]
+    total_overdue = sum(r.get("amount", 0) for r in overdue)
+    return {
+        "total_owed": round(total_owed, 2),
+        "unpaid_count": len(unpaid),
+        "total_overdue": round(total_overdue, 2),
+        "overdue_count": len(overdue),
+    }
+
+class ChatHistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str
+
 class BusinessChatQuery(BaseModel):
     question: str
+    # Prior turns of THIS chat session, oldest first - the client resends
+    # them on every call since this endpoint is otherwise fully stateless.
+    # Without this, every message was its own context-free request and the
+    # model had no idea what a follow-up question ("сравни с него", "ами
+    # миналата седмица?") was even referring to - a real bug, not just a
+    # narrow-data limitation. Capped server-side regardless of what the
+    # client sends (see ask_my_numbers).
+    history: List[ChatHistoryTurn] = []
 
 class BusinessChatResponse(BaseModel):
     answer: str

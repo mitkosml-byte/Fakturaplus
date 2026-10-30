@@ -18,6 +18,7 @@ _eik_check_digit,
     _compute_month_profit,
     _business_digest_period,
     _business_digest_top_expenses,
+    _business_digest_receivables,
     _signal_unpaid_invoices,
     _signal_receivables,
     _signal_scan_credits,
@@ -99,31 +100,54 @@ async def ask_my_numbers(
                 "percent_used": budget_status["percent_used"],
             }
 
+    # What customers owe the business - the mirror image of unpaid_invoices
+    # above, gated the same way the real /receivables/summary endpoint is
+    # (add_revenue), same pattern as budget's manage_budget gate just above.
+    receivables = None
+    if "add_revenue" in set(current_user.permissions or []):
+        receivables = await _business_digest_receivables(scope)
+
     digest = {
         "this_month": {"label": this_month_start[:7], **this_month},
         "last_month": {"label": last_month_start[:7], **last_month},
         "top_expenses_this_month": top_expenses,
         "unpaid_invoices": unpaid,
         "budget": budget,
+        "receivables": receivables,
     }
 
     system_prompt = (
         "Ти си асистент на малък бизнес във Фактура+, който отговаря САМО въз основа на подадените му по-долу "
-        "реални данни за тази фирма (JSON). Никога не отговаряй с измислени или закръглени наизуст числа - "
-        "цитирай само числата от JSON-а. Ако въпросът иска нещо извън тези данни (НАП, данъчни декларации, "
-        "конкуренти, обща информация извън тази фирма), кажи ясно, че не разполагаш с тази информация. "
+        "реални данни за тази фирма (JSON) и предходния разговор. Никога не отговаряй с измислени или закръглени "
+        "наизуст числа - цитирай само числата от JSON-а. Ако въпросът иска нещо извън тези данни (НАП, данъчни "
+        "декларации, конкуренти, обща информация извън тази фирма, или нещо, за което просто няма поле в JSON-а), "
+        "кажи ясно, че не разполагаш с тази информация, вместо да гадаеш. Предходните съобщения по-долу са "
+        "същият разговор - при последващ въпрос ('сравни с него', 'ами миналата седмица') използвай контекста им, "
+        "но винаги смятай с актуалните данни от ПОСЛЕДНИЯ JSON, не с число, спомена в по-ранен твой отговор. "
         "Отговаряй кратко (до 4 изречения), на български, сумите винаги в евро (€). Профитът (profit) може да "
         "е null - това означава, че този потребител няма права да го вижда; в такъв случай кажи, че печалбата "
         "не е видима за него, вместо да я извеждаш или предполагаш."
     )
-    prompt = f"Данни за фирмата (JSON):\n{json.dumps(digest, ensure_ascii=False)}\n\nВъпрос: {question}"
+
+    # The client resends this chat's prior turns on every call since the
+    # endpoint itself holds no session state - capped here regardless of
+    # what it sends, both so one runaway/malicious client can't blow up a
+    # single request's token cost and so a very long on-screen chat still
+    # costs roughly the same per message instead of growing unbounded.
+    MAX_HISTORY_TURNS = 12
+    MAX_TURN_CHARS = 2000
+    history_messages = [
+        {"role": turn.role, "content": turn.text[:MAX_TURN_CHARS]}
+        for turn in query.history[-MAX_HISTORY_TURNS:]
+    ]
+    prompt = f"Данни за фирмата (JSON, актуални към момента):\n{json.dumps(digest, ensure_ascii=False)}\n\nВъпрос: {question}"
 
     try:
         response = await anthropic_client.messages.create(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
             model="claude-opus-5-5",
             max_tokens=400,
             system=system_prompt,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[*history_messages, {"role": "user", "content": prompt}],  # type: ignore[list-item]  # plain dicts matching MessageParam's shape; the SDK's union is stricter than a dict literal can satisfy
         )
         await log_ai_usage(company_id, "ask_my_numbers", response)
         answer = next((b.text for b in response.content if b.type == "text"), "").strip()  # type: ignore[union-attr]  # b.type == "text" guards this at runtime; mypy cannot narrow a discriminated union inside a generator expression

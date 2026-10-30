@@ -57,11 +57,21 @@ export default function AskMyNumbersScreen() {
   const send = async (question: string) => {
     const trimmed = question.trim();
     if (!trimmed || sending) return;
+    // Built from the messages already on screen, BEFORE this question is
+    // added - without this, every message was its own context-free
+    // request and a follow-up ("сравни с него", "ами миналата седмица?")
+    // had nothing to refer back to. Capped to the last 12 turns, matching
+    // the backend's own cap, so a long on-screen chat doesn't grow the
+    // request payload (and the model's token cost) without bound.
+    const history = messages
+      .filter((m): m is Extract<ChatMessage, { role: 'user' | 'assistant' }> => m.role === 'user' || m.role === 'assistant')
+      .slice(-12)
+      .map((m) => ({ role: m.role, text: m.text }));
     setSending(true);
     setText('');
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: 'user', text: trimmed }]);
     try {
-      const data = await api.askMyNumbers(trimmed);
+      const data = await api.askMyNumbers(trimmed, history);
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: data.answer, digest: data.digest }]);
     } catch (error: any) {
       setMessages((prev) => [
@@ -78,7 +88,12 @@ export default function AskMyNumbersScreen() {
     return <AccessDenied />;
   }
 
-  const suggestions = [t('askMyNumbers.suggestion1'), t('askMyNumbers.suggestion2')];
+  const suggestions = [
+    t('askMyNumbers.suggestion1'),
+    t('askMyNumbers.suggestion2'),
+    t('askMyNumbers.suggestion3'),
+    t('askMyNumbers.suggestion4'),
+  ];
 
   return (
     <ScreenEnter>
@@ -189,6 +204,15 @@ export default function AskMyNumbersScreen() {
                                 .replace('{count}', String(d.unpaid_invoices.count))
                                 .replace('{overdue}', String(d.unpaid_invoices.overdue_count))
                                 .replace('{amount}', d.unpaid_invoices.total_unpaid_amount.toFixed(2))}
+                            </Text>
+                          )}
+
+                          {d.receivables && d.receivables.unpaid_count > 0 && (
+                            <Text style={styles.digestRow}>
+                              {t('askMyNumbers.receivables')
+                                .replace('{count}', String(d.receivables.unpaid_count))
+                                .replace('{overdue}', String(d.receivables.overdue_count))
+                                .replace('{amount}', d.receivables.total_owed.toFixed(2))}
                             </Text>
                           )}
 

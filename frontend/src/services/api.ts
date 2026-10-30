@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, ProactiveSignal } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -920,10 +920,10 @@ class ApiService {
 
   // "Ask your own numbers" chat (Module 4 Finding #3) - answers only from
   // this company's own stored data, never a general chatbot.
-  async askMyNumbers(question: string): Promise<BusinessChatResponse> {
+  async askMyNumbers(question: string, history: BusinessChatHistoryTurn[] = []): Promise<BusinessChatResponse> {
     return this.fetch('/ai/ask-my-numbers', {
       method: 'POST',
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, history }),
     });
   }
 

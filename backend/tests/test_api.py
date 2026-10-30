@@ -1180,6 +1180,55 @@ def test_ask_my_numbers(client):
     )
     assert r.status_code == 403
 
+    # history is new (conversation continuity fix - a follow-up question
+    # used to be sent with zero context from earlier turns in the same
+    # chat). A well-formed history must not change anything about the
+    # validation/permission order above - still reaches the same
+    # AI-disabled 503 gate - and a malformed entry must be a clean 422,
+    # not a 500, same as any other bad request body.
+    r = client.post("/api/ai/ask-my-numbers", headers=owner, json={
+        "question": "Ами миналата седмица?",
+        "history": [
+            {"role": "user", "text": "Какви са най-големите ми разходи?"},
+            {"role": "assistant", "text": "Най-големият ти разход е..."},
+        ],
+    })
+    assert r.status_code == 503, r.text
+
+    r = client.post("/api/ai/ask-my-numbers", headers=owner, json={
+        "question": "x",
+        "history": [{"role": "not_a_real_role", "text": "y"}],
+    })
+    assert r.status_code == 422
+
+
+def test_business_digest_receivables():
+    """_business_digest_receivables (ask-my-numbers' digest) duplicates
+    GET /receivables/summary's exact aggregation (see
+    test_customers_and_receivables) in a separate code path, since
+    ai_insights.py can't import a router-level function from
+    receivables.py without a circular import - a direct unit test here
+    catches the two drifting apart without needing a live AI call."""
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+
+    async def _run():
+        company_id = f"company_{uuid_module.uuid4().hex[:12]}"
+        scope = {"company_id": company_id}
+        await server_module.db.receivables.insert_many([
+            {"id": "r1", "company_id": company_id, "user_id": "u1", "customer_name": "A", "amount": 150, "due_date": "2020-01-01", "is_paid": False},
+            {"id": "r2", "company_id": company_id, "user_id": "u1", "customer_name": "B", "amount": 80, "due_date": "2099-01-01", "is_paid": False},
+            {"id": "r3", "company_id": company_id, "user_id": "u1", "customer_name": "C", "amount": 999, "due_date": "2020-01-01", "is_paid": True},
+        ])
+        return await server_module._business_digest_receivables(scope)
+
+    result = asyncio.run(_run())
+    assert result["total_owed"] == 230
+    assert result["unpaid_count"] == 2
+    assert result["total_overdue"] == 150
+    assert result["overdue_count"] == 1
+
 
 def test_proactive_signals(client):
     """Module 11 Finding #1: one ranked signal list over every other

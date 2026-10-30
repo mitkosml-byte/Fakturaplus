@@ -238,6 +238,14 @@ export const translations: Translations = {
     bg: 'Сравни ме със миналия месец',
     en: 'Compare me to last month',
   },
+  'askMyNumbers.suggestion3': {
+    bg: 'Кой ми дължи пари?',
+    en: 'Who owes me money?',
+  },
+  'askMyNumbers.suggestion4': {
+    bg: 'Имам ли неплатени фактури към доставчици?',
+    en: 'Do I have unpaid invoices to suppliers?',
+  },
   'askMyNumbers.numbersTitle': {
     bg: 'Числата зад отговора',
     en: 'The numbers behind this answer',
@@ -273,6 +281,10 @@ export const translations: Translations = {
   'askMyNumbers.unpaid': {
     bg: '{count} неплатени фактури ({overdue} просрочени) - {amount} €',
     en: '{count} unpaid invoices ({overdue} overdue) - {amount} €',
+  },
+  'askMyNumbers.receivables': {
+    bg: '{count} неплатени вземания ({overdue} просрочени) - дължат ти {amount} €',
+    en: '{count} unpaid receivables ({overdue} overdue) - customers owe you {amount} €',
   },
   'askMyNumbers.budget': {
     bg: 'Бюджет: {percent}% от {limit} €',
