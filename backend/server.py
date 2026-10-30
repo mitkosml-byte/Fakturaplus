@@ -1243,7 +1243,7 @@ async def get_closed_days_lookup(company_id: Optional[str]) -> tuple:
     if not company_id:
         return set(), {}
     company = await db.companies.find_one({"id": company_id}, {"_id": 0, "closed_weekdays": 1})
-    closed_weekdays = set(company.get("closed_weekdays") or []) if company else set()
+    closed_weekdays: set[int] = set(company.get("closed_weekdays") or []) if company else set()
     exceptions = await db.closed_date_exceptions.find(
         {"company_id": company_id}, {"_id": 0, "date": 1, "closed": 1}
     ).to_list(2000)
@@ -1830,7 +1830,7 @@ async def next_protocol_number(company_id: Optional[str], user_id: str, year: in
     matches how these protocols are numbered in practice."""
     scope = company_id or f"user:{user_id}"
     counter_id = f"protocol_{scope}_{year}"
-    result = await db.counters.find_one_and_update(
+    result: Dict[str, Any] = await db.counters.find_one_and_update(
         {"_id": counter_id},
         {"$inc": {"seq": 1}},
         upsert=True,
@@ -3410,7 +3410,7 @@ def enrich_asset_with_depreciation(asset: dict) -> dict:
 async def next_asset_inventory_number(company_id: Optional[str], user_id: str) -> str:
     scope = company_id or f"user:{user_id}"
     counter_id = f"asset_{scope}"
-    result = await db.counters.find_one_and_update(
+    result: Dict[str, Any] = await db.counters.find_one_and_update(
         {"_id": counter_id},
         {"$inc": {"seq": 1}},
         upsert=True,
@@ -4011,8 +4011,8 @@ from routers import forecast
 app.include_router(forecast.router)
 from routers import ai_insights
 app.include_router(ai_insights.router)
-from routers import statistics
-app.include_router(statistics.router)
+from routers import statistics as statistics_router
+app.include_router(statistics_router.router)
 
 from routers import invoices
 app.include_router(invoices.router)

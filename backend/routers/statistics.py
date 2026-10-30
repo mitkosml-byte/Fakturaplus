@@ -235,7 +235,7 @@ async def get_chart_data(
     # Group by date
     from collections import defaultdict
 
-    daily_data = defaultdict(lambda: {"income": 0, "expense": 0, "vat": 0})
+    daily_data: Dict[str, Any] = defaultdict(lambda: {"income": 0, "expense": 0, "vat": 0})
 
     for inv in invoices:
         date_str = inv["date"].strftime("%Y-%m-%d") if isinstance(inv["date"], datetime) else inv["date"][:10]
@@ -319,7 +319,7 @@ async def get_supplier_statistics(
     }).to_list(10000)
     
     # Group by supplier with detailed data
-    supplier_data = defaultdict(lambda: {
+    supplier_data: Dict[str, Any] = defaultdict(lambda: {
         "total_amount": 0,
         "total_vat": 0,
         "total_net": 0,
@@ -509,7 +509,7 @@ async def get_detailed_supplier_stats(
     is_active = days_inactive <= 30
     
     # Monthly breakdown
-    monthly_data = defaultdict(lambda: {"amount": 0, "count": 0})
+    monthly_data: Dict[str, Any] = defaultdict(lambda: {"amount": 0, "count": 0})
     for inv in invoices:
         date_val = inv.get("date")
         if isinstance(date_val, datetime):

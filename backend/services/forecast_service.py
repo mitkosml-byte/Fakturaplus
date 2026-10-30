@@ -224,7 +224,7 @@ class ForecastService:
         ).to_list(10000)
 
         # Aggregate by month
-        monthly_totals = defaultdict(float)
+        monthly_totals: Dict[str, float] = defaultdict(float)
 
         for inv in invoices:
             date = inv.get("date")
@@ -287,7 +287,7 @@ class ForecastService:
         ).to_list(10000)
 
         # Aggregate by month (date is stored as a "YYYY-MM-DD" string)
-        monthly_totals = defaultdict(float)
+        monthly_totals: Dict[str, float] = defaultdict(float)
 
         for rev in revenues:
             date_str = rev.get("date")

@@ -320,7 +320,7 @@ async def get_item_statistics(
         }
     
     # Aggregate by item
-    item_stats = defaultdict(lambda: {
+    item_stats: Dict[str, Any] = defaultdict(lambda: {
         "quantity": 0,
         "total_value": 0,
         "frequency": 0,
@@ -509,7 +509,7 @@ async def get_item_by_supplier(
         return {"item_name": item_name, "suppliers": [], "recommendation": None}
     
     # Group by supplier
-    supplier_data = defaultdict(lambda: {"prices": [], "quantities": [], "dates": []})
+    supplier_data: Dict[str, Any] = defaultdict(lambda: {"prices": [], "quantities": [], "dates": []})
     
     for record in history:
         supplier = record["supplier"]
@@ -746,7 +746,7 @@ async def get_merged_item_statistics(
         }
     
     # Aggregate with merging
-    item_stats = defaultdict(lambda: {
+    item_stats: Dict[str, Any] = defaultdict(lambda: {
         "display_name": "",
         "quantity": 0,
         "total_value": 0,

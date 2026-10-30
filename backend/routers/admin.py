@@ -52,7 +52,7 @@ async def get_ai_usage_summary(days: int = 30, current_user: User = Depends(get_
 
     RATES_USD_PER_MTOK = {"input": 4.0, "output": 20.0, "cache_creation": 5.0, "cache_read": 0.20}
 
-    by_endpoint = defaultdict(lambda: {
+    by_endpoint: Dict[str, Any] = defaultdict(lambda: {
         "calls": 0, "input_tokens": 0, "output_tokens": 0,
         "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
     })
