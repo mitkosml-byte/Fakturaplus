@@ -624,6 +624,18 @@ def test_roles_invitations_permissions(client):
     staff_hist = {e["month"]: e["amount"] for e in r.json()["historical"]}
     assert owner_hist.get("2026-09", 0) - staff_hist.get("2026-09", 0) == 30
 
+    # Revenue forecast must include pocket_money ("Джобче" - non-fiscal cash
+    # revenue) for a viewer who can see it, same as get_summary's
+    # total_income - and redact it the same way for one who can't.
+    r = client.get("/api/forecast/revenue", headers=owner)
+    assert r.status_code == 200
+    owner_rev_hist = {e["month"]: e["amount"] for e in r.json()["historical"]}
+    assert owner_rev_hist.get("2026-09", 0) == 115  # fiscal_revenue (100) + pocket_money (15)
+    r = client.get("/api/forecast/revenue", headers=staff)
+    assert r.status_code == 200
+    staff_rev_hist = {e["month"]: e["amount"] for e in r.json()["historical"]}
+    assert staff_rev_hist.get("2026-09", 0) == 100  # pocket_money redacted
+
     r = client.delete(f"/api/personal-expenses/{visibility_pe_id}", headers=owner)
     assert r.status_code == 200
 

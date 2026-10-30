@@ -265,13 +265,24 @@ class ForecastService:
         self,
         company_id: str,
         months_ahead: int = 3,
+        include_pocket_money: bool = True,
         lookback_days: Optional[int] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> Dict:
         """Predict future revenue based on historical data. See
         get_expense_forecast's docstring for lookback_days/start_date/
-        end_date - same adjustable-window fix, same reasoning."""
+        end_date - same adjustable-window fix, same reasoning.
+
+        include_pocket_money mirrors get_expense_forecast's
+        include_off_book_expenses: total revenue everywhere else in this
+        app (get_summary's total_income) is fiscal_revenue + pocket_money
+        ("Джобче" - non-fiscal cash revenue, not personal investment), so
+        omitting pocket_money here made this forecast silently undercount
+        total revenue for any company that takes meaningful cash income
+        outside the register - the forecast card could show a fraction of
+        the real turnover with no indication why. False for a viewer
+        without view_pocket_money, matching get_summary's own redaction."""
         window_start, _window_end = _resolve_window(lookback_days, start_date, end_date)
         window_start_str = window_start.strftime("%Y-%m-%d")
 
@@ -283,7 +294,7 @@ class ForecastService:
 
         revenues = await self.db.daily_revenue.find(
             {"user_id": {"$in": user_ids}, "date": {"$gte": window_start_str}},
-            {"_id": 0, "date": 1, "fiscal_revenue": 1}
+            {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1}
         ).to_list(10000)
 
         # Aggregate by month (date is stored as a "YYYY-MM-DD" string)
@@ -294,6 +305,8 @@ class ForecastService:
             if isinstance(date_str, str) and len(date_str) >= 7:
                 month_key = date_str[:7]
                 monthly_totals[month_key] += float(rev.get("fiscal_revenue", 0))
+                if include_pocket_money:
+                    monthly_totals[month_key] += float(rev.get("pocket_money", 0))
 
         sorted_months = sorted(monthly_totals.keys())
         historical = [{"month": mk, "amount": monthly_totals[mk]} for mk in sorted_months]

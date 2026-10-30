@@ -81,7 +81,9 @@ async def get_revenue_forecast(
     if not company_id:
         return {"error": "No company"}
 
+    visibility = get_financial_visibility(current_user)
     return await forecast_service.get_revenue_forecast(
         company_id, months_ahead,
+        include_pocket_money=visibility["pocket_money"],
         lookback_days=lookback_days, start_date=start_date, end_date=end_date,
     )
