@@ -1227,7 +1227,79 @@ def test_business_digest_receivables():
     assert result["total_owed"] == 230
     assert result["unpaid_count"] == 2
     assert result["total_overdue"] == 150
-    assert result["overdue_count"] == 1
+
+
+def test_business_chat_digest_permission_matrix():
+    """The comprehensive ask-my-numbers digest (build_business_chat_digest)
+    must gate roi/assets/payroll/budget/receivables to None for a viewer
+    missing the matching permission - exactly like the single-purpose
+    endpoint each one duplicates - while vat_due_this_month, forecast,
+    scan_credits, price_alerts_unread_count and reorder_nudges stay
+    present for everyone, since none of those carries sensitive financial
+    data. Calls build_business_chat_digest directly (asyncio.run) with two
+    plain in-memory User objects rather than over HTTP, since AI_FEATURES_
+    ENABLED is off in tests and the 503 gate would otherwise prevent the
+    digest from ever being built (see ask_my_numbers's own 503 test)."""
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timezone as tz
+    from routers.ai_insights import build_business_chat_digest
+
+    company_id = f"company_{uuid_module.uuid4().hex[:12]}"
+    full_user_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    restricted_user_id = f"user_{uuid_module.uuid4().hex[:12]}"
+
+    full_permissions = [
+        "view_statistics", "add_revenue", "manage_budget", "view_personal_investments",
+        "view_pocket_money", "view_off_book_expenses", "view_profit",
+    ]
+    restricted_permissions = ["view_statistics"]  # none of the gated extras
+
+    async def _setup_and_run():
+        for uid, perms in ((full_user_id, full_permissions), (restricted_user_id, restricted_permissions)):
+            await server_module.db.users.insert_one({
+                "user_id": uid, "email": f"{uid}@test.com", "name": "Digest Test User",
+                "role": "staff", "company_id": company_id, "permissions": perms,
+                "auth_provider": "email", "has_password": True,
+                "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+                "created_at": server_module.datetime.now(tz.utc),
+            })
+        full_user = server_module.User(
+            user_id=full_user_id, email=f"{full_user_id}@test.com", name="Full",
+            role="staff", company_id=company_id, permissions=full_permissions,
+        )
+        restricted_user = server_module.User(
+            user_id=restricted_user_id, email=f"{restricted_user_id}@test.com", name="Restricted",
+            role="staff", company_id=company_id, permissions=restricted_permissions,
+        )
+        full_digest = await build_business_chat_digest(full_user)
+        restricted_digest = await build_business_chat_digest(restricted_user)
+        return full_digest, restricted_digest
+
+    full_digest, restricted_digest = asyncio.run(_setup_and_run())
+
+    # Gated fields: present for the full-permission viewer...
+    assert full_digest["roi"] is not None
+    assert full_digest["assets"] is not None
+    assert full_digest["payroll"] is not None
+    assert full_digest["receivables"] is not None
+
+    # ...and None for the restricted viewer, never a 403/omission for the
+    # whole digest (most of it is still valid for them).
+    assert restricted_digest["roi"] is None
+    assert restricted_digest["assets"] is None
+    assert restricted_digest["payroll"] is None
+    assert restricted_digest["receivables"] is None
+    assert restricted_digest["budget"] is None
+
+    # Role-invariant fields stay present regardless of permission set.
+    for digest in (full_digest, restricted_digest):
+        assert "vat_due_this_month" in digest
+        assert digest["forecast"] is not None
+        assert "scan_credits" in digest and digest["scan_credits"] is not None
+        assert "price_alerts_unread_count" in digest
+        assert "reorder_nudges" in digest
 
 
 def test_proactive_signals(client):

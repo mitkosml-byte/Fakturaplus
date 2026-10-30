@@ -236,6 +236,42 @@ export interface BusinessChatDigest {
     total_overdue: number;
     overdue_count: number;
   } | null;
+  vat_due_this_month: number;
+  forecast: {
+    revenue: BusinessChatForecastSummary | null;
+    expenses: BusinessChatForecastSummary | null;
+  };
+  roi: {
+    total_personal_investment: number;
+    total_profit: number | null;
+    roi_percent: number | null;
+    investment_covered: boolean | null;
+  } | null;
+  assets: {
+    active_count: number;
+    total_net_book_value: number;
+    monthly_depreciation_total: number;
+  } | null;
+  payroll: {
+    total_employer_cost: number;
+    employee_count: number;
+  } | null;
+  scan_credits: {
+    total_remaining: number;
+    auto_reload_enabled: boolean;
+  };
+  price_alerts_unread_count: number;
+  reorder_nudges: {
+    item_name: string;
+    days_since_last: number;
+    median_days_between: number;
+  }[];
+}
+
+export interface BusinessChatForecastSummary {
+  next_month_predicted: number;
+  trend: 'increasing' | 'decreasing' | 'stable' | 'insufficient_data';
+  months_of_history: number;
 }
 
 export interface BusinessChatHistoryTurn {

@@ -290,6 +290,46 @@ export const translations: Translations = {
     bg: 'Бюджет: {percent}% от {limit} €',
     en: 'Budget: {percent}% of {limit} €',
   },
+  'askMyNumbers.vatDue': {
+    bg: 'ДДС за внасяне този месец: {amount} €',
+    en: 'VAT due this month: {amount} €',
+  },
+  'askMyNumbers.forecastRevenue': {
+    bg: 'Прогноза приходи следващ месец: {amount} €{note}',
+    en: 'Forecast revenue next month: {amount} €{note}',
+  },
+  'askMyNumbers.forecastExpenses': {
+    bg: 'Прогноза разходи следващ месец: {amount} €{note}',
+    en: 'Forecast expenses next month: {amount} €{note}',
+  },
+  'askMyNumbers.forecastInsufficientData': {
+    bg: ' (малко история - просто средно)',
+    en: ' (little history - plain average)',
+  },
+  'askMyNumbers.roi': {
+    bg: 'ROI: {roiPercent}% - вложени {investment} €',
+    en: 'ROI: {roiPercent}% - invested {investment} €',
+  },
+  'askMyNumbers.assets': {
+    bg: 'Активи: {count} бр., балансова стойност {value} €',
+    en: 'Assets: {count}, net book value {value} €',
+  },
+  'askMyNumbers.payroll': {
+    bg: 'Персонал: {count} служители, разход {amount} €',
+    en: 'Payroll: {count} employees, cost {amount} €',
+  },
+  'askMyNumbers.scanCredits': {
+    bg: 'Остават {count} скана',
+    en: '{count} scans remaining',
+  },
+  'askMyNumbers.priceAlerts': {
+    bg: '{count} непрочетени ценови сигнала',
+    en: '{count} unread price alerts',
+  },
+  'askMyNumbers.reorderNudge': {
+    bg: '{item} - обичайно се поръчва на всеки {days} дни, последно преди {since} дни',
+    en: '{item} - usually reordered every {days} days, last ordered {since} days ago',
+  },
   'askMyNumbers.genericError': {
     bg: 'Нещо се обърка. Опитай отново.',
     en: 'Something went wrong. Try again.',

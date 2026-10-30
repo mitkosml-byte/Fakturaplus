@@ -19,6 +19,11 @@ _eik_check_digit,
     _business_digest_period,
     _business_digest_top_expenses,
     _business_digest_receivables,
+    _business_digest_vat_due,
+    _business_digest_roi,
+    _business_digest_assets,
+    _business_digest_payroll,
+    _business_digest_scan_credits,
     _signal_unpaid_invoices,
     _signal_receivables,
     _signal_scan_credits,
@@ -34,25 +39,25 @@ _eik_check_digit,
     _team_channel_id,
 )
 import server
+# Comprehensive ask-my-numbers digest (2026-10 revision): reuses the real
+# forecast/price-alert/reorder-nudge route functions directly instead of
+# duplicating their logic a second time - none of the three takes a
+# Request or carries its own rate limiter, so calling them with just
+# current_user is safe (same cross-router reuse pattern exports.py
+# already uses for get_summary/get_supplier_statistics/get_item_statistics).
+from routers.price_tracking import get_price_alerts, get_reorder_nudges
+from routers.forecast import get_revenue_forecast, get_expense_forecast
 
 router = APIRouter(prefix="/api")
 
-@router.post("/ai/ask-my-numbers", response_model=BusinessChatResponse)
-@limiter.limit("15/minute")
-async def ask_my_numbers(
-    request: Request,
-    query: BusinessChatQuery,
-    current_user: User = Depends(get_current_user),
-):
-    require_permission(current_user, "view_statistics")
-    question = query.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Въпросът не може да бъде празен.")
-    if len(question) > 500:
-        raise HTTPException(status_code=400, detail="Въпросът е твърде дълъг.")
-    if not server.AI_FEATURES_ENABLED:
-        raise HTTPException(status_code=503, detail="AI функцията не е конфигурирана на сървъра.")
-
+async def build_business_chat_digest(current_user: User) -> dict:
+    """Everything ask_my_numbers grounds its answer in - split out from the
+    route handler so it's directly unit-testable (asyncio.run) without
+    needing AI_FEATURES_ENABLED on or a live Anthropic call. Every field a
+    role-sensitive permission gates returns None for a viewer who lacks
+    it, exactly like the single-purpose endpoint each duplicates/reuses -
+    never a 403 for the whole digest, since most of it is still valid for
+    them."""
     company_id, scope = await get_company_scope(current_user)
     visibility = get_financial_visibility(current_user)
 
@@ -103,30 +108,116 @@ async def ask_my_numbers(
     # What customers owe the business - the mirror image of unpaid_invoices
     # above, gated the same way the real /receivables/summary endpoint is
     # (add_revenue), same pattern as budget's manage_budget gate just above.
+    perms = set(current_user.permissions or [])
     receivables = None
-    if "add_revenue" in set(current_user.permissions or []):
+    if "add_revenue" in perms:
         receivables = await _business_digest_receivables(scope)
+
+    # VAT due this period - role-invariant (see _business_digest_vat_due).
+    vat_due_this_month = await _business_digest_vat_due(scope, this_month_start, this_month_end)
+
+    # Next-month forecast - reuses the real, already-visibility-correct
+    # endpoints rather than calling ForecastService a second time here.
+    def _compact_forecast(raw: dict) -> Optional[dict]:
+        if not raw or not raw.get("forecast"):
+            return None
+        next_month = raw["forecast"][0]
+        return {
+            "next_month_predicted": next_month["predicted_amount"],
+            "trend": raw["trend"],  # "increasing" | "decreasing" | "stable" | "insufficient_data"
+            "months_of_history": raw.get("months_of_history", 0),
+        }
+    revenue_forecast_raw = await get_revenue_forecast(months_ahead=1, current_user=current_user)
+    expense_forecast_raw = await get_expense_forecast(months_ahead=1, current_user=current_user)
+    forecast = {
+        "revenue": _compact_forecast(revenue_forecast_raw),
+        "expenses": _compact_forecast(expense_forecast_raw),
+    }
+
+    # ROI / personal-investment snapshot - gated by view_personal_investments,
+    # same permission the real /roi/analysis endpoint requires.
+    roi = None
+    if "view_personal_investments" in perms:
+        roi = await _business_digest_roi(company_id, scope, now, visibility)
+
+    # Fixed assets - gated by manage_budget, same as /assets/summary.
+    assets = None
+    if "manage_budget" in perms:
+        assets = await _business_digest_assets(scope)
+
+    # Payroll headcount/cost - gated by manage_budget, same as /payroll.
+    payroll = None
+    if "manage_budget" in perms:
+        payroll = await _business_digest_payroll(company_id, current_user.user_id, scope, this_month_start, this_month_end)
+
+    # Scan credits - no extra gate, same as GET /scan-credits (a shared
+    # company resource, not private financial data).
+    scan_credits = await _business_digest_scan_credits(company_id, current_user.user_id)
+
+    # Price alerts / reorder nudges - both already ungated beyond
+    # view_statistics (which the whole endpoint already requires), reused
+    # directly from their own routers rather than re-querying here.
+    price_alerts_raw = await get_price_alerts(current_user=current_user)
+    reorder_raw = await get_reorder_nudges(current_user=current_user)
+    price_alerts_unread_count = price_alerts_raw.get("unread_count", 0)
+    reorder_nudges = [
+        {"item_name": n["item_name"], "days_since_last": n["days_since_last"], "median_days_between": n["median_days_between"]}
+        for n in reorder_raw.get("nudges", [])[:5]
+    ]
 
     digest = {
         "this_month": {"label": this_month_start[:7], **this_month},
         "last_month": {"label": last_month_start[:7], **last_month},
         "top_expenses_this_month": top_expenses,
         "unpaid_invoices": unpaid,
+        "vat_due_this_month": vat_due_this_month,
+        "forecast": forecast,
         "budget": budget,
         "receivables": receivables,
+        "roi": roi,
+        "assets": assets,
+        "payroll": payroll,
+        "scan_credits": scan_credits,
+        "price_alerts_unread_count": price_alerts_unread_count,
+        "reorder_nudges": reorder_nudges,
     }
+    return digest
+
+@router.post("/ai/ask-my-numbers", response_model=BusinessChatResponse)
+@limiter.limit("15/minute")
+async def ask_my_numbers(
+    request: Request,
+    query: BusinessChatQuery,
+    current_user: User = Depends(get_current_user),
+):
+    require_permission(current_user, "view_statistics")
+    question = query.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Въпросът не може да бъде празен.")
+    if len(question) > 500:
+        raise HTTPException(status_code=400, detail="Въпросът е твърде дълъг.")
+    if not server.AI_FEATURES_ENABLED:
+        raise HTTPException(status_code=503, detail="AI функцията не е конфигурирана на сървъра.")
+
+    digest = await build_business_chat_digest(current_user)
+    company_id, _ = await get_company_scope(current_user)
 
     system_prompt = (
         "Ти си асистент на малък бизнес във Фактура+, който отговаря САМО въз основа на подадените му по-долу "
         "реални данни за тази фирма (JSON) и предходния разговор. Никога не отговаряй с измислени или закръглени "
-        "наизуст числа - цитирай само числата от JSON-а. Ако въпросът иска нещо извън тези данни (НАП, данъчни "
-        "декларации, конкуренти, обща информация извън тази фирма, или нещо, за което просто няма поле в JSON-а), "
-        "кажи ясно, че не разполагаш с тази информация, вместо да гадаеш. Предходните съобщения по-долу са "
-        "същият разговор - при последващ въпрос ('сравни с него', 'ами миналата седмица') използвай контекста им, "
-        "но винаги смятай с актуалните данни от ПОСЛЕДНИЯ JSON, не с число, спомена в по-ранен твой отговор. "
-        "Отговаряй кратко (до 4 изречения), на български, сумите винаги в евро (€). Профитът (profit) може да "
-        "е null - това означава, че този потребител няма права да го вижда; в такъв случай кажи, че печалбата "
-        "не е видима за него, вместо да я извеждаш или предполагаш."
+        "наизуст числа - цитирай само числата от JSON-а. Полетата, които са null (budget, receivables, roi, assets, "
+        "payroll), означават, че този потребител няма права да ги вижда - кажи му го ясно вместо да твърдиш, че "
+        "данните липсват изобщо. Ако въпросът иска нещо извън тези данни (НАП, данъчни декларации, конкуренти, "
+        "обща информация извън тази фирма, или нещо, за което просто няма поле в JSON-а), кажи ясно, че не "
+        "разполагаш с тази информация, вместо да гадаеш. forecast.*.trend == 'insufficient_data' означава, че "
+        "фирмата няма достатъчно история (под 4 месеца) за истинска прогноза - next_month_predicted е просто "
+        "средното от наличните месеци, не истинска тенденция; кажи го изрично, вместо да звучиш по-сигурен, "
+        "отколкото данните позволяват. Предходните съобщения по-долу са същият разговор - при последващ въпрос "
+        "('сравни с него', 'ами миналата седмица') използвай контекста им, но винаги смятай с актуалните данни от "
+        "ПОСЛЕДНИЯ JSON, не с число, спомена в по-ранен твой отговор. Отговаряй кратко (до 4 изречения), на "
+        "български, сумите винаги в евро (€). Профитът (profit) може да е null вътре в този JSON дори когато "
+        "самият обект не е null - това означава, че този потребител няма права да вижда печалбата конкретно; в "
+        "такъв случай кажи, че печалбата не е видима за него, вместо да я извеждаш или предполагаш."
     )
 
     # The client resends this chat's prior turns on every call since the
@@ -145,7 +236,7 @@ async def ask_my_numbers(
     try:
         response = await anthropic_client.messages.create(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
             model="claude-opus-5-5",
-            max_tokens=400,
+            max_tokens=500,
             system=system_prompt,
             messages=[*history_messages, {"role": "user", "content": prompt}],  # type: ignore[list-item]  # plain dicts matching MessageParam's shape; the SDK's union is stricter than a dict literal can satisfy
         )

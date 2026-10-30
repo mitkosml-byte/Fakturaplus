@@ -2326,6 +2326,102 @@ async def _business_digest_receivables(scope: dict) -> dict:
         "overdue_count": len(overdue),
     }
 
+async def _business_digest_vat_due(scope: dict, start_date: str, end_date: str) -> float:
+    """VAT owed to NAP for this period (sales VAT minus purchase VAT) -
+    same math as GET /statistics/summary's vat_to_pay. Role-invariant:
+    neither pocket_money nor off-book expenses feed into VAT, so this
+    needs no extra permission gate beyond the whole endpoint's own
+    view_statistics - a question like 'колко ДДС да платя?' had no field
+    to answer from at all before this."""
+    inv_start = datetime.fromisoformat(f"{start_date}T00:00:00+00:00")
+    inv_end = datetime.fromisoformat(f"{end_date}T23:59:59+00:00")
+    invoices = await db.invoices.find(
+        {**scope, "date": {"$gte": inv_start, "$lte": inv_end}}, {"_id": 0, "vat_amount": 1}
+    ).to_list(10000)
+    revenues = await db.daily_revenue.find(
+        {**scope, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0, "fiscal_revenue": 1, "vat_rate_percent": 1}
+    ).to_list(10000)
+    total_invoice_vat = sum(i.get("vat_amount", 0) for i in invoices)
+    fiscal_vat = sum(
+        r.get("fiscal_revenue", 0) * r.get("vat_rate_percent", 20.0) / (100 + r.get("vat_rate_percent", 20.0))
+        for r in revenues
+        if r.get("vat_rate_percent", 20.0) > 0
+    )
+    return round(fiscal_vat - total_invoice_vat, 2)
+
+async def _business_digest_roi(company_id: Optional[str], scope: dict, now: datetime, visibility: dict) -> dict:
+    """Current month's ROI snapshot - same math as GET /roi/analysis,
+    duplicated here rather than called directly since that endpoint takes
+    a Request for its own rate limiter (ask_my_numbers already has its
+    own, separate one). Gated by view_personal_investments at the call
+    site, same as the real endpoint; profit/roi_percent/investment_covered
+    are independently null-able by view_profit within that, also matching
+    the real endpoint's own redaction."""
+    target_month, target_year = now.month, now.year
+    period_start = f"{target_year}-{target_month:02d}-01"
+    period_end = f"{target_year + 1}-01-01" if target_month == 12 else f"{target_year}-{target_month + 1:02d}-01"
+
+    personal_expenses = await db.personal_expenses.find({
+        "company_id": company_id, "period_month": target_month, "period_year": target_year
+    }, {"_id": 0, "amount": 1}).to_list(1000) if company_id else []
+    total_personal = sum(e.get("amount", 0) for e in personal_expenses)
+
+    revenues = await db.daily_revenue.find({
+        **scope, "date": {"$gte": period_start, "$lt": period_end}
+    }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
+    effective_pocket_money = sum(r.get("pocket_money", 0) for r in revenues) if visibility["pocket_money"] else 0
+    total_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues) + effective_pocket_money
+
+    invoices = await db.invoices.find({
+        **scope, "date": {
+            "$gte": datetime.fromisoformat(period_start + "T00:00:00+00:00"),
+            "$lt": datetime.fromisoformat(period_end + "T00:00:00+00:00"),
+        }
+    }, {"_id": 0, "total_amount": 1}).to_list(1000)
+    expenses = await db.expenses.find({
+        **scope, "date": {"$gte": period_start, "$lt": period_end}
+    }, {"_id": 0, "amount": 1}).to_list(1000)
+    effective_off_book_expense = sum(e.get("amount", 0) for e in expenses) if visibility["off_book_expenses"] else 0
+    total_expense = sum(i.get("total_amount", 0) for i in invoices) + effective_off_book_expense
+    total_profit = total_revenue - total_expense
+    roi_percent = (total_profit / total_personal * 100) if total_personal > 0 else (0 if total_profit <= 0 else 100)
+
+    return {
+        "total_personal_investment": round(total_personal, 2),
+        "total_profit": round(total_profit, 2) if visibility["profit"] else None,
+        "roi_percent": round(roi_percent, 1) if visibility["profit"] else None,
+        "investment_covered": (total_profit >= total_personal) if visibility["profit"] else None,
+    }
+
+async def _business_digest_assets(scope: dict) -> dict:
+    """Same aggregation as GET /assets/summary."""
+    assets = await db.assets.find(scope, {"_id": 0}).to_list(1000)
+    enriched = [enrich_asset_with_depreciation(a) for a in assets]
+    active = [a for a in enriched if a["status"] != "disposed"]
+    return {
+        "active_count": len(active),
+        "total_net_book_value": round(sum(a["net_book_value"] for a in active), 2),
+        "monthly_depreciation_total": round(sum(a["monthly_depreciation"] for a in active if a["status"] == "active"), 2),
+    }
+
+async def _business_digest_payroll(company_id: Optional[str], user_id: str, scope: dict, start_date: str, end_date: str) -> dict:
+    """This period's payroll cost (already folded into expenses above) plus
+    a headcount, for 'колко служители имам'/'колко ми струват заплатите'
+    style questions."""
+    total_cost = await get_payroll_cost_for_period(company_id, user_id, start_date, end_date)
+    employee_count = await db.employees.count_documents({**scope, "active": True})
+    return {"total_employer_cost": round(total_cost, 2), "employee_count": employee_count}
+
+async def _business_digest_scan_credits(company_id: Optional[str], user_id: str) -> dict:
+    """No extra permission gate - same as GET /scan-credits, visible to
+    any authenticated team member since it's a shared company resource,
+    not private financial data."""
+    summary = await scan_credit_service.get_balance_summary(company_id, user_id)
+    return {
+        "total_remaining": summary["free_remaining"] + summary["purchased_balance"],
+        "auto_reload_enabled": summary.get("auto_reload_enabled", False),
+    }
+
 class ChatHistoryTurn(BaseModel):
     role: Literal["user", "assistant"]
     text: str

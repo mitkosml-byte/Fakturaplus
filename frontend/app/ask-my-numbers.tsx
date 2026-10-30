@@ -223,6 +223,72 @@ export default function AskMyNumbersScreen() {
                                 .replace('{limit}', d.budget.expense_limit.toFixed(2))}
                             </Text>
                           )}
+
+                          <Text style={styles.digestRow}>
+                            {t('askMyNumbers.vatDue').replace('{amount}', d.vat_due_this_month.toFixed(2))}
+                          </Text>
+
+                          {d.forecast.revenue && (
+                            <Text style={styles.digestRow}>
+                              {t('askMyNumbers.forecastRevenue')
+                                .replace('{amount}', d.forecast.revenue.next_month_predicted.toFixed(2))
+                                .replace('{note}', d.forecast.revenue.trend === 'insufficient_data' ? t('askMyNumbers.forecastInsufficientData') : '')}
+                            </Text>
+                          )}
+                          {d.forecast.expenses && (
+                            <Text style={styles.digestRow}>
+                              {t('askMyNumbers.forecastExpenses')
+                                .replace('{amount}', d.forecast.expenses.next_month_predicted.toFixed(2))
+                                .replace('{note}', d.forecast.expenses.trend === 'insufficient_data' ? t('askMyNumbers.forecastInsufficientData') : '')}
+                            </Text>
+                          )}
+
+                          {d.roi && (
+                            <Text style={styles.digestRow}>
+                              {t('askMyNumbers.roi')
+                                .replace('{roiPercent}', d.roi.roi_percent === null ? '—' : String(d.roi.roi_percent))
+                                .replace('{investment}', d.roi.total_personal_investment.toFixed(2))}
+                            </Text>
+                          )}
+
+                          {d.assets && (
+                            <Text style={styles.digestRow}>
+                              {t('askMyNumbers.assets')
+                                .replace('{count}', String(d.assets.active_count))
+                                .replace('{value}', d.assets.total_net_book_value.toFixed(2))}
+                            </Text>
+                          )}
+
+                          {d.payroll && (
+                            <Text style={styles.digestRow}>
+                              {t('askMyNumbers.payroll')
+                                .replace('{count}', String(d.payroll.employee_count))
+                                .replace('{amount}', d.payroll.total_employer_cost.toFixed(2))}
+                            </Text>
+                          )}
+
+                          <Text style={styles.digestRow}>
+                            {t('askMyNumbers.scanCredits').replace('{count}', String(d.scan_credits.total_remaining))}
+                          </Text>
+
+                          {d.price_alerts_unread_count > 0 && (
+                            <Text style={styles.digestRow}>
+                              {t('askMyNumbers.priceAlerts').replace('{count}', String(d.price_alerts_unread_count))}
+                            </Text>
+                          )}
+
+                          {d.reorder_nudges.length > 0 && (
+                            <View style={styles.digestSection}>
+                              {d.reorder_nudges.map((n, i) => (
+                                <Text key={`${n.item_name}-${i}`} style={styles.digestRow}>
+                                  {t('askMyNumbers.reorderNudge')
+                                    .replace('{item}', n.item_name)
+                                    .replace('{days}', String(n.median_days_between))
+                                    .replace('{since}', String(n.days_since_last))}
+                                </Text>
+                              ))}
+                            </View>
+                          )}
                         </View>
                       </View>
                     </View>
