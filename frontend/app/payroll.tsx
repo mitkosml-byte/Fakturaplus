@@ -33,6 +33,7 @@ const emptyEmployeeForm = () => ({
   agreement_type: 'gross' as PayrollAgreementType,
   food_vouchers: '',
   additional_insurance: '',
+  linked_user_id: null as string | null,
 });
 
 export default function PayrollScreen() {
@@ -51,6 +52,10 @@ export default function PayrollScreen() {
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm());
+  // Optional link from this payroll record to the SAME person's own app
+  // account, so work-schedule can cross-check a shift against their
+  // already-recorded leave. Loaded once, used only to populate the picker.
+  const [directory, setDirectory] = useState<{ user_id: string; name: string; picture: string | null }[]>([]);
 
   const [payrollModalVisible, setPayrollModalVisible] = useState(false);
   const [payrollEmployee, setPayrollEmployee] = useState<Employee | null>(null);
@@ -76,14 +81,16 @@ export default function PayrollScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const [employeesData, entriesData, ratesData] = await Promise.all([
+      const [employeesData, entriesData, ratesData, directoryData] = await Promise.all([
         api.getEmployees(),
         api.getPayrollEntries({ month: periodMonth, year: periodYear }),
         api.getPayrollRates(),
+        api.getCompanyDirectory(),
       ]);
       setEmployees(employeesData);
       setEntries(entriesData);
       setRates(ratesData);
+      setDirectory(directoryData);
     } catch (error) {
       console.error('Error loading payroll data:', error);
     } finally {
@@ -124,6 +131,7 @@ export default function PayrollScreen() {
       agreement_type: emp.agreement_type,
       food_vouchers: emp.food_vouchers ? String(emp.food_vouchers) : '',
       additional_insurance: emp.additional_insurance ? String(emp.additional_insurance) : '',
+      linked_user_id: emp.linked_user_id || null,
     });
     setEmployeeModalVisible(true);
   };
@@ -140,6 +148,7 @@ export default function PayrollScreen() {
       agreement_type: employeeForm.agreement_type,
       food_vouchers: parseFloat(employeeForm.food_vouchers) || 0,
       additional_insurance: parseFloat(employeeForm.additional_insurance) || 0,
+      linked_user_id: employeeForm.linked_user_id,
     };
     try {
       if (editingEmployee) {
@@ -500,6 +509,30 @@ export default function PayrollScreen() {
                 </View>
               </View>
 
+              <Text style={styles.inputLabel}>{t('payroll.linkedAccount')}</Text>
+              <Text style={styles.linkedAccountHint}>{t('payroll.linkedAccountHint')}</Text>
+              <View style={styles.linkChipRow}>
+                <TouchableOpacity
+                  style={[styles.linkChip, !employeeForm.linked_user_id && styles.linkChipActive]}
+                  onPress={() => setEmployeeForm((p) => ({ ...p, linked_user_id: null }))}
+                >
+                  <Text style={[styles.linkChipText, !employeeForm.linked_user_id && styles.linkChipTextActive]}>
+                    {t('payroll.noLinkedAccount')}
+                  </Text>
+                </TouchableOpacity>
+                {directory.map((d) => (
+                  <TouchableOpacity
+                    key={d.user_id}
+                    style={[styles.linkChip, employeeForm.linked_user_id === d.user_id && styles.linkChipActive]}
+                    onPress={() => setEmployeeForm((p) => ({ ...p, linked_user_id: d.user_id }))}
+                  >
+                    <Text style={[styles.linkChipText, employeeForm.linked_user_id === d.user_id && styles.linkChipTextActive]}>
+                      {d.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <View style={styles.modalButtons}>
                 <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setEmployeeModalVisible(false)}>
                   <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
@@ -759,6 +792,12 @@ const styles = StyleSheet.create({
   agreementChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.background, alignItems: 'center' },
   agreementChipActive: { backgroundColor: COLORS.primary },
   agreementChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  linkedAccountHint: { fontSize: 11, color: COLORS.textMuted, marginBottom: 8 },
+  linkChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  linkChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: COLORS.background },
+  linkChipActive: { backgroundColor: COLORS.primary },
+  linkChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  linkChipTextActive: { color: 'white' },
   agreementChipTextActive: { color: 'white' },
   attachButton: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, alignSelf: 'flex-start' },
   attachButtonText: { fontSize: 13, color: COLORS.primary, fontWeight: '500' },

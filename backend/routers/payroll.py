@@ -61,10 +61,18 @@ async def update_payroll_rates(request: Request, current_user: User = Depends(ge
 
     return await get_payroll_rates_dict(company_id)
 
+async def _validate_linked_user_id(linked_user_id: Optional[str], company_id: Optional[str], scope: dict) -> None:
+    if linked_user_id is None:
+        return
+    member = await server.db.users.find_one({"user_id": linked_user_id, **scope}, {"_id": 0, "user_id": 1})
+    if not member:
+        raise HTTPException(status_code=404, detail="Избраният потребител не е от вашата фирма")
+
 @router.post("/employees", response_model=Employee)
 async def create_employee(employee: EmployeeCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
+    await _validate_linked_user_id(employee.linked_user_id, company_id, scope)
 
     employee_obj = Employee(user_id=current_user.user_id, company_id=company_id, **employee.model_dump())
     await server.db.employees.insert_one(employee_obj.model_dump())
@@ -90,7 +98,9 @@ async def get_employees(active_only: bool = False, current_user: User = Depends(
 async def update_employee(employee_id: str, update: EmployeeUpdate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
-    _, scope = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
+    if "linked_user_id" in update_data:
+        await _validate_linked_user_id(update_data["linked_user_id"], company_id, scope)
     result = await server.db.employees.update_one({"id": employee_id, **scope}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")

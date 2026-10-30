@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -1120,6 +1120,30 @@ class ApiService {
 
   async updatePayrollRates(rates: Partial<PayrollRates>): Promise<PayrollRates> {
     return this.fetch('/payroll/rates', { method: 'PUT', body: JSON.stringify(rates) });
+  }
+
+  async createShift(shift: WorkShiftCreate): Promise<WorkShift> {
+    return this.fetch('/schedule/shifts', { method: 'POST', body: JSON.stringify(shift) });
+  }
+
+  async getShiftOccurrences(start: string, end: string, userId?: string): Promise<{ occurrences: ShiftOccurrence[] }> {
+    const query = new URLSearchParams({ start, end });
+    if (userId) query.set('user_id', userId);
+    return this.fetch(`/schedule/shifts?${query.toString()}`);
+  }
+
+  async updateShift(id: string, update: Partial<Omit<WorkShiftCreate, 'user_id'>>): Promise<WorkShift> {
+    return this.fetch(`/schedule/shifts/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteShift(id: string): Promise<void> {
+    await this.fetch(`/schedule/shifts/${id}`, { method: 'DELETE' });
+  }
+
+  async getScheduleSummary(start: string, end: string, userId?: string): Promise<ScheduleSummary> {
+    const query = new URLSearchParams({ start, end });
+    if (userId) query.set('user_id', userId);
+    return this.fetch(`/schedule/summary?${query.toString()}`);
   }
 
   async previewPayroll(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number }): Promise<PayrollBreakdown> {

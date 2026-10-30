@@ -3115,7 +3115,7 @@ class PayrollAgreementType(str, Enum):
 
 class Employee(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
+    user_id: str  # who CREATED/owns this payroll record (scope field, see simple_scope_query) - not the employee's own login
     company_id: Optional[str] = None
     name: str
     position: Optional[str] = None
@@ -3125,6 +3125,13 @@ class Employee(BaseModel):
     food_vouchers: float = 0  # ваучери за храна, месечно
     additional_insurance: float = 0  # ДДЗО, месечно
     active: bool = True
+    # Optional link to this SAME person's actual app account (a company
+    # member with their own login), distinct from the `user_id` field
+    # above. Lets the work-schedule feature cross-check a shift against
+    # this employee's already-recorded leave - an Employee payroll record
+    # doesn't require a login at all (e.g. kitchen staff who never use the
+    # app), so this stays optional rather than merging the two identities.
+    linked_user_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class EmployeeCreate(BaseModel):
@@ -3135,6 +3142,7 @@ class EmployeeCreate(BaseModel):
     agreement_type: PayrollAgreementType = PayrollAgreementType.GROSS
     food_vouchers: float = 0
     additional_insurance: float = 0
+    linked_user_id: Optional[str] = None
 
 class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
@@ -3145,6 +3153,7 @@ class EmployeeUpdate(BaseModel):
     food_vouchers: Optional[float] = None
     additional_insurance: Optional[float] = None
     active: Optional[bool] = None
+    linked_user_id: Optional[str] = None
 
 class PayrollRates(BaseModel):
     company_id: str
@@ -3396,6 +3405,119 @@ async def _get_employee_for_company(employee_id: str, company_id: Optional[str],
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
     return employee
 
+
+# ===================== WORK SCHEDULE / РАБОТЕН ГРАФИК =====================
+# A shift is assigned to a real team-member account (user_id - someone who
+# can log in and see "their own shifts"), not to the separate payroll-only
+# Employee record above, which doesn't require a login at all. The two are
+# cross-referenced only for the leave-conflict check, via Employee's
+# optional linked_user_id.
+
+WORK_SHIFT_REPEAT_PATTERNS = ("none", "daily", "weekly", "monthly")
+# A recurring series must still end somewhere - "repeat every Monday
+# forever" has no natural stopping point to show a manager, and an
+# unbounded series would make every future query scan further back in
+# time for no benefit. Capped well past repeat_until so a reasonable
+# multi-month schedule is never silently truncated.
+WORK_SHIFT_MAX_HORIZON_DAYS = 400
+
+class WorkShiftCreate(BaseModel):
+    user_id: str
+    date: str  # "YYYY-MM-DD" - the anchor date (first/only occurrence)
+    start_time: str  # "HH:MM"
+    end_time: str  # "HH:MM" - may be earlier than start_time for an overnight shift
+    repeat_pattern: str = "none"  # "none" | "daily" | "weekly" | "monthly"
+    repeat_until: Optional[str] = None  # required when repeat_pattern != "none"
+    hourly_rate: Optional[float] = None
+    note: Optional[str] = None
+
+class WorkShiftUpdate(BaseModel):
+    date: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    repeat_pattern: Optional[str] = None
+    repeat_until: Optional[str] = None
+    hourly_rate: Optional[float] = None
+    note: Optional[str] = None
+
+class WorkShift(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    user_id: str
+    created_by: str
+    date: str
+    start_time: str
+    end_time: str
+    repeat_pattern: str = "none"
+    repeat_until: Optional[str] = None
+    hourly_rate: Optional[float] = None
+    note: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+def _shift_hours(start_time: str, end_time: str) -> float:
+    """Duration of one occurrence in hours. end_time < start_time means an
+    overnight shift (e.g. 22:00-06:00), not a negative-length mistake."""
+    sh, sm = (int(x) for x in start_time.split(":"))
+    eh, em = (int(x) for x in end_time.split(":"))
+    minutes = (eh * 60 + em) - (sh * 60 + sm)
+    if minutes <= 0:
+        minutes += 24 * 60
+    return round(minutes / 60, 2)
+
+def _expand_shift_occurrences(shift: dict, range_start: str, range_end: str) -> List[str]:
+    """Concrete calendar dates (within [range_start, range_end]) this shift
+    template actually falls on. A 'none' shift occurs exactly once, on its
+    own date. A recurring one repeats daily/weekly/monthly from that date
+    up to repeat_until (or the query window's end, whichever is sooner -
+    and never past WORK_SHIFT_MAX_HORIZON_DAYS out, regardless of
+    repeat_until, so one series can't make a single list call scan years
+    of dates)."""
+    anchor = date.fromisoformat(shift["date"])
+    window_start = date.fromisoformat(range_start)
+    window_end = date.fromisoformat(range_end)
+    series_end = min(window_end, anchor + timedelta(days=WORK_SHIFT_MAX_HORIZON_DAYS))
+    if shift.get("repeat_until"):
+        series_end = min(series_end, date.fromisoformat(shift["repeat_until"]))
+
+    pattern = shift.get("repeat_pattern", "none")
+    if pattern == "none":
+        return [anchor.isoformat()] if window_start <= anchor <= window_end else []
+
+    occurrences = []
+    cursor = anchor
+    while cursor <= series_end:
+        if cursor >= window_start:
+            occurrences.append(cursor.isoformat())
+        if pattern == "daily":
+            cursor = cursor + timedelta(days=1)
+        elif pattern == "weekly":
+            cursor = cursor + timedelta(days=7)
+        elif pattern == "monthly":
+            y, m = _ym_add(cursor.year, cursor.month, 1)
+            # Same 1-28 simplification RecurringExpense's day_of_month
+            # already relies on, to sidestep "Feb 30th" overflow.
+            cursor = date(y, m, min(anchor.day, 28))
+        else:
+            break
+    return occurrences
+
+async def _leave_conflict_for(company_id: Optional[str], user_id: str, occ_date: str) -> Optional[dict]:
+    """Whether this team member already has recorded leave covering
+    occ_date, by way of an Employee payroll record explicitly linked to
+    their account (linked_user_id) - returns None (no conflict data, not
+    "no conflict") when no such link exists, same soft-skip the proactive
+    signals engine uses elsewhere for a permission/data gap."""
+    if not company_id:
+        return None
+    employee = await db.employees.find_one(
+        {"company_id": company_id, "linked_user_id": user_id}, {"_id": 0, "id": 1}
+    )
+    if not employee:
+        return None
+    return await db.employee_leave.find_one(
+        {"company_id": company_id, "employee_id": employee["id"], "start_date": {"$lte": occ_date}, "end_date": {"$gte": occ_date}},
+        {"_id": 0},
+    )
 
 
 
@@ -4090,6 +4212,10 @@ async def create_indexes():
         # Employee holiday-work / leave tracking
         await db.employee_holiday_work.create_index([("company_id", 1), ("date", 1)])
         await db.employee_leave.create_index([("company_id", 1), ("start_date", 1), ("end_date", 1)])
+        await db.employees.create_index([("company_id", 1), ("linked_user_id", 1)], sparse=True)
+
+        # Work schedule
+        await db.work_shifts.create_index([("company_id", 1), ("user_id", 1)])
 
         # Scan credits (balance doc is keyed by its own scope _id already;
         # auto_reload_subscription_id is looked up by the Stripe webhook)
@@ -4124,6 +4250,8 @@ from routers import budget
 app.include_router(budget.router)
 from routers import payroll
 app.include_router(payroll.router)
+from routers import schedule
+app.include_router(schedule.router)
 from routers import assets
 app.include_router(assets.router)
 

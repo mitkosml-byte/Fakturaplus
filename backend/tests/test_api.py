@@ -1450,6 +1450,138 @@ def test_reorder_nudges_weighted_by_business_impact():
     assert expensive["avg_order_value"] == 500.0
 
 
+def test_work_schedule_monthly_recurrence_expansion():
+    """Direct unit test for _expand_shift_occurrences' monthly branch - the
+    trickiest one (month-length edge cases), isolated from any DB call.
+    Anchored on the 30th: every later occurrence lands on the 28th (same
+    min(day, 28) simplification RecurringExpense's day_of_month already
+    uses), not on a day that doesn't exist in February."""
+    import server as server_module
+
+    shift = {"date": "2026-01-30", "repeat_pattern": "monthly", "repeat_until": "2026-04-30"}
+    dates = server_module._expand_shift_occurrences(shift, "2026-01-01", "2026-12-31")
+    assert dates == ["2026-01-30", "2026-02-28", "2026-03-28", "2026-04-28"]
+
+    # A query window narrower than the series only returns what falls
+    # inside it - the series itself isn't truncated by this call.
+    narrow = server_module._expand_shift_occurrences(shift, "2026-02-01", "2026-03-31")
+    assert narrow == ["2026-02-28", "2026-03-28"]
+
+    # Overnight shift - end_time before start_time means it crosses
+    # midnight, not a negative/zero-length mistake.
+    assert server_module._shift_hours("22:00", "06:00") == 8.0
+    assert server_module._shift_hours("09:00", "17:30") == 8.5
+
+
+def test_work_schedule(client):
+    """Work schedule (new feature): manage_budget creates/edits shifts for
+    any team member; a plain staff member - even scheduled themselves -
+    only ever sees their OWN occurrences, no matter what user_id they
+    query with. A leave conflict is only ever flagged once an Employee
+    payroll record is explicitly linked to that teammate's account
+    (linked_user_id) - before that link exists, the flag is simply never
+    set, never a crash or a false negative/positive."""
+    owner = h(STATE["owner_token"])
+
+    staff_email = f"master_schedstaff_{TS}@test.com"
+    r = client.post("/api/auth/register", json={"name": "Sched Staff", "email": staff_email, "password": "Passw0rd1"})
+    assert r.status_code == 200
+    staff_token = r.json()["session_token"]
+    staff_id = r.json()["user"]["user_id"]
+    staff = h(staff_token)
+
+    r = client.post("/api/invitations", headers=owner, json={"email": staff_email, "role": "staff"})
+    assert r.status_code == 200
+    code = r.json()["invitation"]["code"]
+    r = client.post("/api/invitations/accept", headers=staff, json={"code": code})
+    assert r.status_code == 200
+
+    # Manager creates a recurring weekly shift for the staff member.
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": staff_id, "date": "2026-09-07", "start_time": "09:00", "end_time": "17:00",
+        "repeat_pattern": "weekly", "repeat_until": "2026-09-28", "hourly_rate": 10,
+    })
+    assert r.status_code == 200, r.text
+    shift_id = r.json()["id"]
+
+    # Expands to 4 weekly occurrences within September.
+    r = client.get("/api/schedule/shifts?start=2026-09-01&end=2026-09-30", headers=owner)
+    assert r.status_code == 200, r.text
+    occ = r.json()["occurrences"]
+    assert len(occ) == 4
+    assert all(o["hours"] == 8 for o in occ)
+    assert all(o["user_name"] == "Sched Staff" for o in occ)
+    assert all(o["leave_conflict"] is False for o in occ)
+
+    # Plain staff lacks manage_budget -> can't create a shift at all.
+    r = client.post("/api/schedule/shifts", headers=staff, json={
+        "user_id": staff_id, "date": "2026-09-07", "start_time": "09:00", "end_time": "17:00",
+    })
+    assert r.status_code == 403
+
+    # Plain staff CAN see their own occurrences - no manage_budget needed
+    # to view your own schedule, same as every other self-facing field.
+    r = client.get("/api/schedule/shifts?start=2026-09-01&end=2026-09-30", headers=staff)
+    assert r.status_code == 200
+    assert len(r.json()["occurrences"]) == 4
+
+    # Asking for someone else's schedule as plain staff is silently
+    # narrowed to their own - never a 403, never someone else's real data.
+    r = client.get(f"/api/schedule/shifts?start=2026-09-01&end=2026-09-30&user_id={STATE['owner_id']}", headers=staff)
+    assert r.status_code == 200
+    assert all(o["user_id"] == staff_id for o in r.json()["occurrences"])
+
+    # Hourly summary: 4 shifts * 8h * 10 €/h.
+    r = client.get("/api/schedule/summary?start=2026-09-01&end=2026-09-30", headers=staff)
+    assert r.status_code == 200
+    summary = r.json()
+    assert summary["total_hours"] == 32
+    assert summary["estimated_pay"] == 320
+    assert summary["shift_count"] == 4
+
+    # Link a payroll Employee record to this staff member, then record
+    # leave overlapping one of the already-scheduled occurrences - that
+    # SAME occurrence must now flag a conflict, no re-creation needed.
+    r = client.post("/api/employees", headers=owner, json={
+        "name": "Sched Staff", "base_salary": 1500, "linked_user_id": staff_id,
+    })
+    assert r.status_code == 200, r.text
+    employee_id = r.json()["id"]
+
+    r = client.post("/api/employees/leave", headers=owner, json={
+        "employee_id": employee_id, "leave_type": "paid", "start_date": "2026-09-14", "end_date": "2026-09-14",
+    })
+    assert r.status_code == 200, r.text
+
+    r = client.get("/api/schedule/shifts?start=2026-09-01&end=2026-09-30", headers=owner)
+    conflicts = [o for o in r.json()["occurrences"] if o["leave_conflict"]]
+    assert len(conflicts) == 1
+    assert conflicts[0]["date"] == "2026-09-14"
+
+    # A one-off overnight shift (end before start = crosses midnight).
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": staff_id, "date": "2026-10-01", "start_time": "22:00", "end_time": "06:00",
+    })
+    assert r.status_code == 200
+    r = client.get("/api/schedule/shifts?start=2026-10-01&end=2026-10-01", headers=owner)
+    assert r.json()["occurrences"][0]["hours"] == 8
+
+    # Editing/deleting still requires manage_budget, regardless of whose shift it is.
+    r = client.put(f"/api/schedule/shifts/{shift_id}", headers=staff, json={"hourly_rate": 999})
+    assert r.status_code == 403
+    r = client.delete(f"/api/schedule/shifts/{shift_id}", headers=owner)
+    assert r.status_code == 200
+    r = client.delete(f"/api/schedule/shifts/{shift_id}", headers=owner)
+    assert r.status_code == 404
+
+    # A recurring shift with no end date is rejected outright.
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": staff_id, "date": "2026-09-07", "start_time": "09:00", "end_time": "17:00",
+        "repeat_pattern": "weekly",
+    })
+    assert r.status_code == 400
+
+
 def test_legacy_scope_consistency(client):
     """Module 1 audit finding: 40 endpoints built their own company_id
     lookup inline instead of the shared get_company_scope()/scope helper,

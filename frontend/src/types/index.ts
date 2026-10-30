@@ -541,6 +541,11 @@ export interface Employee {
   food_vouchers: number;
   additional_insurance: number;
   active: boolean;
+  // Optional link to this same person's own app account (a team member
+  // with their own login) - distinct from `user_id` above, which is who
+  // CREATED this payroll record. Used by the work-schedule feature to
+  // cross-check a shift against this employee's already-recorded leave.
+  linked_user_id?: string | null;
   created_at: string;
 }
 
@@ -552,6 +557,56 @@ export interface EmployeeCreate {
   agreement_type: PayrollAgreementType;
   food_vouchers?: number;
   additional_insurance?: number;
+  linked_user_id?: string | null;
+}
+
+export type ShiftRepeatPattern = 'none' | 'daily' | 'weekly' | 'monthly';
+
+export interface WorkShift {
+  id: string;
+  company_id: string;
+  user_id: string;
+  created_by: string;
+  date: string; // "YYYY-MM-DD" - anchor/first occurrence
+  start_time: string; // "HH:MM"
+  end_time: string; // "HH:MM" - may be before start_time (overnight shift)
+  repeat_pattern: ShiftRepeatPattern;
+  repeat_until?: string | null;
+  hourly_rate?: number | null;
+  note?: string | null;
+  created_at: string;
+}
+
+export interface WorkShiftCreate {
+  user_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  repeat_pattern?: ShiftRepeatPattern;
+  repeat_until?: string | null;
+  hourly_rate?: number | null;
+  note?: string | null;
+}
+
+export interface ShiftOccurrence {
+  shift_id: string;
+  user_id: string;
+  user_name: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  hours: number;
+  hourly_rate?: number | null;
+  note?: string | null;
+  repeat_pattern: ShiftRepeatPattern;
+  repeat_until?: string | null;
+  leave_conflict: boolean;
+}
+
+export interface ScheduleSummary {
+  total_hours: number;
+  estimated_pay: number;
+  shift_count: number;
 }
 
 export interface PayrollRates {

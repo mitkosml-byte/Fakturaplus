@@ -24,7 +24,7 @@ type CardDef = {
   icon: keyof typeof Ionicons.glyphMap;
   iconBg: string;
   iconColor: string;
-  route: '/calendar' | '/messages' | '/payroll' | '/employee-absences';
+  route: '/calendar' | '/messages' | '/payroll' | '/employee-absences' | '/work-schedule';
 };
 
 export default function TeamScreen() {
@@ -33,6 +33,19 @@ export default function TeamScreen() {
   const { hasPermission } = useAuth();
 
   const cards: CardDef[] = [
+    // Not permission-gated, unlike every other card here - a work
+    // schedule is relevant to EVERY team member (they see their own
+    // shifts even with no special permission at all), not just managers
+    // or team_collaboration holders.
+    {
+      key: 'schedule',
+      title: t('profile.workSchedule'),
+      subtitle: t('profile.workScheduleDesc'),
+      icon: 'time' as const,
+      iconBg: 'rgba(139, 92, 246, 0.15)',
+      iconColor: COLORS.primary,
+      route: '/work-schedule' as const,
+    },
     ...(hasPermission('team_collaboration')
       ? [{
           key: 'calendar',

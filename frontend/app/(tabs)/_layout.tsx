@@ -14,16 +14,19 @@ export default function TabsLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const { width } = useWindowDimensions();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
 
-  // The Team tab (Calendar/Messages/Payroll/Absences) only earns a slot in
-  // the bar for a viewer who can reach at least one of those - same two
-  // permissions that already gated each of them individually inside the
-  // old Profile menu. Left-to-right order of the tab bar, used to resolve
-  // which tab a swipe should land on and to know a swipe's direction
-  // relative to it - recomputed here (not a module-level constant) since
-  // it now depends on that permission check.
-  const showTeamTab = hasPermission('team_collaboration') || hasPermission('manage_budget');
+  // The Team tab (Calendar/Messages/Payroll/Absences/Work schedule) earns
+  // a slot in the bar for a viewer who can reach at least one of
+  // Calendar/Messages/Payroll/Absences (same two permissions gating each
+  // individually), OR who simply belongs to a company - Work schedule
+  // itself is self-visible to every team member (their own shifts), with
+  // no permission required, so the tab can't stay gated behind the
+  // others once that card exists. Left-to-right order of the tab bar,
+  // used to resolve which tab a swipe should land on and to know a
+  // swipe's direction relative to it - recomputed here (not a
+  // module-level constant) since it now depends on this check.
+  const showTeamTab = hasPermission('team_collaboration') || hasPermission('manage_budget') || !!user?.company_id;
   const TAB_ROUTES = useMemo(
     () => ['/', '/scan', '/invoices', '/stats', ...(showTeamTab ? ['/team'] : []), '/profile'],
     [showTeamTab]
@@ -169,7 +172,9 @@ export default function TabsLayout() {
             // Hides the tab from the bar (and from swipe, via TAB_ROUTES
             // above) without unmounting the route - a direct deep link to
             // /team still resolves, it just isn't advertised in the bar
-            // for a viewer with neither permission it needs.
+            // for a viewer showTeamTab is false for (effectively only
+            // someone with no active company at all, now that Work
+            // schedule makes the tab relevant to every company member).
             href: showTeamTab ? undefined : null,
             tabBarIcon: ({ color, focused }) => (
               <AnimatedTabIcon focused={focused}>
