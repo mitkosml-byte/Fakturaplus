@@ -8,6 +8,7 @@ import DateTimePickerModal from '../AppDateTimePicker';
 import { PressableScale } from '..';
 import { useTranslation } from '../../i18n';
 import { Invoice, VatTreatment } from '../../types';
+import { Avatar } from '../Avatar';
 import { COLORS } from '../../theme/colors';
 
 // Extracted from invoices.tsx (Module 1 audit finding #4). The single
@@ -22,6 +23,11 @@ const VAT_TREATMENT_OPTIONS: VatTreatment[] = [
 
 type Props = {
   invoice: Invoice | null;
+  // Who scanned/created this invoice - resolved by the parent screen from
+  // the company directory (invoice.user_id isn't a name/picture by
+  // itself). Undefined while that lookup is still loading, or if the
+  // creator no longer resolves to a known company member.
+  scannedBy?: { name: string; picture: string | null };
   onClose: () => void;
   editMode: boolean;
   onStartEdit: () => void;
@@ -65,7 +71,7 @@ type Props = {
 };
 
 export function InvoiceDetailModal({
-  invoice, onClose, editMode, onStartEdit, onCancelEdit, dateLocale, language,
+  invoice, scannedBy, onClose, editMode, onStartEdit, onCancelEdit, dateLocale, language,
   editSupplier, onChangeSupplier, editSupplierEik, onChangeSupplierEik,
   editInvoiceNumber, onChangeInvoiceNumber, editDate, onChangeEditDate,
   isEditDatePickerVisible, onOpenEditDatePicker, onCloseEditDatePicker,
@@ -273,6 +279,15 @@ export function InvoiceDetailModal({
                 <Text style={styles.detailSectionLabel}>{t('invoices.dateLabel')}</Text>
                 <Text style={styles.detailSectionValue}>{formatDate(invoice.date)}</Text>
               </View>
+              {scannedBy && (
+                <View style={styles.detailSection}>
+                  <Text style={styles.detailSectionLabel}>{t('invoices.scannedBy')}</Text>
+                  <View style={styles.scannedByRow}>
+                    <Avatar uri={scannedBy.picture} name={scannedBy.name} size={20} />
+                    <Text style={styles.detailSectionValue}>{scannedBy.name}</Text>
+                  </View>
+                </View>
+              )}
               <View style={styles.detailRow2}>
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.withoutVAT')}</Text>
@@ -668,6 +683,11 @@ const styles = StyleSheet.create({
   detailSectionValue: {
     fontSize: 16,
     color: 'white',
+  },
+  scannedByRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   detailRow2: {
     flexDirection: 'row',

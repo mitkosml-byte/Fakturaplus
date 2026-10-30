@@ -177,6 +177,21 @@ class ApiService {
     });
   }
 
+  async updateMyPicture(picture: string | null): Promise<{ picture: string | null }> {
+    return this.fetch('/auth/me/picture', {
+      method: 'PUT',
+      body: JSON.stringify({ picture }),
+    });
+  }
+
+  // Every company member's name+picture, nothing else - used to resolve
+  // identity (avatar) wherever a screen only has a user_id/name snapshot
+  // (calendar creators, audit log actors, past chat senders, invoices'
+  // scanner) rather than re-fetching per screen.
+  async getCompanyDirectory(): Promise<{ user_id: string; name: string; picture: string | null }[]> {
+    return this.fetch('/company/directory');
+  }
+
   async logout(): Promise<void> {
     await this.fetch('/auth/logout', { method: 'POST' });
   }

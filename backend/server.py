@@ -262,6 +262,9 @@ class ChangePassword(BaseModel):
     current_password: Optional[str] = None  # Не се изисква, ако акаунтът все още няма парола (напр. Google вход)
     new_password: str
 
+class UpdatePictureRequest(BaseModel):
+    picture: Optional[str] = None  # data: URI base64, same convention as invoice/asset/payroll images - null clears it
+
 class PasswordResetCode(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str

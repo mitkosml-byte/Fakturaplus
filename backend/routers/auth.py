@@ -38,6 +38,64 @@ router = APIRouter(prefix="/api")
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user.model_dump()
 
+# ~500KB raw after the ~4/3 base64 expansion - generous for a small square
+# avatar once the client has center-cropped/resized it (see the frontend
+# upload flow), but still a fixed, small cap regardless of what a client
+# actually sends - same data-URI-length-as-byte-size-proxy approach as
+# MAX_OCR_IMAGE_BASE64_CHARS in routers/scan_credits.py, scaled way down
+# since a profile picture (unlike an invoice scan) is fetched and rendered
+# everywhere this person's identity shows up, not read once by OCR.
+MAX_PICTURE_BASE64_CHARS = 700_000
+
+@router.put("/auth/me/picture")
+async def update_my_picture(data: UpdatePictureRequest, current_user: User = Depends(get_current_user)):
+    """Sets/replaces/clears the caller's own profile picture - the same
+    data-URI base64 convention already used for invoice/asset/payroll
+    images. Stored once on the user document; every other screen that
+    shows this person's identity (team list, chat, calendar, audit log,
+    "scanned by" on invoices) resolves it via GET /company/directory
+    rather than denormalizing a copy, so it updates everywhere the moment
+    it's changed here."""
+    picture = data.picture
+    if picture is not None:
+        if not picture.startswith("data:image/") or "," not in picture:
+            raise HTTPException(status_code=400, detail="Невалиден формат на снимката")
+        _, payload = picture.split(",", 1)
+        if len(payload) > MAX_PICTURE_BASE64_CHARS:
+            raise HTTPException(status_code=413, detail="Снимката е твърде голяма. Моля, използвайте по-малка снимка.")
+    await server.db.users.update_one({"user_id": current_user.user_id}, {"$set": {"picture": picture}})
+    return {"picture": picture}
+
+@router.get("/company/directory")
+async def get_company_directory(current_user: User = Depends(get_current_user)):
+    """Every company member's name + picture, nothing else - resolves
+    "who did this" wherever a document only ever stored a user_id/name
+    snapshot (invoices' scanner, calendar event creators, audit log
+    actors, chat senders no longer in the conversation's own member
+    list). Not gated beyond belonging to a company: a teammate's name is
+    already visible in half a dozen other places (invitations, audit log,
+    chat) with no extra permission check, and their current picture
+    alongside it carries no more sensitivity than that."""
+    if not current_user.company_id:
+        return []
+    users = await server.db.users.find(
+        {"company_id": current_user.company_id}, {"_id": 0, "user_id": 1, "name": 1, "picture": 1}
+    ).to_list(1000)
+    # An accountant with access to this company might currently be
+    # switched into a different client - same cross-reference as
+    # /auth/users and get_team_members, so a past action of theirs here
+    # still resolves to their real name/picture.
+    existing_ids = {u["user_id"] for u in users}
+    accountant_ids = await server.db.company_memberships.distinct(
+        "user_id", {"company_id": current_user.company_id, "role": "accountant"}
+    )
+    extra_ids = [uid for uid in accountant_ids if uid not in existing_ids]
+    if extra_ids:
+        users.extend(await server.db.users.find(
+            {"user_id": {"$in": extra_ids}}, {"_id": 0, "user_id": 1, "name": 1, "picture": 1}
+        ).to_list(1000))
+    return users
+
 @router.post("/auth/logout")
 async def logout(request: Request, response: Response):
     session_token = await get_session_token(request)

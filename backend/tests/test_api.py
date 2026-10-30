@@ -39,6 +39,42 @@ def test_auth(client):
     assert r.status_code == 200 and r.json()["role"] == "owner"
 
 
+def test_profile_picture_and_directory(client):
+    """PUT /auth/me/picture: validates format/size, persists, clearable.
+    GET /company/directory: every company member's name+picture - used to
+    resolve identity wherever a document only stores a user_id/name
+    snapshot (audit log, calendar, chat, invoices' "scanned by")."""
+    owner = h(STATE["owner_token"])
+
+    # Malformed/oversized payloads rejected before anything is persisted.
+    r = client.put("/api/auth/me/picture", headers=owner, json={"picture": "not-a-data-uri"})
+    assert r.status_code == 400
+    r = client.put("/api/auth/me/picture", headers=owner, json={"picture": "data:image/png;base64," + ("A" * 800_000)})
+    assert r.status_code == 413
+
+    small_picture = "data:image/png;base64," + ("A" * 100)
+    r = client.put("/api/auth/me/picture", headers=owner, json={"picture": small_picture})
+    assert r.status_code == 200 and r.json()["picture"] == small_picture
+
+    r = client.get("/api/auth/me", headers=owner)
+    assert r.json()["picture"] == small_picture
+
+    r = client.get("/api/company/directory", headers=owner)
+    assert r.status_code == 200
+    me = next(u for u in r.json() if u["user_id"] == STATE["owner_id"])
+    assert me["picture"] == small_picture
+    assert me["name"]
+
+    # Clearing it (picture: null) removes it again, everywhere it's resolved from.
+    r = client.put("/api/auth/me/picture", headers=owner, json={"picture": None})
+    assert r.status_code == 200 and r.json()["picture"] is None
+    r = client.get("/api/auth/me", headers=owner)
+    assert r.json()["picture"] is None
+    r = client.get("/api/company/directory", headers=owner)
+    me = next(u for u in r.json() if u["user_id"] == STATE["owner_id"])
+    assert me["picture"] is None
+
+
 def test_invoices(client):
     owner = h(STATE["owner_token"])
     r = client.post("/api/invoices", headers=owner, json={

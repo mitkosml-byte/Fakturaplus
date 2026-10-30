@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Image,
   ImageBackground,
   RefreshControl,
   Modal,
@@ -15,6 +14,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
+import * as ImagePicker from 'expo-image-picker';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
@@ -24,15 +25,31 @@ import { useTranslation, useLanguageStore, Language } from '../../src/i18n';
 import { api } from '../../src/services/api';
 import { Company, CompanyMembership } from '../../src/types';
 import { getRoleName as sharedGetRoleName, getRoleColor } from '../../src/utils/roles';
+import { Avatar } from '../../src/components/Avatar';
 import { COLORS } from '../../src/theme/colors';
 import { DURATION, EASING } from '../../src/theme/motion';
+
+// A profile picture is a small icon shown everywhere (team list, chat,
+// calendar, audit log) - not read for fine detail like an invoice scan,
+// so it's resized down hard before upload regardless of what the OS
+// picker/cropper handed back, keeping every user document's picture
+// field cheap to store and fetch.
+const AVATAR_TARGET_SIZE = 320;
+
+async function prepareAvatarImage(asset: ImagePicker.ImagePickerAsset): Promise<string> {
+  const context = ImageManipulator.manipulate(asset.uri).resize({ width: AVATAR_TARGET_SIZE, height: AVATAR_TARGET_SIZE });
+  const rendered = await context.renderAsync();
+  const saved = await rendered.saveAsync({ compress: 0.8, format: SaveFormat.JPEG, base64: true });
+  return `data:image/jpeg;base64,${saved.base64}`;
+}
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function ProfileScreen() {
   const { t } = useTranslation();
   const { language, setLanguage } = useLanguageStore();
-  const { user, logout, refreshUser, hasPermission, isOwner } = useAuth();
+  const { user, logout, refreshUser, setUser, hasPermission, isOwner } = useAuth();
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
@@ -185,6 +202,58 @@ export default function ProfileScreen() {
     } finally {
       setCreatingCompany(false);
     }
+  };
+
+  const handlePickAvatar = async () => {
+    // Gallery picker only (no camera-vs-gallery choice) - same tradeoff
+    // assets.tsx/payroll.tsx already accept, and it sidesteps the Alert
+    // utility's web fallback only properly handling a 2-button
+    // confirm/cancel, not a 3-way source picker.
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      base64: true,
+      quality: 1,
+    });
+    if (result.canceled || !result.assets[0]) return;
+
+    setUploadingAvatar(true);
+    try {
+      const dataUri = await prepareAvatarImage(result.assets[0]);
+      await api.updateMyPicture(dataUri);
+      setUser(user ? { ...user, picture: dataUri } : user);
+      await refreshUser();
+      Haptics.success();
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      Alert.alert(t('common.error'), t('profile.avatarUploadError'));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    Alert.alert(t('profile.removeAvatarTitle'), t('profile.removeAvatarConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          setUploadingAvatar(true);
+          try {
+            await api.updateMyPicture(null);
+            setUser(user ? { ...user, picture: null } : user);
+            await refreshUser();
+          } catch (error) {
+            console.error('Error removing avatar:', error);
+            Alert.alert(t('common.error'), t('profile.avatarUploadError'));
+          } finally {
+            setUploadingAvatar(false);
+          }
+        },
+      },
+    ]);
   };
 
   const handleLogout = () => {
@@ -471,15 +540,22 @@ export default function ProfileScreen() {
 
             {/* User Card */}
             <View style={styles.userCard}>
-              <View style={styles.avatarContainer}>
-                {user?.picture ? (
-                  <Image source={{ uri: user.picture }} style={styles.avatar} />
-                ) : (
-                  <View style={styles.avatarPlaceholder}>
-                    <Ionicons name="person" size={40} color={COLORS.primary} />
-                  </View>
-                )}
-              </View>
+              <TouchableOpacity
+                style={styles.avatarContainer}
+                onPress={handlePickAvatar}
+                onLongPress={user?.picture ? handleRemoveAvatar : undefined}
+                disabled={uploadingAvatar}
+                accessibilityLabel={t('profile.changeAvatar')}
+              >
+                <Avatar uri={user?.picture} name={user?.name} size={80} />
+                <View style={styles.avatarEditBadge}>
+                  {uploadingAvatar ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <Ionicons name="camera" size={14} color="white" />
+                  )}
+                </View>
+              </TouchableOpacity>
               <Text style={styles.userName}>{user?.name || t('role.user')}</Text>
               <Text style={styles.userEmail}>{user?.email || ''}</Text>
               <View style={styles.roleContainer}>
@@ -772,23 +848,23 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     marginBottom: 16,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    padding: 3,
+    borderRadius: 43,
     borderWidth: 3,
     borderColor: COLORS.primary,
   },
-  avatarPlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    justifyContent: 'center',
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: COLORS.primary,
+    borderWidth: 2,
+    borderColor: COLORS.surface,
     alignItems: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.primary,
+    justifyContent: 'center',
   },
   userName: {
     fontSize: 20,

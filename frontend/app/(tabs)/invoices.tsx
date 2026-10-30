@@ -110,6 +110,16 @@ export default function InvoicesScreen() {
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  // Invoice.user_id is who scanned/created it, but the invoice itself only
+  // ever stores that id - resolved to a name+picture via the company
+  // directory, same approach as calendar.tsx/audit-log.tsx, rather than
+  // adding a denormalized field to every invoice document.
+  const [pictureByUserId, setPictureByUserId] = useState<Record<string, { name: string; picture: string | null }>>({});
+  useEffect(() => {
+    api.getCompanyDirectory()
+      .then((dir) => setPictureByUserId(Object.fromEntries(dir.map((d) => [d.user_id, { name: d.name, picture: d.picture }]))))
+      .catch(() => {});
+  }, []);
   // Which of this invoice's items triggered a price-increase alert when it
   // was created - fetched lazily per invoice_id so the item rows can flag
   // "up X% from last purchase" without duplicating that comparison here.
@@ -829,6 +839,7 @@ export default function InvoicesScreen() {
       {/* Invoice Detail Modal */}
       <InvoiceDetailModal
         invoice={selectedInvoice}
+        scannedBy={selectedInvoice ? pictureByUserId[selectedInvoice.user_id] : undefined}
         onClose={() => setSelectedInvoice(null)}
         editMode={editMode}
         onStartEdit={() => selectedInvoice && startEditInvoice(selectedInvoice)}

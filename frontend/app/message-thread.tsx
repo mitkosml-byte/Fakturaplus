@@ -20,7 +20,7 @@ import { api } from '../src/services/api';
 import { Message } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter } from '../src/components';
+import { AccessDenied, ScreenEnter, Avatar } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -37,6 +37,12 @@ export default function MessageThreadScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // Messages only ever stored sender_name (a name snapshot), never a
+  // picture - resolved here from the company directory instead of adding
+  // a denormalized field to every message, so it always reflects whoever
+  // currently holds that user_id, including a sender who has since left
+  // the team channel's own member list.
+  const [pictureByUserId, setPictureByUserId] = useState<Record<string, string | null>>({});
 
   const listRef = useRef<FlatList<Message>>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -57,6 +63,9 @@ export default function MessageThreadScreen() {
   useFocusEffect(
     useCallback(() => {
       loadMessages();
+      api.getCompanyDirectory()
+        .then((dir) => setPictureByUserId(Object.fromEntries(dir.map((d) => [d.user_id, d.picture]))))
+        .catch(() => {});
       api.markConversationRead(conversationId).catch(() => {});
       intervalRef.current = setInterval(() => {
         loadMessages();
@@ -127,6 +136,9 @@ export default function MessageThreadScreen() {
                   const isMine = item.sender_id === user?.user_id;
                   return (
                     <View style={[styles.bubbleRow, isMine ? styles.bubbleRowMine : styles.bubbleRowTheirs]}>
+                      {!isMine && (
+                        <Avatar uri={pictureByUserId[item.sender_id]} name={item.sender_name} size={28} />
+                      )}
                       <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleTheirs]}>
                         {!isMine && <Text style={styles.bubbleSender}>{item.sender_name}</Text>}
                         <Text style={styles.bubbleText}>{item.text}</Text>
@@ -189,7 +201,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: 'bold', color: 'white', flex: 1, textAlign: 'center', marginHorizontal: 8 },
   emptyContainer: { alignItems: 'center', paddingVertical: 60 },
   emptyText: { fontSize: 14, color: COLORS.textMuted },
-  bubbleRow: { flexDirection: 'row', marginBottom: 10 },
+  bubbleRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginBottom: 10 },
   bubbleRowMine: { justifyContent: 'flex-end' },
   bubbleRowTheirs: { justifyContent: 'flex-start' },
   bubble: {

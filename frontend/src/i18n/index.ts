@@ -1550,7 +1550,23 @@ export const translations: Translations = {
     bg: 'Сигурни ли сте, че искате да излезете?',
     en: 'Are you sure you want to log out?',
   },
-  
+  'profile.changeAvatar': {
+    bg: 'Смяна на профилна снимка',
+    en: 'Change profile picture',
+  },
+  'profile.avatarUploadError': {
+    bg: 'Неуспешно качване на снимката. Опитайте отново.',
+    en: 'Failed to upload picture. Try again.',
+  },
+  'profile.removeAvatarTitle': {
+    bg: 'Премахване на снимката',
+    en: 'Remove picture',
+  },
+  'profile.removeAvatarConfirm': {
+    bg: 'Да премахнем ли текущата профилна снимка?',
+    en: 'Remove your current profile picture?',
+  },
+
   // Common
   'common.cancel': {
     bg: 'Отказ',
@@ -1763,6 +1779,10 @@ export const translations: Translations = {
   'invoices.dateLabel': {
     bg: 'Дата',
     en: 'Date',
+  },
+  'invoices.scannedBy': {
+    bg: 'Сканирано от',
+    en: 'Scanned by',
   },
   'invoices.vatPercent': {
     bg: 'ДДС (20%)',

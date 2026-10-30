@@ -2,7 +2,7 @@ export interface User {
   user_id: string;
   email: string;
   name: string;
-  picture?: string;
+  picture?: string | null;
   role: 'owner' | 'manager' | 'staff' | 'accountant';
   company_id?: string;
   permissions?: string[];

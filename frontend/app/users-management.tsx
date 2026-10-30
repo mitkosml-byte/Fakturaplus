@@ -32,7 +32,7 @@ import { ROLE_DEFAULT_PERMISSIONS, ConfigurableRole } from '../src/utils/permiss
 // ROLE_PERMISSIONS in backend/server.py) - never checklist-configurable -
 // so it's handled as a distinct branch wherever ConfigurableRole drives UI.
 type PickableRole = ConfigurableRole | 'owner';
-import { PermissionsChecklist, ScreenEnter, BottomSheet, RoleBadge, PressableScale } from '../src/components';
+import { PermissionsChecklist, ScreenEnter, BottomSheet, RoleBadge, PressableScale, Avatar } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -361,17 +361,7 @@ export default function UsersManagementScreen() {
                 <View key={user.user_id} style={styles.userCard}>
                   <View style={styles.userInfo}>
                     <View style={styles.avatarContainer}>
-                      {user.picture ? (
-                        <View style={styles.avatar}>
-                          <Text style={styles.avatarText}>
-                            {user.name?.charAt(0)?.toUpperCase() || '?'}
-                          </Text>
-                        </View>
-                      ) : (
-                        <View style={styles.avatar}>
-                          <Ionicons name="person" size={20} color="white" />
-                        </View>
-                      )}
+                      <Avatar uri={user.picture} name={user.name} size={40} />
                     </View>
                     <View style={styles.userDetails}>
                       <Text style={styles.userName}>{user.name}</Text>
@@ -827,19 +817,6 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     marginRight: 12,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
   },
   userDetails: {
     flex: 1,
