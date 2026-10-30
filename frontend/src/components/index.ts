@@ -28,3 +28,4 @@ export { PersonalWalletTeaser } from './PersonalWalletTeaser';
 export { WalletAlertPopup } from './WalletAlertPopup';
 export { MorningBriefingCard } from './MorningBriefingCard';
 export { Avatar } from './Avatar';
+export { SuggestionChips } from './SuggestionChips';

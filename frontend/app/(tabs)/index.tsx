@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -33,6 +33,7 @@ import { COLORS } from '../../src/theme/colors';
 import { PersonalExpenseModal } from '../../src/components/home/PersonalExpenseModal';
 import { RevenueModal } from '../../src/components/home/RevenueModal';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
+import { getDescriptionSuggestions } from '../../src/utils/expenseSuggestions';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -121,6 +122,16 @@ export default function HomeScreen() {
   const [expenseDate, setExpenseDate] = useState(new Date());
   const [dayExpenses, setDayExpenses] = useState<Array<{id: string; description: string; amount: number; date: string}>>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
+  // Full (unfiltered) expense history, loaded once when the modal first
+  // opens - drives the "Recent" quick-fill chips, independent of whatever
+  // single day dayExpenses above is currently scoped to.
+  const [expenseSuggestionSource, setExpenseSuggestionSource] = useState<NonInvoiceExpense[]>([]);
+  // Same idea for personal expenses - getPersonalExpenses() with no
+  // month/year returns the owner's full history, so this needs no new
+  // backend endpoint either.
+  const [personalSuggestionSource, setPersonalSuggestionSource] = useState<
+    { description: string; amount: number; date: string }[]
+  >([]);
   
   // Date picker states
   const [isRevenueDatePickerVisible, setRevenueDatePickerVisible] = useState(false);
@@ -279,6 +290,34 @@ export default function HomeScreen() {
       loadDayExpenses(expenseDate);
     }
   }, [expenseModalVisible, expenseDate, loadDayExpenses]);
+
+  useEffect(() => {
+    if (!expenseModalVisible || expenseSuggestionSource.length > 0) return;
+    api.getExpenses({}).then(setExpenseSuggestionSource).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseModalVisible]);
+
+  const expenseSuggestions = useMemo(
+    () => getDescriptionSuggestions(expenseSuggestionSource),
+    [expenseSuggestionSource]
+  );
+
+  useEffect(() => {
+    if (!personalExpenseModalVisible || personalSuggestionSource.length > 0) return;
+    api.getPersonalExpenses()
+      .then(({ personal_expenses }) =>
+        setPersonalSuggestionSource(
+          personal_expenses.map((p) => ({ description: p.description, amount: p.amount, date: p.created_at }))
+        )
+      )
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personalExpenseModalVisible]);
+
+  const personalSuggestions = useMemo(
+    () => getDescriptionSuggestions(personalSuggestionSource),
+    [personalSuggestionSource]
+  );
 
   // Load ROI/personal-investments data - visible to the owner and to any
   // delegated member the owner has granted view_personal_investments.
@@ -906,6 +945,13 @@ export default function HomeScreen() {
           isSubmitting={isSubmittingForm}
           onSubmit={handleCreatePersonalExpense}
           language={language}
+          suggestions={personalSuggestions}
+          onPickSuggestion={(s) => {
+            setPersonalDescription(s.description);
+            setPersonalAmount(String(s.amount));
+            setPersonalDescriptionError(false);
+            setPersonalAmountError(false);
+          }}
         />
       )}
 
@@ -962,6 +1008,13 @@ export default function HomeScreen() {
         onChangeAmount={(v) => { setExpenseAmount(v); setExpenseAmountError(false); }}
         isSubmitting={isSubmittingForm}
         onSubmit={handleAddExpense}
+        suggestions={expenseSuggestions}
+        onPickSuggestion={(s) => {
+          setExpenseDescription(s.description);
+          setExpenseAmount(String(s.amount));
+          setExpenseDescriptionError(false);
+          setExpenseAmountError(false);
+        }}
       />
 
       <ExcelImportModal

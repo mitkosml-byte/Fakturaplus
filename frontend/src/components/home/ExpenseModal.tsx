@@ -6,7 +6,8 @@ import { Locale } from 'date-fns';
 import DateTimePickerModal from '../AppDateTimePicker';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
-import { BottomSheet, PressableScale, Expandable } from '..';
+import { BottomSheet, PressableScale, Expandable, SuggestionChips } from '..';
+import type { DescriptionSuggestion } from '../../utils/expenseSuggestions';
 
 // Extracted from index.tsx (Module 1 audit finding #4). Lists off-book
 // expenses recorded for a given day and lets the user add a new one.
@@ -34,13 +35,15 @@ type Props = {
   onChangeAmount: (value: string) => void;
   isSubmitting: boolean;
   onSubmit: () => void;
+  suggestions?: DescriptionSuggestion[];
+  onPickSuggestion?: (s: DescriptionSuggestion) => void;
 };
 
 export function ExpenseModal({
   visible, onClose, onViewHistory, date, onChangeDate, isDatePickerVisible, onOpenDatePicker,
   onCloseDatePicker, dateLocale, language, loadingExpenses, dayExpenses, onDeleteExpense,
   description, descriptionError, onChangeDescription, amount, amountError, onChangeAmount,
-  isSubmitting, onSubmit,
+  isSubmitting, onSubmit, suggestions, onPickSuggestion,
 }: Props) {
   const { t } = useTranslation();
 
@@ -132,6 +135,14 @@ export function ExpenseModal({
 
           <View style={styles.addExpenseSection}>
             <Text style={styles.addExpenseTitle}>{t('expenses.addNew')}:</Text>
+
+            {suggestions && onPickSuggestion && (
+              <SuggestionChips
+                suggestions={suggestions}
+                label={t('expenses.recentDescriptions')}
+                onPick={onPickSuggestion}
+              />
+            )}
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>{t('expenses.description')}</Text>

@@ -21,8 +21,9 @@ import { api } from '../src/services/api';
 import { NonInvoiceExpense } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow } from '../src/components';
+import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow, SuggestionChips } from '../src/components';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
+import { getDescriptionSuggestions } from '../src/utils/expenseSuggestions';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -45,6 +46,10 @@ export default function OffBookExpensesHistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expenses, setExpenses] = useState<NonInvoiceExpense[]>([]);
+  // Unfiltered, loaded once regardless of the period chips above - the
+  // "Recent" quick-fill suggestions should always rank across this
+  // business's full history, not just whatever period is on screen.
+  const [suggestionSource, setSuggestionSource] = useState<NonInvoiceExpense[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
 
@@ -85,6 +90,13 @@ export default function OffBookExpensesHistoryScreen() {
   useEffect(() => {
     loadExpenses();
   }, [loadExpenses]);
+
+  useEffect(() => {
+    if (!canView) return;
+    api.getExpenses({}).then(setSuggestionSource).catch(() => {});
+  }, [canView]);
+
+  const suggestions = useMemo(() => getDescriptionSuggestions(suggestionSource), [suggestionSource]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -315,6 +327,17 @@ export default function OffBookExpensesHistoryScreen() {
             <View style={styles.modalContent}>
               <ScrollView keyboardShouldPersistTaps="handled">
                 <Text style={styles.modalTitle}>{editingId ? t('expenses.editExpense') : t('expenses.addNew')}</Text>
+
+                <SuggestionChips
+                  suggestions={suggestions}
+                  label={t('expenses.recentDescriptions')}
+                  onPick={(s) => {
+                    setFormDescription(s.description);
+                    setFormAmount(String(s.amount));
+                    setDescriptionError(false);
+                    setAmountError(false);
+                  }}
+                />
 
                 <Text style={styles.inputLabel}>{t('expenses.description')}</Text>
                 <TextInput

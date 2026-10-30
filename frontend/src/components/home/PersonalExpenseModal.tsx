@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Activi
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
-import { BottomSheet, PressableScale, Expandable } from '..';
+import { BottomSheet, PressableScale, Expandable, SuggestionChips } from '..';
+import type { DescriptionSuggestion } from '../../utils/expenseSuggestions';
 
 // Extracted from index.tsx (Module 1 audit finding #4). Owner-only form for
 // adding a personal expense/investment, scoped to the dashboard's current period.
@@ -27,12 +28,15 @@ type Props = {
   isSubmitting: boolean;
   onSubmit: () => void;
   language: string;
+  suggestions?: DescriptionSuggestion[];
+  onPickSuggestion?: (s: DescriptionSuggestion) => void;
 };
 
 export function PersonalExpenseModal({
   visible, onClose, periodLabel, amount, amountError, onChangeAmount,
   description, descriptionError, onChangeDescription, type, onChangeType,
   category, onChangeCategory, isSubmitting, onSubmit, language,
+  suggestions, onPickSuggestion,
 }: Props) {
   const { t } = useTranslation();
 
@@ -62,6 +66,14 @@ export function PersonalExpenseModal({
               {t('personal.periodNotice').replace('{period}', periodLabel)}
             </Text>
           </View>
+
+          {suggestions && onPickSuggestion && (
+            <SuggestionChips
+              suggestions={suggestions}
+              label={t('expenses.recentDescriptions')}
+              onPick={onPickSuggestion}
+            />
+          )}
 
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>{t('personal.amount')}</Text>

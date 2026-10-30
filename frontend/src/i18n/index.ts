@@ -538,6 +538,10 @@ export const translations: Translations = {
     bg: 'История',
     en: 'History',
   },
+  'expenses.recentDescriptions': {
+    bg: 'Скорошни',
+    en: 'Recent',
+  },
   'expenses.duplicateTitle': {
     bg: 'Възможно повторение',
     en: 'Possible duplicate',
