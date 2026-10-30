@@ -21,7 +21,7 @@ import { api } from '../src/services/api';
 import { Receivable } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow } from '../src/components';
+import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow, SwipeableRow } from '../src/components';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { COLORS } from '../src/theme/colors';
 
@@ -253,8 +253,12 @@ export default function ReceivablesScreen() {
               {receivables.map((r) => {
                 const overdue = isOverdue(r);
                 return (
-                  <TouchableOpacity
+                  <SwipeableRow
                     key={r.id}
+                    leftAction={!r.is_paid ? { label: t('receivables.paidLabel'), icon: 'checkmark-circle-outline', color: COLORS.success, onPress: () => handleMarkPaid(r) } : undefined}
+                    rightAction={{ label: t('common.delete'), icon: 'trash-outline', color: COLORS.danger, onPress: () => handleDelete(r) }}
+                  >
+                  <TouchableOpacity
                     style={[styles.card, overdue && styles.cardOverdue]}
                     onPress={() => openEdit(r)}
                   >
@@ -283,6 +287,7 @@ export default function ReceivablesScreen() {
                       </View>
                     </View>
                   </TouchableOpacity>
+                  </SwipeableRow>
                 );
               })}
             </ScrollView>

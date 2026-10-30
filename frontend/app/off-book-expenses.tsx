@@ -21,7 +21,7 @@ import { api } from '../src/services/api';
 import { NonInvoiceExpense } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow, SuggestionChips } from '../src/components';
+import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow, SuggestionChips, SwipeableRow } from '../src/components';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { getDescriptionSuggestions } from '../src/utils/expenseSuggestions';
 import { COLORS } from '../src/theme/colors';
@@ -294,8 +294,12 @@ export default function OffBookExpensesHistoryScreen() {
                       </Text>
                     </View>
                     {monthExpenses.map((expense) => (
-                      <TouchableOpacity
+                      <SwipeableRow
                         key={expense.id}
+                        leftAction={canManage ? { label: t('common.edit'), icon: 'create-outline', color: COLORS.primary, onPress: () => openEdit(expense) } : undefined}
+                        rightAction={canManage ? { label: t('common.delete'), icon: 'trash-outline', color: COLORS.danger, onPress: () => handleDelete(expense) } : undefined}
+                      >
+                      <TouchableOpacity
                         style={styles.expenseCard}
                         disabled={!canManage}
                         onPress={() => canManage && openEdit(expense)}
@@ -316,6 +320,7 @@ export default function OffBookExpensesHistoryScreen() {
                           )}
                         </View>
                       </TouchableOpacity>
+                      </SwipeableRow>
                     ))}
                   </View>
                 );

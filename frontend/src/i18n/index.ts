@@ -1608,6 +1608,10 @@ export const translations: Translations = {
     bg: 'Запази',
     en: 'Save',
   },
+  'common.edit': {
+    bg: 'Редактирай',
+    en: 'Edit',
+  },
   'common.saving': {
     bg: 'Запазване...',
     en: 'Saving...',
