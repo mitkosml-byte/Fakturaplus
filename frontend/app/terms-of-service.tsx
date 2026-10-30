@@ -29,7 +29,7 @@ export default function TermsOfServiceScreen() {
       },
       {
         title: '2. Описание на услугата',
-        text: 'Фактура+ е приложение за управление на фактури, дневен оборот, разходи, ведомости, дълготрайни активи и финансова отчетност за бизнеси в България. Услугата включва OCR сканиране на фактури (вкл. многостранични), автоматично изчисляване на ДДС, статистики и прогнози, работа в екип с роли и права за достъп, споделен календар и съобщения, проследяване на цени, одитен лог, изчисляване на официалните празници и проследяване на отпуски, износ на данни и Google Drive backup функционалност.',
+        text: 'Фактура+ е приложение за управление на фактури, дневен оборот, разходи, ведомости, дълготрайни активи и финансова отчетност за бизнеси в България. Услугата включва OCR сканиране на фактури (вкл. многостранични), автоматично изчисляване на ДДС, статистики и прогнози, работа в екип с роли и права за достъп, споделен календар и съобщения, проследяване на цени, одитен лог, изчисляване на официалните празници и проследяване на отпуски, износ на данни и функционалност за износ/импорт на бекъп.',
       },
       {
         title: '3. Потребителски акаунт',
@@ -70,7 +70,7 @@ export default function TermsOfServiceScreen() {
       },
       {
         title: '2. Service Description',
-        text: 'Fakturaplus is an application for managing invoices, daily revenue, expenses, payroll, fixed assets, and financial reporting for businesses in Bulgaria. The service includes OCR scanning of invoices (incl. multi-page ones), automatic VAT calculation, statistics and forecasts, team collaboration with roles and access permissions, a shared calendar and messaging, price tracking, an audit log, official-holiday calculation and leave tracking, data export, and Google Drive backup functionality.',
+        text: 'Fakturaplus is an application for managing invoices, daily revenue, expenses, payroll, fixed assets, and financial reporting for businesses in Bulgaria. The service includes OCR scanning of invoices (incl. multi-page ones), automatic VAT calculation, statistics and forecasts, team collaboration with roles and access permissions, a shared calendar and messaging, price tracking, an audit log, official-holiday calculation and leave tracking, data export, and backup export/import functionality.',
       },
       {
         title: '3. User Account',

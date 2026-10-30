@@ -1495,8 +1495,8 @@ export const translations: Translations = {
     en: 'Weekly schedule and holidays for statistics',
   },
   'profile.backup': {
-    bg: 'Google Drive бекъп',
-    en: 'Google Drive Backup',
+    bg: 'Износ/импорт на бекъп',
+    en: 'Backup export/import',
   },
   'profile.backupRestore': {
     bg: 'Backup & Restore',
@@ -2109,12 +2109,12 @@ export const translations: Translations = {
     en: 'Backup & Restore',
   },
   'backup.infoTitle': {
-    bg: 'Google Drive Backup',
-    en: 'Google Drive Backup',
+    bg: 'Износ на бекъп',
+    en: 'Backup export',
   },
   'backup.infoDescription': {
-    bg: 'Създайте backup на вашите данни и го запазете в Google Drive или друго облачно хранилище.',
-    en: 'Create a backup of your data and save it to Google Drive or other cloud storage.',
+    bg: 'Създайте backup на вашите данни и го запазете където пожелаете - Google Drive, имейл или локално на устройството.',
+    en: 'Create a backup of your data and save it wherever you like - Google Drive, email, or locally on your device.',
   },
   'backup.status': {
     bg: 'Статус на backup',
@@ -2161,12 +2161,12 @@ export const translations: Translations = {
     en: 'Press "Create Backup" to export your data',
   },
   'backup.step2': {
-    bg: 'Изберете "Запази в Google Drive" от менюто за споделяне',
-    en: 'Select "Save to Google Drive" from the sharing menu',
+    bg: 'Изберете къде да го запазите от менюто за споделяне (Google Drive, имейл, локално)',
+    en: 'Choose where to save it from the sharing menu (Google Drive, email, locally)',
   },
   'backup.step3': {
-    bg: 'За възстановяване - изберете файла от Google Drive',
-    en: 'To restore - select the file from Google Drive',
+    bg: 'За възстановяване - изберете запазения файл',
+    en: 'To restore - select the saved file',
   },
   'backup.successTitle': {
     bg: 'Успех!',
@@ -2181,8 +2181,8 @@ export const translations: Translations = {
     en: 'Statistics',
   },
   'backup.saveFile': {
-    bg: 'Запазете файла в Google Drive или друго място за съхранение.',
-    en: 'Save the file to Google Drive or other storage.',
+    bg: 'Запазете файла където пожелаете - Google Drive, имейл или локално на устройството.',
+    en: 'Save the file wherever you like - Google Drive, email, or locally on your device.',
   },
   'backup.sharingNotAvailable': {
     bg: 'Файлът е създаден, но споделянето не е достъпно на това устройство.',

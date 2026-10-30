@@ -2774,7 +2774,6 @@ class BackupMetadata(BaseModel):
     invoice_count: int
     revenue_count: int
     expense_count: int
-    google_drive_file_id: Optional[str] = None
 
 # Restore-only input models: validated shapes for what /backup/restore will
 # accept, matching what /backup/create produces. company_id/user_id are
