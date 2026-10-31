@@ -76,6 +76,15 @@ async def create_employee(employee: EmployeeCreate, current_user: User = Depends
 
     employee_obj = Employee(user_id=current_user.user_id, company_id=company_id, **employee.model_dump())
     await server.db.employees.insert_one(employee_obj.model_dump())
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="create",
+        entity_type="employee",
+        entity_id=employee_obj.id,
+        company_id=company_id,
+        details={"name": employee_obj.name, "base_salary": employee_obj.base_salary},
+    )
     return employee_obj
 
 @router.get("/employees", response_model=List[Employee])
@@ -107,15 +116,34 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, current_user
     employee = await server.db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="update",
+        entity_type="employee",
+        entity_id=employee_id,
+        company_id=company_id,
+        details={"name": employee["name"], "changed_fields": update_data},
+    )
     return Employee(**employee)
 
 @router.delete("/employees/{employee_id}")
 async def delete_employee(employee_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await server.db.employees.delete_one({"id": employee_id, **scope})
-    if result.deleted_count == 0:
+    company_id, scope = await get_company_scope(current_user)
+    existing = await server.db.employees.find_one({"id": employee_id, **scope}, {"_id": 0, "name": 1})
+    if not existing:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
+    await server.db.employees.delete_one({"id": employee_id, **scope})
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="delete",
+        entity_type="employee",
+        entity_id=employee_id,
+        company_id=company_id,
+        details={"name": existing["name"]},
+    )
     return {"message": "Служителят е изтрит"}
 
 @router.post("/payroll/preview")

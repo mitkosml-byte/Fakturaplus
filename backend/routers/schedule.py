@@ -74,6 +74,19 @@ async def create_shift(payload: WorkShiftCreate, current_user: User = Depends(ge
 
     shift = WorkShift(company_id=company_id, created_by=current_user.user_id, **payload.model_dump())
     await server.db.work_shifts.insert_one(shift.model_dump())
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="create",
+        entity_type="work_shift",
+        entity_id=shift.id,
+        company_id=company_id,
+        details={
+            "employee_user_id": shift.user_id, "date": shift.date,
+            "start_time": shift.start_time, "end_time": shift.end_time,
+            "repeat_pattern": shift.repeat_pattern,
+        },
+    )
     return shift
 
 
@@ -174,6 +187,15 @@ async def update_shift(shift_id: str, update: WorkShiftUpdate, current_user: Use
 
     if update_data:
         await server.db.work_shifts.update_one({"id": shift_id}, {"$set": update_data})
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+            action="update",
+            entity_type="work_shift",
+            entity_id=shift_id,
+            company_id=company_id,
+            details={"employee_user_id": existing["user_id"], "changed_fields": update_data},
+        )
     updated = await server.db.work_shifts.find_one({"id": shift_id}, {"_id": 0})
     return WorkShift(**updated)
 
@@ -182,9 +204,19 @@ async def update_shift(shift_id: str, update: WorkShiftUpdate, current_user: Use
 async def delete_shift(shift_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
     company_id, _ = await get_company_scope(current_user)
-    result = await server.db.work_shifts.delete_one({"id": shift_id, "company_id": company_id})
-    if result.deleted_count == 0:
+    existing = await server.db.work_shifts.find_one({"id": shift_id, "company_id": company_id}, {"_id": 0})
+    if not existing:
         raise HTTPException(status_code=404, detail="Смяната не е намерена")
+    await server.db.work_shifts.delete_one({"id": shift_id})
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="delete",
+        entity_type="work_shift",
+        entity_id=shift_id,
+        company_id=company_id,
+        details={"employee_user_id": existing["user_id"], "date": existing["date"]},
+    )
     return {"message": "Смяната е изтрита"}
 
 
@@ -438,4 +470,16 @@ async def delete_schedule_payment(payment_id: str, current_user: User = Depends(
         raise HTTPException(status_code=404, detail="Записът не е намерен")
     await server.db.expenses.delete_one({"id": payment["expense_id"], "company_id": company_id})
     await server.db.schedule_payments.delete_one({"id": payment_id})
+    await audit_service.log_action(
+        user_id=current_user.user_id,
+        user_name=current_user.name,
+        action="delete",
+        entity_type="schedule_payment",
+        entity_id=payment_id,
+        company_id=company_id,
+        details={
+            "employee": payment["user_name"], "period": f"{payment['period_start']} - {payment['period_end']}",
+            "amount": payment["amount"],
+        },
+    )
     return {"message": "Плащането е отменено"}

@@ -2237,6 +2237,62 @@ def test_schedule_leave(client):
     assert r.json()["leave"] == []
 
 
+def test_schedule_and_employee_audit_logging(client):
+    """Create/update/delete on a work shift, an employee, and deleting a
+    schedule payment were silently unaudited while sibling actions in the
+    same files (a shift adjustment, creating a payroll entry, creating a
+    schedule payment) already were - a manager could delete someone's
+    whole payroll record or change their shift and GET /audit-logs would
+    show nothing happened."""
+    owner = h(STATE["owner_token"])
+    me = client.get("/api/auth/me", headers=owner).json()
+    owner_user_id = me["user_id"]
+
+    r = client.post("/api/employees", headers=owner, json={"name": "Audit Test Employee", "base_salary": 1000})
+    assert r.status_code == 200, r.text
+    employee_id = r.json()["id"]
+    r = client.put(f"/api/employees/{employee_id}", headers=owner, json={"base_salary": 1100})
+    assert r.status_code == 200, r.text
+    r = client.delete(f"/api/employees/{employee_id}", headers=owner)
+    assert r.status_code == 200, r.text
+
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": owner_user_id, "date": "2029-01-01", "start_time": "09:00", "end_time": "17:00",
+    })
+    assert r.status_code == 200, r.text
+    shift_id = r.json()["id"]
+    r = client.put(f"/api/schedule/shifts/{shift_id}", headers=owner, json={"hourly_rate": 15})
+    assert r.status_code == 200, r.text
+    r = client.delete(f"/api/schedule/shifts/{shift_id}", headers=owner)
+    assert r.status_code == 200, r.text
+
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": owner_user_id, "date": "2029-02-01", "start_time": "09:00", "end_time": "17:00", "hourly_rate": 10,
+    })
+    assert r.status_code == 200, r.text
+    r = client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": owner_user_id, "period_start": "2029-02-01", "period_end": "2029-02-28",
+    })
+    assert r.status_code == 200, r.text
+    payment_id = r.json()["id"]
+    r = client.delete(f"/api/schedule/payments/{payment_id}", headers=owner)
+    assert r.status_code == 200, r.text
+
+    r = client.get("/api/audit-logs?entity_type=employee&limit=200", headers=owner)
+    assert r.status_code == 200, r.text
+    employee_actions = {log["action"] for log in r.json()["logs"] if log["entity_id"] == employee_id}
+    assert {"create", "update", "delete"} <= employee_actions
+
+    r = client.get("/api/audit-logs?entity_type=work_shift&limit=200", headers=owner)
+    assert r.status_code == 200, r.text
+    shift_actions = {log["action"] for log in r.json()["logs"] if log["entity_id"] == shift_id}
+    assert {"create", "update", "delete"} <= shift_actions
+
+    r = client.get("/api/audit-logs?entity_type=schedule_payment&limit=200", headers=owner)
+    assert r.status_code == 200, r.text
+    assert any(log["action"] == "delete" and log["entity_id"] == payment_id for log in r.json()["logs"])
+
+
 def test_legacy_scope_consistency(client):
     """Module 1 audit finding: 40 endpoints built their own company_id
     lookup inline instead of the shared get_company_scope()/scope helper,
