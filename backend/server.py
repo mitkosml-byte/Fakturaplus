@@ -2116,12 +2116,33 @@ def _month_bounds(dt: datetime) -> tuple:
         last_day = dt.replace(month=dt.month + 1, day=1) - timedelta(days=1)
     return start, last_day.strftime("%Y-%m-%d")
 
+def _profit_formula(
+    fiscal_revenue: float, pocket_money: float, invoice_total: float,
+    off_book_expenses: float, payroll_cost: float, depreciation_cost: float,
+) -> tuple:
+    """The one income/expense formula get_summary (routers/statistics.py)
+    and _compute_month_profit below both must stay in sync on: income =
+    fiscal revenue + pocket money; expense = supplier invoices + off-book
+    expenses + payroll + depreciation. Pulled out as its own function so
+    there is exactly one formula to get right, not two hand-maintained
+    copies that could silently drift apart - each caller still decides
+    separately whether pocket_money/off_book_expenses is the real value
+    or zeroed out for a viewer who can't see it (or, for
+    _compute_month_profit, always the real value - see its own docstring).
+    Returns (total_income, total_expense), not the subtraction, since
+    get_summary also reports each side on its own."""
+    total_income = fiscal_revenue + pocket_money
+    total_expense = invoice_total + off_book_expenses + payroll_cost + depreciation_cost
+    return total_income, total_expense
+
 async def _compute_month_profit(company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str) -> float:
-    """Minimal standalone re-derivation of get_summary's profit formula for
-    one month, used so this module doesn't need get_summary's full
-    permission-redaction machinery - whoever reaches these endpoints already
-    holds a personal-wallet permission, which implies the owner trusts them
-    with exactly this level of financial detail."""
+    """Reuses _profit_formula (see its docstring) so this never computes
+    profit a second, independently-maintained way - this module just
+    skips get_summary's permission-redaction machinery, using the real
+    pocket_money/off-book-expense totals unconditionally. Used so this
+    module doesn't need that machinery - whoever reaches these endpoints
+    already holds a personal-wallet permission, which implies the owner
+    trusts them with exactly this level of financial detail."""
     date_query = {"$gte": start_date, "$lte": end_date}
     revenues = await db.daily_revenue.find(
         {**scope, "date": date_query}, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}
@@ -2138,11 +2159,12 @@ async def _compute_month_profit(company_id: Optional[str], scope: dict, user_id:
     payroll_cost = await get_payroll_cost_for_period(company_id, user_id, start_date, end_date)
     depreciation_cost = await get_depreciation_cost_for_period(company_id, user_id, start_date, end_date)
 
-    total_income = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
-    total_expense = (
-        sum(i.get("total_amount", 0) for i in invoices)
-        + sum(e.get("amount", 0) for e in expenses)
-        + payroll_cost + depreciation_cost
+    total_income, total_expense = _profit_formula(
+        fiscal_revenue=sum(r.get("fiscal_revenue", 0) for r in revenues),
+        pocket_money=sum(r.get("pocket_money", 0) for r in revenues),
+        invoice_total=sum(i.get("total_amount", 0) for i in invoices),
+        off_book_expenses=sum(e.get("amount", 0) for e in expenses),
+        payroll_cost=payroll_cost, depreciation_cost=depreciation_cost,
     )
     return total_income - total_expense
 

@@ -15,6 +15,7 @@ _eik_check_digit,
     _scan_packages_catalogue,
     _require_billing_enabled,
     _month_bounds,
+    _profit_formula,
     _compute_month_profit,
     _business_digest_period,
     _business_digest_top_expenses,
@@ -162,11 +163,14 @@ async def get_summary(
     # Общ ДДС за плащане = ДДС от продажби - ДДС от покупки (фактури)
     vat_to_pay = fiscal_vat - total_invoice_vat
 
-    # Общ приход (фискализиран + джобче, ако е видимо)
-    total_income = total_fiscal_revenue + effective_pocket_money
-
-    # Общ разход (фактури + разходи без фактури, ако са видими + персонал + амортизации)
-    total_expense = total_invoice_amount + effective_off_book_expenses + total_payroll_cost + total_depreciation_expense
+    # Общ приход/разход - единствената формула, споделена с
+    # _compute_month_profit (server.py), за да не се разминат двете при
+    # бъдеща промяна в едната.
+    total_income, total_expense = _profit_formula(
+        fiscal_revenue=total_fiscal_revenue, pocket_money=effective_pocket_money,
+        invoice_total=total_invoice_amount, off_book_expenses=effective_off_book_expenses,
+        payroll_cost=total_payroll_cost, depreciation_cost=total_depreciation_expense,
+    )
 
     # Печалбата е независимо скриваема от съставните ѝ части - тя влиза или
     # излиза от отговора само по view_profit, макар вече да е изчислена
