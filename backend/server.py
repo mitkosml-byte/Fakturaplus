@@ -2634,9 +2634,90 @@ async def _signal_forecast(company_id, scope, current_user, visibility) -> Optio
         }
     return None
 
+async def _signal_schedule_unpaid(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Work Schedule's hours*rate estimate for this month, minus whatever's
+    already been marked paid via schedule payments - the schedule-side
+    mirror of _signal_unpaid_invoices, so a mounting pile of unpaid hourly
+    pay shows up here the same way an unpaid supplier invoice does, instead
+    of only being visible to someone who happens to open Pay-run."""
+    if not company_id or "manage_budget" not in set(current_user.permissions or []):
+        return None
+    # Deferred import: routers/schedule.py itself does `from server import
+    # *`, so importing it at server.py's own module level would cycle -
+    # safe here because every router is already fully loaded by the time
+    # any request (and so this function) actually runs.
+    from routers.schedule import _resolve_occurrences
+    month_start, month_end = _month_bounds(datetime.now(timezone.utc))
+    shifts = await db.work_shifts.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
+    if not shifts:
+        return None
+    occurrences = await _resolve_occurrences(shifts, company_id, month_start, month_end)
+    total_pay = sum(o["hours"] * (o["hourly_rate"] or 0) for o in occurrences)
+    if total_pay <= 0:
+        return None
+    payments = await db.schedule_payments.find(
+        {"company_id": company_id, "period_start": {"$lte": month_end}, "period_end": {"$gte": month_start}},
+        {"_id": 0, "amount": 1},
+    ).to_list(1000)
+    unpaid = round(total_pay - sum(p.get("amount", 0) for p in payments), 2)
+    if unpaid <= 0:
+        return None
+    return {
+        "key": "schedule_unpaid", "severity": "info", "priority": 38,
+        "title": "Неплатени часове по график",
+        "detail": f"Екипът е отработил часове на стойност {unpaid:.2f} € този месец, които още не са маркирани като платени.",
+        "route": "/pay-run",
+    }
+
+async def _signal_team_on_leave(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """A quiet, low-priority reminder of who's away today - cheap context
+    for a manager about to plan shifts or wonder why someone's not around,
+    not an alert about anything going wrong."""
+    if not company_id or "manage_budget" not in set(current_user.permissions or []):
+        return None
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    entries = await db.employee_leave.find(
+        {"company_id": company_id, "start_date": {"$lte": today}, "end_date": {"$gte": today}},
+        {"_id": 0, "employee_name": 1},
+    ).to_list(100)
+    if not entries:
+        return None
+    names = ", ".join(e["employee_name"] for e in entries[:3])
+    more = f" и още {len(entries) - 3}" if len(entries) > 3 else ""
+    verb = "е в отпуск" if len(entries) == 1 and not more else "са в отпуск"
+    return {
+        "key": "team_on_leave", "severity": "info", "priority": 25,
+        "title": "Екипът днес",
+        "detail": f"{names}{more} {verb} днес.",
+        "route": "/work-schedule",
+    }
+
+async def _signal_personal_wallet(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """personal-wallet spending already computes its own status/advice
+    (generate_wallet_advice above) for the dashboard teaser, but that
+    never reached this ranked list - a "danger" personal-spending status
+    was invisible everywhere _signal_budget's business-side equivalent is
+    visible. Reuses get_personal_wallet_summary's own computation rather
+    than re-deriving it."""
+    if not company_id or "view_personal_wallet" not in set(current_user.permissions or []):
+        return None
+    # Deferred import - see _signal_schedule_unpaid's comment above.
+    from routers.roi_wallet import get_personal_wallet_summary
+    summary = await get_personal_wallet_summary(current_user=current_user)
+    if summary["status"] == "ok" or not summary.get("advice"):
+        return None
+    severity = "critical" if summary["status"] == "danger" else "warning"
+    return {
+        "key": "personal_wallet", "severity": severity, "priority": 80 if severity == "critical" else 55,
+        "title": "Личните тегления надхвърлят безопасния лимит" if severity == "critical" else "Личните тегления се доближават до лимита",
+        "detail": summary["advice"][0],
+        "route": "/personal-expenses",
+    }
+
 _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_unpaid_invoices, _signal_receivables, _signal_scan_credits,
     _signal_budget, _signal_price_alerts, _signal_reorder, _signal_forecast,
+    _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
 ]
 
 async def get_proactive_signals(current_user: User) -> List[dict]:

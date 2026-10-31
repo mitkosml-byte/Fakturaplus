@@ -1384,6 +1384,93 @@ def test_proactive_signals(client):
     assert r.status_code == 200, r.text
     bare_signal_keys = {s["key"] for s in r.json()["signals"]}
     assert not bare_signal_keys & {"budget", "receivables", "price_alerts", "reorder", "forecast_revenue", "forecast_expense", "scan_credits"}
+    # manage_budget-gated signals (added for Work Schedule/leave) stay out
+    # of a bare staff member's list too.
+    assert not bare_signal_keys & {"schedule_unpaid", "team_on_leave"}
+
+
+def test_proactive_signals_schedule_and_leave(client):
+    """Work Schedule and leave were built after the Proactive Second Brain
+    engine and were invisible to it - a mounting pile of unpaid schedule
+    hours, or someone on leave today, never showed up anywhere a manager
+    would look. Confirms both new signals actually fire, and that marking
+    the schedule paid makes schedule_unpaid disappear again."""
+    owner = h(STATE["owner_token"])
+
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+
+    staff_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    staff_token = uuid_module.uuid4().hex
+
+    async def _make_signal_staff():
+        me = client.get("/api/auth/me", headers=owner).json()
+        await server_module.db.users.insert_one({
+            "user_id": staff_id, "email": f"{staff_id}@test.com", "name": "Signal Staff",
+            "role": "staff", "company_id": me["company_id"], "permissions": [],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": staff_id, "session_token": staff_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+
+    asyncio.run(_make_signal_staff())
+
+    r = client.get("/api/proactive/signals", headers=owner)
+    baseline_keys = {s["key"] for s in r.json()["signals"]}
+    assert "schedule_unpaid" not in baseline_keys
+    assert "team_on_leave" not in baseline_keys
+
+    # A shift THIS real month (the signal always looks at "now", unlike
+    # most other schedule tests which use a fixed future month) with
+    # nothing yet marked paid.
+    today = server_module.datetime.now(tz.utc)
+    month_date = today.strftime("%Y-%m-%d")
+    r = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": staff_id, "date": month_date, "start_time": "09:00", "end_time": "17:00", "hourly_rate": 10,
+    })
+    assert r.status_code == 200, r.text
+
+    r = client.post("/api/employees", headers=owner, json={
+        "name": "Signal Staff", "base_salary": 1200, "linked_user_id": staff_id,
+    })
+    assert r.status_code == 200, r.text
+    employee_id = r.json()["id"]
+    r = client.post("/api/employees/leave", headers=owner, json={
+        "employee_id": employee_id, "leave_type": "sick", "start_date": month_date, "end_date": month_date,
+    })
+    assert r.status_code == 200, r.text
+
+    r = client.get("/api/proactive/signals", headers=owner)
+    assert r.status_code == 200, r.text
+    signals_by_key = {s["key"]: s for s in r.json()["signals"]}
+    assert "schedule_unpaid" in signals_by_key
+    assert "80" in signals_by_key["schedule_unpaid"]["detail"] or "80.00" in signals_by_key["schedule_unpaid"]["detail"]
+    assert "team_on_leave" in signals_by_key
+    assert "Signal Staff" in signals_by_key["team_on_leave"]["detail"]
+
+    # Not visible to the scheduled staff member themselves - these are
+    # manage_budget-gated, same as every other manager-facing signal.
+    r = client.get("/api/proactive/signals", headers=h(staff_token))
+    staff_keys = {s["key"] for s in r.json()["signals"]}
+    assert not staff_keys & {"schedule_unpaid", "team_on_leave"}
+
+    month_start = today.replace(day=1).strftime("%Y-%m-%d")
+    next_month = (today.replace(day=28) + timedelta(days=7)).replace(day=1)
+    month_end = (next_month - timedelta(days=1)).strftime("%Y-%m-%d")
+    r = client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": staff_id, "period_start": month_start, "period_end": month_end,
+    })
+    assert r.status_code == 200, r.text
+
+    r = client.get("/api/proactive/signals", headers=owner)
+    assert "schedule_unpaid" not in {s["key"] for s in r.json()["signals"]}
 
 
 def test_reorder_nudges_weighted_by_business_impact():
