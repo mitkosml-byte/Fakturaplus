@@ -37,7 +37,19 @@ import { DURATION, EASING } from '../../src/theme/motion';
 const AVATAR_TARGET_SIZE = 320;
 
 async function prepareAvatarImage(asset: ImagePicker.ImagePickerAsset): Promise<string> {
-  const context = ImageManipulator.manipulate(asset.uri).resize({ width: AVATAR_TARGET_SIZE, height: AVATAR_TARGET_SIZE });
+  // allowsEditing/aspect on the picker call below only forces a square
+  // crop on native - the web picker ignores both and hands back the
+  // original (usually non-square) photo untouched. Resizing a non-square
+  // source straight to a 320x320 target stretches it, so the source is
+  // first center-cropped to a square using its own shorter side before
+  // that resize ever runs, regardless of which platform actually did
+  // (or skipped) the OS-level crop.
+  const side = Math.min(asset.width, asset.height);
+  const originX = Math.max(0, Math.round((asset.width - side) / 2));
+  const originY = Math.max(0, Math.round((asset.height - side) / 2));
+  const context = ImageManipulator.manipulate(asset.uri)
+    .crop({ originX, originY, width: side, height: side })
+    .resize({ width: AVATAR_TARGET_SIZE, height: AVATAR_TARGET_SIZE });
   const rendered = await context.renderAsync();
   const saved = await rendered.saveAsync({ compress: 0.8, format: SaveFormat.JPEG, base64: true });
   return `data:image/jpeg;base64,${saved.base64}`;
