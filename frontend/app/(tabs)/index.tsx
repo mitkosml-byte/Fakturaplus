@@ -145,36 +145,47 @@ export default function HomeScreen() {
   const prevProfitRef = useRef<number | null>(null);
   const [celebrateProfit, setCelebrateProfit] = useState(false);
 
+  // The two calls below are independent (same date bounds, different
+  // endpoints) but used to run one after the other - on a mobile network
+  // where each round trip costs a few hundred ms, that doubled the time
+  // before the screen settled on every single focus. Promise.all fires
+  // them together; each keeps its own try/catch so one failing still lets
+  // the other's result through, matching the previous behavior.
   const loadData = useCallback(async () => {
     const bounds = getPeriodBounds(periodState);
     const start_date = toApiDate(bounds.start);
     const end_date = toApiDate(bounds.end);
 
-    try {
-      const summaryData = await api.getSummary({ start_date, end_date });
-      setSummary(summaryData);
-      const newProfit = summaryData.profit;
-      if (
-        prevProfitRef.current !== null &&
-        prevProfitRef.current <= 0 &&
-        typeof newProfit === 'number' &&
-        newProfit > 0
-      ) {
-        setCelebrateProfit(true);
-      }
-      if (typeof newProfit === 'number') {
-        prevProfitRef.current = newProfit;
-      }
-    } catch (error) {
-      console.error('Error loading data:', error);
-    }
-
-    try {
-      const openDays = await api.getOpenDaysCount(start_date, end_date);
-      setOpenDaysThisMonth(Math.max(1, openDays.open_days));
-    } catch (error) {
-      console.error('Error loading open-days count:', error);
-    }
+    await Promise.all([
+      (async () => {
+        try {
+          const summaryData = await api.getSummary({ start_date, end_date });
+          setSummary(summaryData);
+          const newProfit = summaryData.profit;
+          if (
+            prevProfitRef.current !== null &&
+            prevProfitRef.current <= 0 &&
+            typeof newProfit === 'number' &&
+            newProfit > 0
+          ) {
+            setCelebrateProfit(true);
+          }
+          if (typeof newProfit === 'number') {
+            prevProfitRef.current = newProfit;
+          }
+        } catch (error) {
+          console.error('Error loading data:', error);
+        }
+      })(),
+      (async () => {
+        try {
+          const openDays = await api.getOpenDaysCount(start_date, end_date);
+          setOpenDaysThisMonth(Math.max(1, openDays.open_days));
+        } catch (error) {
+          console.error('Error loading open-days count:', error);
+        }
+      })(),
+    ]);
   }, [periodState]);
 
   // Pre-fills the form with whatever is already logged for this date, so
@@ -560,13 +571,16 @@ export default function HomeScreen() {
             style={styles.scrollView}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           >
-            {/* Header */}
+            {/* Header - greeting and the icon row stack vertically instead
+                of sharing one row, since three icons (scan credits, language,
+                receipt) squeezed next to the large greeting text crowded
+                together on narrower phone screens. */}
             <View style={styles.header}>
               <View>
                 <Text style={styles.greeting}>{t('home.welcome')}</Text>
                 <Text style={styles.date}>{today}</Text>
               </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={styles.headerIconsRow}>
                 <ScanCreditsBadge />
                 <TouchableOpacity
                   style={styles.headerIcon}
@@ -1099,10 +1113,14 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     marginBottom: 24,
+  },
+  headerIconsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 10,
+    marginTop: 12,
   },
   greeting: {
     fontSize: 28,

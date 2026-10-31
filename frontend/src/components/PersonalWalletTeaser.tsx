@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useTranslation } from '../i18n';
 import { api } from '../services/api';
 import { PersonalWalletSummary } from '../types';
@@ -49,9 +49,15 @@ export function PersonalWalletTeaser({ refreshSignal }: Props) {
       .finally(() => setLoading(false));
   }, []);
 
-  useFocusEffect(refresh);
+  // Home's own useFocusEffect(loadData) already fires on every focus and
+  // always ends in a fresh `summary` object (this teaser's refreshSignal),
+  // so an independent useFocusEffect here used to fire the identical
+  // getPersonalWalletSummary request again on that same focus event. The
+  // null check skips the very first render, where refreshSignal is still
+  // Home's initial `null` summary - firing then just means this exact same
+  // request fires again moments later once Home's own load resolves.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  React.useEffect(() => { refresh(); }, [refreshSignal]);
+  React.useEffect(() => { if (refreshSignal != null) refresh(); }, [refreshSignal]);
 
   const statusColor = summary ? STATUS_COLORS[summary.status] : COLORS.textMuted;
 
