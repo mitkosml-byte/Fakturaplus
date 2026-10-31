@@ -377,6 +377,7 @@ export default function HomeScreen() {
       const data = await api.getROIAnalysis({
         month: periodStart.getMonth() + 1,
         year: periodStart.getFullYear(),
+        language,
       });
       setRoiData(data);
     } catch (error) {
@@ -385,7 +386,7 @@ export default function HomeScreen() {
     } finally {
       setLoadingRoi(false);
     }
-  }, [canViewPersonalInvestments, periodState]);
+  }, [canViewPersonalInvestments, periodState, language]);
 
   useFocusEffect(
     useCallback(() => {

@@ -1996,13 +1996,20 @@ async def generate_roi_insights(
     is_profitable: bool,
     investment_covered: bool,
     days_with_data: int = 0,
+    language: str = "bg",
 ) -> List[str]:
-    """Генерира AI управленски предложения за ROI"""
+    """Генерира AI управленски предложения за ROI.
+
+    `language` was added after this function (and the "Ask about your
+    numbers" chat before it) answered in hardcoded Bulgarian regardless of
+    the app's selected UI language - the exact same mismatch, just in the
+    Personal Investments card's own "AI Insights" box rather than the chat."""
+    is_en = language == "en"
     insights = []
 
     # Basic insights без AI (винаги налични)
     if total_personal == 0:
-        insights.append("📊 Няма въведени лични вложения за периода")
+        insights.append("📊 No personal investment entered for this period" if is_en else "📊 Няма въведени лични вложения за периода")
         return insights
 
     # ROI/profit swing wildly on a handful of days (one big invoice, one
@@ -2017,55 +2024,101 @@ async def generate_roi_insights(
     MIN_RELIABLE_DAYS = 45
     data_is_sparse = days_with_data < MIN_RELIABLE_DAYS
     if data_is_sparse:
-        day_word = "ден" if days_with_data == 1 else "дни"
-        insights.append(
-            f"📅 Фирмата има общо {days_with_data} {day_word} с въведен оборот - "
-            f"изчакайте поне {MIN_RELIABLE_DAYS}-60 дни натрупани данни, преди да вземате "
-            "решения за мащабиране на база тези цифри"
-        )
+        if is_en:
+            day_word = "day" if days_with_data == 1 else "days"
+            insights.append(
+                f"📅 The company has {days_with_data} {day_word} of logged revenue in total - "
+                f"wait for at least {MIN_RELIABLE_DAYS}-60 days of accumulated data before making "
+                "scaling decisions based on these numbers"
+            )
+        else:
+            day_word = "ден" if days_with_data == 1 else "дни"
+            insights.append(
+                f"📅 Фирмата има общо {days_with_data} {day_word} с въведен оборот - "
+                f"изчакайте поне {MIN_RELIABLE_DAYS}-60 дни натрупани данни, преди да вземате "
+                "решения за мащабиране на база тези цифри"
+            )
 
     if investment_covered:
-        insights.append("✅ Бизнесът покрива личната инвестиция за периода")
+        insights.append("✅ The business covers the personal investment for this period" if is_en else "✅ Бизнесът покрива личната инвестиция за периода")
     elif is_profitable:
         diff = total_personal - total_profit
-        insights.append(f"⚠️ Печалбата не покрива напълно личната инвестиция (остават {diff:.2f} €)")
+        insights.append(
+            f"⚠️ Profit doesn't fully cover the personal investment ({diff:.2f} € remaining)" if is_en
+            else f"⚠️ Печалбата не покрива напълно личната инвестиция (остават {diff:.2f} €)"
+        )
     else:
-        insights.append("❌ Работиш повече за бизнеса, отколкото бизнесът за теб")
+        insights.append("❌ You're working more for the business than it's working for you" if is_en else "❌ Работиш повече за бизнеса, отколкото бизнесът за теб")
 
     if roi_percent > 100:
-        insights.append(f"🚀 Отличен ROI: {roi_percent:.1f}% - инвестицията се изплаща многократно")
+        insights.append(
+            f"🚀 Excellent ROI: {roi_percent:.1f}% - the investment is paying off multiple times over" if is_en
+            else f"🚀 Отличен ROI: {roi_percent:.1f}% - инвестицията се изплаща многократно"
+        )
     elif roi_percent > 50:
-        insights.append(f"📈 Добър ROI: {roi_percent:.1f}%")
+        insights.append(f"📈 Good ROI: {roi_percent:.1f}%" if is_en else f"📈 Добър ROI: {roi_percent:.1f}%")
     elif roi_percent > 0:
-        insights.append(f"📉 Нисък ROI: {roi_percent:.1f}% - има място за подобрение")
+        insights.append(
+            f"📉 Low ROI: {roi_percent:.1f}% - there's room for improvement" if is_en
+            else f"📉 Нисък ROI: {roi_percent:.1f}% - има място за подобрение"
+        )
     elif roi_percent < -50:
-        insights.append(f"🔴 Отрицателен ROI: {roi_percent:.1f}% - необходим е анализ на разходите")
-    
+        insights.append(
+            f"🔴 Negative ROI: {roi_percent:.1f}% - an expense review is needed" if is_en
+            else f"🔴 Отрицателен ROI: {roi_percent:.1f}% - необходим е анализ на разходите"
+        )
+
     # Personal contribution ratio
     if total_revenue > 0:
         personal_ratio = (total_personal / total_revenue) * 100
         if personal_ratio > 50:
-            insights.append(f"⚠️ Личната контрибуция ({personal_ratio:.1f}%) е висока спрямо оборота")
+            insights.append(
+                f"⚠️ Personal contribution ({personal_ratio:.1f}%) is high relative to revenue" if is_en
+                else f"⚠️ Личната контрибуция ({personal_ratio:.1f}%) е висока спрямо оборота"
+            )
         elif personal_ratio > 30:
-            insights.append(f"📊 Личната контрибуция е {personal_ratio:.1f}% от оборота")
-    
+            insights.append(f"📊 Personal contribution is {personal_ratio:.1f}% of revenue" if is_en else f"📊 Личната контрибуция е {personal_ratio:.1f}% от оборота")
+
     # Try to get AI enhanced insights
     try:
         if not AI_FEATURES_ENABLED:
             raise RuntimeError("AI features disabled")
 
-        if data_is_sparse:
-            guidance = (
-                f"Периодът има само {days_with_data} дни с въведени данни - твърде малко за "
-                "надежден дългосрочен извод. НЕ предлагай конкретна сума за реинвестиране или "
-                "мащабиране на база тези цифри. Вместо това посъветвай собственика да изчака "
-                f"поне {MIN_RELIABLE_DAYS}-60 дни натрупани данни, евентуално с кратко наблюдение "
-                "върху засегашната тенденция."
-            )
-        else:
-            guidance = "Дай конкретна препоръка какво може да направи собственикът за подобрение."
+        if is_en:
+            if data_is_sparse:
+                guidance = (
+                    f"The period has only {days_with_data} days of logged data - too little for a "
+                    "reliable long-term conclusion. Do NOT suggest a specific amount to reinvest or "
+                    "scale based on these numbers. Instead, advise the owner to wait for at least "
+                    f"{MIN_RELIABLE_DAYS}-60 days of accumulated data, possibly with a brief note on "
+                    "the current trend."
+                )
+            else:
+                guidance = "Give a concrete recommendation for what the owner could do to improve."
 
-        prompt = f"""Анализирай тези финансови показатели за малък бизнес (период с {days_with_data} дни данни):
+            prompt = f"""Analyze these financial figures for a small business (period with {days_with_data} days of data):
+- Owner's personal investment: {total_personal:.2f} €
+- Total revenue: {total_revenue:.2f} €
+- Profit: {total_profit:.2f} €
+- ROI: {roi_percent:.1f}%
+
+{guidance}
+Give ONE short recommendation (up to 15 words). Answer directly with the recommendation, no
+introductory text, and always state amounts in euros (€)."""
+            system_prompt = "You are a financial advisor for a small business. Give short, clear, practical advice in English, always stating amounts in euros (€)."
+        else:
+            if data_is_sparse:
+                guidance = (
+                    f"Периодът има само {days_with_data} дни с въведени данни - твърде малко за "
+                    "надежден дългосрочен извод. НЕ предлагай конкретна сума за реинвестиране или "
+                    "мащабиране на база тези цифри. Вместо това посъветвай собственика да изчака "
+                    f"поне {MIN_RELIABLE_DAYS}-60 дни натрупани данни, евентуално с кратко наблюдение "
+                    "върху засегашната тенденция."
+                )
+            else:
+                guidance = "Дай конкретна препоръка какво може да направи собственикът за подобрение."
+
+            prompt = f"""Анализирай тези финансови показатели за малък бизнес (период с {days_with_data} дни данни):
 - Лична инвестиция на собственика: {total_personal:.2f} €
 - Общ оборот: {total_revenue:.2f} €
 - Печалба: {total_profit:.2f} €
@@ -2074,21 +2127,22 @@ async def generate_roi_insights(
 {guidance}
 Дай ЕДНА кратка препоръка (до 15 думи). Отговори директно с препоръката, без въвеждащ текст,
 и посочвай сумите винаги в евро (€), никога в лева."""
+            system_prompt = "Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български, като посочваш всички суми в евро (€), никога в лева."
 
         response = await anthropic_client.messages.create(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
             model="claude-opus-5-5",
             max_tokens=200,
-            system="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български, като посочваш всички суми в евро (€), никога в лева.",
+            system=system_prompt,
             messages=[{"role": "user", "content": prompt}],
         )
         await log_ai_usage(None, "roi_insights", response)
         ai_recommendation = next((b.text for b in response.content if b.type == "text"), "").strip()  # type: ignore[union-attr]  # b.type == "text" guards this at runtime; mypy cannot narrow a discriminated union inside a generator expression
 
         if ai_recommendation and len(ai_recommendation) < 200:
-            insights.append(f"💡 AI препоръка: {ai_recommendation}")
+            insights.append(f"💡 AI recommendation: {ai_recommendation}" if is_en else f"💡 AI препоръка: {ai_recommendation}")
     except Exception as e:
         logger.warning(f"AI insights generation failed: {str(e)}")
-    
+
     return insights
 
 

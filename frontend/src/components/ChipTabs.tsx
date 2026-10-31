@@ -62,13 +62,23 @@ export function ChipTabs<T extends string>({ options, active, onChange }: Props<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keysSignature, active]);
 
+  // Re-snap (no animation) whenever the ROW ITSELF is re-measured, not just
+  // when the active tab or the key set changes - e.g. async content above
+  // this row (the Home screen's Daily Briefing card loading its signals a
+  // beat after mount) growing taller shifts a scrollbar into/out of view on
+  // web, narrowing every chip's pixel width without the key set or the
+  // active tab ever changing, which otherwise left the pill frozen at its
+  // pre-shift position (visibly under the wrong chip, e.g. "Year" instead
+  // of the actually-selected "Month").
+  const handleRowLayout = () => movePillTo(active, false);
+
   const pillStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: pillX.value }],
     width: pillWidth.value,
   }));
 
   return (
-    <View ref={rowRef} style={styles.row}>
+    <View ref={rowRef} style={styles.row} onLayout={handleRowLayout}>
       <Animated.View style={[styles.pill, pillStyle]} />
       {options.map((opt) => (
         <TouchableOpacity

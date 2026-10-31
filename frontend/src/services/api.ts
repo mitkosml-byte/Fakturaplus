@@ -1082,7 +1082,7 @@ class ApiService {
   }
 
   // ROI Analysis (Owner only)
-  async getROIAnalysis(params?: { month?: number; year?: number }): Promise<{
+  async getROIAnalysis(params?: { month?: number; year?: number; language?: 'bg' | 'en' }): Promise<{
     period: { month: number; year: number };
     total_personal_investment: number;
     total_revenue: number;
@@ -1095,6 +1095,7 @@ class ApiService {
     const queryParams = new URLSearchParams();
     if (params?.month) queryParams.set('month', params.month.toString());
     if (params?.year) queryParams.set('year', params.year.toString());
+    queryParams.set('language', params?.language || 'bg');
     const query = queryParams.toString();
     return this.fetch(`/roi/analysis${query ? `?${query}` : ''}`);
   }

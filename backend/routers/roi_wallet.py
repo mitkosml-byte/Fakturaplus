@@ -40,6 +40,7 @@ async def get_roi_analysis(
     request: Request,
     month: Optional[int] = None,
     year: Optional[int] = None,
+    language: str = "bg",
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -144,9 +145,10 @@ async def get_roi_analysis(
             is_profitable=is_profitable,
             investment_covered=investment_covered,
             days_with_data=total_days_with_data,
+            language=language,
         )
     else:
-        ai_insights = ["🔒 Нямаш право да виждаш печалбата за избрания период"]
+        ai_insights = ["🔒 You don't have permission to see the profit for the selected period"] if language == "en" else ["🔒 Нямаш право да виждаш печалбата за избрания период"]
 
     return {
         "period": {"month": target_month, "year": target_year},
