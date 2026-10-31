@@ -17,7 +17,7 @@ import { useRouter } from 'expo-router';
 import { parseISO, format } from 'date-fns';
 import { api } from '../src/services/api';
 import { BusinessChatDigest } from '../src/types';
-import { useTranslation } from '../src/i18n';
+import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
@@ -39,6 +39,7 @@ type ChatMessage =
 export default function AskMyNumbersScreen() {
   const router = useRouter();
   const { t, dateLocale } = useTranslation();
+  const { language } = useLanguageStore();
   const { hasPermission } = useAuth();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -71,7 +72,7 @@ export default function AskMyNumbersScreen() {
     setText('');
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: 'user', text: trimmed }]);
     try {
-      const data = await api.askMyNumbers(trimmed, history);
+      const data = await api.askMyNumbers(trimmed, history, language);
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: data.answer, digest: data.digest }]);
     } catch (error: any) {
       setMessages((prev) => [

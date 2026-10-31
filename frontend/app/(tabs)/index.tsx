@@ -39,7 +39,7 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 
 export default function HomeScreen() {
   const { t, dateLocale } = useTranslation();
-  const { language } = useLanguageStore();
+  const { language, setLanguage } = useLanguageStore();
   const { isOwner, hasPermission } = useAuth();
   const router = useRouter();
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string }>();
@@ -568,6 +568,13 @@ export default function HomeScreen() {
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <ScanCreditsBadge />
+                <TouchableOpacity
+                  style={styles.headerIcon}
+                  onPress={() => { Haptics.success(); setLanguage(language === 'bg' ? 'en' : 'bg'); }}
+                  accessibilityLabel={t('home.switchLanguage')}
+                >
+                  <Text style={styles.languageToggleText}>{language === 'bg' ? 'BG' : 'EN'}</Text>
+                </TouchableOpacity>
                 <View style={styles.headerIcon}>
                   <Ionicons name="receipt" size={28} color={COLORS.primary} />
                 </View>
@@ -1114,6 +1121,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(139, 92, 246, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  languageToggleText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primary,
   },
   summaryContainer: {
     flexDirection: 'row',

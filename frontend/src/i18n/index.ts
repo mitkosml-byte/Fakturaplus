@@ -340,6 +340,10 @@ export const translations: Translations = {
     bg: 'Добре дошли!',
     en: 'Welcome!',
   },
+  'home.switchLanguage': {
+    bg: 'Смяна на езика',
+    en: 'Switch language',
+  },
   'home.currentMonth': {
     bg: 'Текущ месец',
     en: 'Current month',

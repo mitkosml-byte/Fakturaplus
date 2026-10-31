@@ -2491,6 +2491,11 @@ class BusinessChatQuery(BaseModel):
     # narrow-data limitation. Capped server-side regardless of what the
     # client sends (see ask_my_numbers).
     history: List[ChatHistoryTurn] = []
+    # The app's current UI language - the answer used to be hardcoded to
+    # Bulgarian regardless of this, so a viewer with the UI set to English
+    # got an English screen around a Bulgarian answer. Defaults to "bg"
+    # for an older client that doesn't send it yet.
+    language: Literal["bg", "en"] = "bg"
 
 class BusinessChatResponse(BaseModel):
     answer: str

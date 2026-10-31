@@ -227,6 +227,13 @@ async def ask_my_numbers(
     digest = await build_business_chat_digest(current_user)
     company_id, _ = await get_company_scope(current_user)
 
+    # The app's own UI can be in Bulgarian or English (Профил/Profile ->
+    # language switch, or the Home screen's own quick toggle) - the
+    # answer must follow whichever one the client is actually showing,
+    # not always Bulgarian regardless of it (that mismatch - an English
+    # screen around a Bulgarian answer - is exactly what was reported).
+    response_language = "английски (English)" if query.language == "en" else "български"
+
     system_prompt = (
         "Ти си асистент на малък бизнес във Фактура+, който отговаря САМО въз основа на подадените му по-долу "
         "реални данни за тази фирма (JSON) и предходния разговор. Никога не отговаряй с измислени или закръглени "
@@ -239,8 +246,9 @@ async def ask_my_numbers(
         "средното от наличните месеци, не истинска тенденция; кажи го изрично, вместо да звучиш по-сигурен, "
         "отколкото данните позволяват. Предходните съобщения по-долу са същият разговор - при последващ въпрос "
         "('сравни с него', 'ами миналата седмица') използвай контекста им, но винаги смятай с актуалните данни от "
-        "ПОСЛЕДНИЯ JSON, не с число, спомена в по-ранен твой отговор. Отговаряй кратко (до 4 изречения), на "
-        "български, сумите винаги в евро (€). Профитът (profit) може да е null вътре в този JSON дори когато "
+        "ПОСЛЕДНИЯ JSON, не с число, спомена в по-ранен твой отговор. Отговаряй кратко (до 4 изречения), ВИНАГИ на "
+        f"{response_language} независимо от езика на въпроса или на по-ранни съобщения в разговора, сумите винаги "
+        "в евро (€). Профитът (profit) може да е null вътре в този JSON дори когато "
         "самият обект не е null - това означава, че този потребител няма права да вижда печалбата конкретно; в "
         "такъв случай кажи, че печалбата не е видима за него, вместо да я извеждаш или предполагаш."
     )

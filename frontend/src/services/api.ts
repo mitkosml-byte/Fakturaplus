@@ -935,10 +935,10 @@ class ApiService {
 
   // "Ask your own numbers" chat (Module 4 Finding #3) - answers only from
   // this company's own stored data, never a general chatbot.
-  async askMyNumbers(question: string, history: BusinessChatHistoryTurn[] = []): Promise<BusinessChatResponse> {
+  async askMyNumbers(question: string, history: BusinessChatHistoryTurn[] = [], language: 'bg' | 'en' = 'bg'): Promise<BusinessChatResponse> {
     return this.fetch('/ai/ask-my-numbers', {
       method: 'POST',
-      body: JSON.stringify({ question, history }),
+      body: JSON.stringify({ question, history, language }),
     });
   }
 
