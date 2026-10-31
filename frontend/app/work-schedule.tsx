@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import { format, startOfWeek, addDays, addWeeks, subWeeks } from 'date-fns';
 import { Alert } from '../src/utils/alert';
 import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
-import { ShiftOccurrence, ShiftRepeatPattern, ScheduleSummary, SchedulePayment } from '../src/types';
+import { ShiftOccurrence, ShiftRepeatPattern, ScheduleSummary, SchedulePayment, ScheduleLeaveEntry, LeaveType, PublicHoliday } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Avatar, TeamMemberProfileSheet } from '../src/components';
@@ -55,6 +55,27 @@ function employeeColor(userId: string): string {
 function weekDates(monday: Date): Date[] {
   return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
 }
+// Every date from start to end inclusive, as "YYYY-MM-DD" keys - used to
+// fan a leave period out into the individual grid cells it covers.
+function expandDateRange(startStr: string, endStr: string): string[] {
+  const out: string[] = [];
+  let d = new Date(`${startStr}T00:00:00`);
+  const endD = new Date(`${endStr}T00:00:00`);
+  let guard = 0;
+  while (d <= endD && guard < 400) {
+    out.push(toDateStr(d));
+    d = addDays(d, 1);
+    guard++;
+  }
+  return out;
+}
+
+const LEAVE_TYPES: LeaveType[] = ['paid', 'unpaid', 'sick'];
+const LEAVE_COLORS: Record<LeaveType, string> = {
+  paid: COLORS.info,
+  unpaid: COLORS.textMuted,
+  sick: COLORS.warning,
+};
 
 type DirectoryEntry = { user_id: string; name: string; picture: string | null };
 
@@ -121,6 +142,26 @@ export default function WorkScheduleScreen() {
   // manager-only aggregated profile + private positive/negative notes.
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
 
+  // Leave + public holidays shown directly in the grid (not just as a
+  // conflict flag on a shift that happens to collide) - a manager should
+  // see who's already away before planning around them, not after.
+  const [leaveEntries, setLeaveEntries] = useState<ScheduleLeaveEntry[]>([]);
+  // user_id -> employee_id, for team members linked to a payroll record -
+  // leave belongs to that record, so only linked members can get one
+  // logged from here.
+  const [employeeIdByUserId, setEmployeeIdByUserId] = useState<Record<string, string>>({});
+  const [holidaysByYear, setHolidaysByYear] = useState<Record<number, PublicHoliday[]>>({});
+
+  const [leaveModalVisible, setLeaveModalVisible] = useState(false);
+  const [leaveFormUserId, setLeaveFormUserId] = useState('');
+  const [leaveType, setLeaveType] = useState<LeaveType>('paid');
+  const [leaveStartDate, setLeaveStartDate] = useState(new Date());
+  const [leaveEndDate, setLeaveEndDate] = useState(new Date());
+  const [leaveNoteText, setLeaveNoteText] = useState('');
+  const [leaveStartPickerVisible, setLeaveStartPickerVisible] = useState(false);
+  const [leaveEndPickerVisible, setLeaveEndPickerVisible] = useState(false);
+  const [leaveSaving, setLeaveSaving] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
       const now = new Date();
@@ -132,12 +173,18 @@ export default function WorkScheduleScreen() {
       setMonthEnd(mEnd);
 
       const filterUserId = canManage ? (selectedUserId || undefined) : undefined;
-      const [occData, dir] = await Promise.all([
+      const [occData, dir, leaveData, employees] = await Promise.all([
         api.getShiftOccurrences(start, end, filterUserId),
         canManage ? api.getCompanyDirectory() : Promise.resolve([]),
+        canManage ? api.getScheduleLeave(start, end) : Promise.resolve({ leave: [] }),
+        canManage ? api.getEmployees(true) : Promise.resolve([]),
       ]);
       setOccurrences(occData.occurrences);
       setDirectory(dir);
+      setLeaveEntries(leaveData.leave);
+      const linkMap: Record<string, string> = {};
+      employees.forEach((e) => { if (e.linked_user_id) linkMap[e.linked_user_id] = e.id; });
+      setEmployeeIdByUserId(linkMap);
 
       // A summary only makes sense for ONE person - skip it in the
       // manager's "whole team" view rather than add up different
@@ -163,6 +210,21 @@ export default function WorkScheduleScreen() {
   }, [canManage, selectedUserId]);
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
+
+  // Fetches a year's official Bulgarian holidays the first time the grid
+  // shows a week touching it (a week only ever spans at most two years,
+  // at the Dec/Jan boundary) and caches it - public info, no backend
+  // permission gate, so this runs for every viewer of the grid.
+  useEffect(() => {
+    const years = Array.from(new Set(weekDates(gridWeekStart).map((d) => d.getFullYear())));
+    years.forEach((year) => {
+      if (holidaysByYear[year]) return;
+      api.getPublicHolidays(year)
+        .then((list) => setHolidaysByYear((prev) => ({ ...prev, [year]: list })))
+        .catch(() => {});
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridWeekStart]);
 
   const resetForm = () => {
     setEditingId(null);
@@ -301,12 +363,29 @@ export default function WorkScheduleScreen() {
     ]);
   };
 
-  const handleGridCellPress = (userId: string, dateKey: string, dayOccs: ShiftOccurrence[]) => {
+  const openAddShiftAt = (userId: string, dateKey: string) => {
+    resetForm();
+    setFormUserId(userId);
+    setShiftDate(new Date(`${dateKey}T00:00:00`));
+    setModalVisible(true);
+  };
+
+  const handleGridCellPress = (userId: string, dateKey: string, dayOccs: ShiftOccurrence[], leave?: ScheduleLeaveEntry) => {
+    if (dayOccs.length === 0 && leave) {
+      const range = `${format(new Date(`${leave.start_date}T00:00:00`), 'd MMM', { locale: dateLocale })} - ${format(new Date(`${leave.end_date}T00:00:00`), 'd MMM yyyy', { locale: dateLocale })}`;
+      Alert.alert(
+        `${leave.employee_name} · ${t(`schedule.leaveType_${leave.leave_type}`)}`,
+        leave.note ? `${range}\n${leave.note}` : range,
+        [
+          { text: t('schedule.addShiftAnyway'), onPress: () => openAddShiftAt(userId, dateKey) },
+          { text: t('schedule.deleteLeave'), style: 'destructive', onPress: () => handleDeleteLeave(leave) },
+          { text: t('common.cancel'), style: 'cancel' },
+        ]
+      );
+      return;
+    }
     if (dayOccs.length === 0) {
-      resetForm();
-      setFormUserId(userId);
-      setShiftDate(new Date(`${dateKey}T00:00:00`));
-      setModalVisible(true);
+      openAddShiftAt(userId, dateKey);
       return;
     }
     const occ = dayOccs[0];
@@ -316,6 +395,65 @@ export default function WorkScheduleScreen() {
       { text: t('schedule.copyShift'), onPress: () => openCopyModal(occ) },
       { text: t('common.delete'), style: 'destructive', onPress: () => handleDelete(occ) },
       { text: t('common.cancel'), style: 'cancel' },
+    ]);
+  };
+
+  const handleGridCellLongPress = (userId: string, dateKey: string, dayOccs: ShiftOccurrence[], leave?: ScheduleLeaveEntry) => {
+    if (dayOccs.length > 0 || leave) return;
+    if (!employeeIdByUserId[userId]) {
+      Alert.alert(t('schedule.noLinkedEmployeeTitle'), t('schedule.noLinkedEmployeeHint'));
+      return;
+    }
+    setLeaveFormUserId(userId);
+    const d = new Date(`${dateKey}T00:00:00`);
+    setLeaveStartDate(d);
+    setLeaveEndDate(d);
+    setLeaveType('paid');
+    setLeaveNoteText('');
+    setLeaveModalVisible(true);
+  };
+
+  const handleSaveLeave = async () => {
+    const employeeId = employeeIdByUserId[leaveFormUserId];
+    if (!employeeId) return;
+    if (toDateStr(leaveEndDate) < toDateStr(leaveStartDate)) {
+      Alert.alert(t('common.error'), t('schedule.repeatUntilError'));
+      return;
+    }
+    setLeaveSaving(true);
+    try {
+      await api.createLeaveEntry({
+        employee_id: employeeId,
+        leave_type: leaveType,
+        start_date: toDateStr(leaveStartDate),
+        end_date: toDateStr(leaveEndDate),
+        note: leaveNoteText.trim() || undefined,
+      });
+      setLeaveModalVisible(false);
+      Haptics.success();
+      await loadData();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message || t('schedule.leaveSaveError'));
+    } finally {
+      setLeaveSaving(false);
+    }
+  };
+
+  const handleDeleteLeave = (leave: ScheduleLeaveEntry) => {
+    Alert.alert(t('schedule.deleteLeaveTitle'), t('schedule.deleteLeaveConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.deleteLeaveEntry(leave.id);
+            await loadData();
+          } catch (error: any) {
+            Alert.alert(t('common.error'), error.message);
+          }
+        },
+      },
     ]);
   };
 
@@ -420,6 +558,20 @@ export default function WorkScheduleScreen() {
   const gridDays = weekDates(gridWeekStart);
   const gridEmployees = selectedUserId ? directory.filter((d) => d.user_id === selectedUserId) : directory;
   const showGrid = canManage && viewMode === 'grid';
+
+  const leaveByUserDate: Record<string, Record<string, ScheduleLeaveEntry>> = {};
+  leaveEntries.forEach((entry) => {
+    expandDateRange(entry.start_date, entry.end_date).forEach((dateKey) => {
+      if (!leaveByUserDate[entry.user_id]) leaveByUserDate[entry.user_id] = {};
+      leaveByUserDate[entry.user_id][dateKey] = entry;
+    });
+  });
+  const holidaysThisWeek: Record<string, string> = {};
+  gridDays.forEach((d) => {
+    const dateKey = toDateStr(d);
+    const match = (holidaysByYear[d.getFullYear()] || []).find((h) => h.date === dateKey);
+    if (match) holidaysThisWeek[dateKey] = match.name;
+  });
 
   return (
     <ScreenEnter>
@@ -559,12 +711,26 @@ export default function WorkScheduleScreen() {
                         <View>
                           <View style={styles.gridRow}>
                             <View style={styles.gridLabelCell} />
-                            {gridDays.map((d) => (
-                              <View key={toDateStr(d)} style={styles.gridDayHeaderCell}>
-                                <Text style={styles.gridDayHeaderText}>{format(d, 'EEE', { locale: dateLocale })}</Text>
-                                <Text style={styles.gridDayHeaderDate}>{format(d, 'd.MM')}</Text>
-                              </View>
-                            ))}
+                            {gridDays.map((d) => {
+                              const dateKey = toDateStr(d);
+                              const holidayName = holidaysThisWeek[dateKey];
+                              return (
+                                <TouchableOpacity
+                                  key={dateKey}
+                                  style={[styles.gridDayHeaderCell, !!holidayName && styles.gridDayHeaderHoliday]}
+                                  onPress={() => holidayName && Alert.alert(holidayName)}
+                                  disabled={!holidayName}
+                                >
+                                  <Text style={[styles.gridDayHeaderText, !!holidayName && styles.gridDayHeaderHolidayText]}>
+                                    {format(d, 'EEE', { locale: dateLocale })}
+                                  </Text>
+                                  <Text style={[styles.gridDayHeaderDate, !!holidayName && styles.gridDayHeaderHolidayText]}>
+                                    {format(d, 'd.MM')}
+                                  </Text>
+                                  {holidayName && <Ionicons name="star" size={8} color={COLORS.warning} />}
+                                </TouchableOpacity>
+                              );
+                            })}
                           </View>
                           {gridEmployees.map((emp) => {
                             const color = employeeColor(emp.user_id);
@@ -578,15 +744,16 @@ export default function WorkScheduleScreen() {
                                 {gridDays.map((d) => {
                                   const dateKey = toDateStr(d);
                                   const dayOccs = occurrencesByUserDate[emp.user_id]?.[dateKey] || [];
+                                  const leaveHere = dayOccs.length === 0 ? leaveByUserDate[emp.user_id]?.[dateKey] : undefined;
+                                  const leaveColor = leaveHere ? LEAVE_COLORS[leaveHere.leave_type] : undefined;
                                   return (
                                     <TouchableOpacity
                                       key={dateKey}
-                                      style={styles.gridCell}
-                                      onPress={() => handleGridCellPress(emp.user_id, dateKey, dayOccs)}
+                                      style={[styles.gridCell, !!holidaysThisWeek[dateKey] && styles.gridCellHoliday]}
+                                      onPress={() => handleGridCellPress(emp.user_id, dateKey, dayOccs, leaveHere)}
+                                      onLongPress={() => handleGridCellLongPress(emp.user_id, dateKey, dayOccs, leaveHere)}
                                     >
-                                      {dayOccs.length === 0 ? (
-                                        <Ionicons name="add" size={14} color={COLORS.textMuted} />
-                                      ) : (
+                                      {dayOccs.length > 0 ? (
                                         dayOccs.map((occ) => (
                                           <View
                                             key={occ.shift_id}
@@ -601,6 +768,15 @@ export default function WorkScheduleScreen() {
                                             </View>
                                           </View>
                                         ))
+                                      ) : leaveHere ? (
+                                        <View style={[styles.gridLeaveBlock, { borderColor: leaveColor, backgroundColor: `${leaveColor}22` }]}>
+                                          <Ionicons name="moon" size={10} color={leaveColor} />
+                                          <Text style={[styles.gridLeaveText, { color: leaveColor }]} numberOfLines={1}>
+                                            {t(`schedule.leaveShort_${leaveHere.leave_type}`)}
+                                          </Text>
+                                        </View>
+                                      ) : (
+                                        <Ionicons name="add" size={14} color={COLORS.textMuted} />
                                       )}
                                     </TouchableOpacity>
                                   );
@@ -920,6 +1096,86 @@ export default function WorkScheduleScreen() {
             </View>
           </BottomSheet>
 
+          <BottomSheet visible={leaveModalVisible} onClose={() => setLeaveModalVisible(false)}>
+            <View style={styles.modalContent}>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                <Text style={styles.modalTitle}>{t('schedule.addLeaveTitle')}</Text>
+                <Text style={styles.hint}>{directory.find((d) => d.user_id === leaveFormUserId)?.name}</Text>
+
+                <Text style={styles.inputLabel}>{t('schedule.leaveType')}</Text>
+                <View style={styles.chipRow}>
+                  {LEAVE_TYPES.map((lt) => (
+                    <TouchableOpacity
+                      key={lt}
+                      style={[styles.chip, leaveType === lt && styles.chipActive]}
+                      onPress={() => setLeaveType(lt)}
+                    >
+                      <Text style={[styles.chipText, leaveType === lt && styles.chipTextActive]}>{t(`schedule.leaveType_${lt}`)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <View style={styles.rowBetween}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>{t('schedule.startDate')}</Text>
+                    <TouchableOpacity style={styles.pickerButton} onPress={() => setLeaveStartPickerVisible(true)}>
+                      <Ionicons name="calendar-outline" size={18} color={COLORS.primary} />
+                      <Text style={styles.pickerButtonText}>{format(leaveStartDate, 'd MMM yyyy', { locale: dateLocale })}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ width: 12 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>{t('schedule.endDate')}</Text>
+                    <TouchableOpacity style={styles.pickerButton} onPress={() => setLeaveEndPickerVisible(true)}>
+                      <Ionicons name="calendar-outline" size={18} color={COLORS.primary} />
+                      <Text style={styles.pickerButtonText}>{format(leaveEndDate, 'd MMM yyyy', { locale: dateLocale })}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <Text style={styles.inputLabel}>{t('schedule.note')}</Text>
+                <TextInput
+                  style={[styles.input, { height: 60 }]}
+                  value={leaveNoteText}
+                  onChangeText={setLeaveNoteText}
+                  placeholder={t('schedule.notePlaceholder')}
+                  placeholderTextColor={COLORS.textMuted}
+                  multiline
+                />
+
+                <TouchableOpacity
+                  style={[styles.saveButton, leaveSaving && { opacity: 0.6 }]}
+                  onPress={handleSaveLeave}
+                  disabled={leaveSaving}
+                >
+                  {leaveSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setLeaveModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </BottomSheet>
+
+          <DateTimePickerModal
+            isVisible={leaveStartPickerVisible}
+            mode="date"
+            date={leaveStartDate}
+            onConfirm={(d) => {
+              setLeaveStartDate(d);
+              if (d > leaveEndDate) setLeaveEndDate(d);
+              setLeaveStartPickerVisible(false);
+            }}
+            onCancel={() => setLeaveStartPickerVisible(false)}
+          />
+          <DateTimePickerModal
+            isVisible={leaveEndPickerVisible}
+            mode="date"
+            date={leaveEndDate}
+            onConfirm={(d) => { setLeaveEndDate(d); setLeaveEndPickerVisible(false); }}
+            onCancel={() => setLeaveEndPickerVisible(false)}
+          />
+
           <DateTimePickerModal
             isVisible={datePickerVisible}
             mode="date"
@@ -1053,7 +1309,9 @@ const styles = StyleSheet.create({
   gridColorDot: { width: 6, height: 6, borderRadius: 3 },
   gridLabelText: { fontSize: 11, color: COLORS.textSubtle, flexShrink: 1 },
   gridDayHeaderCell: { width: 56, alignItems: 'center', paddingBottom: 8 },
+  gridDayHeaderHoliday: { backgroundColor: 'rgba(245, 158, 11, 0.12)', borderRadius: 8 },
   gridDayHeaderText: { fontSize: 11, fontWeight: '700', color: COLORS.primaryLight, textTransform: 'capitalize' },
+  gridDayHeaderHolidayText: { color: COLORS.warning },
   gridDayHeaderDate: { fontSize: 10, color: COLORS.textMuted, marginTop: 1 },
   gridCell: {
     width: 56,
@@ -1067,6 +1325,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 2,
   },
+  gridCellHoliday: { backgroundColor: 'rgba(245, 158, 11, 0.06)' },
+  gridLeaveBlock: {
+    width: '100%',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 4,
+    alignItems: 'center',
+    gap: 1,
+  },
+  gridLeaveText: { fontSize: 9, fontWeight: '700' },
   gridShiftChip: {
     width: '100%',
     borderWidth: 1,
