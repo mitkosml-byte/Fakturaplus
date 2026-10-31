@@ -37,6 +37,8 @@ from server import (
 )
 import server
 
+from routers.payroll import list_leave
+
 router = APIRouter(prefix="/api")
 
 # Work schedule is deliberately NOT gated behind team_collaboration or
@@ -213,6 +215,46 @@ async def get_schedule_summary(
     total_hours = round(sum(o["hours"] for o in occurrences), 2)
     estimated_pay = round(sum(o["hours"] * (o["hourly_rate"] or 0) for o in occurrences), 2)
     return {"total_hours": total_hours, "estimated_pay": estimated_pay, "shift_count": len(occurrences)}
+
+
+@router.get("/schedule/leave")
+async def get_schedule_leave(start: str, end: str, current_user: User = Depends(get_current_user)):
+    """Approved leave for every team member who has a linked payroll
+    record, resolved from employee_id to their real account's user_id -
+    lets the grid show "on leave" blocks directly, without the frontend
+    having to cross-reference employees itself. Reuses list_leave's own
+    overlap query and manage_budget gate directly rather than
+    re-deriving either."""
+    require_permission(current_user, "manage_budget")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"leave": []}
+
+    leave_entries = await list_leave(start_date=start, end_date=end, current_user=current_user)
+    if not leave_entries:
+        return {"leave": []}
+
+    employee_ids = list({entry.employee_id for entry in leave_entries})
+    employees = await server.db.employees.find(
+        {"id": {"$in": employee_ids}, "company_id": company_id}, {"_id": 0, "id": 1, "linked_user_id": 1}
+    ).to_list(1000)
+    linked_by_employee = {e["id"]: e.get("linked_user_id") for e in employees}
+
+    result = []
+    for entry in leave_entries:
+        user_id = linked_by_employee.get(entry.employee_id)
+        if not user_id:
+            continue
+        result.append({
+            "id": entry.id,
+            "user_id": user_id,
+            "employee_name": entry.employee_name,
+            "leave_type": entry.leave_type,
+            "start_date": entry.start_date,
+            "end_date": entry.end_date,
+            "note": entry.note,
+        })
+    return {"leave": result}
 
 
 @router.put("/schedule/shifts/{shift_id}/occurrences/{occ_date}/adjustment", response_model=ShiftAdjustment)

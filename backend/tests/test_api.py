@@ -2073,6 +2073,79 @@ def test_team_profile_and_notes(client):
     assert r.status_code == 200
 
 
+def test_schedule_leave(client):
+    """The work-schedule grid shows a team member's approved leave as a
+    block in otherwise-empty cells - GET /schedule/leave resolves each
+    leave entry's employee_id to the SAME person's linked_user_id, so the
+    frontend never has to cross-reference employees itself. An employee
+    with no linked account is silently excluded (nothing for the grid to
+    attach it to), not an error."""
+    owner = h(STATE["owner_token"])
+
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+
+    staff_id = f"user_{uuid_module.uuid4().hex[:12]}"
+    staff_token = uuid_module.uuid4().hex
+
+    async def _make_leave_staff():
+        me = client.get("/api/auth/me", headers=owner).json()
+        await server_module.db.users.insert_one({
+            "user_id": staff_id, "email": f"{staff_id}@test.com", "name": "Leave Staff",
+            "role": "staff", "company_id": me["company_id"], "permissions": [],
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+        await server_module.db.user_sessions.insert_one({
+            "user_id": staff_id, "session_token": staff_token,
+            "expires_at": server_module.datetime.now(tz.utc) + timedelta(days=7),
+            "created_at": server_module.datetime.now(tz.utc),
+        })
+
+    asyncio.run(_make_leave_staff())
+    staff = h(staff_token)
+
+    # An employee with no linked_user_id - their leave must never show up.
+    r = client.post("/api/employees", headers=owner, json={"name": "Unlinked Employee", "base_salary": 1000})
+    assert r.status_code == 200, r.text
+    unlinked_employee_id = r.json()["id"]
+    r = client.post("/api/employees/leave", headers=owner, json={
+        "employee_id": unlinked_employee_id, "leave_type": "paid", "start_date": "2026-05-01", "end_date": "2026-05-03",
+    })
+    assert r.status_code == 200, r.text
+
+    r = client.post("/api/employees", headers=owner, json={
+        "name": "Leave Staff", "base_salary": 1300, "linked_user_id": staff_id,
+    })
+    assert r.status_code == 200, r.text
+    employee_id = r.json()["id"]
+
+    r = client.post("/api/employees/leave", headers=owner, json={
+        "employee_id": employee_id, "leave_type": "sick", "start_date": "2026-05-10", "end_date": "2026-05-12", "note": "Flu",
+    })
+    assert r.status_code == 200, r.text
+
+    # Staff can't see the team's leave calendar.
+    r = client.get("/api/schedule/leave?start=2026-05-01&end=2026-05-31", headers=staff)
+    assert r.status_code == 403
+
+    r = client.get("/api/schedule/leave?start=2026-05-01&end=2026-05-31", headers=owner)
+    assert r.status_code == 200, r.text
+    leave = r.json()["leave"]
+    assert len(leave) == 1
+    assert leave[0]["user_id"] == staff_id
+    assert leave[0]["leave_type"] == "sick"
+    assert leave[0]["start_date"] == "2026-05-10"
+    assert leave[0]["note"] == "Flu"
+
+    # Outside the requested window, it's gone (the overlap filter still applies).
+    r = client.get("/api/schedule/leave?start=2026-06-01&end=2026-06-30", headers=owner)
+    assert r.json()["leave"] == []
+
+
 def test_legacy_scope_consistency(client):
     """Module 1 audit finding: 40 endpoints built their own company_id
     lookup inline instead of the shared get_company_scope()/scope helper,
