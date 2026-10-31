@@ -40,7 +40,7 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 export default function HomeScreen() {
   const { t, dateLocale } = useTranslation();
   const { language, setLanguage } = useLanguageStore();
-  const { isOwner, hasPermission } = useAuth();
+  const { isOwner, hasPermission, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string }>();
 
@@ -241,10 +241,26 @@ export default function HomeScreen() {
   // Tab screens stay mounted, so returning here (e.g. after scanning and
   // saving a new invoice) doesn't remount the screen - only re-fetching on
   // focus picks up the change without needing a manual pull-to-refresh.
+  //
+  // authLoading is in the dependency list for a second reason, not just
+  // "skip while unauthenticated": on a fresh page load (not a tab switch
+  // within an already-running app), Home is "/" - the very first route -
+  // so it mounts and this effect fires before AuthProvider's checkAuth()
+  // has finished reading the stored token out of (async, even on web)
+  // AsyncStorage. That first loadData() call used to go out with no auth
+  // at all, fail with 401, and since nothing else ever re-triggers a focus
+  // event on its own, the summary card (and everything chained off it
+  // below - MorningBriefingCard, PersonalWalletTeaser) stayed stuck on its
+  // loading skeleton forever, until the user manually switched tabs and
+  // back. useFocusEffect's own implementation re-runs its effect whenever
+  // the memoized callback's identity changes while the screen is still
+  // focused (see its [effect, navigation] dependency list), so adding
+  // authLoading here both skips the doomed first call AND, once it flips
+  // to false a moment later, fires the real one - no separate effect needed.
   useFocusEffect(
     useCallback(() => {
-      loadData();
-    }, [loadData])
+      if (!authLoading) loadData();
+    }, [loadData, authLoading])
   );
 
   // Set by the scan screen's "sales" mode hand-off (see the effect below) -
@@ -388,12 +404,17 @@ export default function HomeScreen() {
     }
   }, [canViewPersonalInvestments, periodState, language]);
 
+  // authLoading in the deps list: same auth-readiness race as loadData
+  // above - see its comment. useFocusEffect re-runs its effect whenever
+  // this memoized callback's identity changes while still focused, so
+  // this alone both skips the doomed first call and retries once
+  // checkAuth() actually finishes.
   useFocusEffect(
     useCallback(() => {
-      if (canViewPersonalInvestments) {
+      if (!authLoading && canViewPersonalInvestments) {
         loadRoiData();
       }
-    }, [canViewPersonalInvestments, loadRoiData])
+    }, [canViewPersonalInvestments, loadRoiData, authLoading])
   );
 
   // Create personal expense
