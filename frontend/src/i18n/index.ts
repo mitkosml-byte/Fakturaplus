@@ -179,15 +179,170 @@ export const translations: Translations = {
     bg: 'Статистики',
     en: 'Statistics',
   },
+  'nav.team': {
+    bg: 'Екип',
+    en: 'Team',
+  },
   'nav.profile': {
-    bg: 'Профил',
-    en: 'Profile',
+    bg: 'Акаунт',
+    en: 'Account',
+  },
+  'team.title': {
+    bg: 'Екип',
+    en: 'Team',
+  },
+  'team.subtitle': {
+    bg: 'Календар, съобщения и всичко, свързано с хората в екипа',
+    en: 'Calendar, messages, and everything about your team',
   },
   
+  // Morning briefing card (top of Home) - renders whatever the backend's
+  // unified Proactive Second Brain engine (GET /proactive/signals) ranks
+  // highest; signal title/detail text itself comes from the backend
+  // (Bulgarian-only, same as every other push notification in the app).
+  'briefing.title': {
+    bg: 'Дневен преглед',
+    en: 'Daily briefing',
+  },
+  'briefing.allClear': {
+    bg: 'Нищо спешно днес - всичко изглежда наред.',
+    en: 'Nothing urgent today - everything looks fine.',
+  },
+  // "Ask your own numbers" chat (Module 4 Finding #3) - plain-language Q&A
+  // scoped strictly to the company's own stored data.
+  'askMyNumbers.title': {
+    bg: 'Попитай за числата си',
+    en: 'Ask about your numbers',
+  },
+  'askMyNumbers.subtitle': {
+    bg: 'Прост въпрос, отговор само по твоите данни',
+    en: 'A plain question, answered only from your own data',
+  },
+  'askMyNumbers.disclaimer': {
+    bg: 'Отговаря само въз основа на въведените данни на тази фирма. Не се свързва с НАП и не вижда нищо извън фирмата ти.',
+    en: "Answers only from this company's own stored data. Never talks to NAP or anything outside your company.",
+  },
+  'askMyNumbers.placeholder': {
+    bg: 'Напиши въпрос...',
+    en: 'Type a question...',
+  },
+  'askMyNumbers.emptyTitle': {
+    bg: 'Питай с прости думи',
+    en: 'Ask in plain language',
+  },
+  'askMyNumbers.suggestion1': {
+    bg: 'Какви са най-големите ми разходи този месец?',
+    en: 'What are my biggest expenses this month?',
+  },
+  'askMyNumbers.suggestion2': {
+    bg: 'Сравни ме със миналия месец',
+    en: 'Compare me to last month',
+  },
+  'askMyNumbers.suggestion3': {
+    bg: 'Кой ми дължи пари?',
+    en: 'Who owes me money?',
+  },
+  'askMyNumbers.suggestion4': {
+    bg: 'Имам ли неплатени фактури към доставчици?',
+    en: 'Do I have unpaid invoices to suppliers?',
+  },
+  'askMyNumbers.numbersTitle': {
+    bg: 'Числата зад отговора',
+    en: 'The numbers behind this answer',
+  },
+  'askMyNumbers.thisMonth': {
+    bg: 'Този месец',
+    en: 'This month',
+  },
+  'askMyNumbers.lastMonth': {
+    bg: 'Миналия месец',
+    en: 'Last month',
+  },
+  'askMyNumbers.revenue': {
+    bg: 'Оборот',
+    en: 'Revenue',
+  },
+  'askMyNumbers.expenses': {
+    bg: 'Разходи',
+    en: 'Expenses',
+  },
+  'askMyNumbers.profit': {
+    bg: 'Печалба',
+    en: 'Profit',
+  },
+  'askMyNumbers.profitHidden': {
+    bg: 'скрита за теб',
+    en: 'hidden from you',
+  },
+  'askMyNumbers.topExpenses': {
+    bg: 'Най-големи разходи',
+    en: 'Biggest expenses',
+  },
+  'askMyNumbers.unpaid': {
+    bg: '{count} неплатени фактури ({overdue} просрочени) - {amount} €',
+    en: '{count} unpaid invoices ({overdue} overdue) - {amount} €',
+  },
+  'askMyNumbers.receivables': {
+    bg: '{count} неплатени вземания ({overdue} просрочени) - дължат ти {amount} €',
+    en: '{count} unpaid receivables ({overdue} overdue) - customers owe you {amount} €',
+  },
+  'askMyNumbers.budget': {
+    bg: 'Бюджет: {percent}% от {limit} €',
+    en: 'Budget: {percent}% of {limit} €',
+  },
+  'askMyNumbers.vatDue': {
+    bg: 'ДДС за внасяне този месец: {amount} €',
+    en: 'VAT due this month: {amount} €',
+  },
+  'askMyNumbers.forecastRevenue': {
+    bg: 'Прогноза приходи следващ месец: {amount} €{note}',
+    en: 'Forecast revenue next month: {amount} €{note}',
+  },
+  'askMyNumbers.forecastExpenses': {
+    bg: 'Прогноза разходи следващ месец: {amount} €{note}',
+    en: 'Forecast expenses next month: {amount} €{note}',
+  },
+  'askMyNumbers.forecastInsufficientData': {
+    bg: ' (малко история - просто средно)',
+    en: ' (little history - plain average)',
+  },
+  'askMyNumbers.roi': {
+    bg: 'ROI: {roiPercent}% - вложени {investment} €',
+    en: 'ROI: {roiPercent}% - invested {investment} €',
+  },
+  'askMyNumbers.assets': {
+    bg: 'Активи: {count} бр., балансова стойност {value} €',
+    en: 'Assets: {count}, net book value {value} €',
+  },
+  'askMyNumbers.payroll': {
+    bg: 'Персонал: {count} служители, разход {amount} €',
+    en: 'Payroll: {count} employees, cost {amount} €',
+  },
+  'askMyNumbers.scanCredits': {
+    bg: 'Остават {count} скана',
+    en: '{count} scans remaining',
+  },
+  'askMyNumbers.priceAlerts': {
+    bg: '{count} непрочетени ценови сигнала',
+    en: '{count} unread price alerts',
+  },
+  'askMyNumbers.reorderNudge': {
+    bg: '{item} - обичайно се поръчва на всеки {days} дни за ~{value} €, последно преди {since} дни',
+    en: '{item} - usually reordered every {days} days for ~{value} €, last ordered {since} days ago',
+  },
+  'askMyNumbers.genericError': {
+    bg: 'Нещо се обърка. Опитай отново.',
+    en: 'Something went wrong. Try again.',
+  },
+
   // Home Screen
   'home.welcome': {
     bg: 'Добре дошли!',
     en: 'Welcome!',
+  },
+  'home.switchLanguage': {
+    bg: 'Смяна на езика',
+    en: 'Switch language',
   },
   'home.currentMonth': {
     bg: 'Текущ месец',
@@ -245,6 +400,38 @@ export const translations: Translations = {
     bg: 'Фискален',
     en: 'Fiscal',
   },
+  'historyHub.title': {
+    bg: 'История и справки',
+    en: 'History & records',
+  },
+  'historyHub.subtitle': {
+    bg: 'Всичко на едно място - кредити, разходи, джобче, клиенти',
+    en: 'Everything in one place - credits, expenses, pocket money, customers',
+  },
+  'historyHub.scanCreditsDesc': {
+    bg: 'Баланс и история на кредитите за сканиране',
+    en: 'Scan-credit balance and transaction history',
+  },
+  'historyHub.offBookExpensesDesc': {
+    bg: 'История на разходите „в канала"',
+    en: 'Off-book expense history',
+  },
+  'historyHub.pocketMoneyDesc': {
+    bg: 'История на Джобчето по дни',
+    en: 'Day-by-day pocket-money history',
+  },
+  'historyHub.personalExpensesDesc': {
+    bg: 'Лични вложения и лично тефтерче',
+    en: 'Personal investments and personal wallet',
+  },
+  'pocketMoney.historyTitle': {
+    bg: 'История на Джобчето',
+    en: 'Pocket money history',
+  },
+  'pocketMoney.empty': {
+    bg: 'Няма записи с Джобче за този период',
+    en: 'No pocket-money entries for this period',
+  },
   'home.pocket': {
     bg: 'Джобче',
     en: 'Pocket',
@@ -288,6 +475,18 @@ export const translations: Translations = {
   'home.editInPlaceNotice': {
     bg: 'Полетата по-долу показват вече записаното за тази дата. Промяна на стойност я замества с новата — не се добавя към старата.',
     en: "These fields show what's already logged for this date. Changing a value replaces it — it doesn't add to the old one.",
+  },
+  'home.sameAsYesterday': {
+    bg: 'Както вчера',
+    en: 'Same as yesterday',
+  },
+  'home.sameAsYesterdayEmpty': {
+    bg: 'Няма записан оборот за вчера',
+    en: 'No revenue logged for yesterday',
+  },
+  'home.sameAsYesterdayApplied': {
+    bg: 'Попълнено от вчерашния оборот',
+    en: "Filled in from yesterday's revenue",
   },
   'home.includesVAT': {
     bg: 'Влиза в ДДС',
@@ -351,7 +550,243 @@ export const translations: Translations = {
     bg: 'Напр. гориво, материали...',
     en: 'E.g. fuel, materials...',
   },
-  
+  'expenses.history': {
+    bg: 'История',
+    en: 'History',
+  },
+  'expenses.recentDescriptions': {
+    bg: 'Скорошни',
+    en: 'Recent',
+  },
+  'expenses.duplicateTitle': {
+    bg: 'Възможно повторение',
+    en: 'Possible duplicate',
+  },
+  'expenses.duplicateMessage': {
+    bg: 'Вече имаш разход „{description}“ за този ден - сигурен ли си, че искаш да добавиш още един?',
+    en: 'You already have an expense "{description}" for this day - are you sure you want to add another one?',
+  },
+  'expenses.addAnyway': {
+    bg: 'Добави пак',
+    en: 'Add anyway',
+  },
+  'expenses.historyTitle': {
+    bg: 'История на В канала',
+    en: 'Off-book expenses history',
+  },
+  'receivables.title': {
+    bg: 'Кой ми дължи',
+    en: 'Who owes me',
+  },
+  'receivables.add': {
+    bg: 'Добави',
+    en: 'Add',
+  },
+  'receivables.addNew': {
+    bg: 'Нов запис',
+    en: 'New entry',
+  },
+  'receivables.editTitle': {
+    bg: 'Редактирай записа',
+    en: 'Edit entry',
+  },
+  'receivables.filterAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'receivables.filterUnpaid': {
+    bg: 'Неплатени',
+    en: 'Unpaid',
+  },
+  'receivables.filterOverdue': {
+    bg: 'Просрочени',
+    en: 'Overdue',
+  },
+  'receivables.filterPaid': {
+    bg: 'Платени',
+    en: 'Paid',
+  },
+  'receivables.totalOwed': {
+    bg: 'Дължимо общо',
+    en: 'Total owed',
+  },
+  'receivables.overdueCount': {
+    bg: 'Просрочени',
+    en: 'Overdue',
+  },
+  'receivables.customerName': {
+    bg: 'Клиент',
+    en: 'Customer',
+  },
+  'receivables.customerNamePlaceholder': {
+    bg: 'Име на клиента',
+    en: "Customer's name",
+  },
+  'receivables.amount': {
+    bg: 'Сума',
+    en: 'Amount',
+  },
+  'receivables.description': {
+    bg: 'Описание',
+    en: 'Description',
+  },
+  'receivables.descriptionPlaceholder': {
+    bg: 'За какво е (незадължително)',
+    en: 'What it was for (optional)',
+  },
+  'receivables.dueDate': {
+    bg: 'Падеж',
+    en: 'Due date',
+  },
+  'receivables.noDueDate': {
+    bg: 'Без падеж',
+    en: 'No due date',
+  },
+  'receivables.dueLabel': {
+    bg: 'Падеж',
+    en: 'Due',
+  },
+  'receivables.paidLabel': {
+    bg: 'Платено',
+    en: 'Paid',
+  },
+  'receivables.empty': {
+    bg: 'Няма записи - добави първия с бутона горе',
+    en: 'No entries yet - add the first one above',
+  },
+  'receivables.saved': {
+    bg: 'Записът е добавен',
+    en: 'Entry saved',
+  },
+  'receivables.updated': {
+    bg: 'Записът е обновен',
+    en: 'Entry updated',
+  },
+  'receivables.markedPaid': {
+    bg: 'Отбелязано като платено',
+    en: 'Marked as paid',
+  },
+  'receivables.logAsRevenueTitle': {
+    bg: 'Добави ли го и в дневния оборот?',
+    en: 'Log it as revenue too?',
+  },
+  'receivables.logAsRevenueHint': {
+    bg: '{amount} € от {name} - да ги добавим ли към джобните пари за днес?',
+    en: '{amount} € from {name} - add it to today\'s pocket money revenue?',
+  },
+  'receivables.logAsRevenueSkip': {
+    bg: 'Не сега',
+    en: 'Not now',
+  },
+  'receivables.logAsRevenueConfirm': {
+    bg: 'Добави',
+    en: 'Add it',
+  },
+  'receivables.logAsRevenueSuccess': {
+    bg: 'Добавено към дневния оборот',
+    en: 'Added to daily revenue',
+  },
+  'receivables.deleted': {
+    bg: 'Записът е изтрит',
+    en: 'Entry deleted',
+  },
+  'receivables.deleteConfirm': {
+    bg: 'Да изтрия ли този запис?',
+    en: 'Delete this entry?',
+  },
+  'billingDocuments.title': {
+    bg: 'Оферти и сметки',
+    en: 'Quotes & bills',
+  },
+  'billingDocuments.add': {
+    bg: 'Добави',
+    en: 'Add',
+  },
+  'billingDocuments.addNew': {
+    bg: 'Нов документ',
+    en: 'New document',
+  },
+  'billingDocuments.typeBill': {
+    bg: 'Сметка',
+    en: 'Bill',
+  },
+  'billingDocuments.typeQuote': {
+    bg: 'Оферта',
+    en: 'Quote',
+  },
+  'billingDocuments.items': {
+    bg: 'Артикули/услуги',
+    en: 'Items/services',
+  },
+  'billingDocuments.addItem': {
+    bg: 'Добави ред',
+    en: 'Add row',
+  },
+  'billingDocuments.itemsRequired': {
+    bg: 'Добави поне един артикул с валидна цена',
+    en: 'Add at least one item with a valid price',
+  },
+  'billingDocuments.empty': {
+    bg: 'Няма оферти или сметки още - добави първата с бутона горе',
+    en: 'No quotes or bills yet - add the first one above',
+  },
+  'billingDocuments.billSaved': {
+    bg: 'Сметката е записана',
+    en: 'Bill saved',
+  },
+  'billingDocuments.quoteSaved': {
+    bg: 'Офертата е записана',
+    en: 'Quote saved',
+  },
+  'billingDocuments.deleted': {
+    bg: 'Документът е изтрит',
+    en: 'Document deleted',
+  },
+  'billingDocuments.deleteConfirm': {
+    bg: 'Да изтрия ли този документ?',
+    en: 'Delete this document?',
+  },
+  'billingDocuments.downloadError': {
+    bg: 'Грешка при изтегляне на PDF',
+    en: 'Error downloading the PDF',
+  },
+  'expenses.searchPlaceholder': {
+    bg: 'Търси по описание...',
+    en: 'Search by description...',
+  },
+  'expenses.periodAll': {
+    bg: 'Всички',
+    en: 'All',
+  },
+  'expenses.periodThisMonth': {
+    bg: 'Този месец',
+    en: 'This month',
+  },
+  'expenses.periodLastMonth': {
+    bg: 'Миналия месец',
+    en: 'Last month',
+  },
+  'expenses.empty': {
+    bg: 'Няма записани разходи',
+    en: 'No expenses recorded',
+  },
+  'expenses.editExpense': {
+    bg: 'Редакция на разход',
+    en: 'Edit expense',
+  },
+  'expenses.expenseUpdated': {
+    bg: 'Разходът е обновен',
+    en: 'Expense updated',
+  },
+  'expenses.expenseDeleted': {
+    bg: 'Разходът е изтрит',
+    en: 'Expense deleted',
+  },
+  'expenses.totalLabel': {
+    bg: 'Общо',
+    en: 'Total',
+  },
+
   // Scan Screen
   'scan.title': {
     bg: 'Сканиране на фактура',
@@ -585,6 +1020,10 @@ export const translations: Translations = {
     bg: 'Цена',
     en: 'Price',
   },
+  'scan.priceNote': {
+    bg: '{percent}% спрямо последно {lastPrice} €',
+    en: '{percent}% vs last time ({lastPrice} €)',
+  },
   'scan.notesPlaceholder': {
     bg: 'Допълнителни бележки...',
     en: 'Additional notes...',
@@ -617,6 +1056,14 @@ export const translations: Translations = {
   'scanCredits.freeRenewOn': {
     bg: 'безплатните се подновяват на 1-во число',
     en: 'the free quota renews on the 1st',
+  },
+  'scanCredits.depletionForecast': {
+    bg: 'При този темп ще ти стигнат за около {days} дни',
+    en: 'At this pace, that\'s about {days} days left',
+  },
+  'scanCredits.depletionNow': {
+    bg: 'При този темп кредитите ти вече са на привършване',
+    en: 'At this pace, your credits are about to run out',
   },
   'scanCredits.recentTransactions': {
     bg: 'Последни транзакции',
@@ -1088,8 +1535,8 @@ export const translations: Translations = {
     en: 'Weekly schedule and holidays for statistics',
   },
   'profile.backup': {
-    bg: 'Google Drive бекъп',
-    en: 'Google Drive Backup',
+    bg: 'Износ/импорт на бекъп',
+    en: 'Backup export/import',
   },
   'profile.backupRestore': {
     bg: 'Backup & Restore',
@@ -1143,7 +1590,35 @@ export const translations: Translations = {
     bg: 'Сигурни ли сте, че искате да излезете?',
     en: 'Are you sure you want to log out?',
   },
-  
+  'profile.changeAvatar': {
+    bg: 'Смяна на профилна снимка',
+    en: 'Change profile picture',
+  },
+  'profile.avatarUploadError': {
+    bg: 'Неуспешно качване на снимката. Опитайте отново.',
+    en: 'Failed to upload picture. Try again.',
+  },
+  'profile.removeAvatarTitle': {
+    bg: 'Премахване на снимката',
+    en: 'Remove picture',
+  },
+  'profile.removeAvatarConfirm': {
+    bg: 'Да премахнем ли текущата профилна снимка?',
+    en: 'Remove your current profile picture?',
+  },
+  'profile.cropTitle': {
+    bg: 'Позиционирай снимката',
+    en: 'Position your picture',
+  },
+  'profile.cropHint': {
+    bg: 'Плъзни снимката, за да избереш коя част да се вижда',
+    en: 'Drag the photo to choose which part shows',
+  },
+  'profile.cropUse': {
+    bg: 'Използвай',
+    en: 'Use photo',
+  },
+
   // Common
   'common.cancel': {
     bg: 'Отказ',
@@ -1168,6 +1643,14 @@ export const translations: Translations = {
   'common.save': {
     bg: 'Запази',
     en: 'Save',
+  },
+  'common.edit': {
+    bg: 'Редактирай',
+    en: 'Edit',
+  },
+  'common.saving': {
+    bg: 'Запазване...',
+    en: 'Saving...',
   },
   'common.operationFailed': {
     bg: 'Действието не бе успешно. Опитайте отново.',
@@ -1353,6 +1836,10 @@ export const translations: Translations = {
     bg: 'Дата',
     en: 'Date',
   },
+  'invoices.scannedBy': {
+    bg: 'Сканирано от',
+    en: 'Scanned by',
+  },
   'invoices.vatPercent': {
     bg: 'ДДС (20%)',
     en: 'VAT (20%)',
@@ -1397,8 +1884,12 @@ export const translations: Translations = {
     bg: 'Сборът на артикулите се различава от стойността без ДДС на фактурата - възможна грешка при въвеждането.',
     en: "The items' sum differs from the invoice's amount without VAT - possible entry error.",
   },
-  'invoices.vsLastPurchase': {
-    bg: 'спрямо предишна доставка',
+  'invoices.vsBaseline': {
+    bg: 'спрямо средно от последните {count} доставки',
+    en: 'vs. average of last {count} purchases',
+  },
+  'invoices.vsBaselineSingle': {
+    bg: 'спрямо последната доставка',
     en: 'vs. last purchase',
   },
   'invoices.deleteInvoice': {
@@ -1573,6 +2064,10 @@ export const translations: Translations = {
     bg: 'Филтри',
     en: 'Filters',
   },
+  'invoices.truncatedBanner': {
+    bg: 'Показани са {shown} от {total} фактури. Прецизирай период или търсене, за да видиш останалите.',
+    en: 'Showing {shown} of {total} invoices. Narrow the date range or search to see the rest.',
+  },
   'invoices.filtersActive': {
     bg: 'активни',
     en: 'active',
@@ -1670,12 +2165,12 @@ export const translations: Translations = {
     en: 'Backup & Restore',
   },
   'backup.infoTitle': {
-    bg: 'Google Drive Backup',
-    en: 'Google Drive Backup',
+    bg: 'Износ на бекъп',
+    en: 'Backup export',
   },
   'backup.infoDescription': {
-    bg: 'Създайте backup на вашите данни и го запазете в Google Drive или друго облачно хранилище.',
-    en: 'Create a backup of your data and save it to Google Drive or other cloud storage.',
+    bg: 'Създайте backup на вашите данни и го запазете където пожелаете - Google Drive, имейл или локално на устройството.',
+    en: 'Create a backup of your data and save it wherever you like - Google Drive, email, or locally on your device.',
   },
   'backup.status': {
     bg: 'Статус на backup',
@@ -1722,12 +2217,12 @@ export const translations: Translations = {
     en: 'Press "Create Backup" to export your data',
   },
   'backup.step2': {
-    bg: 'Изберете "Запази в Google Drive" от менюто за споделяне',
-    en: 'Select "Save to Google Drive" from the sharing menu',
+    bg: 'Изберете къде да го запазите от менюто за споделяне (Google Drive, имейл, локално)',
+    en: 'Choose where to save it from the sharing menu (Google Drive, email, locally)',
   },
   'backup.step3': {
-    bg: 'За възстановяване - изберете файла от Google Drive',
-    en: 'To restore - select the file from Google Drive',
+    bg: 'За възстановяване - изберете запазения файл',
+    en: 'To restore - select the saved file',
   },
   'backup.successTitle': {
     bg: 'Успех!',
@@ -1742,8 +2237,8 @@ export const translations: Translations = {
     en: 'Statistics',
   },
   'backup.saveFile': {
-    bg: 'Запазете файла в Google Drive или друго място за съхранение.',
-    en: 'Save the file to Google Drive or other storage.',
+    bg: 'Запазете файла където пожелаете - Google Drive, имейл или локално на устройството.',
+    en: 'Save the file wherever you like - Google Drive, email, or locally on your device.',
   },
   'backup.sharingNotAvailable': {
     bg: 'Файлът е създаден, но споделянето не е достъпно на това устройство.',
@@ -1903,6 +2398,30 @@ export const translations: Translations = {
   },
 
   // Onboarding tutorial (shown once on first login, reopenable via the "?" button)
+  'tutorial.businessTypeQuestion': {
+    bg: 'Какъв е вашият бизнес?',
+    en: "What's your business?",
+  },
+  'tutorial.businessTypeSubtitle': {
+    bg: 'За да подредим обиколката според това, което ви е най-полезно.',
+    en: "So we can order the tour around what's most useful to you.",
+  },
+  'tutorial.businessTypeRetail': {
+    bg: 'Търговия на дребно',
+    en: 'Retail shop',
+  },
+  'tutorial.businessTypeFood': {
+    bg: 'Храни и напитки',
+    en: 'Food & drink',
+  },
+  'tutorial.businessTypeCraftsman': {
+    bg: 'Услуги / занаятчия',
+    en: 'Services / craftsman',
+  },
+  'tutorial.businessTypeOther': {
+    bg: 'Друго',
+    en: 'Other',
+  },
   'tutorial.step1Title': {
     bg: 'Добре дошли във Фактура+!',
     en: 'Welcome to Fakturaplus!',
@@ -2040,6 +2559,46 @@ export const translations: Translations = {
   'stats.forecastHint': {
     bg: 'На база последните 6 месеца',
     en: 'Based on the last 6 months',
+  },
+  'stats.forecastHint1m': {
+    bg: 'На база последния 1 месец',
+    en: 'Based on the last 1 month',
+  },
+  'stats.forecastHint3m': {
+    bg: 'На база последните 3 месеца',
+    en: 'Based on the last 3 months',
+  },
+  'stats.forecastHint6m': {
+    bg: 'На база последните 6 месеца',
+    en: 'Based on the last 6 months',
+  },
+  'stats.forecastHint12m': {
+    bg: 'На база последните 12 месеца',
+    en: 'Based on the last 12 months',
+  },
+  'stats.forecastRange1m': {
+    bg: '1 мес.',
+    en: '1 mo',
+  },
+  'stats.forecastRange3m': {
+    bg: '3 мес.',
+    en: '3 mo',
+  },
+  'stats.forecastRange6m': {
+    bg: '6 мес.',
+    en: '6 mo',
+  },
+  'stats.forecastRange12m': {
+    bg: '12 мес.',
+    en: '12 mo',
+  },
+  'stats.forecastInsufficientData': {
+    bg: 'Все още се учим от твоя бизнес - прогнозата ще стане по-точна с още история (поне 4 месеца данни).',
+    en: "Still learning your business - the forecast gets sharper with more history (at least 4 months of data).",
+  },
+  'stats.forecastAverageOnly': {
+    bg: 'Средно на месец',
+    en: 'Monthly average',
   },
   'stats.forecastRevenue': {
     bg: 'Очакван оборот',
@@ -2210,12 +2769,12 @@ export const translations: Translations = {
     en: 'Price change!',
   },
   'priceAlertPopup.subtitleSingle': {
-    bg: 'Забелязахме повишение на цената на артикул от последна фактура.',
-    en: 'We noticed a price increase on an item from a recent invoice.',
+    bg: 'Забелязахме промяна в цената на артикул от последна фактура.',
+    en: 'We noticed a price change on an item from a recent invoice.',
   },
   'priceAlertPopup.subtitleMultiple': {
-    bg: 'Забелязахме повишение на цените на {count} артикула от последни фактури.',
-    en: 'We noticed price increases on {count} items from recent invoices.',
+    bg: 'Забелязахме промяна в цените на {count} артикула от последни фактури.',
+    en: 'We noticed price changes on {count} items from recent invoices.',
   },
   'priceAlertPopup.more': {
     bg: '+ още {count}',
@@ -2228,6 +2787,30 @@ export const translations: Translations = {
   'priceAlertPopup.viewDetails': {
     bg: 'Виж в статистиката',
     en: 'View in statistics',
+  },
+  'priceAlertPopup.invoiceRef': {
+    bg: 'фактура №{number}',
+    en: 'invoice #{number}',
+  },
+  'priceAlertPopup.basisSingle': {
+    bg: 'Сравнено с последната покупка на този артикул',
+    en: 'Compared to the last purchase of this item',
+  },
+  'priceAlertPopup.basisMultiple': {
+    bg: 'Сравнено със средната цена от последните {count} покупки',
+    en: 'Compared to the average of the last {count} purchases',
+  },
+  'priceAlertPopup.viewInvoice': {
+    bg: 'Виж фактурата',
+    en: 'View invoice',
+  },
+  'priceAlertPopup.muteItem': {
+    bg: 'Не предупреждавай пак',
+    en: "Don't alert again",
+  },
+  'priceAlertPopup.muted': {
+    bg: 'Няма да получаваш повече аларми за този артикул от този доставчик',
+    en: "You won't get alerts for this item from this supplier anymore",
   },
 
   // Items & Price Tracking
@@ -2242,6 +2825,66 @@ export const translations: Translations = {
   'stats.priceAlerts': {
     bg: 'Ценови аларми',
     en: 'Price Alerts',
+  },
+  'stats.priceAlertsEmpty': {
+    bg: 'Няма активни ценови аларми в момента.',
+    en: 'No active price alerts right now.',
+  },
+  'priceAlertSettings.title': {
+    bg: 'Настройки на ценови аларми',
+    en: 'Price alert settings',
+  },
+  'priceAlertSettings.saved': {
+    bg: 'Настройките са запазени',
+    en: 'Settings saved',
+  },
+  'priceAlertSettings.enabled': {
+    bg: 'Ценови аларми',
+    en: 'Price alerts',
+  },
+  'priceAlertSettings.enabledHint': {
+    bg: 'Изключи ако изобщо не искаш да получаваш аларми за промяна в цените.',
+    en: "Turn off if you don't want price-change alerts at all.",
+  },
+  'priceAlertSettings.alertOnDecrease': {
+    bg: 'Предупреждавай и при поевтиняване',
+    en: 'Also alert on price drops',
+  },
+  'priceAlertSettings.alertOnDecreaseHint': {
+    bg: 'Полезно - може да означава възможност за преговори с друг доставчик или по-изгодна покупка.',
+    en: 'Useful - can mean a negotiation opportunity or a better deal elsewhere.',
+  },
+  'priceAlertSettings.threshold': {
+    bg: 'Праг за аларма (%)',
+    en: 'Alert threshold (%)',
+  },
+  'priceAlertSettings.thresholdHint': {
+    bg: 'Алармирай само при промяна поне с толкова процента спрямо средната от последните покупки.',
+    en: 'Only alert when the change is at least this many percent vs. the recent-purchases average.',
+  },
+  'priceAlertSettings.minAbsoluteChange': {
+    bg: 'Минимална разлика (€)',
+    en: 'Minimum difference (€)',
+  },
+  'priceAlertSettings.minAbsoluteChangeHint': {
+    bg: 'Пропускай промени под тази сума - за да не се получават аларми заради стотинки разлика в евтини артикули.',
+    en: "Skip changes smaller than this amount - so cheap items don't trigger alerts over a few cents.",
+  },
+  'priceAlertSettings.mutedTitle': {
+    bg: 'Спрени аларми за артикули',
+    en: 'Muted item alerts',
+  },
+  'priceAlertSettings.mutedHint': {
+    bg: 'Артикули, за които няма да получаваш повече ценови аларми от конкретния доставчик.',
+    en: "Items you've chosen not to get price alerts for, from a specific supplier.",
+  },
+  'priceAlertSettings.mutedEmpty': {
+    bg: 'Няма спрени артикули.',
+    en: 'No muted items.',
+  },
+  'priceAlertSettings.unmute': {
+    bg: 'Възобнови',
+    en: 'Unmute',
   },
   'stats.priceChange': {
     bg: 'Промяна в цена',
@@ -2258,6 +2901,14 @@ export const translations: Translations = {
   'stats.priceInflation': {
     bg: 'Обща инфлация на цените',
     en: 'Overall Price Inflation',
+  },
+  'stats.reorderNudgesTitle': {
+    bg: 'Може би е време да поръчаш пак',
+    en: 'Might be time to reorder',
+  },
+  'stats.reorderNudgeLine': {
+    bg: '{item} ({supplier}) - обикновено на всеки {median} дни за ~{value} €, последно преди {daysSince} дни',
+    en: '{item} ({supplier}) - usually every {median} days for ~{value} €, last bought {daysSince} days ago',
   },
   'stats.inflationPeriod.month': {
     bg: 'Месец',
@@ -3266,6 +3917,8 @@ export const translations: Translations = {
 
   'profile.payrollDesc': { bg: 'Служители и месечни ведомости', en: 'Employees and monthly payroll' },
   'profile.absencesDesc': { bg: 'Работа на празници и отпуски за счетоводителя', en: 'Holiday work and leave for the accountant' },
+  'profile.workSchedule': { bg: 'Работен график', en: 'Work schedule' },
+  'profile.workScheduleDesc': { bg: 'Смени и почасово заплащане', en: 'Shifts and hourly pay' },
   'payroll.title': { bg: 'Ведомост за заплати', en: 'Payroll' },
   'payroll.employees': { bg: 'Служители', en: 'Employees' },
   'payroll.noEmployees': { bg: 'Няма добавени служители', en: 'No employees yet' },
@@ -3283,12 +3936,31 @@ export const translations: Translations = {
   'payroll.netSalary': { bg: 'Нетна заплата ("на ръка")', en: 'Net salary (take-home)' },
   'payroll.foodVouchers': { bg: 'Ваучери за храна', en: 'Food vouchers' },
   'payroll.additionalInsurance': { bg: 'Допълнително осигуряване', en: 'Additional insurance' },
+  'payroll.linkedAccount': { bg: 'Свързан акаунт в екипа', en: 'Linked team account' },
+  'payroll.linkedAccountHint': {
+    bg: 'По избор - свържете този служител с неговия акаунт в приложението, за да работи графикът и проверката за отпуска в "Работен график".',
+    en: 'Optional - link this employee to their own app account so Work Schedule can check their shifts against recorded leave.',
+  },
+  'payroll.noLinkedAccount': { bg: 'Без връзка', en: 'Not linked' },
   'payroll.noPosition': { bg: 'Без длъжност', en: 'No position' },
   'payroll.netShort': { bg: '· нето', en: '· net' },
   'payroll.grossShort': { bg: '· бруто', en: '· gross' },
   'payroll.process': { bg: 'Начисли за месеца', en: 'Process for this month' },
   'payroll.netAmount': { bg: 'Нетно за получаване', en: 'Net take-home' },
   'payroll.totalEmployerCost': { bg: 'Общ разход за работодателя', en: 'Total employer cost' },
+  'payroll.countedInExpenses': { bg: 'Отразява се в разходите', en: 'Counts toward expenses' },
+  'payroll.payTeam': { bg: 'Плати екипа', en: 'Pay the team' },
+
+  // Pay run - one action for everyone due this month, mixing fixed
+  // salary (formal payroll) and hourly (Work Schedule) team members.
+  'payRun.title': { bg: 'Плащане на екипа', en: 'Pay the team' },
+  'payRun.allPaid': { bg: 'Всички са платени за този месец', en: 'Everyone is paid for this month' },
+  'payRun.fixedSalary': { bg: 'Фиксирана заплата', en: 'Fixed salary' },
+  'payRun.hourly': { bg: 'Почасово по график', en: 'Hourly (Work Schedule)' },
+  'payRun.pickAtLeastOne': { bg: 'Изберете поне един служител', en: 'Pick at least one person' },
+  'payRun.processError': { bg: 'Неуспешно обработване на плащанията', en: 'Could not process the payments' },
+  'payRun.resultsTitle': { bg: 'Резултат', en: 'Result' },
+  'payRun.processSelected': { bg: 'Плати {count} ({amount} €)', en: 'Pay {count} ({amount} €)' },
   'payroll.removeEntry': { bg: 'Премахни начислението', en: 'Remove this entry' },
   'payroll.deleteEmployee': { bg: 'Изтрий служителя', en: 'Delete employee' },
   'payroll.deleteEmployeeConfirm': { bg: 'Служителят ще бъде изтрит, но вече начислените заплати остават в историята.', en: "The employee will be deleted, but past payroll entries stay in the history." },
@@ -3311,6 +3983,8 @@ export const translations: Translations = {
   'payroll.totalCostThisMonth': { bg: 'Общ разход за персонал този месец', en: 'Total staff cost this month' },
 
   'profile.assetsDesc': { bg: 'Регистър на дълготрайните активи и амортизации', en: 'Fixed assets register and depreciation' },
+  'profile.receivablesDesc': { bg: 'Кой колко ти дължи и от кога', en: 'Who owes you how much, and since when' },
+  'profile.billingDocumentsDesc': { bg: 'Нефискални оферти и сметки за клиенти', en: 'Non-fiscal quotes and bills for customers' },
   'assets.title': { bg: 'Дълготрайни активи (ДМА)', en: 'Fixed assets' },
   'assets.depreciationThisMonth': { bg: 'Амортизации за месеца', en: 'Depreciation this month' },
   'assets.netBookValue': { bg: 'Балансова стойност', en: 'Net book value' },
@@ -3397,6 +4071,134 @@ export const translations: Translations = {
   'notifications.pushSubtitle': { bg: 'Ново съобщение или напомняне се показва в известията на телефона', en: 'A new message or reminder shows up in your phone\'s notifications' },
   'notifications.pushDenied': { bg: 'Известията са блокирани за този сайт. Разрешете ги от настройките на браузъра.', en: 'Notifications are blocked for this site. Allow them in your browser settings.' },
   'notifications.pushError': { bg: 'Неуспешно включване на известията. Опитайте отново.', en: 'Could not enable notifications. Please try again.' },
+
+  // Work schedule - self-visible to any team member (own shifts), create/edit
+  // restricted to manage_budget (same tier as payroll/leave).
+  'schedule.title': { bg: 'Работен график', en: 'Work schedule' },
+  'schedule.wholeTeam': { bg: 'Целият екип', en: 'Whole team' },
+  'schedule.hoursThisMonth': { bg: 'Часове този месец', en: 'Hours this month' },
+  'schedule.estimatedPay': { bg: 'Прогнозно възнаграждение', en: 'Estimated pay' },
+  'schedule.shiftsThisMonth': { bg: 'Смени този месец', en: 'Shifts this month' },
+  'schedule.noShifts': { bg: 'Няма планирани смени', en: 'No shifts scheduled' },
+  'schedule.newShift': { bg: 'Нова смяна', en: 'New shift' },
+  'schedule.editShift': { bg: 'Редактиране на смяна', en: 'Edit shift' },
+  'schedule.member': { bg: 'Служител', en: 'Team member' },
+  'schedule.date': { bg: 'Дата', en: 'Date' },
+  'schedule.startTime': { bg: 'Начало', en: 'Start' },
+  'schedule.endTime': { bg: 'Край', en: 'End' },
+  'schedule.repeat': { bg: 'Повторение', en: 'Repeat' },
+  'schedule.repeat_none': { bg: 'Еднократно', en: 'One-time' },
+  'schedule.repeat_daily': { bg: 'Ежедневно', en: 'Daily' },
+  'schedule.repeat_weekly': { bg: 'Ежеседмично', en: 'Weekly' },
+  'schedule.repeat_monthly': { bg: 'Ежемесечно', en: 'Monthly' },
+  'schedule.repeatUntil': { bg: 'До дата', en: 'Until' },
+  'schedule.editAffectsSeries': {
+    bg: 'Промените засягат цялата поредица смени, не само тази.',
+    en: 'Changes affect the whole series of shifts, not just this one.',
+  },
+  'schedule.hourlyRate': { bg: 'Часова ставка (по избор)', en: 'Hourly rate (optional)' },
+  'schedule.hourlyRatePlaceholder': { bg: 'напр. 10.00', en: 'e.g. 10.00' },
+  'schedule.note': { bg: 'Бележка (по избор)', en: 'Note (optional)' },
+  'schedule.notePlaceholder': { bg: 'Допълнителни детайли...', en: 'Additional details...' },
+  'schedule.leaveConflict': { bg: 'Служителят има одобрена отпуска тази дата', en: 'This team member has approved leave on this date' },
+  'schedule.deleteTitle': { bg: 'Изтриване на смяна', en: 'Delete shift' },
+  'schedule.deleteConfirm': {
+    bg: 'Да изтрием ли тази смяна (и цялата ѝ поредица, ако се повтаря)?',
+    en: 'Delete this shift (and its whole repeating series, if any)?',
+  },
+  'schedule.pickMemberError': { bg: 'Изберете служител', en: 'Pick a team member' },
+  'schedule.repeatUntilError': { bg: 'Крайната дата е преди началната', en: 'The end date is before the start date' },
+  'schedule.saveError': { bg: 'Неуспешно запазване на смяната', en: 'Could not save the shift' },
+  'schedule.adjustTitle': { bg: 'Корекция на отработени часове', en: 'Correct worked hours' },
+  'schedule.scheduled': { bg: 'По график', en: 'Scheduled' },
+  'schedule.actualHours': { bg: 'Реално отработени часове', en: 'Actual hours worked' },
+  'schedule.actualRate': { bg: 'Часова ставка за този ден (по избор)', en: "This day's hourly rate (optional)" },
+  'schedule.adjustReason': { bg: 'Причина за корекцията', en: 'Reason for the correction' },
+  'schedule.adjustReasonPlaceholder': { bg: 'напр. напусна по-рано, дошъл е по-късно, спор за часовете...', en: 'e.g. left early, came in late, dispute over the hours...' },
+  'schedule.adjustHoursError': { bg: 'Въведете валидни часове', en: 'Enter valid hours' },
+  'schedule.adjustReasonError': { bg: 'Моля, посочете причина за корекцията', en: 'Please give a reason for the correction' },
+  'schedule.adjustSaveError': { bg: 'Неуспешна корекция', en: 'Could not save the correction' },
+  'schedule.adjustedBy': { bg: 'Коригирано от {name}', en: 'Corrected by {name}' },
+  'schedule.revert': { bg: 'Върни по график', en: 'Revert to scheduled' },
+  'schedule.revertTitle': { bg: 'Връщане по график', en: 'Revert to scheduled' },
+  'schedule.revertConfirm': { bg: 'Да върнем ли часовете по график за този ден?', en: "Revert this day's hours back to the schedule?" },
+  'schedule.markPaid': { bg: 'Маркирай като платено', en: 'Mark as paid' },
+  'schedule.markPaidTitle': { bg: 'Маркиране като платено', en: 'Mark as paid' },
+  'schedule.markPaidConfirm': {
+    bg: 'Това ще добави {amount} € като реален разход за този месец. Продължи?',
+    en: 'This will add {amount} € as a real expense for this month. Continue?',
+  },
+  'schedule.markPaidError': { bg: 'Неуспешно маркиране като платено', en: 'Could not mark as paid' },
+  'schedule.paidLabel': { bg: 'Платено {amount} € на {date}', en: 'Paid {amount} € on {date}' },
+  'schedule.undoPaid': { bg: 'Отмени', en: 'Undo' },
+  'schedule.undoPaidTitle': { bg: 'Отмяна на плащане', en: 'Undo payment' },
+  'schedule.undoPaidConfirm': {
+    bg: 'Това ще премахне и свързания разход от общите разходи. Продължи?',
+    en: 'This will also remove the linked expense from total business expenses. Continue?',
+  },
+
+  // Grid ("plug and play") week view - an alternative to the day-grouped
+  // list above, modeled after a paper weekly schedule: employees as rows,
+  // days as columns, a colored block per shift.
+  'schedule.viewList': { bg: 'Списък', en: 'List' },
+  'schedule.viewGrid': { bg: 'Решетка', en: 'Grid' },
+  'schedule.thisWeek': { bg: 'Тази седмица', en: 'This week' },
+  'schedule.gridEmptyTeam': { bg: 'Добавете служители в екипа, за да ги видите тук', en: 'Add team members to see them here' },
+  'schedule.gridTapHint': {
+    bg: 'Докоснете празна клетка за смяна, задръжте за отпуска',
+    en: 'Tap an empty cell for a shift, hold it for leave',
+  },
+  'schedule.leaveType_paid': { bg: 'Платена', en: 'Paid' },
+  'schedule.leaveType_unpaid': { bg: 'Неплатена', en: 'Unpaid' },
+  'schedule.leaveType_sick': { bg: 'Болнична', en: 'Sick' },
+  'schedule.leaveShort_paid': { bg: 'Отпуск', en: 'Leave' },
+  'schedule.leaveShort_unpaid': { bg: 'Неплат.', en: 'Unpaid' },
+  'schedule.leaveShort_sick': { bg: 'Болнич.', en: 'Sick' },
+  'schedule.leaveType': { bg: 'Вид отсъствие', en: 'Leave type' },
+  'schedule.startDate': { bg: 'От дата', en: 'Start date' },
+  'schedule.endDate': { bg: 'До дата', en: 'End date' },
+  'schedule.addLeaveTitle': { bg: 'Нова отпуска', en: 'New leave' },
+  'schedule.leaveSaveError': { bg: 'Неуспешно запазване на отпуската', en: 'Could not save the leave' },
+  'schedule.addShiftAnyway': { bg: 'Добави смяна все пак', en: 'Add shift anyway' },
+  'schedule.deleteLeave': { bg: 'Изтрий отпуската', en: 'Delete leave' },
+  'schedule.deleteLeaveTitle': { bg: 'Изтриване на отпуска', en: 'Delete leave' },
+  'schedule.deleteLeaveConfirm': { bg: 'Да изтрием ли тази отпуска?', en: 'Delete this leave entry?' },
+  'schedule.noLinkedEmployeeTitle': { bg: 'Няма връзка с ведомостта', en: 'Not linked to payroll' },
+  'schedule.noLinkedEmployeeHint': {
+    bg: 'За да добавите отпуска, свържете този служител с картон във "Ведомост".',
+    en: 'To log leave, link this team member to a payroll record in Payroll.',
+  },
+  'schedule.edit': { bg: 'Редактирай', en: 'Edit' },
+  'schedule.adjustShort': { bg: 'Коригирай часове', en: 'Correct hours' },
+  'schedule.copyShift': { bg: 'Копирай в други дни', en: 'Copy to other days' },
+  'schedule.copyShiftTitle': { bg: 'Копиране на смяна', en: 'Copy shift' },
+  'schedule.copyShiftHint': { bg: 'Избери дните от тази седмица, в които да се приложи същата смяна', en: 'Pick the days this week to apply the same shift to' },
+  'schedule.copyShiftApply': { bg: 'Приложи', en: 'Apply' },
+  'schedule.copyShiftNoneSelected': { bg: 'Изберете поне един ден', en: 'Pick at least one day' },
+  'schedule.copyShiftResult': { bg: 'Добавени смени: {ok}, неуспешни: {fail}', en: 'Shifts added: {ok}, failed: {fail}' },
+
+  // Team member profile - opened by tapping an avatar (e.g. in the work
+  // schedule grid). Manager-only, aggregates identity + schedule stats +
+  // leave history, plus private positive/negative performance notes.
+  'teamProfile.loadError': { bg: 'Неуспешно зареждане на профила', en: 'Could not load the profile' },
+  'teamProfile.memberSince': { bg: 'В екипа от {date}', en: 'On the team since {date}' },
+  'teamProfile.position': { bg: 'Длъжност', en: 'Position' },
+  'teamProfile.hireDate': { bg: 'Нает на', en: 'Hired on' },
+  'teamProfile.noEmployeeLink': { bg: 'Няма свързан картон във ведомостта', en: 'Not linked to a payroll record' },
+  'teamProfile.thisMonth': { bg: 'Този месец', en: 'This month' },
+  'teamProfile.leaveCount': { bg: 'Отпуски (общо)', en: 'Leave entries (all time)' },
+  'teamProfile.holidayWorkCount': { bg: 'Работа на празник (общо)', en: 'Holiday work (all time)' },
+  'teamProfile.notesTitle': { bg: 'Бележки от мениджмънта', en: 'Management notes' },
+  'teamProfile.notesHint': { bg: 'Видими само за мениджъри - служителят не ги вижда', en: 'Visible only to managers - the team member never sees these' },
+  'teamProfile.netScore': { bg: 'Нетен резултат', en: 'Net score' },
+  'teamProfile.addPositive': { bg: 'Позитивна', en: 'Positive' },
+  'teamProfile.addNegative': { bg: 'Негативна', en: 'Negative' },
+  'teamProfile.notePlaceholder': { bg: 'Кратко описание за анализ...', en: 'A short note for later analysis...' },
+  'teamProfile.noteTextError': { bg: 'Въведете текст на бележката', en: 'Enter the note text' },
+  'teamProfile.noteSaveError': { bg: 'Неуспешно запазване на бележката', en: 'Could not save the note' },
+  'teamProfile.noNotes': { bg: 'Все още няма бележки', en: 'No notes yet' },
+  'teamProfile.deleteNoteTitle': { bg: 'Изтриване на бележка', en: 'Delete note' },
+  'teamProfile.deleteNoteConfirm': { bg: 'Тази бележка ще бъде изтрита безвъзвратно.', en: 'This note will be permanently deleted.' },
 
   // Calendar (shared team calendar - owner/manager/accountant)
   'calendar.title': { bg: 'Календар', en: 'Calendar' },
@@ -3498,6 +4300,18 @@ export const translations: Translations = {
   'accountSecurity.emailChangeUnavailable': { bg: '. Смяната на имейл не е налична в момента.', en: '. Changing the email is not available yet.' },
   'accountSecurity.changePasswordButton': { bg: 'Смени паролата', en: 'Change password' },
   'accountSecurity.setPasswordButton': { bg: 'Задай парола', en: 'Set password' },
+  'accountSecurity.deleteAccountTitle': { bg: 'Изтриване на акаунта', en: 'Delete account' },
+  'accountSecurity.deleteAccountHint': {
+    bg: 'Трайно изтрива вашите лични данни (име, имейл, парола, снимка). Фирмените записи (фактури, служители и т.н.) остават, ако други хора ги ползват.',
+    en: 'Permanently deletes your personal data (name, email, password, photo). Company records (invoices, employees, etc.) remain if other people use them.',
+  },
+  'accountSecurity.enterPasswordToDelete': { bg: 'Въведете паролата си, за да потвърдите изтриването', en: 'Enter your password to confirm deletion' },
+  'accountSecurity.deleteAccountConfirm': {
+    bg: 'Това действие е необратимо. Акаунтът ви и личните ви данни ще бъдат изтрити завинаги.',
+    en: 'This action cannot be undone. Your account and personal data will be permanently deleted.',
+  },
+  'accountSecurity.deleteAccountConfirmButton': { bg: 'Да, изтрий акаунта', en: 'Yes, delete account' },
+  'accountSecurity.deleteAccountButton': { bg: 'Изтрий акаунта', en: 'Delete account' },
 
   // Join Company screen
   'joinCompany.title': { bg: 'Присъединяване по покана', en: 'Join by Invitation' },

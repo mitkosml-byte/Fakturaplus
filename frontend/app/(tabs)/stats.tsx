@@ -6,30 +6,36 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Dimensions,
   ImageBackground,
   ActivityIndicator,
   Modal,
+  Switch,
+  TextInput,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { api } from '../../src/services/api';
-import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse } from '../../src/types';
+import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse, PriceAlertSettings, PriceAlertMute } from '../../src/types';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { Alert } from '../../src/utils/alert';
+import { Toast } from '../../src/utils/toast';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
+import { PriceAlertsCard } from '../../src/components/stats/PriceAlertsCard';
+import { ReorderNudgesCard } from '../../src/components/stats/ReorderNudgesCard';
+import { ForecastCard } from '../../src/components/stats/ForecastCard';
+import { PriceInflationCard } from '../../src/components/stats/PriceInflationCard';
+import { AlertSettingsModal } from '../../src/components/stats/AlertSettingsModal';
+import { SupplierCompareModal } from '../../src/components/stats/SupplierCompareModal';
 import { COLORS } from '../../src/theme/colors';
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, interpolate, Extrapolation } from 'react-native-reanimated';
 
-const { width } = Dimensions.get('window');
-const chartWidth = width - 80;
-const pieChartRadius = (width - 80) / 3;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 // Color palette for charts
@@ -41,6 +47,24 @@ const CHART_COLORS: string[] = [
 export default function StatsScreen() {
   const { t } = useTranslation();
   const { hasPermission, isOwner } = useAuth();
+  const router = useRouter();
+  // Dimensions.get('window') used to be read ONCE at module-eval time -
+  // harmless on native, but this app's web build is statically pre-rendered
+  // (app.json's web.output: "static"), where there is no real browser
+  // window yet, so Dimensions.get fell back to a small default and that
+  // frozen value shipped to every client regardless of actual screen size -
+  // charts rendered in a tiny, phone-sized box even on a wide desktop
+  // monitor. useWindowDimensions reads the real window on the client and
+  // stays reactive, fixing both the freeze and (as a side effect) giving
+  // charts the full available width on desktop instead of the leftover
+  // ~56px/chartWidth phones were already getting.
+  const { width: windowWidth } = useWindowDimensions();
+  // Capped so a very wide monitor gets a comfortably-sized chart instead of
+  // one stretched edge-to-edge with huge gaps between a handful of bars
+  // (each bar's own width is separately capped below, independent of this).
+  const chartAreaWidth = Math.min(windowWidth, 980) - 80;
+  const chartWidth = chartAreaWidth;
+  const pieChartRadius = chartAreaWidth / 3;
   const params = useLocalSearchParams<{ period?: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
@@ -129,9 +153,15 @@ export default function StatsScreen() {
   const [previousSummary, setPreviousSummary] = useState<Summary | null>(null);
   const [topSuppliers, setTopSuppliers] = useState<SupplierStats[]>([]);
   const [topItems, setTopItems] = useState<any[]>([]);
+  const [reorderNudges, setReorderNudges] = useState<Awaited<ReturnType<typeof api.getReorderNudges>>['nudges']>([]);
   const [expenseForecast, setExpenseForecast] = useState<any>(null);
   const [revenueForecast, setRevenueForecast] = useState<any>(null);
   const [roiTrend, setRoiTrend] = useState<any[]>([]);
+  // How far back the forecast looks for its trend/average - a hardcoded
+  // 6 months used to be the only option, which made the forecast blind
+  // (and its "trend" noise) for any company under 6 months old. Days,
+  // not a month count, to match ForecastService's lookback_days param.
+  const [forecastRangeDays, setForecastRangeDays] = useState<number>(180);
 
   const loadData = useCallback(async () => {
     try {
@@ -155,20 +185,22 @@ export default function StatsScreen() {
 
     if (hasPermission('view_statistics')) {
       try {
-        const [supplierData, itemData] = await Promise.all([
+        const [supplierData, itemData, nudgesData] = await Promise.all([
           api.getSupplierOverview(),
           api.getItemStatistics({ top_n: 3 }),
+          api.getReorderNudges(),
         ]);
         setTopSuppliers((supplierData.top_by_amount || []).slice(0, 3));
         setTopItems(itemData.top_by_value || []);
+        setReorderNudges(nudgesData.nudges || []);
       } catch (error) {
         console.error('Error loading top suppliers/items:', error);
       }
 
       try {
         const [expFc, revFc] = await Promise.all([
-          api.getExpenseForecast(1),
-          api.getRevenueForecast(1),
+          api.getExpenseForecast(1, { lookbackDays: forecastRangeDays }),
+          api.getRevenueForecast(1, { lookbackDays: forecastRangeDays }),
         ]);
         setExpenseForecast(expFc);
         setRevenueForecast(revFc);
@@ -185,7 +217,7 @@ export default function StatsScreen() {
         console.error('Error loading ROI trend:', error);
       }
     }
-  }, [period, summaryPeriodState, hasPermission, isOwner]);
+  }, [period, summaryPeriodState, hasPermission, isOwner, forecastRangeDays]);
 
   const loadSupplierStats = useCallback(async () => {
     setLoadingSuppliers(true);
@@ -328,6 +360,77 @@ export default function StatsScreen() {
       setUnreadAlerts(prev => Math.max(0, prev - 1));
     } catch (error) {
       console.error('Error dismissing alert:', error);
+    }
+  };
+
+  const muteAlertItem = async (alert: any) => {
+    try {
+      await api.createPriceAlertMute(alert.item_name, alert.supplier);
+      await api.updatePriceAlert(alert.id, 'dismissed');
+      setPriceAlerts(prev => prev.filter(a => a.id !== alert.id));
+      if (alert.status === 'unread') setUnreadAlerts(prev => Math.max(0, prev - 1));
+      Toast.success(t('priceAlertPopup.muted'));
+      loadAlertSettings();
+    } catch (error) {
+      console.error('Error muting price alert:', error);
+    }
+  };
+
+  const viewAlertInvoice = (alert: any) => {
+    router.push({ pathname: '/(tabs)/invoices', params: { invoiceId: alert.invoice_id } });
+  };
+
+  // Price-alert settings + the per-item mute list - the only place in the
+  // app these are reachable from, so this doubles as the feature's
+  // "settings" screen (opened via the gear icon next to the alerts card).
+  const [alertSettingsModalVisible, setAlertSettingsModalVisible] = useState(false);
+  const [alertSettings, setAlertSettings] = useState<PriceAlertSettings | null>(null);
+  const [alertMutes, setAlertMutes] = useState<PriceAlertMute[]>([]);
+  const [savingAlertSettings, setSavingAlertSettings] = useState(false);
+
+  const loadAlertSettings = useCallback(async () => {
+    try {
+      const [settings, mutesData] = await Promise.all([
+        api.getPriceAlertSettings(),
+        api.getPriceAlertMutes(),
+      ]);
+      setAlertSettings(settings);
+      setAlertMutes(mutesData.mutes || []);
+    } catch (error) {
+      console.error('Error loading price alert settings:', error);
+    }
+  }, []);
+
+  const openAlertSettings = () => {
+    setAlertSettingsModalVisible(true);
+    loadAlertSettings();
+  };
+
+  const saveAlertSettings = async () => {
+    if (!alertSettings) return;
+    setSavingAlertSettings(true);
+    try {
+      await api.updatePriceAlertSettings({
+        threshold_percent: alertSettings.threshold_percent,
+        min_absolute_change: alertSettings.min_absolute_change,
+        alert_on_decrease: alertSettings.alert_on_decrease,
+        enabled: alertSettings.enabled,
+      });
+      Toast.success(t('priceAlertSettings.saved'));
+      setAlertSettingsModalVisible(false);
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setSavingAlertSettings(false);
+    }
+  };
+
+  const unmuteItem = async (muteId: string) => {
+    try {
+      await api.deletePriceAlertMute(muteId);
+      setAlertMutes(prev => prev.filter(m => m.id !== muteId));
+    } catch (error) {
+      console.error('Error unmuting item:', error);
     }
   };
 
@@ -707,70 +810,9 @@ export default function StatsScreen() {
     </Modal>
   );
 
-  // Render supplier comparison modal
-  const renderCompareModal = () => {
-    const maxAmount = compareResult?.suppliers?.length
-      ? Math.max(...compareResult.suppliers.map((s: any) => s.total_amount), 1)
-      : 1;
-    return (
-      <Modal
-        visible={compareModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => {
-          setCompareModalVisible(false);
-          setCompareResult(null);
-        }}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle} numberOfLines={1}>{t('stats.compareTitle')}</Text>
-            <TouchableOpacity onPress={() => { setCompareModalVisible(false); setCompareResult(null); }}>
-              <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-          </View>
-
-          {loadingCompare ? (
-            <View style={styles.modalLoading}>
-              <ActivityIndicator size="large" color={COLORS.primary} />
-            </View>
-          ) : compareResult?.suppliers?.length ? (
-            <ScrollView style={{ flex: 1, padding: 16 }}>
-              {compareResult.suppliers.map((s: any, idx: number) => (
-                <View key={s.supplier} style={styles.compareCard}>
-                  <Text style={styles.compareSupplierName} numberOfLines={1}>{s.supplier}</Text>
-
-                  <View style={styles.compareBarRow}>
-                    <Text style={styles.compareBarLabel}>{t('stats.compareTotalAmount')}</Text>
-                    <Text style={styles.compareBarValue}>{s.total_amount.toFixed(2)} €</Text>
-                  </View>
-                  <View style={styles.compareBarTrack}>
-                    <View style={[styles.compareBarFill, { width: `${(s.total_amount / maxAmount) * 100}%`, backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }]} />
-                  </View>
-
-                  <View style={styles.compareStatsRow}>
-                    <View style={styles.compareStatItem}>
-                      <Text style={styles.compareStatLabel}>{t('stats.compareInvoiceCount')}</Text>
-                      <Text style={styles.compareStatValue}>{s.invoice_count}</Text>
-                    </View>
-                    <View style={styles.compareStatItem}>
-                      <Text style={styles.compareStatLabel}>{t('stats.compareAvgInvoice')}</Text>
-                      <Text style={styles.compareStatValue}>{s.avg_invoice.toFixed(2)} €</Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          ) : (
-            <View style={styles.modalLoading}>
-              <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
-              <Text style={styles.noDataText}>{t('stats.noData')}</Text>
-            </View>
-          )}
-        </View>
-      </Modal>
-    );
+  const closeCompareModal = () => {
+    setCompareModalVisible(false);
+    setCompareResult(null);
   };
 
   return (
@@ -794,6 +836,42 @@ export default function StatsScreen() {
                 </TouchableOpacity>
               )}
             </Animated.View>
+
+            {/* Navigation-architecture review (2026-10): "Запитай числата
+                си" (AI chat), Бюджет and Активи used to be buried in
+                Profile's "accounting" category - they're all "understand
+                my numbers" tools, the same subject as this whole screen,
+                so a visible link belongs here instead. Plain action
+                buttons, not another ChipTabs selector - tapping one
+                navigates away, it doesn't become a persistent "active"
+                state on this screen. */}
+            {(hasPermission('view_statistics') || hasPermission('manage_budget')) && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.quickLinksRow}
+                contentContainerStyle={styles.quickLinksContent}
+              >
+                {hasPermission('view_statistics') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/ask-my-numbers')}>
+                    <Ionicons name="chatbubbles-outline" size={15} color={COLORS.success} />
+                    <Text style={styles.quickLinkChipText}>{t('askMyNumbers.title')}</Text>
+                  </TouchableOpacity>
+                )}
+                {hasPermission('manage_budget') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/budget')}>
+                    <Ionicons name="wallet-outline" size={15} color={COLORS.primary} />
+                    <Text style={styles.quickLinkChipText}>{t('profile.budget')}</Text>
+                  </TouchableOpacity>
+                )}
+                {hasPermission('manage_budget') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/assets')}>
+                    <Ionicons name="business-outline" size={15} color={COLORS.warning} />
+                    <Text style={styles.quickLinkChipText}>{t('assets.title')}</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            )}
 
             {/* Tab Selector */}
             <ChipTabs
@@ -1169,41 +1247,12 @@ export default function StatsScreen() {
 
                 {/* Forecast */}
                 {hasPermission('view_statistics') && (revenueForecast?.forecast?.length > 0 || expenseForecast?.forecast?.length > 0) && (
-                  <View style={styles.forecastSection}>
-                    <View style={styles.chartHeader}>
-                      <Ionicons name="analytics" size={22} color={COLORS.primary} />
-                      <Text style={styles.chartTitle}>{t('stats.forecastTitle')}</Text>
-                    </View>
-                    <Text style={styles.forecastHint}>{t('stats.forecastHint')}</Text>
-                    <View style={styles.forecastRow}>
-                      {revenueForecast?.forecast?.[0] && (
-                        <View style={styles.forecastCard}>
-                          <Ionicons name="trending-up" size={20} color={COLORS.success} />
-                          <Text style={styles.forecastLabel}>{t('stats.forecastRevenue')}</Text>
-                          <Text style={[styles.forecastValue, { color: COLORS.success }]}>
-                            {revenueForecast.forecast[0].predicted_amount.toFixed(0)} €
-                          </Text>
-                          <Text style={styles.forecastTrend}>
-                            {revenueForecast.trend === 'increasing' ? '📈' : revenueForecast.trend === 'decreasing' ? '📉' : '➖'}
-                            {' '}{revenueForecast.trend_percent > 0 ? '+' : ''}{revenueForecast.trend_percent}%
-                          </Text>
-                        </View>
-                      )}
-                      {expenseForecast?.forecast?.[0] && (
-                        <View style={styles.forecastCard}>
-                          <Ionicons name="trending-down" size={20} color={COLORS.danger} />
-                          <Text style={styles.forecastLabel}>{t('stats.forecastExpense')}</Text>
-                          <Text style={[styles.forecastValue, { color: COLORS.danger }]}>
-                            {expenseForecast.forecast[0].predicted_amount.toFixed(0)} €
-                          </Text>
-                          <Text style={styles.forecastTrend}>
-                            {expenseForecast.trend === 'increasing' ? '📈' : expenseForecast.trend === 'decreasing' ? '📉' : '➖'}
-                            {' '}{expenseForecast.trend_percent > 0 ? '+' : ''}{expenseForecast.trend_percent}%
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
+                  <ForecastCard
+                    revenueForecast={revenueForecast}
+                    expenseForecast={expenseForecast}
+                    forecastRangeDays={forecastRangeDays}
+                    onChangeRangeDays={setForecastRangeDays}
+                  />
                 )}
 
                 {/* ROI Trend - owner or a delegated view_personal_investments
@@ -1614,55 +1663,20 @@ export default function StatsScreen() {
                   </View>
                 ) : (
                   <FadeIn>
-                    {/* Price Alerts Section */}
-                    {priceAlerts.length > 0 && (
-                      <View style={styles.priceAlertsCard}>
-                        <View style={styles.priceAlertsHeader}>
-                          <Ionicons name="alert-circle" size={24} color={COLORS.danger} />
-                          <Text style={styles.priceAlertsTitle}>{t('stats.priceAlerts')}</Text>
-                          {unreadAlerts > 0 && (
-                            <View style={styles.alertCountBadge}>
-                              <Text style={styles.alertCountText}>{unreadAlerts}</Text>
-                            </View>
-                          )}
-                        </View>
-                        
-                        {priceAlerts.filter(a => a.status !== 'dismissed').slice(0, 5).map((alert) => (
-                          <View 
-                            key={alert.id} 
-                            style={[styles.alertItem, alert.status === 'unread' && styles.alertItemUnread]}
-                          >
-                            <View style={styles.alertInfo}>
-                              <Text style={styles.alertItemName} numberOfLines={1}>{alert.item_name}</Text>
-                              <Text style={styles.alertSupplier}>{alert.supplier}</Text>
-                              <View style={styles.alertPrices}>
-                                <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
-                                <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
-                                <Text style={styles.alertNewPrice}>{alert.new_price.toFixed(2)}€</Text>
-                                <View style={styles.alertChangeBadge}>
-                                  <Text style={styles.alertChangeText}>+{alert.change_percent}%</Text>
-                                </View>
-                              </View>
-                            </View>
-                            <View style={styles.alertActions}>
-                              {alert.status === 'unread' && (
-                                <TouchableOpacity 
-                                  style={styles.alertActionBtn}
-                                  onPress={() => markAlertAsRead(alert.id)}
-                                >
-                                  <Ionicons name="checkmark" size={18} color={COLORS.success} />
-                                </TouchableOpacity>
-                              )}
-                              <TouchableOpacity 
-                                style={styles.alertActionBtn}
-                                onPress={() => dismissAlert(alert.id)}
-                              >
-                                <Ionicons name="close" size={18} color={COLORS.danger} />
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        ))}
-                      </View>
+                    {/* Price Alerts Section - header (with settings access) is
+                        always shown once items exist, even with zero current
+                        alerts, since this is the only place the threshold/
+                        mute-list settings are reachable from. */}
+                    {itemStats && (
+                      <PriceAlertsCard
+                        priceAlerts={priceAlerts}
+                        unreadAlerts={unreadAlerts}
+                        onOpenSettings={openAlertSettings}
+                        onViewInvoice={viewAlertInvoice}
+                        onMute={muteAlertItem}
+                        onMarkRead={markAlertAsRead}
+                        onDismiss={dismissAlert}
+                      />
                     )}
 
                     {/* Item Totals */}
@@ -1686,78 +1700,20 @@ export default function StatsScreen() {
                       </View>
                     )}
 
+                    {/* Reorder nudges - a pattern in purchase timing
+                        noticed from data already captured by scanning,
+                        not inventory/stock tracking. */}
+                    <ReorderNudgesCard nudges={reorderNudges} />
+
                     {/* Price Inflation Card */}
-                    <View style={styles.inflationCard}>
-                      <View style={styles.priceAlertsHeader}>
-                        <Ionicons name="analytics" size={24} color={COLORS.warning} />
-                        <Text style={styles.inflationTitle}>{t('stats.priceInflation')}</Text>
-                      </View>
-
-                      <View style={styles.rankingSelector}>
-                        {(['month', 'quarter', 'year'] as const).map((p) => (
-                          <TouchableOpacity
-                            key={p}
-                            style={[styles.rankingButton, inflationPeriod === p && styles.rankingButtonActive]}
-                            onPress={() => setInflationPeriod(p)}
-                          >
-                            <Text style={[styles.rankingButtonText, inflationPeriod === p && styles.rankingButtonTextActive]}>
-                              {t(`stats.inflationPeriod.${p}`)}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-
-                      {loadingInflation ? (
-                        <ActivityIndicator size="small" color={COLORS.warning} style={{ marginVertical: 16 }} />
-                      ) : inflationData && inflationData.items_compared > 0 ? (
-                        <>
-                          <View style={styles.inflationHeadline}>
-                            <Text style={[
-                              styles.inflationHeadlineValue,
-                              { color: inflationData.overall_change_percent > 0 ? COLORS.danger : inflationData.overall_change_percent < 0 ? COLORS.success : COLORS.textSecondary }
-                            ]}>
-                              {inflationData.overall_change_percent > 0 ? '+' : ''}{inflationData.overall_change_percent}%
-                            </Text>
-                            <Text style={styles.inflationHeadlineLabel}>
-                              {t('stats.inflationHeadline')} ({inflationData.items_compared} {t('stats.inflationItemsCompared')})
-                            </Text>
-                          </View>
-
-                          <TouchableOpacity
-                            style={styles.inflationToggle}
-                            onPress={() => setInflationExpanded(!inflationExpanded)}
-                          >
-                            <Text style={styles.inflationToggleText}>
-                              {inflationExpanded ? t('stats.inflationHideDetails') : t('stats.inflationShowDetails')}
-                            </Text>
-                            <Ionicons name={inflationExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.warning} />
-                          </TouchableOpacity>
-
-                          {inflationExpanded && inflationData.items.map((item: any) => (
-                            <View key={item.item_name} style={styles.alertItem}>
-                              <View style={styles.alertInfo}>
-                                <Text style={styles.alertItemName} numberOfLines={1}>{item.item_name}</Text>
-                                <Text style={styles.alertSupplier}>{item.supplier} • {item.purchase_count}x</Text>
-                                <View style={styles.alertPrices}>
-                                  <Text style={styles.alertOldPrice}>{item.start_price.toFixed(2)}€</Text>
-                                  <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
-                                  <Text style={[styles.alertNewPrice, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>
-                                    {item.end_price.toFixed(2)}€
-                                  </Text>
-                                  <View style={[styles.alertChangeBadge, { backgroundColor: item.change_percent >= 0 ? '#EF444420' : '#10B98120' }]}>
-                                    <Text style={[styles.alertChangeText, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>
-                                      {item.change_percent > 0 ? '+' : ''}{item.change_percent}%
-                                    </Text>
-                                  </View>
-                                </View>
-                              </View>
-                            </View>
-                          ))}
-                        </>
-                      ) : (
-                        <Text style={styles.inflationNoData}>{t('stats.inflationNoData')}</Text>
-                      )}
-                    </View>
+                    <PriceInflationCard
+                      inflationData={inflationData}
+                      inflationPeriod={inflationPeriod}
+                      onChangePeriod={setInflationPeriod}
+                      loadingInflation={loadingInflation}
+                      inflationExpanded={inflationExpanded}
+                      onToggleExpanded={() => setInflationExpanded(!inflationExpanded)}
+                    />
 
                     {/* Ranking Type Selector */}
                     <View style={styles.rankingSelector}>
@@ -1894,7 +1850,24 @@ export default function StatsScreen() {
       {renderSupplierDetailModal()}
 
       {/* Supplier Compare Modal */}
-      {renderCompareModal()}
+      <SupplierCompareModal
+        visible={compareModalVisible}
+        onClose={closeCompareModal}
+        loadingCompare={loadingCompare}
+        compareResult={compareResult}
+      />
+
+      {/* Price Alert Settings Modal */}
+      <AlertSettingsModal
+        visible={alertSettingsModalVisible}
+        onClose={() => setAlertSettingsModalVisible(false)}
+        alertSettings={alertSettings}
+        onChangeSettings={setAlertSettings}
+        alertMutes={alertMutes}
+        savingAlertSettings={savingAlertSettings}
+        onSave={saveAlertSettings}
+        onUnmute={unmuteItem}
+      />
 
       {/* Item Detail Modal */}
       <Modal
@@ -2093,6 +2066,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     marginTop: 4,
+  },
+  quickLinksRow: {
+    marginTop: 12,
+    height: 36,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  quickLinksContent: {
+    alignItems: 'center',
+  },
+  quickLinkChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: COLORS.surface,
+    marginRight: 8,
+    flexShrink: 0,
+  },
+  quickLinkChipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
   periodSelectorWrap: {
     marginBottom: 20,
@@ -2364,45 +2362,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: 'white',
-  },
-  forecastSection: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 16,
-  },
-  forecastHint: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: -4,
-    marginBottom: 12,
-  },
-  forecastRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  forecastCard: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-  },
-  forecastLabel: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  forecastValue: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    marginTop: 4,
-  },
-  forecastTrend: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 4,
   },
   tabSelector: {
     flexDirection: 'row',
@@ -2702,60 +2661,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 15,
     fontWeight: '700',
-  },
-  compareCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-  },
-  compareSupplierName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: 'white',
-    marginBottom: 10,
-  },
-  compareBarRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  compareBarLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  compareBarValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'white',
-  },
-  compareBarTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.background,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  compareBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  compareStatsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  compareStatItem: {
-    alignItems: 'center',
-  },
-  compareStatLabel: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginBottom: 2,
-  },
-  compareStatValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
   },
   supplierItem: {
     flexDirection: 'row',
@@ -3088,146 +2993,8 @@ const styles = StyleSheet.create({
   },
   
   // Price Alerts Card
-  priceAlertsCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.danger,
-  },
-  priceAlertsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
-  priceAlertsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.danger,
-    flex: 1,
-  },
-  alertCountBadge: {
-    backgroundColor: COLORS.danger,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  alertCountText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  alertItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
-  },
-  alertItemUnread: {
-    borderLeftWidth: 3,
-    borderLeftColor: COLORS.danger,
-  },
-  alertInfo: {
-    flex: 1,
-  },
-  alertItemName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-  },
-  alertSupplier: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  alertPrices: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-  },
-  alertOldPrice: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    textDecorationLine: 'line-through',
-  },
-  alertNewPrice: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: COLORS.danger,
-  },
-  alertChangeBadge: {
-    backgroundColor: '#EF444420',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  alertChangeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: COLORS.danger,
-  },
-  alertActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  alertActionBtn: {
-    padding: 8,
-    backgroundColor: COLORS.surface,
-    borderRadius: 8,
-  },
 
   // Price Inflation Card
-  inflationCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.warning,
-  },
-  inflationTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.warning,
-    flex: 1,
-  },
-  inflationHeadline: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  inflationHeadlineValue: {
-    fontSize: 36,
-    fontWeight: 'bold',
-  },
-  inflationHeadlineLabel: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  inflationToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-  },
-  inflationToggleText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.warning,
-  },
-  inflationNoData: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
 
   // Item Trend Badge
   itemTrendBadge: {

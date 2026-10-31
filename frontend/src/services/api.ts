@@ -1,7 +1,93 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+// Reads the csrf_token cookie the backend sets alongside the (httponly)
+// session cookie - see server.py's set_session_cookies. Only meaningful on
+// web: native builds authenticate via the Bearer token below, never a
+// cookie, so the backend's CSRF check never triggers for them and this
+// always returns null there (document doesn't exist on native anyway).
+function readCsrfTokenCookie(): string | null {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// Matches ForecastService's _resolve_window: either a lookback preset
+// (in days - 30/90/180/365 for roughly 1/3/6/12 months) or an explicit
+// custom start/end, never both at once.
+export type ForecastRange =
+  | { lookbackDays: number; startDate?: undefined; endDate?: undefined }
+  | { lookbackDays?: undefined; startDate: string; endDate: string };
+
+function forecastRangeQuery(range?: ForecastRange): string {
+  if (!range) return '';
+  if (range.startDate && range.endDate) {
+    return `&start_date=${range.startDate}&end_date=${range.endDate}`;
+  }
+  if (range.lookbackDays) {
+    return `&lookback_days=${range.lookbackDays}`;
+  }
+  return '';
+}
+
+// Bulgarian labels for the field names that actually show up in
+// validation errors across invoices/expenses/items, so a rejected save
+// names the field the way the user sees it on screen, not its Python
+// attribute name. Unlisted fields just fall back to their raw name.
+const FIELD_LABELS: Record<string, string> = {
+  quantity: 'количество', unit_price: 'единична цена', total_price: 'обща цена',
+  vat_amount: 'ДДС', amount_without_vat: 'сума без ДДС', total_amount: 'обща сума',
+  amount: 'сума', name: 'име', date: 'дата', supplier: 'доставчик',
+  invoice_number: 'номер на фактура', description: 'описание',
+};
+
+// Pydantic's error `type` is a stable machine-readable code, independent of
+// the (English) `msg` text - map the couple of constraint kinds that
+// actually occur in this app's models (every numeric Field here uses only
+// gt=0 or ge=0) to a short Bulgarian phrase instead of passing through
+// "Input should be greater than or equal to 0".
+function friendlyReason(type: unknown, msg: string): string {
+  if (type === 'greater_than') return 'трябва да е по-голямо от 0';
+  if (type === 'greater_than_equal') return 'не може да бъде отрицателно число';
+  if (type === 'missing') return 'е задължително поле';
+  return msg;
+}
+
+// FastAPI's own validation-error shape puts `detail` as an ARRAY of
+// {loc, msg, type} objects (one per invalid field), not a string - passing
+// that straight to `new Error(detail)` coerces it via Array.prototype.join,
+// which stringifies each plain object as the literal text "[object Object]"
+// instead of anything a user can act on. Pull out each item's own field +
+// reason instead, translated where this app has a known label for them.
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item) => {
+      if (item && typeof item === 'object' && 'msg' in item) {
+        const loc = Array.isArray((item as any).loc) ? (item as any).loc : [];
+        const field = loc[loc.length - 1];
+        const reason = friendlyReason((item as any).type, (item as any).msg);
+        if (typeof field !== 'string') return reason;
+        const label = FIELD_LABELS[field] || field;
+        // A validation error nested inside an item list (loc includes a
+        // numeric index, e.g. ["body","items",0,"unit_price"]) names which
+        // item row it's about, not just the field - "артикул 1" (1-based,
+        // matching what the UI shows) rather than a bare field name that
+        // could mean any of several rows.
+        const itemIndex = loc.length >= 2 && typeof loc[loc.length - 2] === 'number' ? loc[loc.length - 2] + 1 : null;
+        return itemIndex !== null ? `артикул ${itemIndex} - ${label}: ${reason}` : `${label}: ${reason}`;
+      }
+      return typeof item === 'string' ? item : JSON.stringify(item);
+    });
+    return messages.join('; ') || 'Грешка в заявката';
+  }
+  if (detail && typeof detail === 'object') return JSON.stringify(detail);
+  return 'Грешка в заявката';
+}
 
 class ApiService {
   private token: string | null = null;
@@ -24,6 +110,14 @@ class ApiService {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${this.token}`;
     }
 
+    const method = (options.method || 'GET').toUpperCase();
+    if (MUTATING_METHODS.has(method)) {
+      const csrfToken = readCsrfTokenCookie();
+      if (csrfToken) {
+        (headers as Record<string, string>)['X-CSRF-Token'] = csrfToken;
+      }
+    }
+
     const response = await fetch(`${API_URL}/api${endpoint}`, {
       ...options,
       headers,
@@ -32,7 +126,7 @@ class ApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
-      const err = new Error(error.detail || 'Грешка в заявката') as Error & { status?: number };
+      const err = new Error(formatApiErrorDetail(error.detail)) as Error & { status?: number };
       // Attached so callers that need to branch on it (e.g. 402 = no scan
       // credits remaining, show the purchase screen instead of a plain
       // error alert) can do so without parsing the message text.
@@ -81,6 +175,28 @@ class ApiService {
       method: 'PUT',
       body: JSON.stringify({ new_password: newPassword, current_password: currentPassword }),
     });
+  }
+
+  async deleteAccount(password?: string): Promise<{ message: string }> {
+    return this.fetch('/auth/delete-account', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+  }
+
+  async updateMyPicture(picture: string | null): Promise<{ picture: string | null }> {
+    return this.fetch('/auth/me/picture', {
+      method: 'PUT',
+      body: JSON.stringify({ picture }),
+    });
+  }
+
+  // Every company member's name+picture, nothing else - used to resolve
+  // identity (avatar) wherever a screen only has a user_id/name snapshot
+  // (calendar creators, audit log actors, past chat senders, invoices'
+  // scanner) rather than re-fetching per screen.
+  async getCompanyDirectory(): Promise<{ user_id: string; name: string; picture: string | null }[]> {
+    return this.fetch('/company/directory');
   }
 
   async logout(): Promise<void> {
@@ -176,6 +292,18 @@ class ApiService {
     return this.fetch('/scan-credits');
   }
 
+  async getScanCreditsForecast(): Promise<{
+    insufficient_data: boolean;
+    scans_used_in_window: number;
+    lookback_days: number;
+    total_remaining: number;
+    daily_rate: number | null;
+    days_remaining: number | null;
+    estimated_depletion_date: string | null;
+  }> {
+    return this.fetch('/scan-credits/forecast');
+  }
+
   async getScanPackages(): Promise<ScanPackage[]> {
     return this.fetch('/scan-credits/packages');
   }
@@ -236,7 +364,7 @@ class ApiService {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
-      throw new Error(error.detail || 'Грешка в заявката');
+      throw new Error(formatApiErrorDetail(error.detail));
     }
     return response.json();
   }
@@ -266,6 +394,50 @@ class ApiService {
     if (params?.payment_status) queryParams.set('payment_status', params.payment_status);
     const query = queryParams.toString();
     return this.fetch(`/invoices${query ? `?${query}` : ''}`);
+  }
+
+  // Same filters as getInvoices, plus limit/offset, and also returns the
+  // true total match count (X-Total-Count) so a caller can tell whether
+  // the returned page is everything or there's more to load - the backend
+  // used to cap silently at 1000 with no way to know invoices were missing.
+  async getInvoicesPage(params?: {
+    supplier?: string;
+    invoice_number?: string;
+    search?: string;
+    start_date?: string;
+    end_date?: string;
+    payment_status?: 'paid' | 'unpaid' | 'partial' | 'overdue';
+    limit?: number;
+    offset?: number;
+  }): Promise<{ invoices: Invoice[]; totalCount: number }> {
+    const queryParams = new URLSearchParams();
+    if (params?.supplier) queryParams.set('supplier', params.supplier);
+    if (params?.invoice_number) queryParams.set('invoice_number', params.invoice_number);
+    if (params?.search) queryParams.set('search', params.search);
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    if (params?.payment_status) queryParams.set('payment_status', params.payment_status);
+    if (params?.limit != null) queryParams.set('limit', String(params.limit));
+    if (params?.offset != null) queryParams.set('offset', String(params.offset));
+    const query = queryParams.toString();
+
+    const response = await fetch(`${API_URL}/api/invoices${query ? `?${query}` : ''}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      },
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
+      const err = new Error(formatApiErrorDetail(error.detail)) as Error & { status?: number };
+      err.status = response.status;
+      throw err;
+    }
+    const invoices: Invoice[] = await response.json();
+    const totalHeader = response.headers.get('X-Total-Count');
+    const totalCount = totalHeader ? parseInt(totalHeader, 10) : invoices.length;
+    return { invoices, totalCount };
   }
 
   async createInvoice(invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at' | 'is_paid' | 'paid_amount' | 'paid_at'>): Promise<Invoice> {
@@ -332,8 +504,82 @@ class ApiService {
     });
   }
 
+  async updateExpense(id: string, update: Partial<{ description: string; amount: number; date: string }>): Promise<NonInvoiceExpense> {
+    return this.fetch(`/expenses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(update),
+    });
+  }
+
   async deleteExpense(id: string): Promise<void> {
     await this.fetch(`/expenses/${id}`, { method: 'DELETE' });
+  }
+
+  // Customers (lightweight - see Customer type's own note)
+  async createCustomer(customer: { name: string; phone?: string; email?: string; notes?: string }): Promise<Customer> {
+    return this.fetch('/customers', { method: 'POST', body: JSON.stringify(customer) });
+  }
+
+  async getCustomers(search?: string): Promise<Customer[]> {
+    return this.fetch(`/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+  }
+
+  async updateCustomer(id: string, update: Partial<{ name: string; phone: string; email: string; notes: string }>): Promise<Customer> {
+    return this.fetch(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteCustomer(id: string): Promise<void> {
+    await this.fetch(`/customers/${id}`, { method: 'DELETE' });
+  }
+
+  // Receivables ("who owes me") - mirrors the unpaid/overdue invoice
+  // (payables) pattern already used for what the business owes suppliers.
+  async createReceivable(receivable: {
+    customer_id?: string; customer_name: string; description?: string; amount: number; due_date?: string;
+  }): Promise<Receivable> {
+    return this.fetch('/receivables', { method: 'POST', body: JSON.stringify(receivable) });
+  }
+
+  async getReceivables(status?: 'unpaid' | 'overdue' | 'paid'): Promise<Receivable[]> {
+    return this.fetch(`/receivables${status ? `?status=${status}` : ''}`);
+  }
+
+  async getReceivablesSummary(): Promise<{ total_owed: number; unpaid_count: number; total_overdue: number; overdue_count: number }> {
+    return this.fetch('/receivables/summary');
+  }
+
+  async updateReceivable(id: string, update: Partial<{
+    customer_name: string; description: string; amount: number; due_date: string; is_paid: boolean; paid_amount: number;
+  }>): Promise<Receivable> {
+    return this.fetch(`/receivables/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteReceivable(id: string): Promise<void> {
+    await this.fetch(`/receivables/${id}`, { method: 'DELETE' });
+  }
+
+  // Billing documents (non-fiscal bill/quote) - Module 7 Finding #3.
+  async createBillingDocument(doc: {
+    doc_type: 'quote' | 'bill';
+    customer_id?: string;
+    customer_name: string;
+    items: { name: string; quantity: number; unit: string; unit_price: number }[];
+    notes?: string;
+    issue_date?: string;
+  }): Promise<BillingDocument> {
+    return this.fetch('/billing-documents', { method: 'POST', body: JSON.stringify(doc) });
+  }
+
+  async getBillingDocuments(): Promise<BillingDocument[]> {
+    return this.fetch('/billing-documents');
+  }
+
+  async deleteBillingDocument(id: string): Promise<void> {
+    await this.fetch(`/billing-documents/${id}`, { method: 'DELETE' });
+  }
+
+  getBillingDocumentPdfUrl(id: string): string {
+    return `/api/billing-documents/${id}/pdf`;
   }
 
   // Statistics
@@ -550,15 +796,40 @@ class ApiService {
     });
   }
 
-  async getPriceAlertSettings(): Promise<{ threshold_percent: number; enabled: boolean }> {
+  async getPriceAlertSettings(): Promise<{
+    threshold_percent: number;
+    min_absolute_change: number;
+    alert_on_decrease: boolean;
+    enabled: boolean;
+  }> {
     return this.fetch('/items/price-alert-settings');
   }
 
-  async updatePriceAlertSettings(settings: { threshold_percent?: number; enabled?: boolean }): Promise<{ message: string }> {
+  async updatePriceAlertSettings(settings: {
+    threshold_percent?: number;
+    min_absolute_change?: number;
+    alert_on_decrease?: boolean;
+    enabled?: boolean;
+  }): Promise<{ message: string }> {
     return this.fetch('/items/price-alert-settings', {
       method: 'PUT',
       body: JSON.stringify(settings),
     });
+  }
+
+  async getPriceAlertMutes(): Promise<{ mutes: { id: string; item_name: string; supplier: string }[] }> {
+    return this.fetch('/items/price-alert-mutes');
+  }
+
+  async createPriceAlertMute(itemName: string, supplier: string): Promise<{ mute: { id: string } }> {
+    return this.fetch('/items/price-alert-mutes', {
+      method: 'POST',
+      body: JSON.stringify({ item_name: itemName, supplier }),
+    });
+  }
+
+  async deletePriceAlertMute(muteId: string): Promise<{ message: string }> {
+    return this.fetch(`/items/price-alert-mutes/${muteId}`, { method: 'DELETE' });
   }
 
   async getPriceInflation(startDate: string, endDate: string): Promise<{
@@ -599,6 +870,12 @@ class ApiService {
     if (params?.top_n) queryParams.set('top_n', params.top_n.toString());
     const query = queryParams.toString();
     return this.fetch(`/statistics/items${query ? `?${query}` : ''}`);
+  }
+
+  async getReorderNudges(): Promise<{
+    nudges: { item_name: string; supplier: string; median_days_between: number; days_since_last: number; last_purchase_date: string; avg_order_value: number }[];
+  }> {
+    return this.fetch('/items/reorder-nudges');
   }
 
   async getItemBySupplier(itemName: string): Promise<{
@@ -663,6 +940,22 @@ class ApiService {
     });
   }
 
+  // "Ask your own numbers" chat (Module 4 Finding #3) - answers only from
+  // this company's own stored data, never a general chatbot.
+  async askMyNumbers(question: string, history: BusinessChatHistoryTurn[] = [], language: 'bg' | 'en' = 'bg'): Promise<BusinessChatResponse> {
+    return this.fetch('/ai/ask-my-numbers', {
+      method: 'POST',
+      body: JSON.stringify({ question, history, language }),
+    });
+  }
+
+  // Proactive Second Brain engine (Module 11 Finding #1) - one ranked
+  // signal list over forecast/price-alert/scan-credit/budget/reorder/
+  // receivables, feeding the Home morning-briefing card.
+  async getProactiveSignals(): Promise<{ signals: ProactiveSignal[] }> {
+    return this.fetch('/proactive/signals');
+  }
+
   // Recurring Expenses
   async getRecurringExpenses(): Promise<{ recurring_expenses: any[] }> {
     return this.fetch('/recurring-expenses');
@@ -680,12 +973,12 @@ class ApiService {
   }
 
   // Forecast API
-  async getExpenseForecast(monthsAhead: number = 3): Promise<any> {
-    return this.fetch(`/forecast/expenses?months_ahead=${monthsAhead}`);
+  async getExpenseForecast(monthsAhead: number = 3, range?: ForecastRange): Promise<any> {
+    return this.fetch(`/forecast/expenses?months_ahead=${monthsAhead}${forecastRangeQuery(range)}`);
   }
 
-  async getRevenueForecast(monthsAhead: number = 3): Promise<any> {
-    return this.fetch(`/forecast/revenue?months_ahead=${monthsAhead}`);
+  async getRevenueForecast(monthsAhead: number = 3, range?: ForecastRange): Promise<any> {
+    return this.fetch(`/forecast/revenue?months_ahead=${monthsAhead}${forecastRangeQuery(range)}`);
   }
 
   // Audit Logs
@@ -789,7 +1082,7 @@ class ApiService {
   }
 
   // ROI Analysis (Owner only)
-  async getROIAnalysis(params?: { month?: number; year?: number }): Promise<{
+  async getROIAnalysis(params?: { month?: number; year?: number; language?: 'bg' | 'en' }): Promise<{
     period: { month: number; year: number };
     total_personal_investment: number;
     total_revenue: number;
@@ -802,6 +1095,7 @@ class ApiService {
     const queryParams = new URLSearchParams();
     if (params?.month) queryParams.set('month', params.month.toString());
     if (params?.year) queryParams.set('year', params.year.toString());
+    queryParams.set('language', params?.language || 'bg');
     const query = queryParams.toString();
     return this.fetch(`/roi/analysis${query ? `?${query}` : ''}`);
   }
@@ -834,6 +1128,86 @@ class ApiService {
 
   async updatePayrollRates(rates: Partial<PayrollRates>): Promise<PayrollRates> {
     return this.fetch('/payroll/rates', { method: 'PUT', body: JSON.stringify(rates) });
+  }
+
+  async createShift(shift: WorkShiftCreate): Promise<WorkShift> {
+    return this.fetch('/schedule/shifts', { method: 'POST', body: JSON.stringify(shift) });
+  }
+
+  async getShiftOccurrences(start: string, end: string, userId?: string): Promise<{ occurrences: ShiftOccurrence[] }> {
+    const query = new URLSearchParams({ start, end });
+    if (userId) query.set('user_id', userId);
+    return this.fetch(`/schedule/shifts?${query.toString()}`);
+  }
+
+  async updateShift(id: string, update: Partial<Omit<WorkShiftCreate, 'user_id'>>): Promise<WorkShift> {
+    return this.fetch(`/schedule/shifts/${id}`, { method: 'PUT', body: JSON.stringify(update) });
+  }
+
+  async deleteShift(id: string): Promise<void> {
+    await this.fetch(`/schedule/shifts/${id}`, { method: 'DELETE' });
+  }
+
+  async getScheduleSummary(start: string, end: string, userId?: string): Promise<ScheduleSummary> {
+    const query = new URLSearchParams({ start, end });
+    if (userId) query.set('user_id', userId);
+    return this.fetch(`/schedule/summary?${query.toString()}`);
+  }
+
+  async adjustShiftOccurrence(shiftId: string, date: string, adjustment: ShiftAdjustmentCreate): Promise<WorkShift> {
+    return this.fetch(`/schedule/shifts/${shiftId}/occurrences/${date}/adjustment`, {
+      method: 'PUT',
+      body: JSON.stringify(adjustment),
+    });
+  }
+
+  async removeShiftAdjustment(shiftId: string, date: string): Promise<void> {
+    await this.fetch(`/schedule/shifts/${shiftId}/occurrences/${date}/adjustment`, { method: 'DELETE' });
+  }
+
+  async createSchedulePayment(payment: SchedulePaymentCreate): Promise<SchedulePayment> {
+    return this.fetch('/schedule/payments', { method: 'POST', body: JSON.stringify(payment) });
+  }
+
+  async getSchedulePayments(start: string, end: string, userId?: string): Promise<{ payments: SchedulePayment[] }> {
+    const query = new URLSearchParams({ start, end });
+    if (userId) query.set('user_id', userId);
+    return this.fetch(`/schedule/payments?${query.toString()}`);
+  }
+
+  async deleteSchedulePayment(id: string): Promise<void> {
+    await this.fetch(`/schedule/payments/${id}`, { method: 'DELETE' });
+  }
+
+  async setPayrollEntryCountedInExpenses(entryId: string, counted: boolean): Promise<{ counted_in_expenses: boolean }> {
+    return this.fetch(`/payroll/${entryId}/counted-in-expenses`, {
+      method: 'PUT',
+      body: JSON.stringify({ counted_in_expenses: counted }),
+    });
+  }
+
+  async batchPay(payload: BatchPayRequest): Promise<{ results: BatchPayResultItem[] }> {
+    return this.fetch('/pay-run/batch', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async getTeamMemberProfile(userId: string): Promise<TeamMemberProfile> {
+    return this.fetch(`/team/members/${encodeURIComponent(userId)}/profile`);
+  }
+
+  async getTeamNotes(userId: string): Promise<TeamNotesResponse> {
+    return this.fetch(`/team/notes?user_id=${encodeURIComponent(userId)}`);
+  }
+
+  async createTeamNote(payload: TeamNoteCreate): Promise<TeamNote> {
+    return this.fetch('/team/notes', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async deleteTeamNote(noteId: string): Promise<{ message: string }> {
+    return this.fetch(`/team/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' });
+  }
+
+  async getScheduleLeave(start: string, end: string): Promise<{ leave: ScheduleLeaveEntry[] }> {
+    return this.fetch(`/schedule/leave?start=${start}&end=${end}`);
   }
 
   async previewPayroll(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number }): Promise<PayrollBreakdown> {

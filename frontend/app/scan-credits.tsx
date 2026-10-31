@@ -25,6 +25,8 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { ScreenEnter, ScanCreditsRing } from '../src/components';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useQueryClient } from '@tanstack/react-query';
+import { scanBalanceQueryKey } from '../src/queries/useScanBalance';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -48,6 +50,7 @@ function openCheckout(url: string) {
 
 export default function ScanCreditsScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { t } = useTranslation();
   const { hasPermission } = useAuth();
   const canManageBilling = hasPermission('manage_billing');
@@ -62,6 +65,7 @@ export default function ScanCreditsScreen() {
   const [packages, setPackages] = useState<ScanPackage[]>([]);
   const [history, setHistory] = useState<ScanTransaction[]>([]);
   const [buyingId, setBuyingId] = useState<string | null>(null);
+  const [depletionForecast, setDepletionForecast] = useState<Awaited<ReturnType<typeof api.getScanCreditsForecast>> | null>(null);
 
   const [customQuantity, setCustomQuantity] = useState(50);
   const [customBuying, setCustomBuying] = useState(false);
@@ -76,6 +80,10 @@ export default function ScanCreditsScreen() {
         api.getScanPackages(),
         api.getScanCreditsHistory(),
       ]);
+      // Separate, non-blocking - a forecast that can't be computed yet
+      // (too little usage history) must never stop the balance itself
+      // from showing.
+      api.getScanCreditsForecast().then(setDepletionForecast).catch(() => setDepletionForecast(null));
       const storedRaw = await AsyncStorage.getItem(LAST_FREE_REMAINING_KEY);
       const stored = storedRaw !== null ? parseInt(storedRaw, 10) : null;
       setRingAnimateFrom(stored !== null && stored !== balanceData.free_remaining ? stored : null);
@@ -84,6 +92,11 @@ export default function ScanCreditsScreen() {
       setBalance(balanceData);
       setPackages(packagesData);
       setHistory(historyData);
+      // Pushes the balance this screen just fetched into the shared
+      // cache ScanCreditsBadge/ScanCreditsReloadButton read from, so a
+      // purchase or scan reflected here shows up there too without a
+      // second redundant fetch (Module 1 audit finding #5).
+      queryClient.setQueryData(scanBalanceQueryKey, balanceData);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message || t('scanCredits.loadError'));
     } finally {
@@ -233,6 +246,22 @@ export default function ScanCreditsScreen() {
                   </Text>
                 </View>
               </View>
+
+              {/* Depletion forecast - was just a static count with no
+                  sense of "is that a lot or a little for me"; reuses the
+                  same ledger to say when, not just how many. */}
+              {depletionForecast && !depletionForecast.insufficient_data && depletionForecast.days_remaining !== null && (
+                <Text
+                  style={[
+                    styles.depletionForecastText,
+                    depletionForecast.days_remaining <= 7 && styles.depletionForecastTextUrgent,
+                  ]}
+                >
+                  {depletionForecast.days_remaining <= 0
+                    ? t('scanCredits.depletionNow')
+                    : t('scanCredits.depletionForecast').replace('{days}', String(depletionForecast.days_remaining))}
+                </Text>
+              )}
             </View>
 
             {/* History card */}
@@ -437,6 +466,10 @@ const styles = StyleSheet.create({
   balanceTotal: { fontSize: 32, fontWeight: '700', color: 'white', lineHeight: 36 },
   balanceTotalLabel: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
   balanceSubtext: { fontSize: 11, color: COLORS.textMuted, marginTop: 6 },
+  depletionForecastText: {
+    fontSize: 12, color: COLORS.textSecondary, marginTop: 10, textAlign: 'center',
+  },
+  depletionForecastTextUrgent: { color: COLORS.danger, fontWeight: '600' },
   txRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
   txDescription: { flex: 1, fontSize: 12, color: COLORS.textSubtle },
   txDelta: { fontSize: 12, fontWeight: '600' },

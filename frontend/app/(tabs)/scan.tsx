@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
@@ -61,11 +62,23 @@ export default function ScanScreen() {
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
   const [ocrCorrections, setOcrCorrections] = useState<string[]>([]);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
+  // "You've paid less for this before" - previously only a buried
+  // drill-down in Stats, now surfaced right where a price actually gets
+  // typed in, by reusing the same per-item/per-supplier history lookup.
+  // Keyed by the item's index in `items` (its name alone isn't a stable
+  // key - two rows can share a name before the user's edited them apart).
+  const [itemPriceNotes, setItemPriceNotes] = useState<Record<number, { lastPrice: number; changePercent: number }>>({});
 
   // Form fields (editable after OCR)
   const [supplier, setSupplier] = useState('');
   const [supplierEik, setSupplierEik] = useState('');
   const [eikCheck, setEikCheck] = useState<{ valid: boolean; reason: string | null } | null>(null);
+  // Known suppliers (name + ЕИК) from this company's own invoice history -
+  // drives the autocomplete chips below the supplier field, so correcting
+  // an OCR misread or typing a supplier manually doesn't mean retyping an
+  // ЕИК that's already on file from a previous invoice. Loaded once, lazily
+  // (reuses the existing invoice list endpoint, no backend change).
+  const [supplierDirectory, setSupplierDirectory] = useState<{ name: string; eik: string; date: string }[]>([]);
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [amountWithoutVat, setAmountWithoutVat] = useState('');
   const [vatAmount, setVatAmount] = useState('');
@@ -129,6 +142,33 @@ export default function ScanScreen() {
     return () => clearTimeout(timeout);
   }, [supplierEik]);
 
+  useEffect(() => {
+    if (scanMode !== 'purchase' || capturedImages.length === 0 || supplierDirectory.length > 0) return;
+    api.getInvoices({})
+      .then((invoices) => {
+        const byName = new Map<string, { name: string; eik: string; date: string }>();
+        invoices.forEach((inv) => {
+          const key = inv.supplier.trim().toLowerCase();
+          if (!key) return;
+          const existing = byName.get(key);
+          if (!existing || inv.date > existing.date) {
+            byName.set(key, { name: inv.supplier.trim(), eik: inv.supplier_eik || '', date: inv.date });
+          }
+        });
+        setSupplierDirectory(Array.from(byName.values()));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanMode, capturedImages.length]);
+
+  const supplierMatches = useMemo(() => {
+    const q = supplier.trim().toLowerCase();
+    if (!q) return [];
+    return supplierDirectory
+      .filter((s) => s.name.toLowerCase() !== q && s.name.toLowerCase().includes(q))
+      .slice(0, 5);
+  }, [supplier, supplierDirectory]);
+
   // Delegates to the phone's own camera app (via the OS camera picker)
   // instead of a custom in-page live preview. The in-page camera had no
   // reliable autofocus on web (browsers don't expose manual focus control
@@ -155,6 +195,32 @@ export default function ScanScreen() {
     await processImages(updated);
   };
 
+  // Phone cameras capture at 3000-4000px+ on the long edge - Claude's
+  // vision pricing is per-pixel-patch (28x28px = 1 token), and a photo that
+  // size already hits the model's own 2576px/4784-token cap on every page,
+  // which is close to the single biggest cost component of a scan. OCR only
+  // needs the text to be legible, not photographic fidelity, so downscaling
+  // here before upload cuts that cost roughly in half with (expected, not
+  // yet measured in production) no loss of extraction accuracy - see the
+  // cost-optimization discussion this was built from. TARGET_LONG_EDGE is
+  // deliberately conservative; lower it further only after confirming OCR
+  // quality holds on real invoices.
+  const TARGET_LONG_EDGE = 1600;
+
+  const prepareScanImage = async (asset: ImagePicker.ImagePickerAsset): Promise<string> => {
+    const longEdge = Math.max(asset.width, asset.height);
+    if (longEdge <= TARGET_LONG_EDGE) {
+      return `data:image/jpeg;base64,${asset.base64}`;
+    }
+    const resized = asset.width >= asset.height
+      ? { width: TARGET_LONG_EDGE }
+      : { height: TARGET_LONG_EDGE };
+    const context = ImageManipulator.manipulate(asset.uri).resize(resized);
+    const rendered = await context.renderAsync();
+    const saved = await rendered.saveAsync({ compress: 0.85, format: SaveFormat.JPEG, base64: true });
+    return `data:image/jpeg;base64,${saved.base64}`;
+  };
+
   const handleTakePhoto = async () => {
     try {
       const result = await ImagePicker.launchCameraAsync({
@@ -168,7 +234,8 @@ export default function ScanScreen() {
         // a light haptic the instant the shutter fires - no delay waiting
         // on the network/OCR call that follows.
         Haptics.success();
-        await addPage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+        const dataUri = await prepareScanImage(result.assets[0]);
+        await addPage(dataUri);
       }
     } catch (error) {
       console.error('Error taking photo:', error);
@@ -184,8 +251,39 @@ export default function ScanScreen() {
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      await addPage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+      const dataUri = await prepareScanImage(result.assets[0]);
+      await addPage(dataUri);
     }
+  };
+
+  // Looks up each recognized item's price history from THIS supplier and
+  // flags a meaningful change (same >=10%/>=2 threshold the saved-invoice
+  // price-alert uses) right in the review screen, before the scan is even
+  // saved - reuses the existing per-item/per-supplier statistics lookup,
+  // no new backend endpoint needed. Best-effort: a failed lookup (e.g. a
+  // viewer without view_statistics) just leaves that item without a note,
+  // never blocks the scan.
+  const loadItemPriceNotes = async (ocrItems: { name: string; unit_price: number }[], supplierName: string) => {
+    const normalizedSupplier = supplierName.trim().toLowerCase();
+    const results = await Promise.all(
+      ocrItems.map(async (item) => {
+        try {
+          const data = await api.getItemBySupplier(item.name);
+          const match = data.suppliers.find((s) => s.supplier.trim().toLowerCase() === normalizedSupplier);
+          if (!match || !match.last_price || match.last_price <= 0) return null;
+          const changePercent = ((item.unit_price - match.last_price) / match.last_price) * 100;
+          if (Math.abs(changePercent) < 10 || Math.abs(item.unit_price - match.last_price) < 2) return null;
+          return { lastPrice: match.last_price, changePercent };
+        } catch {
+          return null;
+        }
+      })
+    );
+    const notes: Record<number, { lastPrice: number; changePercent: number }> = {};
+    results.forEach((note, index) => {
+      if (note) notes[index] = note;
+    });
+    setItemPriceNotes(notes);
   };
 
   const processImages = async (images: string[]) => {
@@ -218,6 +316,8 @@ export default function ScanScreen() {
           unit: item.unit || 'бр.',
           unit_price: String(item.unit_price),
         })));
+        setItemPriceNotes({});
+        loadItemPriceNotes(result.items, result.supplier);
       }
       
       // Set invoice date from OCR if available - and flag it clearly when
@@ -288,6 +388,9 @@ export default function ScanScreen() {
         name: item.name.trim(),
         quantity: parseFloat(item.quantity) || 1,
         unit: item.unit.trim() || 'бр.',
+        // A negative unit_price is kept as-is, not clamped to 0 - a
+        // discount/rebate line ("отстъпка") printed as its own row on the
+        // invoice is a real, common pattern the backend accepts on purpose.
         unit_price: parseFloat(item.unit_price) || 0,
       }));
 
@@ -617,6 +720,19 @@ export default function ScanScreen() {
                       placeholder={t('scan.companyNamePlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                     />
+                    {supplierMatches.length > 0 && (
+                      <View style={styles.supplierChipRow}>
+                        {supplierMatches.map((s) => (
+                          <TouchableOpacity
+                            key={s.name}
+                            style={styles.supplierChip}
+                            onPress={() => { setSupplier(s.name); setSupplierEik(s.eik); }}
+                          >
+                            <Text style={styles.supplierChipText} numberOfLines={1}>{s.name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
                   </StaggerReveal>
 
                   <StaggerReveal index={1} style={styles.inputGroup}>
@@ -865,6 +981,17 @@ export default function ScanScreen() {
                               <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
                             </TouchableOpacity>
                           </View>
+                          {itemPriceNotes[index] && (
+                            <Text style={[
+                              styles.itemPriceNote,
+                              { color: itemPriceNotes[index].changePercent > 0 ? COLORS.danger : COLORS.success },
+                            ]}>
+                              {itemPriceNotes[index].changePercent > 0 ? '▲' : '▼'}{' '}
+                              {t('scan.priceNote')
+                                .replace('{percent}', Math.abs(itemPriceNotes[index].changePercent).toFixed(0))
+                                .replace('{lastPrice}', itemPriceNotes[index].lastPrice.toFixed(2))}
+                            </Text>
+                          )}
                         </View>
                       ))
                     )}
@@ -1196,6 +1323,26 @@ const styles = StyleSheet.create({
     color: COLORS.warning,
     marginTop: 6,
   },
+  supplierChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  supplierChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    maxWidth: 200,
+  },
+  supplierChipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
   vatTreatmentGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1363,6 +1510,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
+  },
+  itemPriceNote: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 6,
   },
   itemSmallInput: {
     flex: 1,

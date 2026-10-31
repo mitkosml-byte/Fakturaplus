@@ -2,7 +2,7 @@
 import io
 import os
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Any
 import json
 
 try:
@@ -97,9 +97,9 @@ class ExportService:
             cell.border = thin_border
         
         # Data
-        total_without_vat = 0
-        total_vat = 0
-        total_amount = 0
+        total_without_vat = 0.0
+        total_vat = 0.0
+        total_amount = 0.0
         
         for row, inv in enumerate(invoices, 5):
             date_val = inv.get('date', '')
@@ -249,9 +249,9 @@ class ExportService:
         # Table data
         data = [["Дата", "Доставчик", "No Фактура", "Без ДДС", "ДДС", "Общо"]]
         
-        total_without_vat = 0
-        total_vat = 0
-        total_amount = 0
+        total_without_vat = 0.0
+        total_vat = 0.0
+        total_amount = 0.0
         
         for inv in invoices:
             date_val = inv.get('date', '')
@@ -306,6 +306,90 @@ class ExportService:
         buffer.seek(0)
         return buffer.getvalue()
     
+    @staticmethod
+    def generate_billing_document_pdf(document: dict, company_name: str = "") -> bytes:
+        """Generate a non-fiscal "bill"/quote PDF - Module 7 audit
+        decision: a simple document a craftsman or service business can
+        hand a customer for a job, explicitly NOT a sequentially-numbered
+        VAT invoice (no fiscal metadata, no NAP-declaration implications -
+        see the Master Direction boundary this was built against). The
+        disclaimer line is deliberate and must stay, so this is never
+        mistaken for a real tax invoice."""
+        if not PDF_AVAILABLE:
+            raise ImportError("reportlab is not installed")
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=20 * mm, bottomMargin=20 * mm)
+
+        elements = []
+        styles = getSampleStyleSheet()
+
+        title_style = ParagraphStyle(
+            'CustomTitle', parent=styles['Heading1'], fontName=PDF_FONT_BOLD, fontSize=18, spaceAfter=6, alignment=1,
+        )
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle', parent=styles['Normal'], fontName=PDF_FONT, fontSize=9,
+            textColor=colors.HexColor('#64748B'), alignment=1, spaceAfter=10,
+        )
+        normal_style = ParagraphStyle('CustomNormal', parent=styles['Normal'], fontName=PDF_FONT, fontSize=10, spaceAfter=4)
+        bold_style = ParagraphStyle('CustomBold', parent=styles['Normal'], fontName=PDF_FONT_BOLD, fontSize=10, spaceAfter=4)
+
+        doc_type = document.get('doc_type', 'bill')
+        doc_label = "ОФЕРТА" if doc_type == "quote" else "СМЕТКА ЗА ДЪЛЖИМА СУМА"
+        title = f"{doc_label} - {company_name}" if company_name else doc_label
+        elements.append(Paragraph(title, title_style))
+        elements.append(Paragraph(
+            "Този документ е неформален и не представлява данъчна фактура по смисъла на ЗДДС.",
+            subtitle_style,
+        ))
+
+        issue_date = document.get('issue_date', '')
+        elements.append(Paragraph(f"<b>Клиент:</b> {document.get('customer_name', '')}", bold_style))
+        elements.append(Paragraph(f"<b>Дата:</b> {issue_date}", normal_style))
+        elements.append(Spacer(1, 6 * mm))
+
+        data = [["Артикул/услуга", "Кол-во", "Ед.", "Ед. цена", "Общо"]]
+        total_amount = 0.0
+        for item in document.get('items', []):
+            quantity = float(item.get('quantity', 1))
+            unit_price = float(item.get('unit_price', 0))
+            line_total = quantity * unit_price
+            total_amount += line_total
+            data.append([
+                str(item.get('name', ''))[:40],
+                f"{quantity:g}",
+                str(item.get('unit', 'бр.')),
+                f"{unit_price:.2f}",
+                f"{line_total:.2f}",
+            ])
+        data.append(["", "", "", "ОБЩО:", f"{total_amount:.2f} €"])
+
+        table = Table(data, colWidths=[180, 45, 35, 60, 60])
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#8B5CF6')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (-1, 0), PDF_FONT_BOLD),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('BACKGROUND', (0, 1), (-1, -2), colors.HexColor('#F8FAFC')),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E2E8F0')),
+            ('FONTNAME', (0, -1), (-1, -1), PDF_FONT_BOLD),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CBD5E1')),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ]))
+        elements.append(table)
+
+        if document.get('notes'):
+            elements.append(Spacer(1, 6 * mm))
+            elements.append(Paragraph(f"<b>Бележки:</b> {document['notes']}", normal_style))
+
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+
     @staticmethod
     def generate_statistics_excel(stats: dict, company_name: str = "") -> bytes:
         """Generate Excel statistics report"""
@@ -433,8 +517,7 @@ class ExportService:
             values[9] = inv.get("total_amount", base + vat)
 
             date_val = inv.get("date")
-            is_datetime = isinstance(date_val, datetime)
-            date_str = date_val.strftime("%d.%m.%Y") if is_datetime else str(date_val)[:10]
+            date_str = date_val.strftime("%d.%m.%Y") if isinstance(date_val, datetime) else str(date_val)[:10]
             doc_type = "Протокол чл.117" if treatment == "reverse_charge" else "Фактура"
 
             protocol_number = ""
@@ -442,7 +525,7 @@ class ExportService:
             deadline_overdue = False
             if treatment == "reverse_charge":
                 protocol_number = inv.get("protocol_number") or ""
-                if is_datetime:
+                if isinstance(date_val, datetime):
                     deadline = date_val + timedelta(days=15)
                     deadline_str = deadline.strftime("%d.%m.%Y")
                     deadline_overdue = deadline < today
@@ -595,7 +678,7 @@ class ExportService:
             row = header_row + idx
             start_str = str(entry.get("start_date", ""))[:10]
             end_str = str(entry.get("end_date", ""))[:10]
-            days_count = ""
+            days_count: Any = ""
             try:
                 start_d = datetime.strptime(start_str, "%Y-%m-%d")
                 end_d = datetime.strptime(end_str, "%Y-%m-%d")
@@ -604,7 +687,7 @@ class ExportService:
                 end_str = end_d.strftime("%d.%m.%Y")
             except ValueError:
                 pass
-            leave_type_label = LEAVE_TYPE_LABELS.get(entry.get("leave_type"), entry.get("leave_type", ""))
+            leave_type_label = LEAVE_TYPE_LABELS.get(entry.get("leave_type") or "", entry.get("leave_type", ""))
             row_values = [idx, _excel_safe(entry.get("employee_name", "")), leave_type_label, start_str, end_str, days_count, _excel_safe(entry.get("note") or "")]
             for col, value in enumerate(row_values, 1):
                 ws2.cell(row=row, column=col, value=value)

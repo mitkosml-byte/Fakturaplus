@@ -2,7 +2,7 @@ export interface User {
   user_id: string;
   email: string;
   name: string;
-  picture?: string;
+  picture?: string | null;
   role: 'owner' | 'manager' | 'staff' | 'accountant';
   company_id?: string;
   permissions?: string[];
@@ -140,6 +140,160 @@ export interface NonInvoiceExpense {
   amount: number;
   date: string;
   created_at: string;
+}
+
+export interface Customer {
+  id: string;
+  company_id: string | null;
+  user_id: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  notes?: string | null;
+  created_at: string;
+}
+
+export interface Receivable {
+  id: string;
+  company_id: string | null;
+  user_id: string;
+  customer_id?: string | null;
+  customer_name: string;
+  description?: string | null;
+  amount: number;
+  due_date?: string | null;
+  is_paid: boolean;
+  paid_amount: number;
+  paid_at?: string | null;
+  created_at: string;
+}
+
+export interface BillingDocumentItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+}
+
+export interface BillingDocument {
+  id: string;
+  company_id: string | null;
+  user_id: string;
+  doc_type: 'quote' | 'bill';
+  customer_id?: string | null;
+  customer_name: string;
+  items: BillingDocumentItem[];
+  notes?: string | null;
+  issue_date: string;
+  total_amount: number;
+  receivable_id?: string | null;
+  created_at: string;
+}
+
+// Proactive Second Brain engine (Module 11 Finding #1) - one ranked
+// signal list over every other piece of intelligence the app computes.
+export interface ProactiveSignal {
+  key: string;
+  severity: 'critical' | 'warning' | 'info';
+  priority: number;
+  title: string;
+  detail: string;
+  route: string;
+}
+
+// "Ask your own numbers" chat (Module 4 Finding #3)
+export interface BusinessChatDigestPeriod {
+  label: string;
+  revenue: number;
+  expenses: number;
+  profit: number | null;
+  invoice_count: number;
+}
+
+export interface BusinessChatDigestExpenseItem {
+  name: string;
+  amount: number;
+  source: 'invoice' | 'off_book';
+}
+
+export interface BusinessChatDigest {
+  this_month: BusinessChatDigestPeriod;
+  last_month: BusinessChatDigestPeriod;
+  top_expenses_this_month: BusinessChatDigestExpenseItem[];
+  unpaid_invoices: {
+    count: number;
+    overdue_count: number;
+    total_unpaid_amount: number;
+  };
+  budget: {
+    expense_limit: number;
+    total_spent: number;
+    percent_used: number;
+  } | null;
+  receivables: {
+    total_owed: number;
+    unpaid_count: number;
+    total_overdue: number;
+    overdue_count: number;
+  } | null;
+  vat_due_this_month: number;
+  forecast: {
+    revenue: BusinessChatForecastSummary | null;
+    expenses: BusinessChatForecastSummary | null;
+  };
+  roi: {
+    total_personal_investment: number;
+    total_profit: number | null;
+    roi_percent: number | null;
+    investment_covered: boolean | null;
+  } | null;
+  assets: {
+    active_count: number;
+    total_net_book_value: number;
+    monthly_depreciation_total: number;
+  } | null;
+  payroll: {
+    total_employer_cost: number;
+    employee_count: number;
+  } | null;
+  schedule: {
+    total_hours: number;
+    estimated_pay: number;
+    unpaid_amount: number;
+    on_leave_today: string[];
+  } | null;
+  personal_wallet: {
+    total_spent: number;
+    status: 'ok' | 'warning' | 'danger';
+    spent_percent_of_profit: number | null;
+  } | null;
+  scan_credits: {
+    total_remaining: number;
+    auto_reload_enabled: boolean;
+  };
+  price_alerts_unread_count: number;
+  reorder_nudges: {
+    item_name: string;
+    days_since_last: number;
+    median_days_between: number;
+    avg_order_value: number;
+  }[];
+}
+
+export interface BusinessChatForecastSummary {
+  next_month_predicted: number;
+  trend: 'increasing' | 'decreasing' | 'stable' | 'insufficient_data';
+  months_of_history: number;
+}
+
+export interface BusinessChatHistoryTurn {
+  role: 'user' | 'assistant';
+  text: string;
+}
+
+export interface BusinessChatResponse {
+  answer: string;
+  digest: BusinessChatDigest;
 }
 
 export interface OCRItemResult {
@@ -328,14 +482,24 @@ export interface PriceAlert {
   old_price: number;
   new_price: number;
   change_percent: number;
+  direction: 'increase' | 'decrease';
+  baseline_purchase_count: number;
   invoice_id: string;
   invoice_number: string;
   status: 'unread' | 'read' | 'dismissed';
   created_at: string;
 }
 
+export interface PriceAlertMute {
+  id: string;
+  item_name: string;
+  supplier: string;
+}
+
 export interface PriceAlertSettings {
   threshold_percent: number;
+  min_absolute_change: number;
+  alert_on_decrease: boolean;
   enabled: boolean;
 }
 
@@ -388,6 +552,11 @@ export interface Employee {
   food_vouchers: number;
   additional_insurance: number;
   active: boolean;
+  // Optional link to this same person's own app account (a team member
+  // with their own login) - distinct from `user_id` above, which is who
+  // CREATED this payroll record. Used by the work-schedule feature to
+  // cross-check a shift against this employee's already-recorded leave.
+  linked_user_id?: string | null;
   created_at: string;
 }
 
@@ -399,6 +568,182 @@ export interface EmployeeCreate {
   agreement_type: PayrollAgreementType;
   food_vouchers?: number;
   additional_insurance?: number;
+  linked_user_id?: string | null;
+}
+
+export type ShiftRepeatPattern = 'none' | 'daily' | 'weekly' | 'monthly';
+
+export interface WorkShift {
+  id: string;
+  company_id: string;
+  user_id: string;
+  created_by: string;
+  date: string; // "YYYY-MM-DD" - anchor/first occurrence
+  start_time: string; // "HH:MM"
+  end_time: string; // "HH:MM" - may be before start_time (overnight shift)
+  repeat_pattern: ShiftRepeatPattern;
+  repeat_until?: string | null;
+  hourly_rate?: number | null;
+  note?: string | null;
+  created_at: string;
+}
+
+export interface WorkShiftCreate {
+  user_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  repeat_pattern?: ShiftRepeatPattern;
+  repeat_until?: string | null;
+  hourly_rate?: number | null;
+  note?: string | null;
+}
+
+export interface ShiftOccurrence {
+  shift_id: string;
+  user_id: string;
+  user_name: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  // The planned duration from start_time/end_time - stays fixed even
+  // once `hours` below is overridden by a correction.
+  scheduled_hours: number;
+  // The duration to actually use (hours worked + pay) - the scheduled
+  // duration, or the corrected one when `adjusted` is true.
+  hours: number;
+  hourly_rate?: number | null;
+  note?: string | null;
+  repeat_pattern: ShiftRepeatPattern;
+  repeat_until?: string | null;
+  leave_conflict: boolean;
+  adjusted: boolean;
+  adjustment_reason?: string | null;
+  adjusted_by_name?: string | null;
+}
+
+export interface ShiftAdjustmentCreate {
+  actual_hours: number;
+  actual_hourly_rate?: number | null;
+  reason: string;
+}
+
+export interface ScheduleSummary {
+  total_hours: number;
+  estimated_pay: number;
+  shift_count: number;
+}
+
+export interface SchedulePaymentCreate {
+  user_id: string;
+  period_start: string;
+  period_end: string;
+}
+
+export interface SchedulePayment {
+  id: string;
+  company_id: string;
+  user_id: string;
+  user_name: string;
+  period_start: string;
+  period_end: string;
+  total_hours: number;
+  amount: number;
+  expense_id: string;
+  paid_by: string;
+  paid_by_name: string;
+  created_at: string;
+}
+
+// Pays several team members in one action - some on a fixed monthly
+// salary (formal payroll), others hourly (Work Schedule) - see pay-run.tsx.
+export interface BatchPayrollItem {
+  employee_id: string;
+  period_month: number;
+  period_year: number;
+}
+
+export interface BatchPayRequest {
+  payroll_entries: BatchPayrollItem[];
+  schedule_payments: SchedulePaymentCreate[];
+}
+
+export interface BatchPayResultItem {
+  kind: 'payroll' | 'schedule';
+  label: string;
+  success: boolean;
+  error?: string | null;
+  amount?: number | null;
+}
+
+// Manager-only team member profile (opened from an avatar tap, e.g. the
+// work-schedule grid) + private positive/negative performance notes.
+export type TeamNoteType = 'positive' | 'negative';
+
+export interface TeamNoteCreate {
+  user_id: string;
+  note_type: TeamNoteType;
+  text: string;
+}
+
+export interface TeamNote {
+  id: string;
+  company_id: string;
+  user_id: string;
+  note_type: TeamNoteType;
+  text: string;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+}
+
+export interface TeamNotesResponse {
+  notes: TeamNote[];
+  positive_count: number;
+  negative_count: number;
+  net_score: number;
+}
+
+export interface TeamMemberIdentity {
+  user_id: string;
+  name: string;
+  email: string;
+  picture?: string | null;
+  role: 'owner' | 'manager' | 'staff' | 'accountant';
+  permissions: string[];
+  created_at: string;
+}
+
+// Deliberately narrower than the full Employee type - no salary/agreement
+// here, that stays in the Payroll screen where it already lives.
+export interface TeamMemberEmployeeInfo {
+  id: string;
+  name: string;
+  position?: string | null;
+  hire_date?: string | null;
+  active: boolean;
+}
+
+export interface TeamMemberProfile {
+  member: TeamMemberIdentity;
+  employee: TeamMemberEmployeeInfo | null;
+  schedule_summary: ScheduleSummary;
+  leave_entries: LeaveEntry[];
+  holiday_work_entries: HolidayWorkEntry[];
+  notes: TeamNotesResponse;
+}
+
+// A leave entry resolved to the SAME person's real login (user_id) rather
+// than the payroll-only employee_id - what the work-schedule grid needs
+// to show "on leave" blocks keyed the same way it already keys shifts.
+export interface ScheduleLeaveEntry {
+  id: string;
+  user_id: string;
+  employee_name: string;
+  leave_type: LeaveType;
+  start_date: string;
+  end_date: string;
+  note?: string | null;
 }
 
 export interface PayrollRates {
@@ -431,6 +776,10 @@ export interface PayrollEntry extends PayrollBreakdown {
   period_year: number;
   bonus_amount: number;
   notes?: string;
+  // Whether this entry counts toward total business expenses - absent
+  // on entries created before this field existed, which means "yes"
+  // (the same default new entries get), not "unknown".
+  counted_in_expenses?: boolean;
   created_at: string;
 }
 

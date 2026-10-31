@@ -1,15 +1,12 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { Tabs, useRouter, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, View, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../../src/i18n';
+import { useAuth } from '../../src/contexts/AuthContext';
 import { AnimatedTabIcon } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
-
-// Left-to-right order of the tab bar, used to resolve which tab a swipe
-// should land on and to know a swipe's direction relative to it.
-const TAB_ROUTES = ['/', '/scan', '/invoices', '/stats', '/profile'];
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
@@ -17,22 +14,44 @@ export default function TabsLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const { width } = useWindowDimensions();
+  const { hasPermission, user } = useAuth();
+
+  // The Team tab (Calendar/Messages/Payroll/Absences/Work schedule) earns
+  // a slot in the bar for a viewer who can reach at least one of
+  // Calendar/Messages/Payroll/Absences (same two permissions gating each
+  // individually), OR who simply belongs to a company - Work schedule
+  // itself is self-visible to every team member (their own shifts), with
+  // no permission required, so the tab can't stay gated behind the
+  // others once that card exists. Left-to-right order of the tab bar,
+  // used to resolve which tab a swipe should land on and to know a
+  // swipe's direction relative to it - recomputed here (not a
+  // module-level constant) since it now depends on this check.
+  const showTeamTab = hasPermission('team_collaboration') || hasPermission('manage_budget') || !!user?.company_id;
+  const TAB_ROUTES = useMemo(
+    () => ['/', '/scan', '/invoices', '/stats', ...(showTeamTab ? ['/team'] : []), '/profile'],
+    [showTeamTab]
+  );
 
   // PanResponder below is created once via useRef so its handlers don't
   // reattach on every render; goToTab must therefore read the *current*
-  // route from a ref rather than close over the `pathname` value from
-  // whichever render first built the responder, or every swipe after
-  // the first navigation would still act as if we were on the initial tab.
+  // route (and the *current* TAB_ROUTES, now that it can change at
+  // runtime if a permission check flips - e.g. right after login, before
+  // the user profile has fully loaded) from refs rather than close over
+  // values from whichever render first built the responder, or every
+  // swipe after that would still act on stale data.
   const pathnameRef = useRef(pathname);
   pathnameRef.current = pathname;
+  const tabRoutesRef = useRef(TAB_ROUTES);
+  tabRoutesRef.current = TAB_ROUTES;
 
   const goToTab = useCallback(
     (delta: number) => {
-      const currentIndex = TAB_ROUTES.indexOf(pathnameRef.current);
+      const routes = tabRoutesRef.current;
+      const currentIndex = routes.indexOf(pathnameRef.current);
       if (currentIndex === -1) return;
       const nextIndex = currentIndex + delta;
-      if (nextIndex < 0 || nextIndex >= TAB_ROUTES.length) return;
-      router.navigate(TAB_ROUTES[nextIndex] as any);
+      if (nextIndex < 0 || nextIndex >= routes.length) return;
+      router.navigate(routes[nextIndex] as any);
     },
     [router]
   );
@@ -142,6 +161,24 @@ export default function TabsLayout() {
             tabBarIcon: ({ color, focused }) => (
               <AnimatedTabIcon focused={focused}>
                 <Ionicons name="stats-chart" size={24} color={color} />
+              </AnimatedTabIcon>
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="team"
+          options={{
+            title: t('nav.team'),
+            // Hides the tab from the bar (and from swipe, via TAB_ROUTES
+            // above) without unmounting the route - a direct deep link to
+            // /team still resolves, it just isn't advertised in the bar
+            // for a viewer showTeamTab is false for (effectively only
+            // someone with no active company at all, now that Work
+            // schedule makes the tab relevant to every company member).
+            href: showTeamTab ? undefined : null,
+            tabBarIcon: ({ color, focused }) => (
+              <AnimatedTabIcon focused={focused}>
+                <Ionicons name="people-circle" size={26} color={color} />
               </AnimatedTabIcon>
             ),
           }}

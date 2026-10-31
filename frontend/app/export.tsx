@@ -243,6 +243,10 @@ const styles = StyleSheet.create({
   },
   ledgerPeriodChip: {
     flex: 1,
+    // minWidth: 0 overrides flex items' web default of min-width: auto,
+    // which refuses to shrink a chip below its text's natural width and
+    // overflows a longer label past its border instead of wrapping.
+    minWidth: 0,
     paddingVertical: 10,
     borderRadius: 10,
     backgroundColor: COLORS.background,
@@ -255,6 +259,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
     fontWeight: '500',
+    textAlign: 'center',
   },
   ledgerPeriodTextActive: {
     color: 'white',
