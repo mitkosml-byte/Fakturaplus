@@ -6,12 +6,12 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Dimensions,
   ImageBackground,
   ActivityIndicator,
   Modal,
   Switch,
   TextInput,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,9 +36,6 @@ import { SupplierCompareModal } from '../../src/components/stats/SupplierCompare
 import { COLORS } from '../../src/theme/colors';
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, interpolate, Extrapolation } from 'react-native-reanimated';
 
-const { width } = Dimensions.get('window');
-const chartWidth = width - 80;
-const pieChartRadius = (width - 80) / 3;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 // Color palette for charts
@@ -51,6 +48,23 @@ export default function StatsScreen() {
   const { t } = useTranslation();
   const { hasPermission, isOwner } = useAuth();
   const router = useRouter();
+  // Dimensions.get('window') used to be read ONCE at module-eval time -
+  // harmless on native, but this app's web build is statically pre-rendered
+  // (app.json's web.output: "static"), where there is no real browser
+  // window yet, so Dimensions.get fell back to a small default and that
+  // frozen value shipped to every client regardless of actual screen size -
+  // charts rendered in a tiny, phone-sized box even on a wide desktop
+  // monitor. useWindowDimensions reads the real window on the client and
+  // stays reactive, fixing both the freeze and (as a side effect) giving
+  // charts the full available width on desktop instead of the leftover
+  // ~56px/chartWidth phones were already getting.
+  const { width: windowWidth } = useWindowDimensions();
+  // Capped so a very wide monitor gets a comfortably-sized chart instead of
+  // one stretched edge-to-edge with huge gaps between a handful of bars
+  // (each bar's own width is separately capped below, independent of this).
+  const chartAreaWidth = Math.min(windowWidth, 980) - 80;
+  const chartWidth = chartAreaWidth;
+  const pieChartRadius = chartAreaWidth / 3;
   const params = useLocalSearchParams<{ period?: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);

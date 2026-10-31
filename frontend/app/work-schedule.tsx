@@ -8,6 +8,7 @@ import {
   TextInput,
   ActivityIndicator,
   ImageBackground,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -84,6 +85,7 @@ export default function WorkScheduleScreen() {
   const { t, dateLocale } = useTranslation();
   const { user, hasPermission } = useAuth();
   const canManage = hasPermission('manage_budget');
+  const { width: windowWidth } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
   const [occurrences, setOccurrences] = useState<ShiftOccurrence[]>([]);
@@ -559,6 +561,24 @@ export default function WorkScheduleScreen() {
   const gridEmployees = selectedUserId ? directory.filter((d) => d.user_id === selectedUserId) : directory;
   const showGrid = canManage && viewMode === 'grid';
 
+  // Day columns default to a fixed 56 (GRID_DAY_MIN_WIDTH) - sized for a
+  // phone, where the grid is meant to scroll horizontally (see the
+  // `horizontal` ScrollView wrapping it below). On a wide/desktop viewport
+  // that fixed width left most of the screen empty instead of using it, so
+  // once the available width (content's own 16+16 padding subtracted) is
+  // wider than the grid's natural phone-sized width, spread the day columns
+  // out to fill it - capped so an ultra-wide monitor doesn't get absurdly
+  // wide cells. Narrower than that threshold, this evaluates to exactly
+  // GRID_DAY_MIN_WIDTH, so mobile's layout is byte-for-byte unchanged.
+  const GRID_LABEL_WIDTH = 96;
+  const GRID_DAY_MIN_WIDTH = 56;
+  const GRID_DAY_MAX_WIDTH = 140;
+  const availableGridWidth = windowWidth - 32;
+  const naturalGridWidth = GRID_LABEL_WIDTH + GRID_DAY_MIN_WIDTH * 7;
+  const gridDayWidth = availableGridWidth > naturalGridWidth
+    ? Math.min(GRID_DAY_MAX_WIDTH, Math.floor((availableGridWidth - GRID_LABEL_WIDTH) / 7))
+    : GRID_DAY_MIN_WIDTH;
+
   const leaveByUserDate: Record<string, Record<string, ScheduleLeaveEntry>> = {};
   leaveEntries.forEach((entry) => {
     expandDateRange(entry.start_date, entry.end_date).forEach((dateKey) => {
@@ -717,7 +737,7 @@ export default function WorkScheduleScreen() {
                               return (
                                 <TouchableOpacity
                                   key={dateKey}
-                                  style={[styles.gridDayHeaderCell, !!holidayName && styles.gridDayHeaderHoliday]}
+                                  style={[styles.gridDayHeaderCell, { width: gridDayWidth }, !!holidayName && styles.gridDayHeaderHoliday]}
                                   onPress={() => holidayName && Alert.alert(holidayName)}
                                   disabled={!holidayName}
                                 >
@@ -749,7 +769,7 @@ export default function WorkScheduleScreen() {
                                   return (
                                     <TouchableOpacity
                                       key={dateKey}
-                                      style={[styles.gridCell, !!holidaysThisWeek[dateKey] && styles.gridCellHoliday]}
+                                      style={[styles.gridCell, { width: gridDayWidth }, !!holidaysThisWeek[dateKey] && styles.gridCellHoliday]}
                                       onPress={() => handleGridCellPress(emp.user_id, dateKey, dayOccs, leaveHere)}
                                       onLongPress={() => handleGridCellLongPress(emp.user_id, dateKey, dayOccs, leaveHere)}
                                     >
