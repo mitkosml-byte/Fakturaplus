@@ -25,14 +25,18 @@ import { COLORS } from '../src/theme/colors';
 // resolve back to whichever of the two the router already considered
 // "current" instead of actually leaving the tabs group.
 //
-// "login" and "forgot-password" are the only public screens - the latter
-// has to be reachable while logged out, since that's the only time it's
-// ever needed. Every other top-level route (e.g. company-settings,
+// "login" and "forgot-password" are public because they're only ever
+// needed logged out. privacy-policy/terms-of-service are public for a
+// different reason: login.tsx links to both, and without this, tapping
+// either from a logged-out login screen (or visiting its URL directly on
+// the web build - e.g. the link Google Play/App Store review requires in
+// the console) bounced straight back to /login before the text ever
+// rendered. Every other top-level route (e.g. company-settings,
 // users-management, budget) is pushed on top of the tabs stack and still
 // requires auth, so redirecting whenever the user isn't literally inside
 // "(tabs)" would bounce them back out of those screens the instant they
 // navigate to one.
-const PUBLIC_SCREENS = ['login', 'forgot-password'];
+const PUBLIC_SCREENS = ['login', 'forgot-password', 'privacy-policy', 'terms-of-service'];
 
 function useProtectedRoute() {
   const { isAuthenticated, isLoading } = useAuth();
