@@ -2293,6 +2293,101 @@ def test_schedule_and_employee_audit_logging(client):
     assert any(log["action"] == "delete" and log["entity_id"] == payment_id for log in r.json()["logs"])
 
 
+def test_delete_account(client):
+    """POST /auth/delete-account: wrong/missing password rejected; a plain
+    team member can delete themselves freely; a sole owner of a company
+    with other members is blocked (mirrors /company/leave's rule) until
+    another owner exists, after which it goes through; the deleted user's
+    session stops working and the owner's audit log records the deletion.
+
+    Users are inserted directly against the DB rather than via the
+    rate-limited POST /auth/register - same shortcut test_scan_credits and
+    test_cross_tenant_isolation use - since this test alone needs four
+    accounts and the whole module's shared register() budget is already
+    spent by other tests."""
+    import asyncio
+    import uuid
+    from datetime import timedelta, timezone
+    import server
+
+    async def _make_company(name):
+        company = server.Company(name=name, eik=f"TEST{uuid.uuid4().hex[:9].upper()}")
+        await server.db.companies.insert_one(company.model_dump())
+        return company.id
+
+    async def _make_user(name, email, role, company_id, password="Passw0rd1"):
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        token = uuid.uuid4().hex
+        await server.db.users.insert_one({
+            "user_id": user_id, "email": email, "name": name,
+            "role": role, "company_id": company_id,
+            "permissions": list(server.ROLE_PERMISSIONS[role]),
+            "password_hash": server.pwd_context.hash(password),
+            "auth_provider": "email", "has_password": True,
+            "permissions_schema_version": server.PERMISSIONS_SCHEMA_VERSION,
+            "created_at": server.datetime.now(timezone.utc),
+        })
+        await server.db.user_sessions.insert_one({
+            "user_id": user_id, "session_token": token,
+            "expires_at": server.datetime.now(timezone.utc) + timedelta(days=7),
+            "created_at": server.datetime.now(timezone.utc),
+        })
+        return user_id, token
+
+    async def _setup():
+        company_id = await _make_company("Del Co")
+        _, owner_token = await _make_user("Del Owner", f"del_owner_{TS}@test.com", "owner", company_id)
+        _, staff_token = await _make_user("Del Staff", f"del_staff_{TS}@test.com", "staff", company_id)
+        staff2_id, staff2_token = await _make_user("Del Staff 2", f"del_staff2_{TS}@test.com", "staff", company_id)
+        solo_company_id = await _make_company("Del Solo Co")
+        _, solo_token = await _make_user("Del Solo", f"del_solo_{TS}@test.com", "owner", solo_company_id)
+        return owner_token, staff_token, staff2_id, staff2_token, solo_token
+
+    owner_token, staff_token, staff2_id, staff2_token, solo_token = asyncio.run(_setup())
+    del_owner = h(owner_token)
+    staff = h(staff_token)
+    staff2 = h(staff2_token)
+    solo = h(solo_token)
+
+    # Wrong/missing password confirmation rejected before anything happens.
+    r = client.post("/api/auth/delete-account", headers=staff, json={"password": "WrongPass1"})
+    assert r.status_code == 401, r.text
+    r = client.post("/api/auth/delete-account", headers=staff, json={})
+    assert r.status_code == 400, r.text
+
+    # A plain staff member (not an owner anywhere) deletes freely.
+    r = client.post("/api/auth/delete-account", headers=staff, json={"password": "Passw0rd1"})
+    assert r.status_code == 200, r.text
+
+    # The deleted account's session is gone immediately...
+    r = client.get("/api/auth/me", headers=staff)
+    assert r.status_code == 401, r.text
+    # ...and so is the login itself.
+    r = client.post("/api/auth/login", json={"email": f"del_staff_{TS}@test.com", "password": "Passw0rd1"})
+    assert r.status_code == 401, r.text
+
+    # Del Owner is the sole owner of a company that still has Del Staff 2 in
+    # it - blocked, same as /company/leave would block Del Owner leaving.
+    r = client.post("/api/auth/delete-account", headers=del_owner, json={"password": "Passw0rd1"})
+    assert r.status_code == 400, r.text
+    assert "Del Owner" not in r.json()["detail"]  # names the COMPANY, not the owner
+
+    # Promoting the other member to co-owner unblocks it.
+    r = client.put(f"/api/auth/role/{staff2_id}", headers=del_owner, json={"role": "owner"})
+    assert r.status_code == 200, r.text
+    r = client.post("/api/auth/delete-account", headers=del_owner, json={"password": "Passw0rd1"})
+    assert r.status_code == 200, r.text
+
+    # The remaining co-owner's audit log shows the self-deletion.
+    r = client.get("/api/audit-logs?entity_type=user_account&limit=200", headers=staff2)
+    assert r.status_code == 200, r.text
+    assert any(log["action"] == "delete" for log in r.json()["logs"])
+
+    # A solo owner (no other members at all) deletes freely.
+    r = client.post("/api/auth/delete-account", headers=solo, json={"password": "Passw0rd1"})
+    assert r.status_code == 200, r.text
+
+
 def test_legacy_scope_consistency(client):
     """Module 1 audit finding: 40 endpoints built their own company_id
     lookup inline instead of the shared get_company_scope()/scope helper,

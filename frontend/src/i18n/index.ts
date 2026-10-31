@@ -4300,6 +4300,18 @@ export const translations: Translations = {
   'accountSecurity.emailChangeUnavailable': { bg: '. Смяната на имейл не е налична в момента.', en: '. Changing the email is not available yet.' },
   'accountSecurity.changePasswordButton': { bg: 'Смени паролата', en: 'Change password' },
   'accountSecurity.setPasswordButton': { bg: 'Задай парола', en: 'Set password' },
+  'accountSecurity.deleteAccountTitle': { bg: 'Изтриване на акаунта', en: 'Delete account' },
+  'accountSecurity.deleteAccountHint': {
+    bg: 'Трайно изтрива вашите лични данни (име, имейл, парола, снимка). Фирмените записи (фактури, служители и т.н.) остават, ако други хора ги ползват.',
+    en: 'Permanently deletes your personal data (name, email, password, photo). Company records (invoices, employees, etc.) remain if other people use them.',
+  },
+  'accountSecurity.enterPasswordToDelete': { bg: 'Въведете паролата си, за да потвърдите изтриването', en: 'Enter your password to confirm deletion' },
+  'accountSecurity.deleteAccountConfirm': {
+    bg: 'Това действие е необратимо. Акаунтът ви и личните ви данни ще бъдат изтрити завинаги.',
+    en: 'This action cannot be undone. Your account and personal data will be permanently deleted.',
+  },
+  'accountSecurity.deleteAccountConfirmButton': { bg: 'Да, изтрий акаунта', en: 'Yes, delete account' },
+  'accountSecurity.deleteAccountButton': { bg: 'Изтрий акаунта', en: 'Delete account' },
 
   // Join Company screen
   'joinCompany.title': { bg: 'Присъединяване по покана', en: 'Join by Invitation' },

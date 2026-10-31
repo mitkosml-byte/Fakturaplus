@@ -57,7 +57,7 @@ export default function PrivacyPolicyScreen() {
       },
       {
         title: '8. Вашите права',
-        text: 'Имате право да:\n• Достъпите вашите данни\n• Коригирате неточности\n• Изтриете акаунта си\n• Експортирате данните си (Excel/PDF от съответните екрани)\n• Оттеглите съгласието си',
+        text: 'Имате право да:\n• Достъпите вашите данни\n• Коригирате неточности\n• Изтриете акаунта си (Профил → Акаунт и сигурност → Изтрий акаунта) - премахва трайно личните ви данни (име, имейл, парола, снимка). Фирмените записи (фактури, служители и т.н.) остават достъпни за останалите членове на фирмата, а ако сте били неин единствен собственик - се запазват по счетоводното законодателство, без връзка към ваш личен акаунт\n• Експортирате данните си (Excel/PDF от съответните екрани)\n• Оттеглите съгласието си',
       },
       {
         title: '9. Контакт',
@@ -98,7 +98,7 @@ export default function PrivacyPolicyScreen() {
       },
       {
         title: '8. Your Rights',
-        text: 'You have the right to:\n• Access your data\n• Correct inaccuracies\n• Delete your account\n• Export your data (Excel/PDF from the relevant screens)\n• Withdraw your consent',
+        text: "You have the right to:\n• Access your data\n• Correct inaccuracies\n• Delete your account (Profile → Account & Security → Delete account) - permanently removes your personal data (name, email, password, photo). Company records (invoices, employees, etc.) remain available to other company members, or, if you were its sole owner, are retained under accounting law with no link to a personal account\n• Export your data (Excel/PDF from the relevant screens)\n• Withdraw your consent",
       },
       {
         title: '9. Contact',

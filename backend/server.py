@@ -262,6 +262,9 @@ class ChangePassword(BaseModel):
     current_password: Optional[str] = None  # Не се изисква, ако акаунтът все още няма парола (напр. Google вход)
     new_password: str
 
+class DeleteAccountRequest(BaseModel):
+    password: Optional[str] = None  # Не се изисква, ако акаунтът все още няма парола (напр. Google вход)
+
 class UpdatePictureRequest(BaseModel):
     picture: Optional[str] = None  # data: URI base64, same convention as invoice/asset/payroll images - null clears it
 

@@ -272,6 +272,83 @@ async def change_password(data: ChangePassword, current_user: User = Depends(get
     )
     return {"message": "Паролата е сменена успешно"}
 
+@router.post("/auth/delete-account")
+async def delete_account(
+    data: DeleteAccountRequest,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    """Трайно изтриване на собствения акаунт - личните данни на потребителя
+    (име, имейл, парола, снимка, сесии), не и фирмените записи (фактури,
+    служители, одит лог и т.н.), които остават собственост на фирмата и са
+    по закон запазени дори след като неин член напусне - същият принцип
+    като leave_company по-горе. Блокира се само ако потребителят е
+    единственият собственик (owner) на фирма с други членове - изтриването
+    тогава би ги оставило без никакъв owner, точно както при leave_company."""
+    user = await server.db.users.find_one({"user_id": current_user.user_id})
+    if not user:
+        raise HTTPException(status_code=401, detail="Потребителят не е намерен")
+
+    existing_hash = user.get("password_hash")
+    if existing_hash:
+        if not data.password:
+            raise HTTPException(status_code=400, detail="Въведете паролата си, за да потвърдите изтриването на акаунта")
+        if not pwd_context.verify(data.password, existing_hash):
+            raise HTTPException(status_code=401, detail="Грешна парола")
+
+    # Every company this user owns - the currently active one plus any other
+    # membership (an accountant/multi-company owner can hold several, see
+    # CompanyMembership above).
+    owned_company_ids = set()
+    if user.get("company_id") and user.get("role") == "owner":
+        owned_company_ids.add(user["company_id"])
+    owner_memberships = await server.db.company_memberships.find(
+        {"user_id": current_user.user_id, "role": "owner"}, {"_id": 0, "company_id": 1}
+    ).to_list(1000)
+    owned_company_ids.update(m["company_id"] for m in owner_memberships)
+
+    blocking_company_names = []
+    for company_id in owned_company_ids:
+        other_owners = await server.db.users.count_documents({
+            "company_id": company_id, "role": "owner", "user_id": {"$ne": current_user.user_id}
+        })
+        if other_owners == 0 and await company_has_other_members(company_id, current_user.user_id):
+            company_doc = await server.db.companies.find_one({"id": company_id}, {"_id": 0, "name": 1})
+            blocking_company_names.append(company_doc["name"] if company_doc else company_id)
+
+    if blocking_company_names:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Вие сте единственият собственик на фирма с други членове ({}). "
+                "Добавете друг собственик или прехвърлете правата, преди да изтриете акаунта си."
+            ).format(", ".join(blocking_company_names)),
+        )
+
+    # Logged under the still-active company (if any) before the user doc
+    # disappears - the one place GET /audit-logs lets the remaining team see
+    # that this member deleted their own account, not just vanished.
+    if user.get("company_id"):
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+            action="delete",
+            entity_type="user_account",
+            entity_id=current_user.user_id,
+            company_id=user["company_id"],
+            details={"self_deleted": True},
+        )
+
+    await server.db.company_memberships.delete_many({"user_id": current_user.user_id})
+    await server.db.user_sessions.delete_many({"user_id": current_user.user_id})
+    await server.db.password_reset_codes.delete_many({"user_id": current_user.user_id})
+    await server.db.push_subscriptions.delete_many({"user_id": current_user.user_id})
+    await server.db.users.delete_one({"user_id": current_user.user_id})
+
+    clear_session_cookies(response)
+    return {"message": "Акаунтът е изтрит успешно"}
+
 @router.post("/auth/forgot-password")
 @limiter.limit("3/minute")
 async def forgot_password(request: Request, data: ForgotPasswordRequest):

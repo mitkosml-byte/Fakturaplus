@@ -177,6 +177,13 @@ class ApiService {
     });
   }
 
+  async deleteAccount(password?: string): Promise<{ message: string }> {
+    return this.fetch('/auth/delete-account', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+  }
+
   async updateMyPicture(picture: string | null): Promise<{ picture: string | null }> {
     return this.fetch('/auth/me/picture', {
       method: 'PUT',
