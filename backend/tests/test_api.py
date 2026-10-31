@@ -1288,7 +1288,7 @@ def test_business_chat_digest_permission_matrix():
 
     full_permissions = [
         "view_statistics", "add_revenue", "manage_budget", "view_personal_investments",
-        "view_pocket_money", "view_off_book_expenses", "view_profit",
+        "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_wallet",
     ]
     restricted_permissions = ["view_statistics"]  # none of the gated extras
 
@@ -1320,6 +1320,8 @@ def test_business_chat_digest_permission_matrix():
     assert full_digest["assets"] is not None
     assert full_digest["payroll"] is not None
     assert full_digest["receivables"] is not None
+    assert full_digest["schedule"] is not None
+    assert full_digest["personal_wallet"] is not None
 
     # ...and None for the restricted viewer, never a 403/omission for the
     # whole digest (most of it is still valid for them).
@@ -1328,6 +1330,8 @@ def test_business_chat_digest_permission_matrix():
     assert restricted_digest["payroll"] is None
     assert restricted_digest["receivables"] is None
     assert restricted_digest["budget"] is None
+    assert restricted_digest["schedule"] is None
+    assert restricted_digest["personal_wallet"] is None
 
     # Role-invariant fields stay present regardless of permission set.
     for digest in (full_digest, restricted_digest):

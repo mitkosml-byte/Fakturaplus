@@ -23,6 +23,7 @@ _eik_check_digit,
     _business_digest_roi,
     _business_digest_assets,
     _business_digest_payroll,
+    _business_digest_schedule,
     _business_digest_scan_credits,
     _signal_unpaid_invoices,
     _signal_receivables,
@@ -47,6 +48,7 @@ import server
 # already uses for get_summary/get_supplier_statistics/get_item_statistics).
 from routers.price_tracking import get_price_alerts, get_reorder_nudges
 from routers.forecast import get_revenue_forecast, get_expense_forecast
+from routers.roi_wallet import get_personal_wallet_summary
 
 router = APIRouter(prefix="/api")
 
@@ -150,6 +152,24 @@ async def build_business_chat_digest(current_user: User) -> dict:
     if "manage_budget" in perms:
         payroll = await _business_digest_payroll(company_id, current_user.user_id, scope, this_month_start, this_month_end)
 
+    # Work Schedule hours/unpaid amount/who's on leave - gated by
+    # manage_budget, same as /work-schedule itself for a manager's view of it.
+    schedule = None
+    if "manage_budget" in perms:
+        schedule = await _business_digest_schedule(company_id, this_month_start, this_month_end)
+
+    # Personal-wallet status - gated by view_personal_wallet, same as the
+    # real /personal-wallet/summary endpoint. Compact on purpose: the full
+    # advice list is for the dashboard teaser, not for grounding an AI answer.
+    personal_wallet = None
+    if "view_personal_wallet" in perms:
+        wallet_summary = await get_personal_wallet_summary(current_user=current_user)
+        personal_wallet = {
+            "total_spent": wallet_summary["total_spent"],
+            "status": wallet_summary["status"],
+            "spent_percent_of_profit": wallet_summary.get("spent_percent_of_profit"),
+        }
+
     # Scan credits - no extra gate, same as GET /scan-credits (a shared
     # company resource, not private financial data).
     scan_credits = await _business_digest_scan_credits(company_id, current_user.user_id)
@@ -180,6 +200,8 @@ async def build_business_chat_digest(current_user: User) -> dict:
         "roi": roi,
         "assets": assets,
         "payroll": payroll,
+        "schedule": schedule,
+        "personal_wallet": personal_wallet,
         "scan_credits": scan_credits,
         "price_alerts_unread_count": price_alerts_unread_count,
         "reorder_nudges": reorder_nudges,
@@ -209,7 +231,7 @@ async def ask_my_numbers(
         "Ти си асистент на малък бизнес във Фактура+, който отговаря САМО въз основа на подадените му по-долу "
         "реални данни за тази фирма (JSON) и предходния разговор. Никога не отговаряй с измислени или закръглени "
         "наизуст числа - цитирай само числата от JSON-а. Полетата, които са null (budget, receivables, roi, assets, "
-        "payroll), означават, че този потребител няма права да ги вижда - кажи му го ясно вместо да твърдиш, че "
+        "payroll, schedule, personal_wallet), означават, че този потребител няма права да ги вижда - кажи му го ясно вместо да твърдиш, че "
         "данните липсват изобщо. Ако въпросът иска нещо извън тези данни (НАП, данъчни декларации, конкуренти, "
         "обща информация извън тази фирма, или нещо, за което просто няма поле в JSON-а), кажи ясно, че не "
         "разполагаш с тази информация, вместо да гадаеш. forecast.*.trend == 'insufficient_data' означава, че "

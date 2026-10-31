@@ -2415,6 +2415,36 @@ async def _business_digest_payroll(company_id: Optional[str], user_id: str, scop
     employee_count = await db.employees.count_documents({**scope, "active": True})
     return {"total_employer_cost": round(total_cost, 2), "employee_count": employee_count}
 
+async def _business_digest_schedule(company_id: Optional[str], start_date: str, end_date: str) -> dict:
+    """Work Schedule's hours/pay for this period, what's not yet marked
+    paid, and who's on leave today - the schedule-side mirror of
+    _business_digest_payroll above, for "колко часа отработи екипът"/"кой
+    е в отпуск" style questions that payroll's own numbers can't answer."""
+    if not company_id:
+        return {"total_hours": 0, "estimated_pay": 0, "unpaid_amount": 0, "on_leave_today": []}
+    # Deferred import - routers/schedule.py itself does `from server import
+    # *`, so a top-level import here would cycle; safe by request time.
+    from routers.schedule import _resolve_occurrences
+    shifts = await db.work_shifts.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
+    occurrences = await _resolve_occurrences(shifts, company_id, start_date, end_date) if shifts else []
+    total_hours = round(sum(o["hours"] for o in occurrences), 2)
+    total_pay = round(sum(o["hours"] * (o["hourly_rate"] or 0) for o in occurrences), 2)
+    payments = await db.schedule_payments.find(
+        {"company_id": company_id, "period_start": {"$lte": end_date}, "period_end": {"$gte": start_date}},
+        {"_id": 0, "amount": 1},
+    ).to_list(1000)
+    unpaid = round(max(total_pay - sum(p.get("amount", 0) for p in payments), 0), 2)
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    on_leave = await db.employee_leave.find(
+        {"company_id": company_id, "start_date": {"$lte": today_str}, "end_date": {"$gte": today_str}},
+        {"_id": 0, "employee_name": 1},
+    ).to_list(100)
+    return {
+        "total_hours": total_hours, "estimated_pay": total_pay, "unpaid_amount": unpaid,
+        "on_leave_today": [e["employee_name"] for e in on_leave],
+    }
+
 async def _business_digest_scan_credits(company_id: Optional[str], user_id: str) -> dict:
     """No extra permission gate - same as GET /scan-credits, visible to
     any authenticated team member since it's a shared company resource,

@@ -256,6 +256,17 @@ export interface BusinessChatDigest {
     total_employer_cost: number;
     employee_count: number;
   } | null;
+  schedule: {
+    total_hours: number;
+    estimated_pay: number;
+    unpaid_amount: number;
+    on_leave_today: string[];
+  } | null;
+  personal_wallet: {
+    total_spent: number;
+    status: 'ok' | 'warning' | 'danger';
+    spent_percent_of_profit: number | null;
+  } | null;
   scan_credits: {
     total_remaining: number;
     auto_reload_enabled: boolean;
