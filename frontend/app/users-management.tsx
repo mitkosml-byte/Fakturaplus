@@ -1016,6 +1016,11 @@ const styles = StyleSheet.create({
   },
   roleOption: {
     flex: 1,
+    // Flex items default to min-width: auto on web, which refuses to
+    // shrink a chip below its text's natural (unwrapped) width - the
+    // longest role label ("Счетоводител") then overflowed past its
+    // border in a 4-column row instead of wrapping to a second line.
+    minWidth: 0,
     padding: 16,
     borderRadius: 12,
     backgroundColor: COLORS.background,
@@ -1031,6 +1036,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: COLORS.textMuted,
+    textAlign: 'center',
   },
   roleOptionTextActive: {
     color: COLORS.primary,

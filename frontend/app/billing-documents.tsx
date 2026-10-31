@@ -424,11 +424,14 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: 'white', marginBottom: 16 },
   typeSelector: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   typeOption: {
-    flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+    // minWidth: 0 overrides flex items' web default of min-width: auto,
+    // which refuses to shrink a chip below its text's natural width and
+    // overflows a longer label past its border instead of wrapping.
+    flex: 1, minWidth: 0, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
     backgroundColor: COLORS.surface,
   },
   typeOptionActive: { backgroundColor: COLORS.primary },
-  typeOptionText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
+  typeOptionText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600', textAlign: 'center' },
   typeOptionTextActive: { color: 'white' },
   inputLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 6, marginTop: 10 },
   input: {

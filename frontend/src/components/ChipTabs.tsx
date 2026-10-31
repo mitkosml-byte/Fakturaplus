@@ -122,6 +122,12 @@ const styles = StyleSheet.create({
   },
   chip: {
     flex: 1,
+    // Flex items default to min-width: auto on web, which refuses to
+    // shrink a chip below its own text's natural (unwrapped) width - a
+    // longer translated label (e.g. "Счетоводител") then overflows past
+    // its border instead of wrapping, while the pill above still tracks
+    // the geometrically correct (but now visually wrong-looking) position.
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

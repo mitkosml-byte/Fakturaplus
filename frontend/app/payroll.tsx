@@ -818,9 +818,13 @@ const styles = StyleSheet.create({
   input: { backgroundColor: COLORS.background, borderRadius: 10, padding: 12, color: 'white', fontSize: 15 },
   row2: { flexDirection: 'row', gap: 12 },
   agreementRow: { flexDirection: 'row', gap: 10 },
-  agreementChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.background, alignItems: 'center' },
+  // minWidth: 0 overrides flex items' web default of min-width: auto, which
+  // refuses to shrink a chip below its text's natural width and overflows
+  // a longer label past its border instead of wrapping (same fix as
+  // ChipTabs' chip style and users-management's roleOption).
+  agreementChip: { flex: 1, minWidth: 0, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.background, alignItems: 'center' },
   agreementChipActive: { backgroundColor: COLORS.primary },
-  agreementChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  agreementChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500', textAlign: 'center' },
   linkedAccountHint: { fontSize: 11, color: COLORS.textMuted, marginBottom: 8 },
   linkChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   linkChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: COLORS.background },
