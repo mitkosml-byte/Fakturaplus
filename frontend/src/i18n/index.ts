@@ -1582,6 +1582,18 @@ export const translations: Translations = {
     bg: 'Да премахнем ли текущата профилна снимка?',
     en: 'Remove your current profile picture?',
   },
+  'profile.cropTitle': {
+    bg: 'Позиционирай снимката',
+    en: 'Position your picture',
+  },
+  'profile.cropHint': {
+    bg: 'Плъзни снимката, за да избереш коя част да се вижда',
+    en: 'Drag the photo to choose which part shows',
+  },
+  'profile.cropUse': {
+    bg: 'Използвай',
+    en: 'Use photo',
+  },
 
   // Common
   'common.cancel': {

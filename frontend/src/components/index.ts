@@ -31,3 +31,4 @@ export { Avatar } from './Avatar';
 export { SuggestionChips } from './SuggestionChips';
 export { SwipeableRow } from './SwipeableRow';
 export { TeamMemberProfileSheet } from './TeamMemberProfileSheet';
+export { AvatarCropModal } from './AvatarCropModal';

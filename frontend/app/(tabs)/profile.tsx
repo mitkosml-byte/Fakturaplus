@@ -26,6 +26,7 @@ import { api } from '../../src/services/api';
 import { Company, CompanyMembership } from '../../src/types';
 import { getRoleName as sharedGetRoleName, getRoleColor } from '../../src/utils/roles';
 import { Avatar } from '../../src/components/Avatar';
+import { AvatarCropModal } from '../../src/components/AvatarCropModal';
 import { COLORS } from '../../src/theme/colors';
 import { DURATION, EASING } from '../../src/theme/motion';
 
@@ -36,19 +37,12 @@ import { DURATION, EASING } from '../../src/theme/motion';
 // field cheap to store and fetch.
 const AVATAR_TARGET_SIZE = 320;
 
-async function prepareAvatarImage(asset: ImagePicker.ImagePickerAsset): Promise<string> {
-  // allowsEditing/aspect on the picker call below only forces a square
-  // crop on native - the web picker ignores both and hands back the
-  // original (usually non-square) photo untouched. Resizing a non-square
-  // source straight to a 320x320 target stretches it, so the source is
-  // first center-cropped to a square using its own shorter side before
-  // that resize ever runs, regardless of which platform actually did
-  // (or skipped) the OS-level crop.
-  const side = Math.min(asset.width, asset.height);
-  const originX = Math.max(0, Math.round((asset.width - side) / 2));
-  const originY = Math.max(0, Math.round((asset.height - side) / 2));
-  const context = ImageManipulator.manipulate(asset.uri)
-    .crop({ originX, originY, width: side, height: side })
+// Takes the already-chosen square crop (from AvatarCropModal - the user's
+// own positioning, or its centered default if they never dragged) and
+// scales just that region down to the stored size.
+async function prepareAvatarImage(uri: string, crop: { originX: number; originY: number; size: number }): Promise<string> {
+  const context = ImageManipulator.manipulate(uri)
+    .crop({ originX: crop.originX, originY: crop.originY, width: crop.size, height: crop.size })
     .resize({ width: AVATAR_TARGET_SIZE, height: AVATAR_TARGET_SIZE });
   const rendered = await context.renderAsync();
   const saved = await rendered.saveAsync({ compress: 0.8, format: SaveFormat.JPEG, base64: true });
@@ -216,6 +210,13 @@ export default function ProfileScreen() {
     }
   };
 
+  // The OS picker's own allowsEditing/aspect crop UI differs by platform
+  // (and the web build skips it entirely), so cropping is instead always
+  // done with AvatarCropModal below - one consistent, user-draggable
+  // positioning step regardless of platform.
+  const [pickedAvatar, setPickedAvatar] = useState<{ uri: string; width: number; height: number } | null>(null);
+  const [cropModalVisible, setCropModalVisible] = useState(false);
+
   const handlePickAvatar = async () => {
     // Gallery picker only (no camera-vs-gallery choice) - same tradeoff
     // assets.tsx/payroll.tsx already accept, and it sidesteps the Alert
@@ -223,16 +224,26 @@ export default function ProfileScreen() {
     // confirm/cancel, not a 3-way source picker.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      base64: true,
       quality: 1,
     });
     if (result.canceled || !result.assets[0]) return;
 
+    const asset = result.assets[0];
+    setPickedAvatar({ uri: asset.uri, width: asset.width, height: asset.height });
+    setCropModalVisible(true);
+  };
+
+  const handleCropCancel = () => {
+    setCropModalVisible(false);
+    setPickedAvatar(null);
+  };
+
+  const handleCropConfirm = async (crop: { originX: number; originY: number; size: number }) => {
+    if (!pickedAvatar) return;
+    setCropModalVisible(false);
     setUploadingAvatar(true);
     try {
-      const dataUri = await prepareAvatarImage(result.assets[0]);
+      const dataUri = await prepareAvatarImage(pickedAvatar.uri, crop);
       await api.updateMyPicture(dataUri);
       setUser(user ? { ...user, picture: dataUri } : user);
       await refreshUser();
@@ -242,6 +253,7 @@ export default function ProfileScreen() {
       Alert.alert(t('common.error'), t('profile.avatarUploadError'));
     } finally {
       setUploadingAvatar(false);
+      setPickedAvatar(null);
     }
   };
 
@@ -796,6 +808,15 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <AvatarCropModal
+        visible={cropModalVisible}
+        imageUri={pickedAvatar?.uri ?? null}
+        imageWidth={pickedAvatar?.width ?? 1}
+        imageHeight={pickedAvatar?.height ?? 1}
+        onCancel={handleCropCancel}
+        onConfirm={handleCropConfirm}
+      />
     </ImageBackground>
   );
 }
