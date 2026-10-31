@@ -722,6 +722,19 @@ export interface TeamMemberProfile {
   notes: TeamNotesResponse;
 }
 
+// A leave entry resolved to the SAME person's real login (user_id) rather
+// than the payroll-only employee_id - what the work-schedule grid needs
+// to show "on leave" blocks keyed the same way it already keys shifts.
+export interface ScheduleLeaveEntry {
+  id: string;
+  user_id: string;
+  employee_name: string;
+  leave_type: LeaveType;
+  start_date: string;
+  end_date: string;
+  note?: string | null;
+}
+
 export interface PayrollRates {
   employee_rate_percent: number;
   employer_rate_percent: number;
