@@ -662,6 +662,26 @@ export const translations: Translations = {
     bg: 'Отбелязано като платено',
     en: 'Marked as paid',
   },
+  'receivables.logAsRevenueTitle': {
+    bg: 'Добави ли го и в дневния оборот?',
+    en: 'Log it as revenue too?',
+  },
+  'receivables.logAsRevenueHint': {
+    bg: '{amount} € от {name} - да ги добавим ли към джобните пари за днес?',
+    en: '{amount} € from {name} - add it to today\'s pocket money revenue?',
+  },
+  'receivables.logAsRevenueSkip': {
+    bg: 'Не сега',
+    en: 'Not now',
+  },
+  'receivables.logAsRevenueConfirm': {
+    bg: 'Добави',
+    en: 'Add it',
+  },
+  'receivables.logAsRevenueSuccess': {
+    bg: 'Добавено към дневния оборот',
+    en: 'Added to daily revenue',
+  },
   'receivables.deleted': {
     bg: 'Записът е изтрит',
     en: 'Entry deleted',

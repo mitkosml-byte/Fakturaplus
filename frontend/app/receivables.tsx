@@ -148,12 +148,44 @@ export default function ReceivablesScreen() {
     }
   };
 
+  // Marking a receivable paid never touches daily revenue on its own -
+  // same explicit-control philosophy as Work Schedule's own "Mark as
+  // paid" button and payroll's counted_in_expenses toggle, rather than
+  // silently assuming every payment belongs in the till. This just makes
+  // the option easy to reach in the same gesture instead of a separate,
+  // easy-to-forget trip to "Дневен оборот".
+  const handleLogAsRevenue = async (r: Receivable) => {
+    try {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const existing = await api.getRevenueByDate(todayStr);
+      await api.createDailyRevenue({
+        date: todayStr,
+        fiscal_revenue: existing.fiscal_revenue,
+        pocket_money: existing.pocket_money + r.amount,
+        card_revenue: existing.card_revenue,
+        vat_rate_percent: existing.vat_rate_percent,
+      });
+      Haptics.success();
+      Toast.success(t('receivables.logAsRevenueSuccess'));
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    }
+  };
+
   const handleMarkPaid = async (r: Receivable) => {
     try {
       await api.updateReceivable(r.id, { is_paid: true });
       Haptics.success();
       Toast.success(t('receivables.markedPaid'));
       loadData();
+      Alert.alert(
+        t('receivables.logAsRevenueTitle'),
+        t('receivables.logAsRevenueHint').replace('{name}', r.customer_name).replace('{amount}', r.amount.toFixed(2)),
+        [
+          { text: t('receivables.logAsRevenueSkip'), style: 'cancel' },
+          { text: t('receivables.logAsRevenueConfirm'), onPress: () => handleLogAsRevenue(r) },
+        ]
+      );
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     }
