@@ -26,7 +26,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator } from '../../src/components/PeriodNavigator';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard } from '../../src/components';
+import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard, LockedValue } from '../../src/components';
 import Animated from 'react-native-reanimated';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
@@ -384,14 +384,6 @@ export default function HomeScreen() {
   // started with no personal expenses logged yet, even though September's
   // real data was still sitting right there, one period-back away.
   const canViewPersonalInvestments = hasPermission('view_personal_investments');
-  // Gates the whole income/expense/VAT/unpaid-invoices dashboard below -
-  // a newly invited staff member has none of these by default and must be
-  // granted view_statistics explicitly (same permission that already gates
-  // the Stats tab) before seeing any company-wide financial total here.
-  // The backend enforces this too (get_summary redacts every aggregate to
-  // null without it) - this flag just decides whether to render real cards
-  // or the locked placeholder below, instead of a wall of "0.00 €".
-  const canViewStatistics = hasPermission('view_statistics');
   const loadRoiData = useCallback(async () => {
     if (!canViewPersonalInvestments) return;
 
@@ -627,14 +619,16 @@ export default function HomeScreen() {
 
             <MorningBriefingCard refreshSignal={summary} />
 
-            {canViewStatistics ? (
-            <>
             <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
 
             <Animated.View style={periodReveal.style}>
             {/* Summary Cards - skeletons stand in until the first real
                 summary lands, so these never flash "0.00 €" for data that
-                just hasn't arrived yet. */}
+                just hasn't arrived yet. Once it lands, a card whose field
+                came back null (viewer lacks view_statistics) shows a
+                blurred placeholder instead of either the real figure or a
+                bare lock icon - nothing sensitive sits behind the blur,
+                the backend already redacted the real number to null. */}
             {!summary ? (
               <>
                 <View style={styles.summaryContainer}>
@@ -654,11 +648,15 @@ export default function HomeScreen() {
                   <Ionicons name="trending-up" size={24} color={COLORS.success} />
                 </View>
                 <Text style={styles.cardLabel}>{t('home.totalIncome')}</Text>
-                <CountUp
-                  value={summary?.total_income || 0}
-                  formatter={(n) => `${n.toFixed(2)} €`}
-                  style={[styles.cardValue, { color: COLORS.success }]}
-                />
+                {summary.total_income === null ? (
+                  <LockedValue textStyle={[styles.cardValue, { color: COLORS.success }]} fakeText="1 240.00 €" />
+                ) : (
+                  <CountUp
+                    value={summary.total_income || 0}
+                    formatter={(n) => `${n.toFixed(2)} €`}
+                    style={[styles.cardValue, { color: COLORS.success }]}
+                  />
+                )}
               </View>
 
               <View style={[styles.summaryCard, styles.expenseCard]}>
@@ -666,11 +664,15 @@ export default function HomeScreen() {
                   <Ionicons name="trending-down" size={24} color={COLORS.danger} />
             </View>
             <Text style={styles.cardLabel}>{t('home.totalExpenses')}</Text>
-            <CountUp
-              value={summary?.total_expense || 0}
-              formatter={(n) => `${n.toFixed(2)} €`}
-              style={[styles.cardValue, { color: COLORS.danger }]}
-            />
+            {summary.total_expense === null ? (
+              <LockedValue textStyle={[styles.cardValue, { color: COLORS.danger }]} fakeText="860.00 €" />
+            ) : (
+              <CountUp
+                value={summary.total_expense || 0}
+                formatter={(n) => `${n.toFixed(2)} €`}
+                style={[styles.cardValue, { color: COLORS.danger }]}
+              />
+            )}
           </View>
         </View>
 
@@ -681,11 +683,15 @@ export default function HomeScreen() {
               <Ionicons name="cash-outline" size={24} color={COLORS.success} />
             </View>
             <Text style={styles.cardLabel}>{t('home.cashRevenue')}</Text>
-            <CountUp
-              value={summary?.total_cash_revenue || 0}
-              formatter={(n) => `${n.toFixed(2)} €`}
-              style={[styles.cardValue, { color: COLORS.success }]}
-            />
+            {summary.total_cash_revenue === null ? (
+              <LockedValue textStyle={[styles.cardValue, { color: COLORS.success }]} fakeText="430.00 €" />
+            ) : (
+              <CountUp
+                value={summary.total_cash_revenue || 0}
+                formatter={(n) => `${n.toFixed(2)} €`}
+                style={[styles.cardValue, { color: COLORS.success }]}
+              />
+            )}
           </View>
 
           <View style={[styles.summaryCard, styles.cardCard]}>
@@ -693,11 +699,15 @@ export default function HomeScreen() {
               <Ionicons name="card-outline" size={24} color={COLORS.info} />
             </View>
             <Text style={styles.cardLabel}>{t('home.cardRevenue')}</Text>
-            <CountUp
-              value={summary?.total_card_revenue || 0}
-              formatter={(n) => `${n.toFixed(2)} €`}
-              style={[styles.cardValue, { color: COLORS.info }]}
-            />
+            {summary.total_card_revenue === null ? (
+              <LockedValue textStyle={[styles.cardValue, { color: COLORS.info }]} fakeText="810.00 €" />
+            ) : (
+              <CountUp
+                value={summary.total_card_revenue || 0}
+                formatter={(n) => `${n.toFixed(2)} €`}
+                style={[styles.cardValue, { color: COLORS.info }]}
+              />
+            )}
           </View>
         </View>
             </>
@@ -709,19 +719,31 @@ export default function HomeScreen() {
             <Ionicons name="calculator" size={24} color={COLORS.primary} />
             <Text style={styles.vatTitle}>{t('home.vatToPay')}</Text>
           </View>
-          <CountUp
-            value={summary?.vat_to_pay || 0}
-            formatter={(n) => `${n.toFixed(2)} €`}
-            style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}
-          />
+          {summary?.vat_to_pay === null ? (
+            <LockedValue textStyle={styles.vatValue} fakeText="124.50 €" iconSize={18} />
+          ) : (
+            <CountUp
+              value={summary?.vat_to_pay || 0}
+              formatter={(n) => `${n.toFixed(2)} €`}
+              style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}
+            />
+          )}
           <View style={styles.vatDetails}>
             <View style={styles.vatDetailRow}>
               <Text style={styles.vatDetailLabel}>{t('stats.vatFromSales')}:</Text>
-              <Text style={styles.vatDetailValue}>{summary?.fiscal_vat?.toFixed(2) || '0.00'} €</Text>
+              {summary?.fiscal_vat === null ? (
+                <LockedValue textStyle={styles.vatDetailValue} fakeText="210.40 €" iconSize={11} />
+              ) : (
+                <Text style={styles.vatDetailValue}>{summary?.fiscal_vat?.toFixed(2) || '0.00'} €</Text>
+              )}
             </View>
             <View style={styles.vatDetailRow}>
               <Text style={styles.vatDetailLabel}>{t('stats.vatCredit')}:</Text>
-              <Text style={styles.vatDetailValue}>-{summary?.total_invoice_vat?.toFixed(2) || '0.00'} €</Text>
+              {summary?.total_invoice_vat === null ? (
+                <LockedValue textStyle={styles.vatDetailValue} fakeText="85.90 €" iconSize={11} />
+              ) : (
+                <Text style={styles.vatDetailValue}>-{summary?.total_invoice_vat?.toFixed(2) || '0.00'} €</Text>
+              )}
             </View>
           </View>
         </View>
@@ -773,22 +795,26 @@ export default function HomeScreen() {
             <Text style={styles.avgTurnoverTitle}>{t('home.avgDailyTurnover')}</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </View>
-          <CountUp
-            value={avgDailyTurnover}
-            formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
-            style={styles.avgTurnoverValue}
-          />
+          {summary && summary.total_income === null ? (
+            <LockedValue textStyle={styles.avgTurnoverValue} fakeText="61.30 €" iconSize={18} />
+          ) : (
+            <CountUp
+              value={avgDailyTurnover}
+              formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
+              style={styles.avgTurnoverValue}
+            />
+          )}
           <Text style={styles.avgTurnoverSubtitle}>
             {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysThisMonth))}
           </Text>
         </TouchableOpacity>
-            </>
-            ) : (
-              <View style={styles.restrictedNote}>
-                <Ionicons name="lock-closed-outline" size={14} color={COLORS.textSecondary} />
-                <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
-              </View>
-            )}
+
+        {summary?.financial_visibility?.statistics === false && (
+          <View style={styles.restrictedNote}>
+            <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
+            <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+          </View>
+        )}
 
         {/* Closed/open-days calendar - embedded here (collapsed by default)
             so it's regularly filled in without needing a trip to Profile,
@@ -807,7 +833,7 @@ export default function HomeScreen() {
         <View style={styles.statsGrid}>
           <View style={styles.statItem}>
             {summary && summary.invoice_count === null ? (
-              <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
+              <LockedValue textStyle={styles.statValue} fakeText="14" iconSize={16} />
             ) : (
               <CountUp value={summary?.invoice_count || 0} formatter={(n) => `${Math.round(n)}`} style={styles.statValue} />
             )}
@@ -815,7 +841,7 @@ export default function HomeScreen() {
           </View>
           <View style={styles.statItem}>
             {summary && summary.total_fiscal_revenue === null ? (
-              <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
+              <LockedValue textStyle={styles.statValue} fakeText="1240" iconSize={16} />
             ) : (
               <CountUp value={summary?.total_fiscal_revenue || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
             )}
@@ -827,7 +853,7 @@ export default function HomeScreen() {
             disabled={summary?.total_pocket_money === null}
           >
             {summary && summary.total_pocket_money === null ? (
-              <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
+              <LockedValue textStyle={styles.statValue} fakeText="95" iconSize={16} />
             ) : (
               <CountUp value={summary?.total_pocket_money || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
             )}
@@ -836,7 +862,7 @@ export default function HomeScreen() {
           <View style={[styles.statItem, { overflow: 'visible' }]}>
             <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
             {summary && summary.profit === null ? (
-              <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
+              <LockedValue textStyle={styles.statValue} fakeText="380" iconSize={16} />
             ) : (
               <CountUp
                 value={summary?.profit || 0}
