@@ -440,15 +440,23 @@ export default function ProfileScreen() {
           iconColor: COLORS.primary,
           onPress: () => router.push('/notifications-settings'),
         },
-        {
-          key: 'scanCredits',
-          title: t('scanCredits.title'),
-          subtitle: t('scanCredits.totalRemaining'),
-          icon: 'scan',
-          iconBg: 'rgba(139, 92, 246, 0.15)',
-          iconColor: COLORS.primary,
-          onPress: () => router.push('/scan-credits'),
-        },
+        // manage_invoices-gated - same permission already gating the
+        // Scan/Invoices tabs and the backend endpoints this screen calls
+        // (balance/history/packages). A staff member with nothing granted
+        // used to see this entry and the full screen behind it (balance +
+        // real transaction history) despite having no reason to ever
+        // touch scan credits.
+        ...(hasPermission('manage_invoices')
+          ? [{
+              key: 'scanCredits',
+              title: t('scanCredits.title'),
+              subtitle: t('scanCredits.totalRemaining'),
+              icon: 'scan' as const,
+              iconBg: 'rgba(139, 92, 246, 0.15)',
+              iconColor: COLORS.primary,
+              onPress: () => router.push('/scan-credits'),
+            }]
+          : []),
         {
           key: 'language',
           title: t('profile.language'),

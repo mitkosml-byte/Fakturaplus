@@ -880,6 +880,7 @@ def test_scan_credits(client):
     r = client.post("/api/auth/register", json={"name": "Credits Staff", "email": staff_email, "password": "Passw0rd1"})
     assert r.status_code == 200
     staff = h(r.json()["session_token"])
+    staff_id = r.json()["user"]["user_id"]
     r = client.post("/api/invitations", headers=owner, json={"email": staff_email, "role": "staff"})
     assert r.status_code == 200
     code = r.json()["invitation"]["code"]
@@ -890,8 +891,34 @@ def test_scan_credits(client):
     assert r.status_code == 403
     r = client.post("/api/scan-credits/auto-reload", headers=staff, json={"enabled": False})
     assert r.status_code == 403
-    # Balance is shared company-wide though - any teammate can check it.
+
+    # Viewing the balance/history/packages used to be open to any
+    # teammate regardless of permission ("shared company-wide") - plain
+    # staff (no permissions at all, the default now - see
+    # ROLE_PERMISSIONS["staff"]) could open the full scan-credits screen,
+    # including real transaction history, with no operational reason to
+    # ever touch it. Now gated behind manage_invoices, same permission
+    # already required to spend a scan credit in the first place (and the
+    # same one gating the Scan/Invoices tabs this screen's menu entry sits
+    # behind).
     r = client.get("/api/scan-credits", headers=staff)
+    assert r.status_code == 403
+    r = client.get("/api/scan-credits/forecast", headers=staff)
+    assert r.status_code == 403
+    r = client.get("/api/scan-credits/packages", headers=staff)
+    assert r.status_code == 403
+    r = client.get("/api/scan-credits/history", headers=staff)
+    assert r.status_code == 403
+
+    r = client.put(f"/api/auth/role/{staff_id}", headers=owner, json={
+        "role": "staff", "permissions": ["manage_invoices"],
+    })
+    assert r.status_code == 200
+    r = client.get("/api/scan-credits", headers=staff)
+    assert r.status_code == 200
+    r = client.get("/api/scan-credits/packages", headers=staff)
+    assert r.status_code == 200
+    r = client.get("/api/scan-credits/history", headers=staff)
     assert r.status_code == 200
 
     # Custom-quantity validation at the API boundary.

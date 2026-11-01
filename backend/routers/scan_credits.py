@@ -205,6 +205,16 @@ async def scan_invoice(request: Request, image_base64: Optional[str] = None, cur
 
 @router.get("/scan-credits", response_model=ScanBalanceOut)
 async def get_scan_credits(current_user: User = Depends(get_current_user)):
+    # Used to be open to any authenticated teammate ("the balance is
+    # shared company-wide, no reason to hide it") - but that predates
+    # staff defaulting to zero permissions. A staff member with nothing
+    # granted could still open the full Кредити за сканиране screen
+    # (balance + transaction history + packages), with no operational
+    # reason to - manage_invoices is the same gate already on the
+    # Scan/Invoices tabs (and the backend scan endpoint itself), so anyone
+    # who can actually spend a scan credit can still see their balance;
+    # anyone who can't, no longer sees any of this screen either.
+    require_permission(current_user, "manage_invoices")
     summary = await scan_credit_service.get_balance_summary(current_user.company_id, current_user.user_id)
     return ScanBalanceOut(**summary)
 
@@ -214,20 +224,24 @@ async def get_scan_credits_forecast(current_user: User = Depends(get_current_use
     that the credit ledger already has what it needs to predict a
     depletion date, turning a static low-balance warning into one with
     an actual timeline."""
+    require_permission(current_user, "manage_invoices")
     return await scan_credit_service.get_depletion_forecast(current_user.company_id, current_user.user_id)
 
 @router.get("/scan-credits/packages", response_model=List[ScanPackageOut])
 async def get_scan_packages(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_invoices")
     return _scan_packages_catalogue()
 
 @router.get("/scan-credits/history", response_model=List[ScanTransactionOut])
 async def get_scan_credits_history(current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_invoices")
     rows = await scan_credit_service.get_history(current_user.company_id, current_user.user_id)
     return [ScanTransactionOut(**row) for row in rows]
 
 @router.get("/scan-credits/history/export")
 @limiter.limit("20/minute")
 async def export_scan_credits_history(request: Request, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "manage_invoices")
     require_permission(current_user, "export_data")
     rows = await scan_credit_service.get_history(current_user.company_id, current_user.user_id)
     company_name = ""

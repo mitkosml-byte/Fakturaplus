@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, Redirect } from 'expo-router';
 import { SimpleSlider } from '../src/components/SimpleSlider';
 import { Alert } from '../src/utils/alert';
 import { Haptics } from '../src/utils/haptics';
@@ -52,8 +52,9 @@ export default function ScanCreditsScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { t } = useTranslation();
-  const { hasPermission } = useAuth();
+  const { hasPermission, isLoading: authLoading } = useAuth();
   const canManageBilling = hasPermission('manage_billing');
+  const canViewScanCredits = hasPermission('manage_invoices');
 
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState<ScanBalance | null>(null);
@@ -105,8 +106,8 @@ export default function ScanCreditsScreen() {
   }, [t]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (canViewScanCredits) loadData();
+  }, [loadData, canViewScanCredits]);
 
   const packageName = (pkg: ScanPackage) => t(PACKAGE_NAME_KEYS[pkg.id] || pkg.id) || pkg.name;
 
@@ -195,6 +196,16 @@ export default function ScanCreditsScreen() {
       Alert.alert(t('common.error'), error.message || t('scanCredits.loadError'));
     }
   };
+
+  // The Account-tab menu entry pointing here is already hidden without
+  // manage_invoices (see (tabs)/profile.tsx) - this is the direct-URL/
+  // deep-link half of the same gate, same Redirect pattern as Home's own
+  // view_statistics gate. Every fetch above is 403'd server-side too, but
+  // without this the screen would otherwise just spin forever (balance
+  // stays null after the load effect's catch swallows the error).
+  if (!authLoading && !canViewScanCredits) {
+    return <Redirect href="/(tabs)/profile" />;
+  }
 
   if (loading || !balance) {
     return (
