@@ -319,6 +319,10 @@ export interface OCRResult {
 }
 
 export interface FinancialVisibility {
+  // The overarching gate - without view_statistics, every field below that
+  // is typed `number | null` comes back null regardless of the other three
+  // flags (a newly invited staff member has none of these by default).
+  statistics: boolean;
   pocket_money: boolean;
   off_book_expenses: boolean;
   profit: boolean;
@@ -326,27 +330,27 @@ export interface FinancialVisibility {
 }
 
 export interface Summary {
-  total_invoice_amount: number;
-  total_invoice_vat: number;
-  total_fiscal_revenue: number;
   // null (not 0) when this viewer's permissions hide the field - every
   // total below is already recomputed as if it were zero in that case.
+  total_invoice_amount: number | null;
+  total_invoice_vat: number | null;
+  total_fiscal_revenue: number | null;
   total_pocket_money: number | null;
-  fiscal_vat: number;
-  vat_to_pay: number;
+  fiscal_vat: number | null;
+  vat_to_pay: number | null;
   total_non_invoice_expenses: number | null;
-  total_payroll_cost: number;
-  total_depreciation_expense: number;
-  total_income: number;
-  total_expense: number;
+  total_payroll_cost: number | null;
+  total_depreciation_expense: number | null;
+  total_income: number | null;
+  total_expense: number | null;
   profit: number | null;
-  invoice_count: number;
-  total_cash_revenue: number;
-  total_card_revenue: number;
-  total_unpaid_amount: number;
-  unpaid_invoice_count: number;
-  total_overdue_amount: number;
-  overdue_invoice_count: number;
+  invoice_count: number | null;
+  total_cash_revenue: number | null;
+  total_card_revenue: number | null;
+  total_unpaid_amount: number | null;
+  unpaid_invoice_count: number | null;
+  total_overdue_amount: number | null;
+  overdue_invoice_count: number | null;
   financial_visibility: FinancialVisibility;
 }
 

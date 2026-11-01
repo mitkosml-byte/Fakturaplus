@@ -177,28 +177,40 @@ async def get_summary(
     # спрямо ефективните (не суровите) приход/разход по-горе.
     profit = round(total_income - total_expense, 2) if visibility["profit"] else None
 
+    # "statistics" is the overarching gate - without it, a viewer (e.g. a
+    # newly invited staff member with no permissions at all) gets back
+    # None for every company-wide aggregate, not just the four individually
+    # gated sensitive sub-fields above. This was a real incident: a staff
+    # account with zero permissions could still see Home's full "Общо
+    # приходи"/"Общо разходи" cards, because those were never gated by
+    # anything before this. None (not 0), same reasoning as pocket_money/
+    # profit above - so the frontend can tell "genuinely zero" apart from
+    # "you don't have access to this field".
+    show_stats = visibility["statistics"]
+
+    def _redact(value):
+        return value if show_stats else None
+
     return {
-        "total_invoice_amount": round(total_invoice_amount, 2),
-        "total_invoice_vat": round(total_invoice_vat, 2),
-        "total_fiscal_revenue": round(total_fiscal_revenue, 2),
-        # None (not 0) when hidden, so the frontend can tell "genuinely
-        # zero" apart from "you don't have access to this field".
-        "total_pocket_money": round(total_pocket_money, 2) if visibility["pocket_money"] else None,
-        "fiscal_vat": round(fiscal_vat, 2),
-        "vat_to_pay": round(vat_to_pay, 2),
-        "total_non_invoice_expenses": round(total_expenses, 2) if visibility["off_book_expenses"] else None,
-        "total_payroll_cost": round(total_payroll_cost, 2),
-        "total_depreciation_expense": round(total_depreciation_expense, 2),
-        "total_income": round(total_income, 2),
-        "total_expense": round(total_expense, 2),
-        "profit": profit,
-        "invoice_count": len(invoices),
-        "total_cash_revenue": round(total_cash_revenue, 2),
-        "total_card_revenue": round(total_card_revenue, 2),
-        "total_unpaid_amount": round(total_unpaid_amount, 2),
-        "unpaid_invoice_count": len(unpaid_invoices),
-        "total_overdue_amount": round(total_overdue_amount, 2),
-        "overdue_invoice_count": len(overdue_invoices),
+        "total_invoice_amount": _redact(round(total_invoice_amount, 2)),
+        "total_invoice_vat": _redact(round(total_invoice_vat, 2)),
+        "total_fiscal_revenue": _redact(round(total_fiscal_revenue, 2)),
+        "total_pocket_money": round(total_pocket_money, 2) if show_stats and visibility["pocket_money"] else None,
+        "fiscal_vat": _redact(round(fiscal_vat, 2)),
+        "vat_to_pay": _redact(round(vat_to_pay, 2)),
+        "total_non_invoice_expenses": round(total_expenses, 2) if show_stats and visibility["off_book_expenses"] else None,
+        "total_payroll_cost": _redact(round(total_payroll_cost, 2)),
+        "total_depreciation_expense": _redact(round(total_depreciation_expense, 2)),
+        "total_income": _redact(round(total_income, 2)),
+        "total_expense": _redact(round(total_expense, 2)),
+        "profit": _redact(profit),
+        "invoice_count": _redact(len(invoices)),
+        "total_cash_revenue": _redact(round(total_cash_revenue, 2)),
+        "total_card_revenue": _redact(round(total_card_revenue, 2)),
+        "total_unpaid_amount": _redact(round(total_unpaid_amount, 2)),
+        "unpaid_invoice_count": _redact(len(unpaid_invoices)),
+        "total_overdue_amount": _redact(round(total_overdue_amount, 2)),
+        "overdue_invoice_count": _redact(len(overdue_invoices)),
         "financial_visibility": visibility,
     }
 
@@ -207,6 +219,12 @@ async def get_chart_data(
     period: str = "week",  # week, month, year
     current_user: User = Depends(get_current_user)
 ):
+    # Only the Stats tab calls this, and that tab is already hidden from a
+    # viewer without view_statistics (frontend's showStatsTab) - this gate
+    # is the backend-enforced version of the same rule, same precedent as
+    # get_supplier_statistics below, so a direct call can't bypass the tab
+    # being hidden.
+    require_permission(current_user, "view_statistics")
     now = datetime.now(timezone.utc)
     
     if period == "week":

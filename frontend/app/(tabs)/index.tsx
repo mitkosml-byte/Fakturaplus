@@ -384,6 +384,14 @@ export default function HomeScreen() {
   // started with no personal expenses logged yet, even though September's
   // real data was still sitting right there, one period-back away.
   const canViewPersonalInvestments = hasPermission('view_personal_investments');
+  // Gates the whole income/expense/VAT/unpaid-invoices dashboard below -
+  // a newly invited staff member has none of these by default and must be
+  // granted view_statistics explicitly (same permission that already gates
+  // the Stats tab) before seeing any company-wide financial total here.
+  // The backend enforces this too (get_summary redacts every aggregate to
+  // null without it) - this flag just decides whether to render real cards
+  // or the locked placeholder below, instead of a wall of "0.00 €".
+  const canViewStatistics = hasPermission('view_statistics');
   const loadRoiData = useCallback(async () => {
     if (!canViewPersonalInvestments) return;
 
@@ -619,6 +627,8 @@ export default function HomeScreen() {
 
             <MorningBriefingCard refreshSignal={summary} />
 
+            {canViewStatistics ? (
+            <>
             <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
 
             <Animated.View style={periodReveal.style}>
@@ -707,11 +717,11 @@ export default function HomeScreen() {
           <View style={styles.vatDetails}>
             <View style={styles.vatDetailRow}>
               <Text style={styles.vatDetailLabel}>{t('stats.vatFromSales')}:</Text>
-              <Text style={styles.vatDetailValue}>{summary?.fiscal_vat.toFixed(2) || '0.00'} €</Text>
+              <Text style={styles.vatDetailValue}>{summary?.fiscal_vat?.toFixed(2) || '0.00'} €</Text>
             </View>
             <View style={styles.vatDetailRow}>
               <Text style={styles.vatDetailLabel}>{t('stats.vatCredit')}:</Text>
-              <Text style={styles.vatDetailValue}>-{summary?.total_invoice_vat.toFixed(2) || '0.00'} €</Text>
+              <Text style={styles.vatDetailValue}>-{summary?.total_invoice_vat?.toFixed(2) || '0.00'} €</Text>
             </View>
           </View>
         </View>
@@ -772,6 +782,13 @@ export default function HomeScreen() {
             {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysThisMonth))}
           </Text>
         </TouchableOpacity>
+            </>
+            ) : (
+              <View style={styles.restrictedNote}>
+                <Ionicons name="lock-closed-outline" size={14} color={COLORS.textSecondary} />
+                <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+              </View>
+            )}
 
         {/* Closed/open-days calendar - embedded here (collapsed by default)
             so it's regularly filled in without needing a trip to Profile,
@@ -789,11 +806,19 @@ export default function HomeScreen() {
         {/* Stats Overview */}
         <View style={styles.statsGrid}>
           <View style={styles.statItem}>
-            <CountUp value={summary?.invoice_count || 0} formatter={(n) => `${Math.round(n)}`} style={styles.statValue} />
+            {summary && summary.invoice_count === null ? (
+              <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
+            ) : (
+              <CountUp value={summary?.invoice_count || 0} formatter={(n) => `${Math.round(n)}`} style={styles.statValue} />
+            )}
             <Text style={styles.statLabel}>{t('home.invoices')}</Text>
           </View>
           <View style={styles.statItem}>
-            <CountUp value={summary?.total_fiscal_revenue || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
+            {summary && summary.total_fiscal_revenue === null ? (
+              <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
+            ) : (
+              <CountUp value={summary?.total_fiscal_revenue || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
+            )}
             <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
           </View>
           <TouchableOpacity
@@ -824,6 +849,7 @@ export default function HomeScreen() {
         </View>
 
         {summary?.financial_visibility && (
+          summary.financial_visibility.statistics === false ||
           summary.financial_visibility.pocket_money === false ||
           summary.financial_visibility.off_book_expenses === false ||
           summary.financial_visibility.profit === false

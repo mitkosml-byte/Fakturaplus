@@ -1130,13 +1130,13 @@ export default function StatsScreen() {
                     <View style={styles.vatItem}>
                       <Text style={styles.vatLabel}>{t('stats.vatFromSales')}</Text>
                       <Text style={[styles.vatValue, { color: COLORS.danger }]}>
-                        +{summary?.fiscal_vat.toFixed(2) || '0.00'} €
+                        +{summary?.fiscal_vat?.toFixed(2) || '0.00'} €
                       </Text>
                     </View>
                     <View style={styles.vatItem}>
                       <Text style={styles.vatLabel}>{t('stats.vatCredit')}</Text>
                       <Text style={[styles.vatValue, { color: COLORS.success }]}>
-                        -{summary?.total_invoice_vat.toFixed(2) || '0.00'} €
+                        -{summary?.total_invoice_vat?.toFixed(2) || '0.00'} €
                       </Text>
                     </View>
                   </View>
@@ -1144,7 +1144,7 @@ export default function StatsScreen() {
                   <View style={styles.vatTotal}>
                     <Text style={styles.vatTotalLabel}>{t('stats.vatToPay')}</Text>
                     <Text style={[styles.vatTotalValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
-                      {summary?.vat_to_pay.toFixed(2) || '0.00'} €
+                      {summary?.vat_to_pay?.toFixed(2) || '0.00'} €
                     </Text>
                   </View>
                 </View>
@@ -1162,7 +1162,7 @@ export default function StatsScreen() {
                     <View style={styles.statItem}>
                       <Ionicons name="cash" size={20} color={COLORS.success} />
                       <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0} €</Text>
+                      <Text style={styles.statValue}>{summary?.total_fiscal_revenue?.toFixed(0) || 0} €</Text>
                     </View>
                   </View>
 

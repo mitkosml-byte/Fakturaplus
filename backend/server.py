@@ -919,14 +919,23 @@ def require_permission(current_user: User, permission: str):
 
 def get_financial_visibility(current_user: User) -> dict:
     """Which of the four sensitive financial data fields this viewer may
-    see. Used both to decide what get_summary/get_chart_data return raw AND
-    to decide what to fold into their derived totals (income, expense,
-    profit, the daily charts) - a hidden field is zeroed out of every
-    aggregate that would otherwise include it, not just blanked in the UI,
-    so the viewer gets a fully coherent analytical picture for the data
-    they're actually allowed to see."""
+    see, plus "statistics" - the overarching gate on seeing any company-wide
+    financial aggregate at all (Home's income/expense/VAT/unpaid-invoices
+    cards, Stats). A newly invited staff member has none of these by
+    default (see ROLE_PERMISSIONS["staff"]), so without "statistics" every
+    aggregate get_summary/get_chart_data compute is withheld, not just the
+    four sensitive sub-fields - seeing the real company totals is itself a
+    grant, same as seeing pocket money or profit is.
+
+    Used both to decide what get_summary/get_chart_data return raw AND to
+    decide what to fold into their derived totals (income, expense, profit,
+    the daily charts) - a hidden field is zeroed out of every aggregate
+    that would otherwise include it, not just blanked in the UI, so the
+    viewer gets a fully coherent analytical picture for the data they're
+    actually allowed to see."""
     granted = set(current_user.permissions or [])
     return {
+        "statistics": "view_statistics" in granted,
         "pocket_money": "view_pocket_money" in granted,
         "off_book_expenses": "view_off_book_expenses" in granted,
         "profit": "view_profit" in granted,

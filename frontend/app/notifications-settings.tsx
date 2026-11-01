@@ -21,6 +21,7 @@ import { NotificationSettings } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { getPushStatus, enablePushNotifications, disablePushNotifications } from '../src/utils/pushNotifications';
 import { ScreenEnter } from '../src/components';
+import { useAuth } from '../src/contexts/AuthContext';
 import { COLORS } from '../src/theme/colors';
 
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -29,6 +30,12 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 export default function NotificationsSettingsScreen() {
   const router = useRouter();
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
+  // VAT-threshold/periodic reminders are company-financial-adjacent
+  // settings, not a plain personal preference like the push toggle below -
+  // a staff member with no granted permissions should not be offered them,
+  // same reasoning (and same permission) as Home/Stats' financial cards.
+  const canConfigureFinancialReminders = hasPermission('view_statistics');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -141,6 +148,8 @@ export default function NotificationsSettingsScreen() {
           </View>
 
           <ScrollView style={styles.content}>
+            {canConfigureFinancialReminders && (
+            <>
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <View style={[styles.sectionIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
@@ -223,6 +232,8 @@ export default function NotificationsSettingsScreen() {
             </View>
           )}
         </View>
+            </>
+            )}
 
             {pushSupported && (
               <View style={styles.section}>

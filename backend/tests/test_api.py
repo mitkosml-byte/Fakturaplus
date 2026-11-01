@@ -544,6 +544,34 @@ def test_roles_invitations_permissions(client):
     r = client.get("/api/invoices", headers=plain_staff)
     assert r.status_code == 403  # staff now defaults to NO permissions at all - manage_invoices must be granted explicitly
 
+    # The incident this regression guards against: a zero-permission staff
+    # member could still see Home's real "Общо приходи"/"Общо разходи"
+    # cards, because /statistics/summary never checked view_statistics at
+    # all - only the four individually-gated sensitive sub-fields were ever
+    # redacted. Home always calls this endpoint (unlike Stats, it's never
+    # hidden), so it must degrade to nulls rather than 403 - every
+    # company-wide aggregate must come back None for a viewer lacking
+    # view_statistics, and financial_visibility.statistics must say so.
+    r = client.get("/api/statistics/summary", headers=plain_staff)
+    assert r.status_code == 200
+    plain_summary = r.json()
+    assert plain_summary["financial_visibility"]["statistics"] is False
+    for field in (
+        "total_invoice_amount", "total_invoice_vat", "total_fiscal_revenue",
+        "fiscal_vat", "vat_to_pay", "total_payroll_cost", "total_depreciation_expense",
+        "total_income", "total_expense", "profit", "invoice_count",
+        "total_cash_revenue", "total_card_revenue", "total_unpaid_amount",
+        "unpaid_invoice_count", "total_overdue_amount", "overdue_invoice_count",
+    ):
+        assert plain_summary[field] is None, f"{field} should be redacted for a viewer lacking view_statistics"
+
+    # Stats' own chart-data endpoint, unlike Home's summary, has no reason
+    # to ever be reached without view_statistics (the tab itself is hidden
+    # for such a viewer) - it 403s outright, same precedent as
+    # /statistics/suppliers above.
+    r = client.get("/api/statistics/chart-data?period=month", headers=plain_staff)
+    assert r.status_code == 403
+
     r = client.post("/api/items/ai-merge", headers=plain_staff)
     assert r.status_code == 403  # plain staff lacks view_statistics
 
