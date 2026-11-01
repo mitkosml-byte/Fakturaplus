@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry } from '../types';
+import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -118,15 +119,38 @@ class ApiService {
       }
     }
 
-    const response = await fetch(`${API_URL}/api${endpoint}`, {
-      ...options,
-      headers,
-      credentials: 'include',
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}/api${endpoint}`, {
+        ...options,
+        headers,
+        credentials: 'include',
+      });
+    } catch {
+      // fetch() itself only ever rejects for a network-level failure (DNS,
+      // connection refused/reset, blocked by a proxy/CORS, the request
+      // aborted mid-flight) - never for an HTTP error status, which lands
+      // in the branch below instead. The browser's own message for this
+      // ("Failed to fetch" / "Network request failed") is a raw English
+      // technical string with no bearing on the user's selected language,
+      // unlike every other error in this app - replaced with a plain,
+      // localized one so it reads the same as everything else.
+      const isEn = useLanguageStore.getState().language === 'en';
+      throw new Error(
+        isEn
+          ? 'Connection failed. Check your internet connection and try again.'
+          : 'Неуспешна връзка. Проверете интернет връзката си и опитайте отново.'
+      );
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
-      const err = new Error(formatApiErrorDetail(error.detail)) as Error & { status?: number };
+      // Most error responses carry `detail` (FastAPI's own shape); a few
+      // (e.g. slowapi's rate-limit handler) carry `error` instead - without
+      // this fallback those fell through formatApiErrorDetail's `undefined`
+      // branch to a generic "Грешка в заявката" instead of the specific,
+      // actually useful message ("Rate limit exceeded: 5 per 1 minute").
+      const err = new Error(formatApiErrorDetail(error.detail ?? error.error)) as Error & { status?: number };
       // Attached so callers that need to branch on it (e.g. 402 = no scan
       // credits remaining, show the purchase screen instead of a plain
       // error alert) can do so without parsing the message text.
