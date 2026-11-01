@@ -832,14 +832,16 @@ ROLE_PERMISSIONS = {
         "view_pocket_money", "view_off_book_expenses", "view_profit",
         "team_collaboration",
     },
-    "staff": {
-        "manage_invoices", "add_revenue", "add_expenses",
-        "view_pocket_money", "view_off_book_expenses",
-        # Deliberately no team_collaboration by default - the shared
-        # calendar/messages feature is meant for owner/manager/accountant
-        # coordination, not day-to-day staff use. Still grantable per-user
-        # via the configurable ceiling below, same as every other permission.
-    },
+    # Empty by design: a newly invited staff member starts with no
+    # permission at all - every screen/tab this gates (invoices/scan,
+    # statistics, pocket money, off-book expenses, ...) is opt-in, ticked
+    # explicitly per person via the permissions checklist. What's NOT
+    # gated by any of these - their own Work Schedule shifts and their own
+    # Account/profile settings - is what they can always reach regardless.
+    # This was a real incident, not a hypothetical: a newly invited staff
+    # member had full invoice/statistics/financial-field access before any
+    # permission was ever explicitly granted, simply by being "staff".
+    "staff": set(),
     "accountant": {
         "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
         # Profit only: an accountant's typical job is exactly this figure,

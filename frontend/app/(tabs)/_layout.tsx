@@ -27,9 +27,27 @@ export default function TabsLayout() {
   // swipe's direction relative to it - recomputed here (not a
   // module-level constant) since it now depends on this check.
   const showTeamTab = hasPermission('team_collaboration') || hasPermission('manage_budget') || !!user?.company_id;
+  // Scan/Invoices both ultimately create or manage invoice records (the
+  // scan endpoint itself requires manage_invoices server-side), and Stats
+  // is squarely "advanced statistics" - none of these were ever meant to
+  // be universally visible the way Home, Team (own work schedule) and
+  // Account are. They used to show in the bar for every team member
+  // regardless of permission - a staff account with none of these three
+  // still saw all three tabs, even though opening them would 403 or (for
+  // Stats) render a financial picture they shouldn't see fields of.
+  const showInvoicesTab = hasPermission('manage_invoices');
+  const showScanTab = hasPermission('manage_invoices');
+  const showStatsTab = hasPermission('view_statistics');
   const TAB_ROUTES = useMemo(
-    () => ['/', '/scan', '/invoices', '/stats', ...(showTeamTab ? ['/team'] : []), '/profile'],
-    [showTeamTab]
+    () => [
+      '/',
+      ...(showScanTab ? ['/scan'] : []),
+      ...(showInvoicesTab ? ['/invoices'] : []),
+      ...(showStatsTab ? ['/stats'] : []),
+      ...(showTeamTab ? ['/team'] : []),
+      '/profile',
+    ],
+    [showScanTab, showInvoicesTab, showStatsTab, showTeamTab]
   );
 
   // PanResponder below is created once via useRef so its handlers don't
@@ -134,6 +152,11 @@ export default function TabsLayout() {
           name="scan"
           options={{
             title: t('nav.scan'),
+            // Same hide-from-bar-without-unmounting technique as Team
+            // below - scanning ultimately requires manage_invoices
+            // server-side anyway, so a viewer without it only ever saw a
+            // button that would ultimately fail.
+            href: showScanTab ? undefined : null,
             tabBarIcon: ({ focused }) => (
               <AnimatedTabIcon focused={focused}>
                 <View style={styles.scanButton}>
@@ -147,6 +170,7 @@ export default function TabsLayout() {
           name="invoices"
           options={{
             title: t('nav.invoices'),
+            href: showInvoicesTab ? undefined : null,
             tabBarIcon: ({ color, focused }) => (
               <AnimatedTabIcon focused={focused}>
                 <Ionicons name="document-text" size={24} color={color} />
@@ -158,6 +182,7 @@ export default function TabsLayout() {
           name="stats"
           options={{
             title: t('nav.stats'),
+            href: showStatsTab ? undefined : null,
             tabBarIcon: ({ color, focused }) => (
               <AnimatedTabIcon focused={focused}>
                 <Ionicons name="stats-chart" size={24} color={color} />

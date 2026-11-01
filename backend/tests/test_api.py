@@ -542,7 +542,7 @@ def test_roles_invitations_permissions(client):
     assert r.status_code == 403
 
     r = client.get("/api/invoices", headers=plain_staff)
-    assert r.status_code == 200  # staff role defaults to manage_invoices
+    assert r.status_code == 403  # staff now defaults to NO permissions at all - manage_invoices must be granted explicitly
 
     r = client.post("/api/items/ai-merge", headers=plain_staff)
     assert r.status_code == 403  # plain staff lacks view_statistics
@@ -603,9 +603,15 @@ def test_roles_invitations_permissions(client):
     assert staff_roi["total_profit"] == 100  # has view_profit, so still shown
     assert staff_roi["total_profit"] != owner_roi["total_profit"]
 
-    r = client.get("/api/roi/trend?months=2", headers=staff)
+    # months is generously large (not 2) so the Sept 2026 fixture data stays
+    # inside the trailing window regardless of which real-world date this
+    # suite happens to run on - trend[0] isn't necessarily Sept 2026 once
+    # "now" has moved past it, so the entry is found by month/year instead
+    # of assumed position.
+    r = client.get("/api/roi/trend?months=36", headers=staff)
     assert r.status_code == 200
-    assert r.json()["trend"][0]["profit"] == 100
+    sept_entry = next(e for e in r.json()["trend"] if e["month"] == 9 and e["year"] == 2026)
+    assert sept_entry["profit"] == 100
 
     # Now strip view_profit too - profit/ROI must disappear from every
     # field AND from the ai_insights prose (no leaking the same figures via
@@ -628,11 +634,11 @@ def test_roles_invitations_permissions(client):
     assert no_profit_roi["investment_covered"] is None
     assert no_profit_roi["ai_insights"] == ["🔒 Нямаш право да виждаш печалбата за избрания период"]
 
-    r = client.get("/api/roi/trend?months=2", headers=staff)
+    r = client.get("/api/roi/trend?months=36", headers=staff)
     assert r.status_code == 200
-    no_profit_trend = r.json()["trend"]
-    assert no_profit_trend[0]["profit"] is None
-    assert no_profit_trend[0]["roi_percent"] is None
+    no_profit_sept = next(e for e in r.json()["trend"] if e["month"] == 9 and e["year"] == 2026)
+    assert no_profit_sept["profit"] is None
+    assert no_profit_sept["roi_percent"] is None
 
     # The raw VAT-ledger Excel export must redact pocket_money too (same
     # right as the other views above), not just the aggregated endpoints.
