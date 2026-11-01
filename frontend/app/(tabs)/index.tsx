@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams, Redirect } from 'expo-router';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
@@ -584,6 +584,17 @@ export default function HomeScreen() {
 
   const today = format(new Date(), "d MMMM yyyy 'г.'" , { locale: bg });
   const avgDailyTurnover = (summary?.total_income || 0) / openDaysThisMonth;
+
+  // Home is hidden from the tab bar for a viewer without view_statistics
+  // (see (tabs)/_layout.tsx's showHomeTab), but hiding a tab alone never
+  // stops it being where login or a bookmarked "/" lands - this is the
+  // other half of that: once auth has actually resolved (never redirect
+  // off a still-loading permission set), send such a viewer straight to
+  // Team instead, same destination the hidden tab bar icon would have
+  // pointed at anyway.
+  if (!authLoading && !hasPermission('view_statistics')) {
+    return <Redirect href="/(tabs)/team" />;
+  }
 
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>

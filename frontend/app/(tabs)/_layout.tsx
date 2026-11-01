@@ -30,24 +30,34 @@ export default function TabsLayout() {
   // Scan/Invoices both ultimately create or manage invoice records (the
   // scan endpoint itself requires manage_invoices server-side), and Stats
   // is squarely "advanced statistics" - none of these were ever meant to
-  // be universally visible the way Home, Team (own work schedule) and
-  // Account are. They used to show in the bar for every team member
-  // regardless of permission - a staff account with none of these three
-  // still saw all three tabs, even though opening them would 403 or (for
-  // Stats) render a financial picture they shouldn't see fields of.
+  // be universally visible the way Team (own work schedule) and Account
+  // are. They used to show in the bar for every team member regardless of
+  // permission - a staff account with none of these three still saw all
+  // three tabs, even though opening them would 403 or (for Stats) render
+  // a financial picture they shouldn't see fields of.
   const showInvoicesTab = hasPermission('manage_invoices');
   const showScanTab = hasPermission('manage_invoices');
   const showStatsTab = hasPermission('view_statistics');
+  // Home itself used to be the one tab every team member saw regardless of
+  // permission - but once its summary cards were locked down to
+  // view_statistics (Module: zero-permission-staff-sees-company-totals
+  // incident), a viewer without it only ever lands on a wall of blurred
+  // placeholders and an empty daily briefing. Same gate as Stats, same
+  // precedent as Scan/Invoices above - a viewer with none of these simply
+  // never sees Home at all, and lands on Team (their own work schedule)
+  // instead; see the Redirect in (tabs)/index.tsx for the other half of
+  // this (hiding the tab alone wouldn't stop login from landing there).
+  const showHomeTab = hasPermission('view_statistics');
   const TAB_ROUTES = useMemo(
     () => [
-      '/',
+      ...(showHomeTab ? ['/'] : []),
       ...(showScanTab ? ['/scan'] : []),
       ...(showInvoicesTab ? ['/invoices'] : []),
       ...(showStatsTab ? ['/stats'] : []),
       ...(showTeamTab ? ['/team'] : []),
       '/profile',
     ],
-    [showScanTab, showInvoicesTab, showStatsTab, showTeamTab]
+    [showHomeTab, showScanTab, showInvoicesTab, showStatsTab, showTeamTab]
   );
 
   // PanResponder below is created once via useRef so its handlers don't
@@ -141,6 +151,7 @@ export default function TabsLayout() {
           name="index"
           options={{
             title: t('nav.home'),
+            href: showHomeTab ? undefined : null,
             tabBarIcon: ({ color, focused }) => (
               <AnimatedTabIcon focused={focused}>
                 <Ionicons name="home" size={24} color={color} />
