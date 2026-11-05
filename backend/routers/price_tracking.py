@@ -577,25 +577,61 @@ async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
 
     from collections import defaultdict
 
+    # Same canonical-name merge mappings get_merged_item_statistics already
+    # applies - without this, two invoices for the exact same physical
+    # product that scanned to slightly different item_name text (an OCR
+    # variant close enough for a human but that normalize_item_name's
+    # write-time fuzzy match (88% similarity) didn't catch, later merged
+    # by hand via AI-merge for the Statistics view) land in separate groups
+    # below: the old group's last purchase date never advances again, so
+    # it reports as "overdue" indefinitely even while the same item keeps
+    # getting bought and scanned, just under its newer/merged name. Also
+    # drops supplier from the grouping key (same as get_merged_item_
+    # statistics) rather than requiring an exact match on that too - a
+    # supplier's own name varying slightly invoice to invoice (or a
+    # genuine backup supplier for the same product) used to split an
+    # otherwise-consistent cadence the same way.
+    mappings = await server.db.item_merge_mappings.find(
+        {"company_id": company_id}, {"_id": 0}
+    ).to_list(1000)
+    variant_to_canonical: Dict[str, str] = {}
+    canonical_display: Dict[str, str] = {}
+    for m in mappings:
+        canonical = m["canonical_name"]
+        canonical_display[canonical] = m.get("display_name", canonical)
+        for variant in m.get("variants", []):
+            variant_to_canonical[variant.lower()] = canonical
+
     records = await server.db.item_price_history.find(
         {"company_id": company_id},
         {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1, "unit_price": 1, "quantity": 1},
     ).to_list(10000)
 
     groups = defaultdict(list)
+    suppliers_by_item: Dict[str, set] = defaultdict(set)
+    # The exact original item_name casing/text to show for a canonical key
+    # that ISN'T an AI-merge target (canonical_display only covers merged
+    # ones) - mirrors get_merged_item_statistics's own "display =
+    # original_name" fallback, rather than title-casing the lowercase
+    # canonical key itself, which would alter unmerged names cosmetically
+    # for no reason.
+    original_name_by_canonical: Dict[str, str] = {}
     for r in records:
         date = r.get("invoice_date")
-        if isinstance(date, datetime):
-            groups[(r["item_name"], r["supplier"])].append(
-                (date, r.get("unit_price", 0) * r.get("quantity", 0))
-            )
+        if not isinstance(date, datetime):
+            continue
+        name_lower = r["item_name"].lower()
+        canonical = variant_to_canonical.get(name_lower, name_lower)
+        groups[canonical].append((date, r.get("unit_price", 0) * r.get("quantity", 0)))
+        suppliers_by_item[canonical].add(r["supplier"])
+        original_name_by_canonical[canonical] = r["item_name"]
 
     now = datetime.now(timezone.utc)
     nudges = []
     # Needs at least 4 purchases to call anything a "usual" cadence -
     # same minimum-sample-size reasoning as ForecastService's trend gate.
     MIN_PURCHASES_FOR_CADENCE = 4
-    for (item_name, supplier), entries in groups.items():
+    for canonical, entries in groups.items():
         if len(entries) < MIN_PURCHASES_FOR_CADENCE:
             continue
         entries_sorted = sorted(
@@ -622,9 +658,14 @@ async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
         if days_since_last > median_gap * 1.5:
             avg_order_value = statistics.mean(amount for _, amount in entries_sorted)
             overdue_ratio = days_since_last / median_gap
+            suppliers = suppliers_by_item[canonical]
+            supplier_display = (
+                next(iter(suppliers)) if len(suppliers) == 1
+                else f"{len(suppliers)} доставчика"
+            )
             nudges.append({
-                "item_name": item_name,
-                "supplier": supplier,
+                "item_name": canonical_display.get(canonical, original_name_by_canonical[canonical]),
+                "supplier": supplier_display,
                 "median_days_between": round(median_gap),
                 "days_since_last": days_since_last,
                 "last_purchase_date": last_date.strftime("%Y-%m-%d"),

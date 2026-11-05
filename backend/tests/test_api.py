@@ -1602,6 +1602,97 @@ def test_reorder_nudges_weighted_by_business_impact():
     assert expensive["avg_order_value"] == 500.0
 
 
+def test_reorder_nudges_respects_ai_merge_mapping():
+    """Real incident this guards against: an item scanned under a slightly
+    different OCR-variant name (later merged via AI-merge for the
+    Statistics view, same as any other item) kept showing a "time to
+    reorder" nudge for weeks, unchanged, even though the business kept
+    buying and scanning that exact item - just under its newer/merged
+    name. get_reorder_nudges used to group purely by raw item_name (and
+    supplier), never applying item_merge_mappings the way
+    get_merged_item_statistics already does, so the pre-merge name's last
+    purchase date could never advance again.
+
+    Purchases alternate between an old name/supplier and a variant name/
+    supplier on an unbroken 5-day cadence throughout - without the merge
+    mapping, the old name alone (4 purchases, last one 20 days ago) reads
+    as 4x overdue (and the new name alone, only 3 purchases, never reaches
+    the minimum sample size to establish its own cadence) - exactly the
+    "stuck" stale nudge reported. With the mapping in place, the two
+    collapse into one unbroken, perfectly regular cadence whose last
+    purchase was 5 days ago - not overdue at all."""
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+    from routers.price_tracking import get_reorder_nudges
+
+    company_id = f"company_{uuid_module.uuid4().hex[:12]}"
+    user_id = f"user_{uuid_module.uuid4().hex[:12]}"
+
+    async def _run(with_mapping: bool):
+        # get_company_scope resolves company_id by looking the user up in
+        # db.users (not from the in-memory User object below), same as the
+        # business-impact test above.
+        await server_module.db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "user_id": user_id, "email": f"{user_id}@test.com", "name": "Reorder Merge Test User",
+                "role": "staff", "company_id": company_id, "permissions": ["view_statistics"],
+                "auth_provider": "email", "has_password": True,
+                "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+                "created_at": server_module.datetime.now(tz.utc),
+            }},
+            upsert=True,
+        )
+        await server_module.db.item_price_history.delete_many({"company_id": company_id})
+        await server_module.db.item_merge_mappings.delete_many({"company_id": company_id})
+        now = server_module.datetime.now(tz.utc)
+
+        def _history(item_name, supplier, days_ago_list):
+            return [
+                {
+                    "company_id": company_id, "supplier": supplier, "item_name": item_name,
+                    "unit_price": 10, "quantity": 2, "unit": "бр",
+                    "invoice_id": "x", "invoice_number": "INV", "invoice_date": now - timedelta(days=d),
+                }
+                for d in days_ago_list
+            ]
+
+        # Old name/supplier: a clean 5-day cadence, last bought 20 days ago.
+        await server_module.db.item_price_history.insert_many(
+            _history("филе капка", "Месокомбинат Стар", [35, 30, 25, 20])
+        )
+        # OCR-variant name (and a different supplier) for the exact same
+        # product, continuing the identical cadence uninterrupted.
+        await server_module.db.item_price_history.insert_many(
+            _history("fileto kapka", "Месокомбинат Нов", [15, 10, 5])
+        )
+
+        if with_mapping:
+            await server_module.db.item_merge_mappings.insert_one({
+                "company_id": company_id, "canonical_name": "филе капка",
+                "display_name": "Филе капка", "variants": ["fileto kapka"],
+            })
+
+        user = server_module.User(
+            user_id=user_id, email=f"{user_id}@test.com", name="Reorder Merge Test User",
+            role="staff", company_id=company_id, permissions=["view_statistics"],
+        )
+        return await get_reorder_nudges(current_user=user)
+
+    # Without the mapping: the old name alone still reads as overdue - the
+    # bug, reproduced.
+    stale = asyncio.run(_run(with_mapping=False))
+    names = [n["item_name"] for n in stale["nudges"]]
+    assert "филе капка" in names
+
+    # With the mapping: merged into one continuous, current cadence - fixed.
+    fixed = asyncio.run(_run(with_mapping=True))
+    names = [n["item_name"] for n in fixed["nudges"]]
+    assert "Филе капка" not in names and "филе капка" not in names
+
+
 def test_work_schedule_monthly_recurrence_expansion():
     """Direct unit test for _expand_shift_occurrences' monthly branch - the
     trickiest one (month-length edge cases), isolated from any DB call.
