@@ -29,6 +29,7 @@ import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
 import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { PriceAlertsCard } from '../../src/components/stats/PriceAlertsCard';
 import { ReorderNudgesCard } from '../../src/components/stats/ReorderNudgesCard';
+import { ReorderRecommendationsCard } from '../../src/components/stats/ReorderRecommendationsCard';
 import { ForecastCard } from '../../src/components/stats/ForecastCard';
 import { PriceInflationCard } from '../../src/components/stats/PriceInflationCard';
 import { AlertSettingsModal } from '../../src/components/stats/AlertSettingsModal';
@@ -154,6 +155,7 @@ export default function StatsScreen() {
   const [topSuppliers, setTopSuppliers] = useState<SupplierStats[]>([]);
   const [topItems, setTopItems] = useState<any[]>([]);
   const [reorderNudges, setReorderNudges] = useState<Awaited<ReturnType<typeof api.getReorderNudges>>['nudges']>([]);
+  const [reorderRecommendations, setReorderRecommendations] = useState<Awaited<ReturnType<typeof api.getReorderRecommendations>>['items']>([]);
   const [expenseForecast, setExpenseForecast] = useState<any>(null);
   const [revenueForecast, setRevenueForecast] = useState<any>(null);
   const [roiTrend, setRoiTrend] = useState<any[]>([]);
@@ -185,14 +187,16 @@ export default function StatsScreen() {
 
     if (hasPermission('view_statistics')) {
       try {
-        const [supplierData, itemData, nudgesData] = await Promise.all([
+        const [supplierData, itemData, nudgesData, recommendationsData] = await Promise.all([
           api.getSupplierOverview(),
           api.getItemStatistics({ top_n: 3 }),
           api.getReorderNudges(),
+          api.getReorderRecommendations(),
         ]);
         setTopSuppliers((supplierData.top_by_amount || []).slice(0, 3));
         setTopItems(itemData.top_by_value || []);
         setReorderNudges(nudgesData.nudges || []);
+        setReorderRecommendations(recommendationsData.items || []);
       } catch (error) {
         console.error('Error loading top suppliers/items:', error);
       }
@@ -1704,6 +1708,11 @@ export default function StatsScreen() {
                         noticed from data already captured by scanning,
                         not inventory/stock tracking. */}
                     <ReorderNudgesCard nudges={reorderNudges} />
+
+                    {/* Standing ordering assistant - every recurring item
+                        with an established cadence, not just the overdue
+                        ones the nudges card above alerts on. */}
+                    <ReorderRecommendationsCard items={reorderRecommendations} />
 
                     {/* Price Inflation Card */}
                     <PriceInflationCard

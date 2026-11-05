@@ -2721,10 +2721,18 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> Option
     # actual money problem, however overdue the pattern looks.
     priority = min(50, round(30 + (overdue_ratio - 1.5) * 10))
     value_note = f" (обичайно за ~{top['avg_order_value']:.0f} €)" if top.get("avg_order_value") else ""
+    # Recommended quantity turns this from a bare "it's been a while" nudge
+    # into something actionable - get_reorder_recommendations' same
+    # trend-adjusted suggestion (see _compute_recurring_item_cadences),
+    # just for the single most-worth-surfacing item here.
+    quantity_note = (
+        f" Препоръчано количество: ~{top['recommended_quantity']} {top['unit']}."
+        if top.get("recommended_quantity") else ""
+    )
     return {
         "key": "reorder", "severity": "info", "priority": priority,
         "title": "Време е за нова поръчка",
-        "detail": f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни{value_note} - вече мина {top['days_since_last']}.",
+        "detail": f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни{value_note} - вече мина {top['days_since_last']}.{quantity_note}",
         "route": "/(tabs)/stats",
     }
 

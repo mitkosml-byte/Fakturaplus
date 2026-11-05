@@ -1693,6 +1693,88 @@ def test_reorder_nudges_respects_ai_merge_mapping():
     assert "Филе капка" not in names and "филе капка" not in names
 
 
+def test_reorder_recommendations_trend_adjusted_quantity():
+    """get_reorder_recommendations (the standing ordering-assistant list,
+    unlike get_reorder_nudges which only ever surfaces overdue items) must
+    scale its suggested quantity by the company's own revenue trend -
+    generic for any item/any business, not a per-item special case.
+
+    Item: 5 purchases of 10 units each, a clean 5-day cadence, last bought
+    3 days ago (well inside the cadence - NOT overdue, so it must be
+    absent from get_reorder_nudges but present here). Over the item's own
+    20-day observed window: baseline rate = 50 units / 20 days = 2.5/day.
+
+    Revenue over that same 20-day window is set to exactly halve from the
+    earlier 10 days (100 €/day) to the recent 10 days (50 €/day) -
+    trend_ratio must read 0.5, and the recommended quantity must be the
+    baseline rate * trend_ratio * cadence = 2.5 * 0.5 * 5 = 6.25 -> 6, not
+    the naive (trend-blind) 2.5 * 5 = 12.5 -> 13."""
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+    from routers.price_tracking import get_reorder_nudges, get_reorder_recommendations
+
+    company_id = f"company_{uuid_module.uuid4().hex[:12]}"
+    user_id = f"user_{uuid_module.uuid4().hex[:12]}"
+
+    async def _run():
+        await server_module.db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "user_id": user_id, "email": f"{user_id}@test.com", "name": "Reorder Recs Test User",
+                "role": "staff", "company_id": company_id, "permissions": ["view_statistics"],
+                "auth_provider": "email", "has_password": True,
+                "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+                "created_at": server_module.datetime.now(tz.utc),
+            }},
+            upsert=True,
+        )
+        await server_module.db.item_price_history.delete_many({"company_id": company_id})
+        await server_module.db.item_merge_mappings.delete_many({"company_id": company_id})
+        await server_module.db.daily_revenue.delete_many({"user_id": user_id})
+        now = server_module.datetime.now(tz.utc)
+
+        await server_module.db.item_price_history.insert_many([
+            {
+                "company_id": company_id, "supplier": "Хлебозавод", "item_name": "хлебче",
+                "unit_price": 1, "quantity": 10, "unit": "бр",
+                "invoice_id": "x", "invoice_number": "INV", "invoice_date": now - timedelta(days=d),
+            }
+            for d in [23, 18, 13, 8, 3]
+        ])
+
+        # Recent 10 days: 50 €/day. Earlier 10 days (11-20 days ago): 100
+        # €/day. trend_ratio must come out to exactly 50/100 = 0.5.
+        revenue_docs = [
+            {
+                "user_id": user_id, "date": (now - timedelta(days=d)).strftime("%Y-%m-%d"),
+                "fiscal_revenue": 50 if d <= 10 else 100, "pocket_money": 0, "card_revenue": 0,
+            }
+            for d in range(1, 21)
+        ]
+        await server_module.db.daily_revenue.insert_many(revenue_docs)
+
+        user = server_module.User(
+            user_id=user_id, email=f"{user_id}@test.com", name="Reorder Recs Test User",
+            role="staff", company_id=company_id, permissions=["view_statistics"],
+        )
+        nudges = await get_reorder_nudges(current_user=user)
+        recommendations = await get_reorder_recommendations(current_user=user)
+        return nudges, recommendations
+
+    nudges, recommendations = asyncio.run(_run())
+
+    # Not overdue (3 days since last, cadence is 5) - absent from the
+    # alert-only nudges list.
+    assert "хлебче" not in [n["item_name"] for n in nudges["nudges"]]
+
+    item = next(i for i in recommendations["items"] if i["item_name"] == "хлебче")
+    assert item["median_days_between"] == 5
+    assert item["trend_ratio"] == 0.5
+    assert item["recommended_quantity"] == 6
+
+
 def test_work_schedule_monthly_recurrence_expansion():
     """Direct unit test for _expand_shift_occurrences' monthly branch - the
     trickiest one (month-length edge cases), isolated from any DB call.

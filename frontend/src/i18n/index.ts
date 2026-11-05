@@ -327,8 +327,8 @@ export const translations: Translations = {
     en: '{count} unread price alerts',
   },
   'askMyNumbers.reorderNudge': {
-    bg: '{item} - обичайно се поръчва на всеки {days} дни за ~{value} €, последно преди {since} дни',
-    en: '{item} - usually reordered every {days} days for ~{value} €, last ordered {since} days ago',
+    bg: '{item} - обичайно се поръчва на всеки {days} дни за ~{value} €, последно преди {since} дни. Препоръчано количество: ~{quantity} {unit}.',
+    en: '{item} - usually reordered every {days} days for ~{value} €, last ordered {since} days ago. Suggested quantity: ~{quantity} {unit}.',
   },
   'askMyNumbers.genericError': {
     bg: 'Нещо се обърка. Опитай отново.',
@@ -2909,6 +2909,22 @@ export const translations: Translations = {
   'stats.reorderNudgeLine': {
     bg: '{item} ({supplier}) - обикновено на всеки {median} дни за ~{value} €, последно преди {daysSince} дни',
     en: '{item} ({supplier}) - usually every {median} days for ~{value} €, last bought {daysSince} days ago',
+  },
+  'stats.reorderNudgeQuantity': {
+    bg: ' Препоръчано количество: ~{quantity} {unit}.',
+    en: ' Suggested quantity: ~{quantity} {unit}.',
+  },
+  'stats.reorderRecommendationsTitle': {
+    bg: 'Помощник за поръчки',
+    en: 'Ordering assistant',
+  },
+  'stats.reorderRecommendationsSubtitle': {
+    bg: 'Препоръчано количество за всеки артикул с установен ритъм на поръчки, напасано към скорошния ти оборот.',
+    en: 'A recommended order quantity for every item with an established ordering pattern, adjusted to your recent revenue.',
+  },
+  'stats.reorderRecommendationLine': {
+    bg: '{item} ({supplier}) - поръчвай ~{quantity} {unit} на всеки {median} дни (последно преди {daysSince} дни)',
+    en: '{item} ({supplier}) - order ~{quantity} {unit} every {median} days (last bought {daysSince} days ago)',
   },
   'stats.inflationPeriod.month': {
     bg: 'Месец',

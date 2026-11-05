@@ -277,6 +277,8 @@ export interface BusinessChatDigest {
     days_since_last: number;
     median_days_between: number;
     avg_order_value: number;
+    recommended_quantity: number;
+    unit: string;
   }[];
 }
 
@@ -352,6 +354,22 @@ export interface Summary {
   total_overdue_amount: number | null;
   overdue_invoice_count: number | null;
   financial_visibility: FinancialVisibility;
+}
+
+export interface ReorderItem {
+  item_name: string;
+  supplier: string;
+  unit: string;
+  median_days_between: number;
+  days_since_last: number;
+  last_purchase_date: string;
+  avg_order_value: number;
+  // Trend-adjusted suggested order size for this item's next cycle - this
+  // item's own trailing per-day purchase rate, scaled by how the
+  // company's overall revenue has trended lately. 0 whenever not enough
+  // revenue data exists on either side to say anything about a trend.
+  recommended_quantity: number;
+  trend_ratio: number;
 }
 
 export interface ChartDataPoint {

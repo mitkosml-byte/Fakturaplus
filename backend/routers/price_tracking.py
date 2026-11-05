@@ -560,21 +560,78 @@ async def get_item_by_supplier(
         "recommendation": recommendation
     }
 
-@router.get("/items/reorder-nudges")
-async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
-    """Module 5 audit finding: scanned purchase history already encodes a
-    recurring item's typical reorder cadence - the gap between consecutive
-    invoice_dates for the same item/supplier, entirely derivable from data
-    already captured by scanning invoices. Deliberately NOT stock/
-    inventory tracking (no on-hand quantities, no "run out at X units"
-    math) - it only notices a pattern in purchase timing and asks the
-    question a human assistant would: "it's been longer than usual since
-    you last bought X - still good on it?" """
-    require_permission(current_user, "view_statistics")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        return {"nudges": []}
+# Needs at least 4 purchases to call anything a "usual" cadence - same
+# minimum-sample-size reasoning as ForecastService's trend gate.
+MIN_PURCHASES_FOR_CADENCE = 4
 
+
+async def _revenue_trend_ratio(company_id: str, window_days: int) -> float:
+    """Recent-half vs. earlier-half average daily revenue (fiscal_revenue +
+    pocket_money), over a window sized to match an item's own observed
+    purchase history - the same "business has gotten busier/quieter
+    lately" read a human restocking by feel already does before deciding
+    how much to reorder (notice the trend, then scale the usual quantity
+    proportionally), just computed from data already captured instead of
+    eyeballed. Entirely generic - one company-wide number, not derived
+    from any single item, so this works the same whatever the item or
+    business is.
+
+    Clamped to [0.4, 2.5]: a near-zero-revenue half (a closure, a data
+    gap) could otherwise send a recommendation to zero or multiply it
+    absurdly, and falls back to a neutral 1.0 (no adjustment) whenever
+    either half has no revenue data at all to compare."""
+    now = datetime.now(timezone.utc)
+    half = max(window_days // 2, 3)
+    recent_start = (now - timedelta(days=half)).strftime("%Y-%m-%d")
+    earlier_start = (now - timedelta(days=half * 2)).strftime("%Y-%m-%d")
+
+    # daily_revenue is keyed by user_id, not company_id - same resolution
+    # ForecastService uses.
+    company_users = await server.db.users.find(
+        {"company_id": company_id}, {"_id": 0, "user_id": 1}
+    ).to_list(1000)
+    user_ids = [u["user_id"] for u in company_users]
+
+    revenues = await server.db.daily_revenue.find(
+        {"user_id": {"$in": user_ids}, "date": {"$gte": earlier_start}},
+        {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1},
+    ).to_list(10000)
+
+    recent_total = 0.0
+    earlier_total = 0.0
+    for r in revenues:
+        date_str = r.get("date")
+        if not isinstance(date_str, str):
+            continue
+        amount = r.get("fiscal_revenue", 0) + r.get("pocket_money", 0)
+        if date_str >= recent_start:
+            recent_total += amount
+        else:
+            earlier_total += amount
+
+    if earlier_total <= 0 or recent_total <= 0:
+        return 1.0
+    ratio = (recent_total / half) / (earlier_total / half)
+    return max(0.4, min(2.5, ratio))
+
+
+async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
+    """Shared by get_reorder_nudges (overdue-only, ranked) and
+    get_reorder_recommendations (every recurring item, a standing
+    reference) - everything about an item's purchase pattern that doesn't
+    depend on which of those two views is asking: its canonical name/
+    merged suppliers, usual cadence, and a trend-adjusted suggested
+    reorder quantity. One formula, no per-item or per-business special
+    casing, since this ships to thousands of companies with completely
+    different products.
+
+    Module 5 audit finding (the cadence half): scanned purchase history
+    already encodes a recurring item's typical reorder cadence - the gap
+    between consecutive invoice_dates for the same item, entirely
+    derivable from data already captured by scanning invoices. Deliberately
+    NOT stock/inventory tracking (no on-hand quantities, no "run out at X
+    units" math) - it only notices a pattern in purchase timing and
+    timing-scaled quantity, the same way a human assistant would."""
     from collections import defaultdict
 
     # Same canonical-name merge mappings get_merged_item_statistics already
@@ -604,7 +661,7 @@ async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
 
     records = await server.db.item_price_history.find(
         {"company_id": company_id},
-        {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1, "unit_price": 1, "quantity": 1},
+        {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1, "unit_price": 1, "quantity": 1, "unit": 1},
     ).to_list(10000)
 
     groups = defaultdict(list)
@@ -616,26 +673,29 @@ async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
     # canonical key itself, which would alter unmerged names cosmetically
     # for no reason.
     original_name_by_canonical: Dict[str, str] = {}
+    unit_by_canonical: Dict[str, str] = {}
     for r in records:
         date = r.get("invoice_date")
         if not isinstance(date, datetime):
             continue
         name_lower = r["item_name"].lower()
         canonical = variant_to_canonical.get(name_lower, name_lower)
-        groups[canonical].append((date, r.get("unit_price", 0) * r.get("quantity", 0)))
+        groups[canonical].append((date, r.get("unit_price", 0) * r.get("quantity", 0), r.get("quantity", 0)))
         suppliers_by_item[canonical].add(r["supplier"])
         original_name_by_canonical[canonical] = r["item_name"]
+        if r.get("unit"):
+            unit_by_canonical[canonical] = r["unit"]
 
     now = datetime.now(timezone.utc)
-    nudges = []
-    # Needs at least 4 purchases to call anything a "usual" cadence -
-    # same minimum-sample-size reasoning as ForecastService's trend gate.
-    MIN_PURCHASES_FOR_CADENCE = 4
+    items = []
     for canonical, entries in groups.items():
         if len(entries) < MIN_PURCHASES_FOR_CADENCE:
             continue
         entries_sorted = sorted(
-            ((d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d, amount) for d, amount in entries),
+            (
+                (d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d, amount, qty)
+                for d, amount, qty in entries
+            ),
             key=lambda e: e[0],
         )
         dates_sorted = [e[0] for e in entries_sorted]
@@ -654,40 +714,104 @@ async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
             continue
 
         last_date = dates_sorted[-1]
+        first_date = dates_sorted[0]
         days_since_last = (now - last_date).days
-        if days_since_last > median_gap * 1.5:
-            avg_order_value = statistics.mean(amount for _, amount in entries_sorted)
-            overdue_ratio = days_since_last / median_gap
-            suppliers = suppliers_by_item[canonical]
-            supplier_display = (
-                next(iter(suppliers)) if len(suppliers) == 1
-                else f"{len(suppliers)} доставчика"
-            )
-            nudges.append({
-                "item_name": canonical_display.get(canonical, original_name_by_canonical[canonical]),
-                "supplier": supplier_display,
-                "median_days_between": round(median_gap),
-                "days_since_last": days_since_last,
-                "last_purchase_date": last_date.strftime("%Y-%m-%d"),
-                "avg_order_value": round(avg_order_value, 2),
-                # Not returned - only used to rank below. How overdue
-                # (as a multiple of its own usual cadence, not raw days -
-                # a weekly item twice as late matters more than a
-                # quarterly item a few days late) combined with how much
-                # this item usually costs to reorder, so a rarely-bought
-                # bulk ingredient genuinely worth flagging outranks an
-                # equally-overdue but economically trivial one instead of
-                # whichever happens to have the larger raw day gap.
-                "_impact_score": overdue_ratio * (avg_order_value if avg_order_value > 0 else 1.0),
-            })
+        avg_order_value = statistics.mean(amount for _, amount, _ in entries_sorted)
+        overdue_ratio = days_since_last / median_gap
 
+        # Recommended quantity: this item's own trailing per-day purchase
+        # rate (total quantity over the whole observed window, so it's
+        # blended across whatever conditions actually occurred - not just
+        # the last order), scaled by the company-wide revenue trend over a
+        # matching window, then projected across one full cadence cycle.
+        window_days = max((last_date - first_date).days, round(median_gap))
+        total_quantity = sum(qty for _, _, qty in entries_sorted)
+        baseline_daily_quantity = total_quantity / window_days if window_days > 0 else 0
+        trend_ratio = await _revenue_trend_ratio(company_id, window_days)
+        recommended_quantity = round(max(baseline_daily_quantity * trend_ratio * median_gap, 0))
+
+        suppliers = suppliers_by_item[canonical]
+        supplier_display = (
+            next(iter(suppliers)) if len(suppliers) == 1
+            else f"{len(suppliers)} доставчика"
+        )
+        items.append({
+            "item_name": canonical_display.get(canonical, original_name_by_canonical[canonical]),
+            "supplier": supplier_display,
+            "unit": unit_by_canonical.get(canonical, "бр"),
+            "median_days_between": round(median_gap),
+            "days_since_last": days_since_last,
+            "last_purchase_date": last_date.strftime("%Y-%m-%d"),
+            "avg_order_value": round(avg_order_value, 2),
+            "recommended_quantity": recommended_quantity,
+            "trend_ratio": round(trend_ratio, 2),
+            "is_overdue": days_since_last > median_gap * 1.5,
+            # Not returned from either endpoint - ranking helpers only.
+            "_overdue_ratio": overdue_ratio,
+            "_impact_score": overdue_ratio * (avg_order_value if avg_order_value > 0 else 1.0),
+        })
+    return items
+
+
+@router.get("/items/reorder-nudges")
+async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
+    """The alert half: only items that are actually overdue right now,
+    ranked most business-significant first - see
+    _compute_recurring_item_cadences for the shared cadence/recommendation
+    maths, and get_reorder_recommendations for the standing (not just
+    overdue) view of the same data."""
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"nudges": []}
+
+    items = await _compute_recurring_item_cadences(company_id)
+    nudges = [n for n in items if n["is_overdue"]]
     # Most business-significant first: how overdue relative to its own
-    # cadence, weighted by what reordering it is usually worth - see
-    # _impact_score above.
+    # cadence, weighted by what reordering it is usually worth - so a
+    # rarely-bought bulk ingredient genuinely worth flagging outranks an
+    # equally-overdue but economically trivial one instead of whichever
+    # happens to have the larger raw day gap.
     nudges.sort(key=lambda n: n["_impact_score"], reverse=True)
     for n in nudges:
         del n["_impact_score"]
+        del n["_overdue_ratio"]
+        del n["is_overdue"]
     return {"nudges": nudges[:10]}
+
+
+@router.get("/items/reorder-recommendations")
+async def get_reorder_recommendations(current_user: User = Depends(get_current_user)):
+    """A standing ordering assistant, not an alert - every recurring item
+    with an established cadence (whether or not it's currently overdue),
+    each with a recommended order quantity for its next cycle: this item's
+    own trailing per-day purchase rate, scaled by how the company's
+    overall revenue trend compares between a recent window and the one
+    before it (the same reasoning anyone restocking manually already
+    applies - "business is down/up ~X% lately, so order proportionally
+    less/more" - just computed from data already captured by scanning,
+    instead of guessed by feel). Entirely generic: no item or business is
+    special-cased, so the exact same formula produces a sensible answer
+    for a döner shop's pita bags, a hair salon's color tubes, or a
+    hardware store's screws.
+
+    Deliberately NOT stock/inventory tracking (same caveat as
+    get_reorder_nudges) - no on-hand quantity is known, so this is a
+    starting point for a standing order size, not a precise reorder-point
+    calculation. Sorted soonest-due first (closest to its own cadence
+    threshold, even if not past it yet), so the list itself prioritizes
+    without the caller needing to."""
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"items": []}
+
+    items = await _compute_recurring_item_cadences(company_id)
+    items.sort(key=lambda n: n["_overdue_ratio"], reverse=True)
+    for n in items:
+        del n["_impact_score"]
+        del n["_overdue_ratio"]
+    return {"items": items}
 
 @router.post("/items/ai-merge")
 @limiter.limit("10/minute")

@@ -2,22 +2,15 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
+import { ReorderItem } from '../../types';
 import { COLORS } from '../../theme/colors';
 
 // Extracted from stats.tsx (Module 1 audit finding #4). A pattern in
 // purchase timing noticed from data already captured by scanning, not
 // inventory/stock tracking - see the reorder-nudges endpoint's own
 // docstring.
-type Nudge = {
-  item_name: string;
-  supplier: string;
-  median_days_between: number;
-  days_since_last: number;
-  avg_order_value: number;
-};
-
 type Props = {
-  nudges: Nudge[];
+  nudges: ReorderItem[];
 };
 
 export function ReorderNudgesCard({ nudges }: Props) {
@@ -39,6 +32,10 @@ export function ReorderNudgesCard({ nudges }: Props) {
               .replace('{median}', String(n.median_days_between))
               .replace('{value}', n.avg_order_value.toFixed(0))
               .replace('{daysSince}', String(n.days_since_last))}
+            {n.recommended_quantity > 0 &&
+              t('stats.reorderNudgeQuantity')
+                .replace('{quantity}', String(n.recommended_quantity))
+                .replace('{unit}', n.unit)}
           </Text>
         ))}
       </View>

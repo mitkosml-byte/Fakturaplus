@@ -184,6 +184,7 @@ async def build_business_chat_digest(current_user: User) -> dict:
         {
             "item_name": n["item_name"], "days_since_last": n["days_since_last"],
             "median_days_between": n["median_days_between"], "avg_order_value": n.get("avg_order_value", 0),
+            "recommended_quantity": n.get("recommended_quantity", 0), "unit": n.get("unit", ""),
         }
         for n in reorder_raw.get("nudges", [])[:5]
     ]

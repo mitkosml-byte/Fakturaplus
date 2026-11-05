@@ -286,7 +286,9 @@ export default function AskMyNumbersScreen() {
                                     .replace('{item}', n.item_name)
                                     .replace('{days}', String(n.median_days_between))
                                     .replace('{value}', n.avg_order_value.toFixed(0))
-                                    .replace('{since}', String(n.days_since_last))}
+                                    .replace('{since}', String(n.days_since_last))
+                                    .replace('{quantity}', String(n.recommended_quantity))
+                                    .replace('{unit}', n.unit)}
                                 </Text>
                               ))}
                             </View>
