@@ -330,6 +330,14 @@ export const translations: Translations = {
     bg: '{item} - обичайно се поръчва на всеки {days} дни за ~{value} €, последно преди {since} дни. Препоръчано количество: ~{quantity} {unit}.',
     en: '{item} - usually reordered every {days} days for ~{value} €, last ordered {since} days ago. Suggested quantity: ~{quantity} {unit}.',
   },
+  'askMyNumbers.itemPurchasesTitle': {
+    bg: 'Поръчани количества ({month})',
+    en: 'Ordered quantities ({month})',
+  },
+  'askMyNumbers.itemPurchaseLine': {
+    bg: '{item}: {quantity} {unit} ({count}x поръчано)',
+    en: '{item}: {quantity} {unit} (ordered {count}x)',
+  },
   'askMyNumbers.genericError': {
     bg: 'Нещо се обърка. Опитай отново.',
     en: 'Something went wrong. Try again.',

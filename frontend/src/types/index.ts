@@ -285,6 +285,17 @@ export interface BusinessChatDigest {
     recommended_quantity: number;
     unit: string;
   }[];
+  item_purchases: {
+    this_month: BusinessChatItemPurchase[];
+    last_month: BusinessChatItemPurchase[];
+  };
+}
+
+export interface BusinessChatItemPurchase {
+  name: string;
+  quantity: number;
+  unit: string;
+  purchases_count: number;
 }
 
 export interface BusinessChatForecastSummary {

@@ -912,7 +912,7 @@ async def get_merged_item_statistics(
         canonical_display[canonical] = m.get("display_name", canonical)
         for variant in m.get("variants", []):
             variant_to_canonical[variant.lower()] = canonical
-    
+
     # Build date query
     query = {"company_id": company_id}
     if start_date or end_date:
@@ -921,10 +921,13 @@ async def get_merged_item_statistics(
             query["invoice_date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
         if end_date:
             query["invoice_date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
-    
+
     # Get all price history records
-    history = await server.db.item_price_history.find(query, {"_id": 0}).to_list(10000)
-    
+    history = await server.db.item_price_history.find(
+        query,
+        {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1, "unit_price": 1, "quantity": 1, "unit": 1},
+    ).to_list(10000)
+
     if not history:
         return {
             "totals": {"total_items": 0, "total_value": 0, "unique_items": 0, "merged_items": 0},
@@ -936,6 +939,7 @@ async def get_merged_item_statistics(
     # Aggregate with merging
     item_stats: Dict[str, Any] = defaultdict(lambda: {
         "display_name": "",
+        "unit": "бр.",
         "quantity": 0,
         "total_value": 0,
         "frequency": 0,
@@ -962,6 +966,8 @@ async def get_merged_item_statistics(
         qty = record["quantity"]
         
         item_stats[canonical]["display_name"] = display
+        if record.get("unit"):
+            item_stats[canonical]["unit"] = record["unit"]
         item_stats[canonical]["quantity"] += qty
         item_stats[canonical]["total_value"] += price * qty
         item_stats[canonical]["frequency"] += 1
@@ -983,6 +989,7 @@ async def get_merged_item_statistics(
         items_list.append({
             "name": stats["display_name"],
             "canonical_name": canonical,
+            "unit": stats["unit"],
             "total_quantity": round(stats["quantity"], 2),
             "total_value": round(stats["total_value"], 2),
             "frequency": stats["frequency"],
