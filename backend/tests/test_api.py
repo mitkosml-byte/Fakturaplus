@@ -120,6 +120,67 @@ def test_invoices(client):
     assert r.status_code == 200 and len(r.json()) == 0
 
 
+def test_invoice_item_quantity_correction(client):
+    """Real incident: OCR (or a manual entry) read a 6-pack as "1 бр.", so
+    the per-unit price looked 6x higher than it actually is and fired a
+    bogus price-change alert. The invoice item's quantity/unit_price must
+    be correctable after the fact, and item_price_history (what price
+    alerts and reorder-nudges actually read) must follow the correction -
+    fixing only the invoice would leave the exact same wrong per-unit
+    price poisoning every future comparison, making the NEXT (correctly
+    entered) purchase look like the anomaly instead."""
+    import asyncio
+    import server as server_module
+
+    owner = h(STATE["owner_token"])
+    r = client.post("/api/invoices", headers=owner, json={
+        "supplier": "Хлебозавод Тест ЕООД", "invoice_number": f"INV-ITEMS-{TS}",
+        "amount_without_vat": 70, "vat_amount": 14, "total_amount": 84, "date": "2026-09-15",
+        "items": [
+            {"name": "хлебче пакет", "quantity": 1, "unit": "бр.", "unit_price": 60},
+            {"name": "кроасан", "quantity": 10, "unit": "бр.", "unit_price": 1},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    invoice = r.json()
+    invoice_id = invoice["id"]
+    item_id = next(it["id"] for it in invoice["items"] if it["name"] == "хлебче пакет")
+    other_item_id = next(it["id"] for it in invoice["items"] if it["name"] == "кроасан")
+
+    # Correct it: it was actually a 6-pack, so quantity=6 and unit_price=10
+    # (same 60 total for that line - nothing about the physical purchase
+    # changed, only how it was recorded).
+    r = client.put(f"/api/invoices/{invoice_id}", headers=owner, json={
+        "items": [{"id": item_id, "quantity": 6, "unit_price": 10}],
+    })
+    assert r.status_code == 200, r.text
+    updated_items = {it["id"]: it for it in r.json()["items"]}
+    corrected = updated_items[item_id]
+    assert corrected["quantity"] == 6
+    assert corrected["unit_price"] == 10
+    assert corrected["total_price"] == 60
+    assert corrected["vat_amount"] == 12.0
+    # The other item on the same invoice, not named in the update, must be
+    # untouched.
+    assert updated_items[other_item_id]["quantity"] == 10
+    assert updated_items[other_item_id]["unit_price"] == 1
+
+    history = asyncio.run(
+        server_module.db.item_price_history.find_one(
+            {"invoice_id": invoice_id, "item_name": "хлебче пакет"}, {"_id": 0}
+        )
+    )
+    assert history is not None
+    assert history["quantity"] == 6
+    assert history["unit_price"] == 10
+
+    # Cleanup - this shares STATE["owner_token"]'s company with every other
+    # test in this module, several of which assert exact totals (ROI,
+    # statistics) computed over all of that company's invoices.
+    r = client.delete(f"/api/invoices/{invoice_id}", headers=owner)
+    assert r.status_code == 200
+
+
 def test_daily_revenue(client):
     owner = h(STATE["owner_token"])
     r = client.post("/api/daily-revenue", headers=owner, json={

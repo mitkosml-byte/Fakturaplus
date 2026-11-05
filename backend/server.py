@@ -377,6 +377,18 @@ class InvoiceItemCreate(BaseModel):
     total_price: Optional[float] = None  # Ако не е подадено, се изчислява
     vat_amount: Optional[float] = None
 
+class InvoiceItemUpdate(BaseModel):
+    """Corrects one already-saved line item (e.g. OCR read "1 бр." for what
+    was actually a 6-pack, so the real per-unit price looked 6x higher than
+    it is) - id identifies which of the invoice's existing items this
+    applies to; every other field is optional, only sent when it actually
+    changed."""
+    id: str
+    name: Optional[str] = None
+    quantity: Optional[float] = Field(default=None, gt=0)
+    unit: Optional[str] = None
+    unit_price: Optional[float] = None
+
 # Item Price History - за проследяване на цените
 class ItemPriceHistory(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -467,6 +479,7 @@ class InvoiceUpdate(BaseModel):
     payment_due_date: Optional[str] = None
     is_paid: Optional[bool] = None
     paid_amount: Optional[float] = Field(default=None, ge=0)
+    items: Optional[List[InvoiceItemUpdate]] = None
 
 class DailyRevenue(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))

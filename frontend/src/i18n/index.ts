@@ -1876,6 +1876,10 @@ export const translations: Translations = {
     bg: 'Общо',
     en: 'Total',
   },
+  'invoices.editItemsHint': {
+    bg: 'Поправи количество или единична цена, ако артикул е записан грешно (напр. пакет от 6 бр., въведен като 1 бр.).',
+    en: 'Correct quantity or unit price if an item was recorded wrong (e.g. a 6-pack entered as 1 unit).',
+  },
   'invoices.itemsSum': {
     bg: 'Сбор на артикулите',
     en: 'Items sum',

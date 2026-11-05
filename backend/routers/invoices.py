@@ -423,6 +423,62 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
             company_id, current_user.user_id, protocol_year
         )
 
+    # Correcting one or more already-saved line items - the real incident
+    # this guards against: OCR (or a fat-fingered manual entry) read a
+    # 6-pack as "1 бр.", so the per-unit price looked 6x higher than it
+    # actually is and fired a bogus price-change alert. Only the items
+    # named by id are touched; every other item on the invoice is left
+    # exactly as it was.
+    if update_data.get("items"):
+        existing_items_by_id = {it["id"]: it for it in (existing.get("items") or [])}
+        merged_items = list(existing.get("items") or [])
+        for i, it in enumerate(merged_items):
+            upd = next((u for u in update_data["items"] if u["id"] == it["id"]), None)
+            if not upd:
+                continue
+            old_item = existing_items_by_id[it["id"]]
+            merged = dict(it)
+            if upd.get("name") is not None:
+                merged["name"] = upd["name"]
+            if upd.get("quantity") is not None:
+                merged["quantity"] = upd["quantity"]
+            if upd.get("unit") is not None:
+                merged["unit"] = upd["unit"]
+            if upd.get("unit_price") is not None:
+                merged["unit_price"] = upd["unit_price"]
+            # Same total_price/vat_amount formula create_invoice uses - an
+            # edited line shouldn't leave its own total stale.
+            merged["total_price"] = round(merged["quantity"] * merged["unit_price"], 2)
+            merged["vat_amount"] = round(merged["total_price"] * 0.2, 2)
+            merged_items[i] = merged
+
+            # Keep item_price_history (what price alerts and reorder-
+            # nudges actually read) in sync - without this, fixing the
+            # invoice here would leave the exact same wrong per-unit price
+            # poisoning every future comparison. item_price_history has no
+            # field linking it back to one specific line item, so the old
+            # quantity+unit_price pair (unique enough in practice) is the
+            # most reliable way to find the one record this edit applies
+            # to, among every item_price_history row this invoice wrote.
+            if company_id:
+                name_set: Dict[str, Any] = {}
+                if upd.get("name") is not None:
+                    new_normalized_name, _ = await normalize_item_name(merged["name"], company_id)
+                    name_set["item_name"] = new_normalized_name
+                await server.db.item_price_history.update_many(
+                    {
+                        "company_id": company_id, "invoice_id": invoice_id,
+                        "quantity": old_item["quantity"], "unit_price": old_item["unit_price"],
+                    },
+                    {"$set": {
+                        "quantity": merged["quantity"],
+                        "unit_price": merged["unit_price"],
+                        "unit": merged["unit"],
+                        **name_set,
+                    }},
+                )
+        update_data["items"] = merged_items
+
     # Existence was already confirmed above via `existing` - modified_count
     # being 0 here just means the new values matched the old ones (e.g.
     # re-saving unchanged fields), not that the invoice is missing.

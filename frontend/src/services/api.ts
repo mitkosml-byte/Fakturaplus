@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
-WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion } from '../types';
+WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate } from '../types';
 import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -465,7 +465,11 @@ class ApiService {
     return { invoices, totalCount };
   }
 
-  async createInvoice(invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at' | 'is_paid' | 'paid_amount' | 'paid_at'>): Promise<Invoice> {
+  async createInvoice(
+    invoice: Omit<Invoice, 'id' | 'user_id' | 'created_at' | 'is_paid' | 'paid_amount' | 'paid_at' | 'items'> & {
+      items?: InvoiceItemCreate[];
+    }
+  ): Promise<Invoice> {
     return this.fetch('/invoices', {
       method: 'POST',
       body: JSON.stringify(invoice),
@@ -478,7 +482,10 @@ class ApiService {
     return this.fetch(`/invoices/${id}`);
   }
 
-  async updateInvoice(id: string, invoice: Partial<Invoice>): Promise<Invoice> {
+  async updateInvoice(
+    id: string,
+    invoice: Partial<Omit<Invoice, 'items'>> & { items?: InvoiceItemUpdate[] }
+  ): Promise<Invoice> {
     return this.fetch(`/invoices/${id}`, {
       method: 'PUT',
       body: JSON.stringify(invoice),

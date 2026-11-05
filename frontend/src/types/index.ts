@@ -109,7 +109,12 @@ export interface Invoice {
   image_base64?: string; // Legacy - едностранично сканиране
   image_base64s?: string[]; // Всички страници на сканираната фактура, по ред
   notes?: string;
-  items?: InvoiceItemCreate[];
+  // What the backend actually stores/returns - full items, each with its
+  // own id (needed to target one line item for correction) and computed
+  // total_price/vat_amount. createInvoice overrides this back to
+  // InvoiceItemCreate[] for the one call site building a NEW invoice,
+  // where items don't have ids yet.
+  items?: InvoiceItem[];
   payment_method?: PaymentMethod;
   is_paid: boolean;
   // Cumulative amount paid so far - "fully paid" means paid_amount >=
@@ -523,6 +528,18 @@ export interface InvoiceItemCreate {
   unit_price: number;
   total_price?: number;
   vat_amount?: number;
+}
+
+// Corrects one already-saved line item on an existing invoice (e.g. OCR
+// read "1 бр." for what was actually a 6-pack) - id identifies which item,
+// every other field is optional and only sent when it actually changed.
+// total_price/vat_amount are recomputed server-side, not sent here.
+export interface InvoiceItemUpdate {
+  id: string;
+  name?: string;
+  quantity?: number;
+  unit?: string;
+  unit_price?: number;
 }
 
 // Price Alert types

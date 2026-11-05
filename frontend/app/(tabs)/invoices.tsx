@@ -300,6 +300,17 @@ export default function InvoicesScreen() {
   const [editNotes, setEditNotes] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Real incident this fixes: OCR (or a fat-fingered manual entry) read a
+  // 6-pack as "1 бр.", so the per-unit price looked 6x higher than it
+  // actually is and fired a bogus price-change alert - with no way to
+  // correct just the quantity/price of one already-saved line, the only
+  // option was delete-and-rescan the whole invoice. Quantity/unit_price
+  // are kept as strings for direct TextInput binding, same convention as
+  // editAmountWithoutVat/editVatAmount above.
+  const [editItems, setEditItems] = useState<
+    { id: string; name: string; quantity: string; unit: string; unit_price: string }[]
+  >([]);
+
   const startEditInvoice = (invoice: Invoice) => {
     setEditSupplier(invoice.supplier);
     setEditSupplierEik(invoice.supplier_eik || '');
@@ -309,7 +320,16 @@ export default function InvoicesScreen() {
     setEditVatAmount(invoice.vat_amount.toFixed(2));
     setEditVatTreatment(invoice.vat_treatment || '');
     setEditNotes(invoice.notes || '');
+    setEditItems(
+      (invoice.items || []).map((it) => ({
+        id: it.id, name: it.name, quantity: String(it.quantity), unit: it.unit, unit_price: it.unit_price.toFixed(2),
+      }))
+    );
     setEditMode(true);
+  };
+
+  const updateEditItemField = (itemId: string, field: 'quantity' | 'unit_price', value: string) => {
+    setEditItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, [field]: value } : it)));
   };
 
   const handleSaveEditedInvoice = async () => {
@@ -319,6 +339,15 @@ export default function InvoicesScreen() {
     const withoutVat = parseFloat(editAmountWithoutVat.replace(',', '.'));
     const vat = parseFloat(editVatAmount.replace(',', '.'));
     if (!supplier || !invoiceNumber || isNaN(withoutVat) || isNaN(vat)) {
+      Alert.alert(t('common.error'), t('msg.fillRequired'));
+      return;
+    }
+    const parsedItems = editItems.map((it) => ({
+      id: it.id,
+      quantity: parseFloat(it.quantity.replace(',', '.')),
+      unit_price: parseFloat(it.unit_price.replace(',', '.')),
+    }));
+    if (parsedItems.some((it) => isNaN(it.quantity) || it.quantity <= 0 || isNaN(it.unit_price))) {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;
     }
@@ -334,6 +363,7 @@ export default function InvoicesScreen() {
         total_amount: withoutVat + vat,
         vat_treatment: editVatTreatment || undefined,
         notes: editNotes.trim() || undefined,
+        items: parsedItems.length > 0 ? parsedItems : undefined,
       });
       applyInvoiceUpdate(updated);
       setEditMode(false);
@@ -865,6 +895,8 @@ export default function InvoicesScreen() {
         onChangeVatTreatment={setEditVatTreatment}
         editNotes={editNotes}
         onChangeNotes={setEditNotes}
+        editItems={editItems}
+        onChangeEditItemField={updateEditItemField}
         savingEdit={savingEdit}
         onSaveEdit={handleSaveEditedInvoice}
         selectedInvoiceAlerts={selectedInvoiceAlerts}

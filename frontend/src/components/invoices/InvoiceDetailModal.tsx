@@ -54,6 +54,13 @@ type Props = {
   onChangeVatTreatment: (v: VatTreatment) => void;
   editNotes: string;
   onChangeNotes: (v: string) => void;
+  // Lets a line item's quantity/unit_price be corrected after the fact -
+  // e.g. OCR read "1 бр." for what was actually a 6-pack, making the
+  // per-unit price look 6x higher than it is. name/unit stay read-only
+  // here (quantity/price is the error this exists to fix); id matches
+  // Invoice.items[].id.
+  editItems: { id: string; name: string; quantity: string; unit: string; unit_price: string }[];
+  onChangeEditItemField: (itemId: string, field: 'quantity' | 'unit_price', value: string) => void;
   savingEdit: boolean;
   onSaveEdit: () => void;
 
@@ -76,7 +83,8 @@ export function InvoiceDetailModal({
   editInvoiceNumber, onChangeInvoiceNumber, editDate, onChangeEditDate,
   isEditDatePickerVisible, onOpenEditDatePicker, onCloseEditDatePicker,
   editAmountWithoutVat, onChangeAmountWithoutVat, editVatAmount, onChangeVatAmount,
-  editVatTreatment, onChangeVatTreatment, editNotes, onChangeNotes, savingEdit, onSaveEdit,
+  editVatTreatment, onChangeVatTreatment, editNotes, onChangeNotes,
+  editItems, onChangeEditItemField, savingEdit, onSaveEdit,
   selectedInvoiceAlerts, loadingInvoiceAlerts, updatingPayment, onTogglePaid, onOpenPaymentModal,
   scannedPages, loadingScannedPages, onViewPage, onDelete,
 }: Props) {
@@ -212,6 +220,38 @@ export function InvoiceDetailModal({
                   ))}
                 </View>
               </View>
+
+              {editItems.length > 0 && (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('invoices.items')}</Text>
+                  <Text style={styles.editItemsHint}>{t('invoices.editItemsHint')}</Text>
+                  {editItems.map((item) => (
+                    <View key={item.id} style={styles.editItemRow}>
+                      <Text style={styles.editItemName} numberOfLines={2}>{item.name}</Text>
+                      <View style={styles.editItemFieldGroup}>
+                        <Text style={styles.editItemFieldLabel}>{t('invoices.itemQty')}</Text>
+                        <TextInput
+                          style={styles.editItemInput}
+                          value={item.quantity}
+                          onChangeText={(v) => onChangeEditItemField(item.id, 'quantity', v)}
+                          keyboardType="decimal-pad"
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </View>
+                      <View style={styles.editItemFieldGroup}>
+                        <Text style={styles.editItemFieldLabel}>{t('invoices.itemUnitPrice')}</Text>
+                        <TextInput
+                          style={styles.editItemInput}
+                          value={item.unit_price}
+                          onChangeText={(v) => onChangeEditItemField(item.id, 'unit_price', v)}
+                          keyboardType="decimal-pad"
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('invoices.notes')}</Text>
@@ -553,6 +593,41 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
+    color: 'white',
+  },
+  editItemsHint: {
+    fontSize: 11.5,
+    color: COLORS.textMuted,
+    marginBottom: 10,
+    lineHeight: 16,
+  },
+  editItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  editItemName: {
+    flex: 1,
+    fontSize: 13,
+    color: 'white',
+  },
+  editItemFieldGroup: {
+    width: 76,
+  },
+  editItemFieldLabel: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    marginBottom: 4,
+  },
+  editItemInput: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    fontSize: 13,
     color: 'white',
   },
   submitButton: {
