@@ -302,6 +302,222 @@ async def get_chart_data(
 
     return chart_data
 
+# Minimum distinct weeks of data required before calling any per-weekday
+# pattern "established" rather than noise - a single unusually quiet
+# Tuesday shouldn't read as "Tuesdays are always weak". Same reasoning as
+# get_reorder_nudges'/ForecastService's own minimum-sample-size gates.
+MIN_WEEKS_FOR_WEEKDAY_PATTERN = 4
+WEEKDAY_LOOKBACK_DAYS = 56  # 8 weeks
+
+async def _daily_revenue_by_weekday(company_id: str, lookback_days: int = WEEKDAY_LOOKBACK_DAYS) -> Dict[int, List[float]]:
+    """Every day's revenue (fiscal_revenue + pocket_money - same proxy
+    ForecastService's own revenue forecast uses) over the trailing
+    lookback_days, bucketed by weekday (0=Monday..6=Sunday), skipping days
+    the business is known to be closed (the recurring weekly pattern plus
+    one-off exceptions - see is_date_closed/get_closed_days_lookup). A day
+    with legitimately zero revenue because the business wasn't open isn't
+    a "weak day", it's already correctly closed - only open days ever
+    enter a bucket. A day that WAS open but genuinely has no revenue
+    logged counts as an actual 0 (not logging anything is itself
+    information), not a gap to skip."""
+    from collections import defaultdict
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=lookback_days)
+    start_str = start.strftime("%Y-%m-%d")
+
+    # daily_revenue is keyed by user_id, not company_id - same resolution
+    # ForecastService uses.
+    company_users = await server.db.users.find(
+        {"company_id": company_id}, {"_id": 0, "user_id": 1}
+    ).to_list(1000)
+    user_ids = [u["user_id"] for u in company_users]
+
+    revenues = await server.db.daily_revenue.find(
+        {"user_id": {"$in": user_ids}, "date": {"$gte": start_str}},
+        {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1},
+    ).to_list(10000)
+    revenue_by_date: Dict[str, float] = defaultdict(float)
+    for r in revenues:
+        date_str = r.get("date")
+        if isinstance(date_str, str):
+            revenue_by_date[date_str] += r.get("fiscal_revenue", 0) + r.get("pocket_money", 0)
+
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+
+    buckets: Dict[int, List[float]] = defaultdict(list)
+    d = start.date()
+    today = now.date()
+    while d <= today:
+        date_str = d.strftime("%Y-%m-%d")
+        if not is_date_closed(date_str, closed_weekdays, exceptions_map):
+            buckets[d.weekday()].append(revenue_by_date.get(date_str, 0.0))
+        d += timedelta(days=1)
+    return buckets
+
+async def _weak_day_suggestion(company_id: str) -> Optional[dict]:
+    """Module: cross-data-source insight #2 (weekday revenue pattern). A
+    weekday open every week that consistently underperforms the rest of
+    the week is worth flagging on its own - shortening hours or closing
+    it could cut cost with little revenue to lose. Entirely generic
+    (restaurant, shop, salon - whatever logs daily revenue), not tuned to
+    any particular trade."""
+    buckets = await _daily_revenue_by_weekday(company_id)
+    qualifying = {
+        wd: statistics.mean(vals) for wd, vals in buckets.items()
+        if len(vals) >= MIN_WEEKS_FOR_WEEKDAY_PATTERN
+    }
+    # Needs most of an open week represented, or "weakest day" is just
+    # whichever of 2-3 known days happens to be lowest - not a pattern.
+    if len(qualifying) < 5:
+        return None
+    overall_avg = statistics.mean(qualifying.values())
+    if overall_avg <= 0:
+        return None
+    weakest_wd = min(qualifying, key=lambda wd: qualifying[wd])
+    pct_below = round((overall_avg - qualifying[weakest_wd]) / overall_avg * 100)
+    if pct_below < 30:
+        return None
+    return {
+        "weekday": weakest_wd,
+        "avg_revenue": round(qualifying[weakest_wd], 2),
+        "overall_avg_revenue": round(overall_avg, 2),
+        "percent_below_average": pct_below,
+    }
+
+@router.get("/statistics/weekday-revenue")
+async def get_weekday_revenue_pattern(current_user: User = Depends(get_current_user)):
+    """Average revenue per weekday over the trailing 8 weeks, plus (if a
+    clear pattern exists) a suggestion naming the one weekday that
+    consistently underperforms the rest. See _weak_day_suggestion."""
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"weekdays": [], "weak_day_suggestion": None}
+
+    buckets = await _daily_revenue_by_weekday(company_id)
+    weekdays = [
+        {"weekday": wd, "avg_revenue": round(statistics.mean(vals), 2), "days_observed": len(vals)}
+        for wd, vals in sorted(buckets.items())
+        if vals
+    ]
+    suggestion = await _weak_day_suggestion(company_id)
+    return {"weekdays": weekdays, "weak_day_suggestion": suggestion}
+
+async def _weekday_labor_efficiency(company_id: str, lookback_days: int = WEEKDAY_LOOKBACK_DAYS):
+    """Average revenue and average scheduled labor-hours per weekday over
+    the same trailing window, each only for weekdays with enough distinct
+    weeks of data to mean something. Hours come from Work Schedule's own
+    occurrence resolution (shift_adjustments-aware, same as
+    _signal_schedule_unpaid), not a separate re-derivation of the
+    schedule."""
+    from collections import defaultdict
+    from routers.schedule import _resolve_occurrences
+
+    revenue_buckets = await _daily_revenue_by_weekday(company_id, lookback_days)
+    revenue_avg_by_wd = {
+        wd: statistics.mean(vals) for wd, vals in revenue_buckets.items()
+        if len(vals) >= MIN_WEEKS_FOR_WEEKDAY_PATTERN
+    }
+
+    now = datetime.now(timezone.utc)
+    start_str = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    end_str = now.strftime("%Y-%m-%d")
+    shifts = await server.db.work_shifts.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
+    occurrences = await _resolve_occurrences(shifts, company_id, start_str, end_str) if shifts else []
+
+    hours_sum_by_wd: Dict[int, float] = defaultdict(float)
+    weeks_seen_by_wd: Dict[int, set] = defaultdict(set)
+    for o in occurrences:
+        d = datetime.strptime(o["date"], "%Y-%m-%d")
+        wd = d.weekday()
+        hours_sum_by_wd[wd] += o["hours"]
+        weeks_seen_by_wd[wd].add(d.isocalendar()[:2])  # (iso_year, iso_week)
+
+    avg_hours_by_wd = {
+        wd: hours_sum_by_wd[wd] / len(weeks_seen_by_wd[wd])
+        for wd in hours_sum_by_wd
+        if len(weeks_seen_by_wd[wd]) >= MIN_WEEKS_FOR_WEEKDAY_PATTERN
+    }
+    return revenue_avg_by_wd, avg_hours_by_wd
+
+async def _staffing_rebalance_suggestion(company_id: str) -> Optional[dict]:
+    """Module: cross-data-source insight #1 (staffing vs. revenue). Same
+    revenue-by-weekday pattern as _weak_day_suggestion, but divided by
+    scheduled labor-hours for that weekday - revenue per labor-hour - so a
+    weekday that's fully staffed but earns far less per hour than another
+    equally-staffed weekday stands out, generically, without assuming
+    anything about the business beyond "it uses Work Schedule and logs
+    daily revenue". Suggests moving a modest slice of hours from the
+    weakest-per-hour day toward the strongest, rather than a wholesale
+    schedule rewrite."""
+    revenue_avg_by_wd, avg_hours_by_wd = await _weekday_labor_efficiency(company_id)
+    efficiency = {
+        wd: revenue_avg_by_wd[wd] / avg_hours_by_wd[wd]
+        for wd in (set(revenue_avg_by_wd) & set(avg_hours_by_wd))
+        if avg_hours_by_wd[wd] > 0
+    }
+    if len(efficiency) < 4:
+        return None
+    overall_avg_efficiency = statistics.mean(efficiency.values())
+    if overall_avg_efficiency <= 0:
+        return None
+
+    overstaffed_wd = min(efficiency, key=lambda wd: efficiency[wd])
+    understaffed_wd = max(efficiency, key=lambda wd: efficiency[wd])
+    if overstaffed_wd == understaffed_wd:
+        return None
+    overstaffed_ratio = efficiency[overstaffed_wd] / overall_avg_efficiency
+    understaffed_ratio = efficiency[understaffed_wd] / overall_avg_efficiency
+
+    # Both days must deviate clearly from the average, and the
+    # overstaffed day needs enough hours on it to actually have something
+    # worth trimming - moving "1 hour off a 2-hour shift" isn't useful.
+    if overstaffed_ratio > 0.75 or understaffed_ratio < 1.25 or avg_hours_by_wd[overstaffed_wd] < 2:
+        return None
+
+    suggested_hours = round(min(avg_hours_by_wd[overstaffed_wd] * 0.25, 4), 1)
+    if suggested_hours < 0.5:
+        return None
+
+    return {
+        "overstaffed_weekday": overstaffed_wd,
+        "understaffed_weekday": understaffed_wd,
+        "overstaffed_hours": round(avg_hours_by_wd[overstaffed_wd], 1),
+        "understaffed_hours": round(avg_hours_by_wd[understaffed_wd], 1),
+        "overstaffed_percent_of_average": round(overstaffed_ratio * 100),
+        "understaffed_percent_of_average": round(understaffed_ratio * 100),
+        "suggested_hours_to_move": suggested_hours,
+    }
+
+@router.get("/statistics/staffing-efficiency")
+async def get_staffing_efficiency(current_user: User = Depends(get_current_user)):
+    """Revenue-per-scheduled-labor-hour per weekday over the trailing 8
+    weeks, plus (if a clear mismatch exists) a suggestion to move a slice
+    of hours from the weekday that earns least per staffed hour toward
+    the one that earns most. Needs both view_statistics (revenue) and
+    manage_budget (schedule/payroll) - the same gate _signal_schedule_
+    unpaid already uses for schedule-derived labor cost."""
+    require_permission(current_user, "view_statistics")
+    require_permission(current_user, "manage_budget")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"weekdays": [], "rebalance_suggestion": None}
+
+    revenue_avg_by_wd, avg_hours_by_wd = await _weekday_labor_efficiency(company_id)
+    weekdays = [
+        {
+            "weekday": wd,
+            "avg_revenue": round(revenue_avg_by_wd[wd], 2),
+            "avg_scheduled_hours": round(avg_hours_by_wd[wd], 1),
+            "revenue_per_labor_hour": round(revenue_avg_by_wd[wd] / avg_hours_by_wd[wd], 2),
+        }
+        for wd in sorted(set(revenue_avg_by_wd) & set(avg_hours_by_wd))
+        if avg_hours_by_wd[wd] > 0
+    ]
+    suggestion = await _staffing_rebalance_suggestion(company_id)
+    return {"weekdays": weekdays, "rebalance_suggestion": suggestion}
+
 @router.get("/statistics/suppliers")
 async def get_supplier_statistics(
     start_date: Optional[str] = None,

@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem } from '../types';
+import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion } from '../types';
 import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -905,6 +906,26 @@ class ApiService {
   // surfaces), each with a trend-adjusted recommended order quantity.
   async getReorderRecommendations(): Promise<{ items: ReorderItem[] }> {
     return this.fetch('/items/reorder-recommendations');
+  }
+
+  // Average revenue per weekday over the trailing 8 weeks, plus (when a
+  // clear pattern exists) a suggestion naming the one weekday that
+  // consistently underperforms the rest.
+  async getWeekdayRevenuePattern(): Promise<{
+    weekdays: WeekdayRevenueStat[];
+    weak_day_suggestion: WeakDaySuggestion | null;
+  }> {
+    return this.fetch('/statistics/weekday-revenue');
+  }
+
+  // Revenue per scheduled labor-hour by weekday, plus (when a clear
+  // mismatch exists) a suggestion to move hours from the weekday earning
+  // least per staffed hour toward the one earning most.
+  async getStaffingEfficiency(): Promise<{
+    weekdays: StaffingEfficiencyStat[];
+    rebalance_suggestion: StaffingRebalanceSuggestion | null;
+  }> {
+    return this.fetch('/statistics/staffing-efficiency');
   }
 
   async getItemBySupplier(itemName: string): Promise<{

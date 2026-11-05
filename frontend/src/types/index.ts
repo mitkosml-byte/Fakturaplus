@@ -372,6 +372,36 @@ export interface ReorderItem {
   trend_ratio: number;
 }
 
+export interface WeekdayRevenueStat {
+  weekday: number; // 0=Monday..6=Sunday, matches date.weekday()
+  avg_revenue: number;
+  days_observed: number;
+}
+
+export interface WeakDaySuggestion {
+  weekday: number;
+  avg_revenue: number;
+  overall_avg_revenue: number;
+  percent_below_average: number;
+}
+
+export interface StaffingEfficiencyStat {
+  weekday: number;
+  avg_revenue: number;
+  avg_scheduled_hours: number;
+  revenue_per_labor_hour: number;
+}
+
+export interface StaffingRebalanceSuggestion {
+  overstaffed_weekday: number;
+  understaffed_weekday: number;
+  overstaffed_hours: number;
+  understaffed_hours: number;
+  overstaffed_percent_of_average: number;
+  understaffed_percent_of_average: number;
+  suggested_hours_to_move: number;
+}
+
 export interface ChartDataPoint {
   date: string;
   label: string;

@@ -1775,6 +1775,143 @@ def test_reorder_recommendations_trend_adjusted_quantity():
     assert item["recommended_quantity"] == 6
 
 
+def test_weak_weekday_suggestion():
+    """Cross-data-source insight #2: a weekday open every week that
+    consistently earns far less than the rest of the week should surface
+    as a suggestion, found purely from daily_revenue bucketed by weekday -
+    no item or schedule data involved, generic for any business.
+
+    Monday set to 50 €/day, every other weekday to 150 €/day, over 8
+    weeks (56 days, every weekday gets exactly 8 data points). Overall
+    average across the 7 weekdays is (50 + 150*6) / 7 ≈ 135.7 €, so
+    Monday's 50 € is ~63% below it - comfortably past the 30% gate."""
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+    from routers.statistics import get_weekday_revenue_pattern
+
+    company_id = f"company_{uuid_module.uuid4().hex[:12]}"
+    user_id = f"user_{uuid_module.uuid4().hex[:12]}"
+
+    async def _run():
+        await server_module.db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "user_id": user_id, "email": f"{user_id}@test.com", "name": "Weekday Test User",
+                "role": "owner", "company_id": company_id, "permissions": ["view_statistics"],
+                "auth_provider": "email", "has_password": True,
+                "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+                "created_at": server_module.datetime.now(tz.utc),
+            }},
+            upsert=True,
+        )
+        await server_module.db.daily_revenue.delete_many({"user_id": user_id})
+        today = server_module.datetime.now(tz.utc).date()
+
+        docs = []
+        for i in range(56):
+            d = today - timedelta(days=i)
+            amount = 50 if d.weekday() == 0 else 150  # Monday = 0
+            docs.append({
+                "user_id": user_id, "date": d.strftime("%Y-%m-%d"),
+                "fiscal_revenue": amount, "pocket_money": 0, "card_revenue": 0,
+            })
+        await server_module.db.daily_revenue.insert_many(docs)
+
+        user = server_module.User(
+            user_id=user_id, email=f"{user_id}@test.com", name="Weekday Test User",
+            role="owner", company_id=company_id, permissions=["view_statistics"],
+        )
+        return await get_weekday_revenue_pattern(current_user=user)
+
+    result = asyncio.run(_run())
+    suggestion = result["weak_day_suggestion"]
+    assert suggestion is not None
+    assert suggestion["weekday"] == 0  # Monday
+    assert suggestion["avg_revenue"] == 50.0
+    assert suggestion["percent_below_average"] >= 30
+
+
+def test_staffing_rebalance_suggestion():
+    """Cross-data-source insight #1: a weekday that's fully staffed but
+    earns far less per scheduled labor-hour than another equally-staffed
+    weekday should surface a rebalance suggestion - revenue-by-weekday
+    (daily_revenue) divided by scheduled-hours-by-weekday (Work Schedule's
+    own occurrence resolution), neither of which says anything about this
+    on its own.
+
+    All 7 weekdays get an identical 8-hour/day weekly shift. Revenue is
+    150 €/day everywhere except Wednesday (50 €/day, understaffed... no,
+    OVERstaffed relative to its tiny revenue) and Friday (300 €/day,
+    same staffing but working much harder per hour). Efficiency
+    (revenue/hours): Wed = 50/8 = 6.25, Fri = 300/8 = 37.5, everywhere
+    else = 150/8 = 18.75. Average of the 7 ≈ 19.64 - Wed is ~32% of that
+    (overstaffed), Fri is ~191% (understaffed)."""
+    import asyncio
+    import uuid as uuid_module
+    import server as server_module
+    from datetime import timedelta, timezone as tz
+    from routers.statistics import get_staffing_efficiency
+
+    company_id = f"company_{uuid_module.uuid4().hex[:12]}"
+    user_id = f"user_{uuid_module.uuid4().hex[:12]}"
+
+    async def _run():
+        await server_module.db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "user_id": user_id, "email": f"{user_id}@test.com", "name": "Staffing Test User",
+                "role": "owner", "company_id": company_id, "permissions": ["view_statistics", "manage_budget"],
+                "auth_provider": "email", "has_password": True,
+                "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
+                "created_at": server_module.datetime.now(tz.utc),
+            }},
+            upsert=True,
+        )
+        await server_module.db.daily_revenue.delete_many({"user_id": user_id})
+        await server_module.db.work_shifts.delete_many({"company_id": company_id})
+        today = server_module.datetime.now(tz.utc).date()
+
+        revenue_by_weekday = {2: 50, 4: 300}  # Wednesday, Friday
+        docs = []
+        for i in range(56):
+            d = today - timedelta(days=i)
+            amount = revenue_by_weekday.get(d.weekday(), 150)
+            docs.append({
+                "user_id": user_id, "date": d.strftime("%Y-%m-%d"),
+                "fiscal_revenue": amount, "pocket_money": 0, "card_revenue": 0,
+            })
+        await server_module.db.daily_revenue.insert_many(docs)
+
+        base = today - timedelta(days=56)
+        shifts = []
+        for wd in range(7):
+            anchor = base + timedelta(days=(wd - base.weekday()) % 7)
+            shifts.append({
+                "id": f"shift_{wd}_{uuid_module.uuid4().hex[:8]}", "company_id": company_id,
+                "user_id": user_id, "created_by": user_id, "date": anchor.isoformat(),
+                "start_time": "09:00", "end_time": "17:00",  # 8 hours
+                "repeat_pattern": "weekly", "repeat_until": today.isoformat(),
+                "hourly_rate": 10, "note": None,
+                "created_at": server_module.datetime.now(tz.utc),
+            })
+        await server_module.db.work_shifts.insert_many(shifts)
+
+        user = server_module.User(
+            user_id=user_id, email=f"{user_id}@test.com", name="Staffing Test User",
+            role="owner", company_id=company_id, permissions=["view_statistics", "manage_budget"],
+        )
+        return await get_staffing_efficiency(current_user=user)
+
+    result = asyncio.run(_run())
+    suggestion = result["rebalance_suggestion"]
+    assert suggestion is not None
+    assert suggestion["overstaffed_weekday"] == 2  # Wednesday
+    assert suggestion["understaffed_weekday"] == 4  # Friday
+    assert suggestion["suggested_hours_to_move"] == 2.0
+
+
 def test_work_schedule_monthly_recurrence_expansion():
     """Direct unit test for _expand_shift_occurrences' monthly branch - the
     trickiest one (month-length edge cases), isolated from any DB call.

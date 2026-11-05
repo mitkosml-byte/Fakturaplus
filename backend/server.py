@@ -2847,10 +2847,69 @@ async def _signal_personal_wallet(company_id, scope, current_user, visibility) -
         "route": "/personal-expenses",
     }
 
+# Bulgarian weekday names, index 0=Monday matching Python's own
+# datetime.weekday() - shared by both weekday-pattern signals below.
+_WEEKDAY_NAMES_BG = ["понеделник", "вторник", "сряда", "четвъртък", "петък", "събота", "неделя"]
+
+async def _signal_weak_weekday(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Module: cross-data-source insight #2 - a weekday open every week
+    that consistently earns far less than the rest of the week, found by
+    bucketing daily revenue by weekday over the trailing 8 weeks (see
+    routers/statistics.py's _weak_day_suggestion for the full maths).
+    Generic: works from data every business already logs (daily revenue),
+    nothing item- or trade-specific."""
+    if not company_id or "view_statistics" not in set(current_user.permissions or []):
+        return None
+    from routers.statistics import _weak_day_suggestion
+    suggestion = await _weak_day_suggestion(company_id)
+    if not suggestion:
+        return None
+    day_name = _WEEKDAY_NAMES_BG[suggestion["weekday"]]
+    return {
+        "key": "weak_weekday", "severity": "info", "priority": 35,
+        "title": "Един ден от седмицата изостава",
+        "detail": (
+            f"Оборотът ти в {day_name} е средно {suggestion['avg_revenue']:.0f} € - "
+            f"с {suggestion['percent_below_average']}% под обичайния ти ден "
+            f"({suggestion['overall_avg_revenue']:.0f} €). Струва ли си пълен работен ден?"
+        ),
+        "route": "/(tabs)/stats",
+    }
+
+async def _signal_staffing_mismatch(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Module: cross-data-source insight #1 - a weekday that's fully
+    staffed but earns far less per scheduled labor-hour than another
+    equally-staffed weekday, found by dividing the same revenue-by-
+    weekday pattern by Work Schedule's own scheduled hours (see
+    routers/statistics.py's _staffing_rebalance_suggestion). Needs both
+    view_statistics (revenue) and manage_budget (schedule/payroll) - same
+    gate _signal_schedule_unpaid already uses for schedule-derived data."""
+    if not company_id or not {"view_statistics", "manage_budget"} <= set(current_user.permissions or []):
+        return None
+    from routers.statistics import _staffing_rebalance_suggestion
+    suggestion = await _staffing_rebalance_suggestion(company_id)
+    if not suggestion:
+        return None
+    over_name = _WEEKDAY_NAMES_BG[suggestion["overstaffed_weekday"]]
+    under_name = _WEEKDAY_NAMES_BG[suggestion["understaffed_weekday"]]
+    return {
+        "key": "staffing_mismatch", "severity": "info", "priority": 36,
+        "title": "Графикът не пасва на оборота",
+        "detail": (
+            f"В {over_name} имаш пълен екип, но оборотът на отработен час е само "
+            f"{suggestion['overstaffed_percent_of_average']}% от средното; в {under_name} "
+            f"същият екип изкарва {suggestion['understaffed_percent_of_average']}%. "
+            f"Обмисли да преместиш ~{suggestion['suggested_hours_to_move']} часа от "
+            f"{over_name} към {under_name}."
+        ),
+        "route": "/(tabs)/stats",
+    }
+
 _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_unpaid_invoices, _signal_receivables, _signal_scan_credits,
     _signal_budget, _signal_price_alerts, _signal_reorder, _signal_forecast,
     _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
+    _signal_weak_weekday, _signal_staffing_mismatch,
 ]
 
 async def get_proactive_signals(current_user: User) -> List[dict]:

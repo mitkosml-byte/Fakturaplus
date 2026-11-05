@@ -30,6 +30,8 @@ import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '.
 import { PriceAlertsCard } from '../../src/components/stats/PriceAlertsCard';
 import { ReorderNudgesCard } from '../../src/components/stats/ReorderNudgesCard';
 import { ReorderRecommendationsCard } from '../../src/components/stats/ReorderRecommendationsCard';
+import { WeekdayRevenueCard } from '../../src/components/stats/WeekdayRevenueCard';
+import { StaffingEfficiencyCard } from '../../src/components/stats/StaffingEfficiencyCard';
 import { ForecastCard } from '../../src/components/stats/ForecastCard';
 import { PriceInflationCard } from '../../src/components/stats/PriceInflationCard';
 import { AlertSettingsModal } from '../../src/components/stats/AlertSettingsModal';
@@ -156,6 +158,10 @@ export default function StatsScreen() {
   const [topItems, setTopItems] = useState<any[]>([]);
   const [reorderNudges, setReorderNudges] = useState<Awaited<ReturnType<typeof api.getReorderNudges>>['nudges']>([]);
   const [reorderRecommendations, setReorderRecommendations] = useState<Awaited<ReturnType<typeof api.getReorderRecommendations>>['items']>([]);
+  const [weekdayRevenue, setWeekdayRevenue] = useState<Awaited<ReturnType<typeof api.getWeekdayRevenuePattern>>['weekdays']>([]);
+  const [weakDaySuggestion, setWeakDaySuggestion] = useState<Awaited<ReturnType<typeof api.getWeekdayRevenuePattern>>['weak_day_suggestion']>(null);
+  const [staffingEfficiency, setStaffingEfficiency] = useState<Awaited<ReturnType<typeof api.getStaffingEfficiency>>['weekdays']>([]);
+  const [staffingRebalanceSuggestion, setStaffingRebalanceSuggestion] = useState<Awaited<ReturnType<typeof api.getStaffingEfficiency>>['rebalance_suggestion']>(null);
   const [expenseForecast, setExpenseForecast] = useState<any>(null);
   const [revenueForecast, setRevenueForecast] = useState<any>(null);
   const [roiTrend, setRoiTrend] = useState<any[]>([]);
@@ -210,6 +216,26 @@ export default function StatsScreen() {
         setRevenueForecast(revFc);
       } catch (error) {
         console.error('Error loading forecast:', error);
+      }
+
+      try {
+        const weekdayData = await api.getWeekdayRevenuePattern();
+        setWeekdayRevenue(weekdayData.weekdays || []);
+        setWeakDaySuggestion(weekdayData.weak_day_suggestion || null);
+      } catch (error) {
+        console.error('Error loading weekday revenue pattern:', error);
+      }
+
+      // Needs manage_budget too (schedule/payroll data) - same gate the
+      // backend endpoint itself enforces.
+      if (hasPermission('manage_budget')) {
+        try {
+          const staffingData = await api.getStaffingEfficiency();
+          setStaffingEfficiency(staffingData.weekdays || []);
+          setStaffingRebalanceSuggestion(staffingData.rebalance_suggestion || null);
+        } catch (error) {
+          console.error('Error loading staffing efficiency:', error);
+        }
       }
     }
 
@@ -1713,6 +1739,21 @@ export default function StatsScreen() {
                         with an established cadence, not just the overdue
                         ones the nudges card above alerts on. */}
                     <ReorderRecommendationsCard items={reorderRecommendations} />
+
+                    {/* Cross-data-source insight #2: revenue bucketed by
+                        weekday over the trailing 8 weeks, highlighting a
+                        weekday that consistently underperforms. */}
+                    <WeekdayRevenueCard weekdays={weekdayRevenue} suggestion={weakDaySuggestion} />
+
+                    {/* Cross-data-source insight #1: the same weekday
+                        pattern divided by Work Schedule's own scheduled
+                        hours - needs manage_budget too. */}
+                    {hasPermission('manage_budget') && (
+                      <StaffingEfficiencyCard
+                        weekdays={staffingEfficiency}
+                        suggestion={staffingRebalanceSuggestion}
+                      />
+                    )}
 
                     {/* Price Inflation Card */}
                     <PriceInflationCard

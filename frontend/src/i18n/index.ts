@@ -2926,6 +2926,32 @@ export const translations: Translations = {
     bg: '{item} ({supplier}) - поръчвай ~{quantity} {unit} на всеки {median} дни (последно преди {daysSince} дни)',
     en: '{item} ({supplier}) - order ~{quantity} {unit} every {median} days (last bought {daysSince} days ago)',
   },
+  // Full weekday names, index 0=Monday matching the backend's own
+  // Python date.weekday() convention (and ClosedDaysCalendar's existing
+  // WEEKDAYS array) - shared by both weekday-pattern cards below.
+  'weekday.0': { bg: 'Понеделник', en: 'Monday' },
+  'weekday.1': { bg: 'Вторник', en: 'Tuesday' },
+  'weekday.2': { bg: 'Сряда', en: 'Wednesday' },
+  'weekday.3': { bg: 'Четвъртък', en: 'Thursday' },
+  'weekday.4': { bg: 'Петък', en: 'Friday' },
+  'weekday.5': { bg: 'Събота', en: 'Saturday' },
+  'weekday.6': { bg: 'Неделя', en: 'Sunday' },
+  'stats.weekdayRevenueTitle': {
+    bg: 'Оборот по дни от седмицата',
+    en: 'Revenue by weekday',
+  },
+  'stats.weakDaySuggestion': {
+    bg: '{day} изостава - средно {avg} € срещу обичайните {overall} € ({percent}% по-малко). Струва ли си пълен работен ден?',
+    en: '{day} lags behind - averaging {avg} € vs. your usual {overall} € ({percent}% less). Worth a full working day?',
+  },
+  'stats.staffingEfficiencyTitle': {
+    bg: 'Екип спрямо оборот',
+    en: 'Staffing vs. revenue',
+  },
+  'stats.staffingRebalanceSuggestion': {
+    bg: 'В {overDay} имаш пълен екип, но оборотът на отработен час е само {overPercent}% от средното; в {underDay} същият екип изкарва {underPercent}%. Обмисли да преместиш ~{hours} часа от {overDay} към {underDay}.',
+    en: 'On {overDay} you\'re fully staffed, but revenue per labor-hour is only {overPercent}% of average; on {underDay} the same staffing earns {underPercent}%. Consider moving ~{hours} hours from {overDay} to {underDay}.',
+  },
   'stats.inflationPeriod.month': {
     bg: 'Месец',
     en: 'Month',
