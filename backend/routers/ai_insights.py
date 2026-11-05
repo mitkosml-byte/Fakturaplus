@@ -189,33 +189,29 @@ async def build_business_chat_digest(current_user: User) -> dict:
         for n in reorder_raw.get("nudges", [])[:5]
     ]
 
-    # Per-item purchase quantities (this/last month) - the actual "what and
-    # how much did I buy" data ask-my-numbers was previously missing
-    # entirely: it only ever carried overdue-reorder nudges (a narrow,
-    # overdue-only subset), never a plain quantity breakdown. Reuses the
-    # already-built, already-merge-mapping-aware /statistics/items/merged
-    # endpoint (top_by_quantity) rather than re-aggregating item_price_history
-    # a second time here.
-    def _compact_item_purchases(raw: dict) -> list:
-        return [
-            {
-                "name": it["name"],
-                "quantity": it["total_quantity"],
-                "unit": it.get("unit", "бр."),
-                "purchases_count": it["frequency"],
-            }
-            for it in raw.get("top_by_quantity", [])[:10]
-        ]
-    item_purchases_this_month_raw = await get_merged_item_statistics(
-        start_date=this_month_start, end_date=this_month_end, top_n=10, current_user=current_user
+    # Per-item purchase quantities - the actual "what and how much did I
+    # buy" data ask-my-numbers was previously missing entirely: it only
+    # ever carried overdue-reorder nudges (a narrow, overdue-only subset),
+    # never a plain quantity breakdown. Unrestricted date range (the
+    # company's whole item_price_history, not just the current/previous
+    # calendar month) so a question about any item ever bought can be
+    # answered, not only a recent one - capped to the top 10 by quantity
+    # (matching get_merged_item_statistics's own default cap) to keep the
+    # digest bounded. Reuses the already-built, already-merge-mapping-aware
+    # /statistics/items/merged endpoint (top_by_quantity) rather than
+    # re-aggregating item_price_history a second time here.
+    item_purchases_raw = await get_merged_item_statistics(
+        start_date=None, end_date=None, top_n=10, current_user=current_user
     )
-    item_purchases_last_month_raw = await get_merged_item_statistics(
-        start_date=last_month_start, end_date=last_month_end, top_n=10, current_user=current_user
-    )
-    item_purchases = {
-        "this_month": _compact_item_purchases(item_purchases_this_month_raw),
-        "last_month": _compact_item_purchases(item_purchases_last_month_raw),
-    }
+    item_purchases = [
+        {
+            "name": it["name"],
+            "quantity": it["total_quantity"],
+            "unit": it.get("unit", "бр."),
+            "purchases_count": it["frequency"],
+        }
+        for it in item_purchases_raw.get("top_by_quantity", [])[:10]
+    ]
 
     digest = {
         "this_month": {"label": this_month_start[:7], **this_month},
@@ -274,14 +270,17 @@ async def ask_my_numbers(
         "разполагаш с тази информация, вместо да гадаеш. forecast.*.trend == 'insufficient_data' означава, че "
         "фирмата няма достатъчно история (под 4 месеца) за истинска прогноза - next_month_predicted е просто "
         "средното от наличните месеци, не истинска тенденция; кажи го изрично, вместо да звучиш по-сигурен, "
-        "отколкото данните позволяват. item_purchases.this_month и item_purchases.last_month показват точните "
-        "закупени количества по артикул (name, quantity, unit, purchases_count - брой отделни покупки) за текущия "
-        "и предходния календарен месец, до 10 най-поръчвани артикула, с обединени еднакви продукти от различни "
+        "отколкото данните позволяват. item_purchases показва точните закупени количества по артикул (name, "
+        "quantity, unit, purchases_count - брой отделни покупки) за ЦЯЛАТА история на фирмата (не само текущия "
+        "месец) - до 10 най-поръчвани артикула по общо количество, с обединени еднакви продукти от различни "
         "фактури/доставчици. Ако въпрос пита за количество на конкретен артикул ('колко питки съм поръчал'), "
         "търси го именно тук по name (включително частично/сходно съвпадение на името), а не в reorder_nudges - "
-        "последното съдържа само закъснели поръчки за преповтарящи се артикули, не пълна картина на покупките. Ако "
-        "артикулът не фигурира в списъка, той просто не е сред топ 10 по количество за този месец - кажи го ясно, "
-        "вместо да твърдиш, че изобщо няма данни за покупки. Предходните съобщения по-долу са същият разговор - при последващ въпрос "
+        "последното съдържа само закъснели поръчки за преповтарящи се артикули, не пълна картина на покупките. "
+        "item_purchases НЕ е разделено по месец - ако въпросът пита конкретно за определен период ('миналия "
+        "месец', 'през март'), кажи ясно, че разполагаш само с общо количество за цялата история, не разбито по "
+        "период, вместо да гадаеш каква част е от съответния период. Ако артикулът не фигурира в списъка, той "
+        "просто не е сред топ 10 по общо количество - кажи го ясно, вместо да твърдиш, че изобщо няма данни за "
+        "покупки. Предходните съобщения по-долу са същият разговор - при последващ въпрос "
         "('сравни с него', 'ами миналата седмица') използвай контекста им, но винаги смятай с актуалните данни от "
         "ПОСЛЕДНИЯ JSON, не с число, спомена в по-ранен твой отговор. Отговаряй кратко (до 4 изречения), ВИНАГИ на "
         f"{response_language} независимо от езика на въпроса или на по-ранни съобщения в разговора, сумите винаги "

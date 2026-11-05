@@ -294,12 +294,12 @@ export default function AskMyNumbersScreen() {
                             </View>
                           )}
 
-                          {d.item_purchases.this_month.length > 0 && (
+                          {d.item_purchases.length > 0 && (
                             <View style={styles.digestSection}>
                               <Text style={styles.digestSectionLabel}>
-                                {t('askMyNumbers.itemPurchasesTitle').replace('{month}', monthLabel(d.this_month.label))}
+                                {t('askMyNumbers.itemPurchasesTitle')}
                               </Text>
-                              {d.item_purchases.this_month.slice(0, 5).map((it, i) => (
+                              {d.item_purchases.slice(0, 5).map((it, i) => (
                                 <Text key={`${it.name}-${i}`} style={styles.digestRow}>
                                   {t('askMyNumbers.itemPurchaseLine')
                                     .replace('{item}', it.name)

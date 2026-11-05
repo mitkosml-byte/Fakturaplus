@@ -331,8 +331,8 @@ export const translations: Translations = {
     en: '{item} - usually reordered every {days} days for ~{value} €, last ordered {since} days ago. Suggested quantity: ~{quantity} {unit}.',
   },
   'askMyNumbers.itemPurchasesTitle': {
-    bg: 'Поръчани количества ({month})',
-    en: 'Ordered quantities ({month})',
+    bg: 'Поръчани количества (цялата история)',
+    en: 'Ordered quantities (all-time)',
   },
   'askMyNumbers.itemPurchaseLine': {
     bg: '{item}: {quantity} {unit} ({count}x поръчано)',

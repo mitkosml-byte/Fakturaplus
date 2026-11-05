@@ -1463,7 +1463,7 @@ def test_business_chat_digest_permission_matrix():
         assert "price_alerts_unread_count" in digest
         assert "reorder_nudges" in digest
         assert "item_purchases" in digest
-        assert "this_month" in digest["item_purchases"] and "last_month" in digest["item_purchases"]
+        assert isinstance(digest["item_purchases"], list)
 
 
 def test_item_purchases_in_chat_digest():
@@ -1472,11 +1472,11 @@ def test_item_purchases_in_chat_digest():
     though item_price_history (via the already-built /statistics/items/
     merged endpoint) had it the whole time - build_business_chat_digest
     never surfaced a per-item quantity breakdown at all, only overdue-only
-    reorder nudges. item_purchases.this_month/last_month must: (1) bucket
-    purchases by calendar month correctly, (2) merge an OCR-variant name
-    into the same canonical item via item_merge_mappings exactly like
-    /statistics/items/merged itself does, and (3) sum quantities/count
-    purchases correctly across the merged records."""
+    reorder nudges. item_purchases must: (1) carry NO date restriction - a
+    purchase from many months ago still counts, unlike the digest's
+    this_month/last_month period fields - and (2) still merge an
+    OCR-variant name into the same canonical item via item_merge_mappings,
+    exactly like /statistics/items/merged itself does."""
     import asyncio
     import uuid as uuid_module
     import server as server_module
@@ -1487,8 +1487,7 @@ def test_item_purchases_in_chat_digest():
     user_id = f"user_{uuid_module.uuid4().hex[:12]}"
 
     now = server_module.datetime.now(tz.utc)
-    last_month_last_day = now.replace(day=1) - server_module.timedelta(days=1)
-    last_month_mid = last_month_last_day.replace(day=1) + server_module.timedelta(days=10)
+    long_ago = now - server_module.timedelta(days=200)  # well outside this/last calendar month
 
     async def _run():
         await server_module.db.users.insert_one({
@@ -1498,31 +1497,39 @@ def test_item_purchases_in_chat_digest():
             "permissions_schema_version": server_module.PERMISSIONS_SCHEMA_VERSION,
             "created_at": now,
         })
-        # This month: two purchases of "питка" under two OCR-variant names
-        # (10 + 5 = 15 total units, 2 separate purchases) - must merge into
-        # one canonical entry via item_merge_mappings.
+        # Same item, bought now AND 200 days ago - item_purchases must sum
+        # both (30 total, 2 purchases), proving it is unrestricted by date,
+        # unlike this_month/last_month elsewhere in the digest.
         await server_module.db.item_price_history.insert_many([
             {
-                "company_id": company_id, "supplier": "Хлебозавод", "item_name": "питка",
-                "unit_price": 1, "quantity": 10, "unit": "бр",
+                "company_id": company_id, "supplier": "Хлебозавод", "item_name": "мляко",
+                "unit_price": 1, "quantity": 10, "unit": "л",
                 "invoice_id": "x1", "invoice_number": "INV1", "invoice_date": now,
             },
             {
-                "company_id": company_id, "supplier": "Хлебозавод", "item_name": "pitka",
-                "unit_price": 1, "quantity": 5, "unit": "бр",
-                "invoice_id": "x2", "invoice_number": "INV2", "invoice_date": now,
+                "company_id": company_id, "supplier": "Хлебозавод", "item_name": "мляко",
+                "unit_price": 1, "quantity": 20, "unit": "л",
+                "invoice_id": "x2", "invoice_number": "INV2", "invoice_date": long_ago,
+            },
+        ])
+        # A different item, under an OCR-variant name, also spanning old
+        # and recent purchases - must still merge into one canonical entry
+        # via item_merge_mappings.
+        await server_module.db.item_price_history.insert_many([
+            {
+                "company_id": company_id, "supplier": "Хлебозавод", "item_name": "хляб",
+                "unit_price": 1, "quantity": 8, "unit": "бр",
+                "invoice_id": "x3", "invoice_number": "INV3", "invoice_date": long_ago,
+            },
+            {
+                "company_id": company_id, "supplier": "Хлебозавод", "item_name": "hlyab",
+                "unit_price": 1, "quantity": 4, "unit": "бр",
+                "invoice_id": "x4", "invoice_number": "INV4", "invoice_date": now,
             },
         ])
         await server_module.db.item_merge_mappings.insert_one({
-            "company_id": company_id, "canonical_name": "питка",
-            "display_name": "Питка", "variants": ["pitka"],
-        })
-        # Last month: a single, separate purchase of "питка" (20 units) -
-        # must appear under item_purchases.last_month, never this_month.
-        await server_module.db.item_price_history.insert_one({
-            "company_id": company_id, "supplier": "Хлебозавод", "item_name": "питка",
-            "unit_price": 1, "quantity": 20, "unit": "бр",
-            "invoice_id": "x3", "invoice_number": "INV3", "invoice_date": last_month_mid,
+            "company_id": company_id, "canonical_name": "хляб",
+            "display_name": "Хляб", "variants": ["hlyab"],
         })
 
         user = server_module.User(
@@ -1532,19 +1539,16 @@ def test_item_purchases_in_chat_digest():
         return await build_business_chat_digest(user)
 
     digest = asyncio.run(_run())
-    this_month_items = {it["name"]: it for it in digest["item_purchases"]["this_month"]}
-    last_month_items = {it["name"]: it for it in digest["item_purchases"]["last_month"]}
+    items = {it["name"]: it for it in digest["item_purchases"]}
 
-    assert "Питка" in this_month_items
-    assert this_month_items["Питка"]["quantity"] == 15
-    assert this_month_items["Питка"]["purchases_count"] == 2
-    assert this_month_items["Питка"]["unit"] == "бр"
-    # The last-month purchase, alone, carries no merge mapping match on its
-    # own name - its display falls back to the raw original name, exactly
-    # like /statistics/items/merged's own unmerged-item fallback.
-    assert "питка" in last_month_items
-    assert last_month_items["питка"]["quantity"] == 20
-    assert last_month_items["питка"]["purchases_count"] == 1
+    assert "мляко" in items
+    assert items["мляко"]["quantity"] == 30
+    assert items["мляко"]["purchases_count"] == 2
+    assert items["мляко"]["unit"] == "л"
+
+    assert "Хляб" in items
+    assert items["Хляб"]["quantity"] == 12
+    assert items["Хляб"]["purchases_count"] == 2
 
 
 def test_proactive_signals(client):
