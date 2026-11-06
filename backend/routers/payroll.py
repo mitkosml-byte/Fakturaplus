@@ -279,6 +279,229 @@ async def delete_payroll_entry(entry_id: str, current_user: User = Depends(get_c
         raise HTTPException(status_code=404, detail="Записът не е намерен")
     return {"message": "Записът е изтрит"}
 
+# ===================== PAYROLL PDF IMPORT (ведомост от счетоводителя) =====================
+
+class PayrollImportEntryPreview(BaseModel):
+    name: str
+    egn: Optional[str] = None
+    position: Optional[str] = None
+    gross_amount: float
+    insurance_base: float
+    employee_contributions: float
+    employer_contributions: float
+    income_tax: float
+    other_deductions: float = 0
+    net_amount: float
+    matched_employee_id: Optional[str] = None
+    matched_employee_name: Optional[str] = None
+    match_confidence: float = 0
+    already_imported: bool = False
+
+class PayrollImportPreviewResponse(BaseModel):
+    period_month: int
+    period_year: int
+    entries: List[PayrollImportEntryPreview]
+
+class PayrollImportCommitEntry(BaseModel):
+    employee_id: str
+    period_month: int = Field(ge=1, le=12)
+    period_year: int
+    gross_amount: float = Field(gt=0)
+    insurance_base: float = Field(ge=0)
+    employee_contributions: float = Field(ge=0)
+    employer_contributions: float = Field(ge=0)
+    income_tax: float = Field(ge=0)
+    other_deductions: float = Field(default=0, ge=0)
+    net_amount: float = Field(ge=0)
+
+class PayrollImportCommitRequest(BaseModel):
+    entries: List[PayrollImportCommitEntry]
+
+# Below this, a fuzzy name match is treated as "no confident suggestion" -
+# the UI still lets the user pick an employee manually, this just controls
+# whether a dropdown opens pre-filled or empty.
+MIN_PAYROLL_IMPORT_MATCH_CONFIDENCE = 0.5
+
+def _match_payroll_import_entries(
+    parsed_entries: List[dict], employees: List[dict], employees_with_existing_entry: set
+) -> List[dict]:
+    """Fuzzy-matches each parsed ведомост entry to one of the company's own
+    Employee records by name - the only identifying field both sides share
+    (the PDF's ЕГН is shown back to the user for visual confirmation but
+    never persisted; Employee itself carries no такова поле). Same
+    _compare_key/_similarity normalization already used for supplier-name
+    matching elsewhere, kept here as its own pure function so it's testable
+    without a live Anthropic call. employees_with_existing_entry is a set
+    of employee_ids that already have a payroll_entries doc for this exact
+    period, so a re-import of the same ведомост is flagged before commit
+    rather than silently creating a duplicate."""
+    previews = []
+    for entry in parsed_entries:
+        entry_key = _compare_key(entry["name"])
+        best_id = None
+        best_name = None
+        best_score = 0.0
+        for emp in employees:
+            score = _similarity(entry_key, _compare_key(emp["name"]))
+            if score > best_score:
+                best_score = score
+                best_id = emp["id"]
+                best_name = emp["name"]
+        matched = best_score >= MIN_PAYROLL_IMPORT_MATCH_CONFIDENCE
+        matched_id = best_id if matched else None
+        previews.append({
+            **entry,
+            "matched_employee_id": matched_id,
+            "matched_employee_name": best_name if matched else None,
+            "match_confidence": round(best_score, 2),
+            "already_imported": bool(matched_id and matched_id in employees_with_existing_entry),
+        })
+    return previews
+
+# Generous for a multi-page, multi-employee ведомост PDF exported straight
+# from accounting software - these are small (text + a couple of logos),
+# nowhere near a scanned-photo invoice's size.
+MAX_PAYROLL_PDF_BYTES = 15 * 1024 * 1024
+
+@router.post("/payroll/import/preview", response_model=PayrollImportPreviewResponse)
+@limiter.limit("10/minute")
+async def preview_payroll_import(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    """Parses the accountant's own ведомост PDF (one of the two standard
+    layouts - see PAYROLL_IMPORT_SYSTEM_PROMPT) via Claude's native PDF
+    understanding, fuzzy-matches each parsed person to a company Employee
+    record, and returns a preview for the user to confirm/adjust - nothing
+    is written to the database here, exactly like /ocr/scan's own
+    preview-before-save contract for invoices."""
+    require_permission(current_user, "manage_budget")
+    if not server.AI_FEATURES_ENABLED:
+        raise HTTPException(status_code=503, detail="AI разпознаването временно не е налично. Моля, въведете данните ръчно.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Празен файл")
+    if len(content) > MAX_PAYROLL_PDF_BYTES:
+        raise HTTPException(status_code=413, detail="Файлът е твърде голям (макс. 15MB).")
+
+    company_id, scope = await get_company_scope(current_user)
+    pdf_base64 = base64.b64encode(content).decode()
+
+    try:
+        response = await anthropic_client.messages.parse(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
+            model="claude-opus-5-5",
+            max_tokens=8000,
+            system=PAYROLL_IMPORT_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_base64}},  # type: ignore[list-item]  # plain dict matching DocumentBlockParam's shape; the SDK's content union is stricter than a dict literal can satisfy
+                    {"type": "text", "text": "Извлечи всички лица от тази ведомост за заплати."}
+                ]
+            }],
+            output_format=ClaudePayrollImportExtraction,
+        )
+        await log_ai_usage(company_id, "payroll_import", response)
+        extracted = response.parsed_output
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Payroll import parse failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Грешка при разпознаване на ведомостта")
+
+    if extracted is None or not extracted.entries:
+        raise HTTPException(status_code=422, detail="Не успяхме да разпознаем лица във ведомостта. Моля, проверете файла или въведете данните ръчно.")
+
+    employees = await server.db.employees.find(scope, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    existing = await server.db.payroll_entries.find(
+        {**scope, "period_month": extracted.period_month, "period_year": extracted.period_year},
+        {"_id": 0, "employee_id": 1},
+    ).to_list(1000)
+    employees_with_existing_entry = {e["employee_id"] for e in existing}
+
+    parsed_dicts = [e.model_dump() for e in extracted.entries]
+    enriched = _match_payroll_import_entries(parsed_dicts, employees, employees_with_existing_entry)
+
+    return PayrollImportPreviewResponse(
+        period_month=extracted.period_month,
+        period_year=extracted.period_year,
+        entries=[PayrollImportEntryPreview(**e) for e in enriched],
+    )
+
+@router.post("/payroll/import/commit")
+async def commit_payroll_import(payload: PayrollImportCommitRequest, current_user: User = Depends(get_current_user)):
+    """Creates one payroll_entries doc per confirmed entry, carrying the
+    accountant's own real breakdown through verbatim (no calculate_payroll
+    re-derivation) - the entries list here is exactly what the user
+    confirmed/edited on top of the preview, each tied to an employee_id
+    they picked explicitly."""
+    require_permission(current_user, "manage_budget")
+    company_id, scope = await get_company_scope(current_user)
+
+    imported = 0
+    skipped = []
+    for entry in payload.entries:
+        employee = await server.db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
+        if not employee:
+            skipped.append({"employee_id": entry.employee_id, "message": "Служителят не е намерен"})
+            continue
+
+        existing = await server.db.payroll_entries.find_one({
+            "employee_id": entry.employee_id,
+            "period_month": entry.period_month,
+            "period_year": entry.period_year,
+        })
+        if existing:
+            skipped.append({"employee_id": entry.employee_id, "message": f"Вече има ведомост за {employee['name']} за {entry.period_month}/{entry.period_year}"})
+            continue
+
+        total_employer_cost = round(
+            entry.gross_amount + entry.employer_contributions
+            + employee.get("food_vouchers", 0) + employee.get("additional_insurance", 0),
+            2,
+        )
+        doc = {
+            "id": str(uuid.uuid4()),
+            "user_id": current_user.user_id,
+            "company_id": company_id,
+            "employee_id": entry.employee_id,
+            "employee_name": employee["name"],
+            "period_month": entry.period_month,
+            "period_year": entry.period_year,
+            "bonus_amount": 0.0,
+            "notes": "Импортирано от ведомост на счетоводителя",
+            "image_base64": None,
+            "created_at": datetime.now(timezone.utc),
+            "counted_in_expenses": True,
+            "source": "accountant_import",
+            "gross_amount": round(entry.gross_amount, 2),
+            "insurance_base": round(entry.insurance_base, 2),
+            "employee_contributions": round(entry.employee_contributions, 2),
+            "employer_contributions": round(entry.employer_contributions, 2),
+            "income_tax": round(entry.income_tax, 2),
+            "other_deductions": round(entry.other_deductions, 2),
+            "net_amount": round(entry.net_amount, 2),
+            "food_vouchers": round(employee.get("food_vouchers", 0), 2),
+            "additional_insurance": round(employee.get("additional_insurance", 0), 2),
+            "total_employer_cost": total_employer_cost,
+        }
+        await server.db.payroll_entries.insert_one(doc)
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+            action="create",
+            entity_type="payroll",
+            entity_id=doc["id"],
+            company_id=company_id,
+            details={
+                "employee": employee["name"],
+                "period": f"{entry.period_month}/{entry.period_year}",
+                "total_employer_cost": total_employer_cost,
+                "source": "accountant_import",
+            },
+        )
+        imported += 1
+
+    return {"imported": imported, "skipped": skipped, "total": len(payload.entries)}
+
 @router.get("/holidays")
 async def get_holidays(year: int, current_user: User = Depends(get_current_user)):
     """Официалният календар на неработните дни за годината - публична

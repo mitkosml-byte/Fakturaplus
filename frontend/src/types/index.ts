@@ -837,6 +837,10 @@ export interface PayrollBreakdown {
   employee_contributions: number;
   employer_contributions: number;
   income_tax: number;
+  // Advance/garnishment/other withholding distinct from social
+  // contributions and income tax - only ever non-zero for an entry
+  // imported from the accountant's own ведомост PDF.
+  other_deductions: number;
   net_amount: number;
   food_vouchers: number;
   additional_insurance: number;
@@ -857,7 +861,56 @@ export interface PayrollEntry extends PayrollBreakdown {
   // on entries created before this field existed, which means "yes"
   // (the same default new entries get), not "unknown".
   counted_in_expenses?: boolean;
+  // Absent for a manually-entered/estimated entry - "accountant_import"
+  // for one created from a parsed ведомост PDF (see PayrollImportEntry).
+  source?: 'accountant_import';
   created_at: string;
+}
+
+// One parsed person from the accountant's own ведомост PDF
+// (POST /payroll/import/preview), before the user has confirmed/adjusted
+// the employee match - egn is shown only for the user to visually confirm
+// identity, never sent back on commit or persisted anywhere.
+export interface PayrollImportEntry {
+  name: string;
+  egn?: string | null;
+  position?: string | null;
+  gross_amount: number;
+  insurance_base: number;
+  employee_contributions: number;
+  employer_contributions: number;
+  income_tax: number;
+  other_deductions: number;
+  net_amount: number;
+  matched_employee_id: string | null;
+  matched_employee_name: string | null;
+  match_confidence: number;
+  already_imported: boolean;
+}
+
+export interface PayrollImportPreviewResponse {
+  period_month: number;
+  period_year: number;
+  entries: PayrollImportEntry[];
+}
+
+export interface PayrollImportCommitEntry {
+  employee_id: string;
+  period_month: number;
+  period_year: number;
+  gross_amount: number;
+  insurance_base: number;
+  employee_contributions: number;
+  employer_contributions: number;
+  income_tax: number;
+  other_deductions: number;
+  net_amount: number;
+}
+
+export interface PayrollImportCommitResult {
+  imported: number;
+  skipped: { employee_id: string; message: string }[];
+  total: number;
 }
 
 // Official Bulgarian public holidays (computed, not stored) and

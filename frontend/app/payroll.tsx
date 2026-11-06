@@ -24,6 +24,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
+import PayrollPdfImportModal from '../src/components/PayrollPdfImportModal';
 import { COLORS } from '../src/theme/colors';
 
 const emptyEmployeeForm = () => ({
@@ -50,6 +51,7 @@ export default function PayrollScreen() {
 
   const [employeeModalVisible, setEmployeeModalVisible] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
+  const [pdfImportModalVisible, setPdfImportModalVisible] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm());
   // Optional link from this payroll record to the SAME person's own app
@@ -351,6 +353,9 @@ export default function PayrollScreen() {
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity onPress={() => router.push('/pay-run')} style={styles.backButton} accessibilityLabel={t('payroll.payTeam')}>
               <Ionicons name="cash-outline" size={22} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setPdfImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('payroll.importPdfButton')}>
+              <Ionicons name="document-attach-outline" size={22} color="white" />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('import.button')}>
               <Ionicons name="cloud-upload-outline" size={22} color="white" />
@@ -741,6 +746,13 @@ export default function PayrollScreen() {
           { key: 'period_month', label: t('payroll.period'), format: (_v, row) => `${row.period_month}/${row.period_year}` },
           { key: 'gross_amount', label: t('payroll.grossAmount'), format: (v, row) => `${Number(v ?? row.net_target ?? 0).toFixed(2)} €` },
         ]}
+        onImported={loadData}
+      />
+
+      <PayrollPdfImportModal
+        visible={pdfImportModalVisible}
+        onClose={() => setPdfImportModalVisible(false)}
+        employees={employees}
         onImported={loadData}
       />
     </View>

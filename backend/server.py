@@ -3522,6 +3522,11 @@ def calculate_payroll(
         "employee_contributions": round(employee_contributions, 2),
         "employer_contributions": round(employer_contributions, 2),
         "income_tax": round(income_tax, 2),
+        # Only ever non-zero for a ведомост imported from the accountant's
+        # own PDF (see PAYROLL PDF IMPORT below) - this formula-based
+        # estimate has no concept of an advance/garnishment/other
+        # withholding, so it's always 0 here.
+        "other_deductions": 0.0,
         "net_amount": round(net_amount, 2),
         "food_vouchers": round(food_vouchers, 2),
         "additional_insurance": round(additional_insurance, 2),
@@ -3536,8 +3541,46 @@ async def get_payroll_rates_dict(company_id: Optional[str]) -> dict:
         return dict(DEFAULT_PAYROLL_RATES)
     return {**DEFAULT_PAYROLL_RATES, **rates}
 
+# ===================== PAYROLL PDF IMPORT (ведомост от счетоводителя) =====================
+# calculate_payroll above is an ESTIMATE (see its own docstring) - useful
+# when there's no real figure yet, but once the accountant's actual
+# ведомост PDF exists it is the authoritative source, not this app's own
+# approximation. This lets that real PDF (either of the two standard
+# Bulgarian payroll-software layouts - a single-person "Ведомост за
+# договори за управление и контрол" for a managing director, or a
+# multi-employee "Разчетно-платежна ведомост") be parsed directly into
+# payroll_entries, carrying the real numbers through untouched rather than
+# re-deriving them from calculate_payroll's own formula.
+class ClaudePayrollImportEntry(BaseModel):
+    name: str = Field(description="Пълното име на лицето (служител или управител) точно както е изписано до 'Име:'")
+    egn: Optional[str] = Field(default=None, description="ЕГН на лицето, ако е видимо до 'ЕГН:'")
+    position: Optional[str] = Field(default=None, description="Длъжност, ако е изписана (напр. след 'длъжност:')")
+    gross_amount: float = Field(description="Брутното трудово възнаграждение за периода - полето 'Брутна заплата', или 'Сума за отработени дни' в документа за управление и контрол. НЕ включва осигуровки или данък.")
+    insurance_base: float = Field(description="Осигурителният доход за лицето - полето 'Осигурителен доход'")
+    employee_contributions: float = Field(description="Сборът от ВСИЧКИ осигурителни и здравни вноски за сметка на самия служител/осигурен (редовете, означени с 'от осигурен' или 'от осиг-н' - напр. ФПенсии, ФОбщо заб., ФБезраб., ЗО, ДЗПО). НЕ включва данъка върху дохода и НЕ включва 'Други удръжки', 'Аванс' или 'Запор'.")
+    employer_contributions: float = Field(description="Сборът от ВСИЧКИ осигурителни и здравни вноски за сметка на работодателя/осигурителя (редовете, означени с 'от осигурител' или 'от осиг-л' - напр. ФПенсии, ФОбщо заб., ФБезраб., ЗО, ДЗПО, Фонд ТЗПБ, Фонд ГВРС).")
+    income_tax: float = Field(description="Полето 'Данък за месеца' (данък върху дохода за текущия период)")
+    other_deductions: float = Field(default=0, description="Сборът от 'Други удръжки', 'Аванс' и 'Запор върху възнаграждението', ако има такива - обикновено 0")
+    net_amount: float = Field(description="Полето 'Сума за получаване' - нетната сума, която лицето реално получава")
 
+class ClaudePayrollImportExtraction(BaseModel):
+    period_month: int = Field(description="Месецът, за който е ведомостта (1-12), от заглавието 'за [месец] [година] г.'")
+    period_year: int = Field(description="Годината, за която е ведомостта")
+    entries: List[ClaudePayrollImportEntry] = Field(default_factory=list, description="Едно физическо лице на запис - може да е само едно (управител) или няколко (служители)")
 
+PAYROLL_IMPORT_SYSTEM_PROMPT = """Ти си експертен AI асистент за разпознаване на данни от български ведомости за заплати.
+
+Документът е ЕДИН от следните два стандартни формата на счетоводен софтуер за заплати:
+1. "Ведомост за договори за управление и контрол" - за управител/управляващ съдружник по договор за управление и контрол, обикновено само ЕДНО лице.
+2. "Разчетно - платежна ведомост" - за служители на трудов договор, обикновено НЯКОЛКО лица едно след друго, всяко в собствена секция, започваща с "Име: ... длъжност: ...".
+
+ВАЖНО - ПРОПУСНИ ОБОБЩАВАЩИЯ РЕД: И двата формата завършват с обобщаваща секция "Общо:", която сумира всички лица от документа в едни общи числа. Това НЕ Е отделно физическо лице - НИКОГА не го добавяй като отделен запис в 'entries'. Ако в документа има само едно лице (управителския формат), секцията "Общо:" просто повтаря неговите числа - пак я пропускай, връщай само реалната секция с "Име:".
+
+Етикетите на удръжките се различават леко между двата формата, но означават едно и също:
+- "от осигурен" (управителски формат) = "от осиг-н" (служителски формат) = за сметка на самия служител/управител.
+- "от осигурител" (управителски формат) = "от осиг-л" (служителски формат) = за сметка на работодателя.
+
+Прегледай ЦЯЛОТО изображение внимателно, страница по страница - не пропускай лица само защото са в края на документ с много страници. Извлечи числата ТОЧНО както са отпечатани, не закръгляй и не измисляй стойности, които не се виждат."""
 
 
 

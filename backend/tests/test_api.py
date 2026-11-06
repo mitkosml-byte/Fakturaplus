@@ -475,6 +475,95 @@ def test_employees_and_payroll(client):
     assert r.status_code == 200
 
 
+def test_payroll_import_entry_matching():
+    """_match_payroll_import_entries is the pure-function core of the
+    accountant-ведомост PDF import (routers/payroll.py) - unit-testable
+    without a live Anthropic call, unlike the preview endpoint itself.
+    Must: (1) fuzzy-match a parsed name to the right Employee despite
+    punctuation/casing differences, (2) leave a genuinely unmatched name
+    unmatched rather than forcing a weak guess, and (3) flag an employee
+    who already has a payroll_entries doc for this exact period."""
+    from routers.payroll import _match_payroll_import_entries
+
+    employees = [
+        {"id": "e1", "name": "Виолета Петрова Новакова"},
+        {"id": "e2", "name": "Галина Христова Златева"},
+    ]
+    parsed = [
+        {"name": "виолета петрова новакова"},  # same name, different case - must still match e1
+        {"name": "Съвсем Друго Име Непознато"},  # no real employee is this - must stay unmatched
+    ]
+    result = _match_payroll_import_entries(parsed, employees, employees_with_existing_entry={"e1"})
+
+    violeta = result[0]
+    assert violeta["matched_employee_id"] == "e1"
+    assert violeta["matched_employee_name"] == "Виолета Петрова Новакова"
+    assert violeta["already_imported"] is True
+
+    unknown = result[1]
+    assert unknown["matched_employee_id"] is None
+    assert unknown["matched_employee_name"] is None
+    assert unknown["already_imported"] is False
+
+
+def test_payroll_import_commit(client):
+    """The accountant-ведомост PDF import's commit step: creates a
+    payroll_entries doc carrying the REAL numbers from the PDF through
+    verbatim (not recomputed via calculate_payroll's own approximation),
+    tagged source=accountant_import, and must refuse to silently duplicate
+    an entry already imported for the same employee+period."""
+    owner = h(STATE["owner_token"])
+    r = client.post("/api/employees", headers=owner, json={
+        "name": "Ведомост Тестов", "position": "Готвач", "base_salary": 900, "agreement_type": "gross",
+    })
+    assert r.status_code == 200
+    emp_id = r.json()["id"]
+
+    entry = {
+        "employee_id": emp_id, "period_month": 9, "period_year": 2026,
+        "gross_amount": 409.50, "insurance_base": 409.50,
+        "employee_contributions": 56.44, "employer_contributions": 77.48,
+        "income_tax": 35.31, "other_deductions": 0, "net_amount": 317.76,
+    }
+    r = client.post("/api/payroll/import/commit", headers=owner, json={"entries": [entry]})
+    assert r.status_code == 200, r.text
+    result = r.json()
+    assert result["imported"] == 1 and result["skipped"] == []
+
+    r = client.get("/api/payroll?year=2026&month=9", headers=owner)
+    assert r.status_code == 200
+    created = next(e for e in r.json() if e["employee_id"] == emp_id)
+    assert created["source"] == "accountant_import"
+    assert created["net_amount"] == 317.76
+    assert created["income_tax"] == 35.31
+    # total_employer_cost = gross + employer_contributions (+ food vouchers/
+    # additional insurance, both 0 for this employee) - the REAL gross/
+    # employer figures from the ведомост, not an estimate.
+    assert created["total_employer_cost"] == round(409.50 + 77.48, 2)
+
+    # Re-importing the same employee+period must be skipped, never silently
+    # duplicated.
+    r = client.post("/api/payroll/import/commit", headers=owner, json={"entries": [entry]})
+    assert r.status_code == 200
+    result = r.json()
+    assert result["imported"] == 0 and len(result["skipped"]) == 1
+
+    r = client.delete(f"/api/payroll/{created['id']}", headers=owner)
+    assert r.status_code == 200
+    r = client.delete(f"/api/employees/{emp_id}", headers=owner)
+    assert r.status_code == 200
+
+
+def test_payroll_import_preview_size_gate(client):
+    """Regression check: no AI key locally, so this only confirms an
+    oversized PDF is rejected cleanly instead of crashing - mirrors
+    test_ocr_size_gate's own reasoning for the same local-env constraint."""
+    owner = h(STATE["owner_token"])
+    huge_file = ("ведомост.pdf", b"%PDF-1.4 " + b"A" * 15_000_001, "application/pdf")
+    r = client.post("/api/payroll/import/preview", headers=owner, files={"file": huge_file})
+    assert r.status_code in (413, 503)
+
+
 def test_fixed_assets(client):
     owner = h(STATE["owner_token"])
     r = client.post("/api/assets", headers=owner, json={

@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
-WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate } from '../types';
+WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
+PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult } from '../types';
 import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -1285,6 +1286,36 @@ class ApiService {
 
   async deletePayrollEntry(id: string): Promise<void> {
     await this.fetch(`/payroll/${id}`, { method: 'DELETE' });
+  }
+
+  // Accountant-ведомост PDF import - same multipart pattern as
+  // previewImport above, since this also sends a file rather than JSON.
+  async previewPayrollImport(asset: { uri: string; name: string; mimeType?: string; file?: any }): Promise<PayrollImportPreviewResponse> {
+    const formData = new FormData();
+    if (Platform.OS === 'web' && asset.file) {
+      formData.append('file', asset.file, asset.name);
+    } else {
+      formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || 'application/pdf' } as any);
+    }
+
+    const headers: Record<string, string> = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+
+    const response = await fetch(`${API_URL}/api/payroll/import/preview`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
+      throw new Error(formatApiErrorDetail(error.detail));
+    }
+    return response.json();
+  }
+
+  async commitPayrollImport(entries: PayrollImportCommitEntry[]): Promise<PayrollImportCommitResult> {
+    return this.fetch('/payroll/import/commit', { method: 'POST', body: JSON.stringify({ entries }) });
   }
 
   // Official holidays (computed, public) + employee holiday-work / leave
