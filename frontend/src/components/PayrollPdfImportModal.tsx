@@ -13,7 +13,11 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   employees: Employee[];
-  onImported: () => void;
+  // Called after a successful commit with the period that was just
+  // imported, so the caller can jump its own month selector there - a
+  // committed-but-still-off-screen import otherwise looks identical to a
+  // failed one.
+  onImported: (periodMonth: number, periodYear: number) => void;
 }
 
 type Step = 'pick' | 'loading' | 'preview' | 'committing' | 'done';
@@ -26,12 +30,22 @@ export default function PayrollPdfImportModal({ visible, onClose, employees, onI
   // pre-filled with the backend's own fuzzy-match suggestion, editable here
   // before anything is actually saved.
   const [selections, setSelections] = useState<Record<number, string | null>>({});
+  // Employees created ON THE SPOT from an unmatched row (see
+  // handleCreateEmployee) - merged with the `employees` prop for chip
+  // rendering so a brand-new company with zero Employee records yet can
+  // still complete an import instead of having no selectable chip at all.
+  const [createdEmployees, setCreatedEmployees] = useState<Employee[]>([]);
+  const [creatingIndex, setCreatingIndex] = useState<number | null>(null);
   const [commitSummary, setCommitSummary] = useState<{ imported: number; total: number; skippedCount: number } | null>(null);
+
+  const allEmployees = [...employees, ...createdEmployees];
 
   const reset = () => {
     setStep('pick');
     setPreview(null);
     setSelections({});
+    setCreatedEmployees([]);
+    setCreatingIndex(null);
     setCommitSummary(null);
   };
 
@@ -70,6 +84,30 @@ export default function PayrollPdfImportModal({ visible, onClose, employees, onI
     ? preview.entries.filter((entry, i) => !entry.already_imported && selections[i]).length
     : 0;
 
+  // The row's own parsed name/position/gross become sensible starting
+  // defaults for a brand-new Employee record - editable afterward in
+  // "Служители" like any other employee, same as every field a manually
+  // created one starts with.
+  const handleCreateEmployee = async (rowIndex: number) => {
+    if (!preview) return;
+    const entry = preview.entries[rowIndex];
+    setCreatingIndex(rowIndex);
+    try {
+      const newEmployee = await api.createEmployee({
+        name: entry.name,
+        position: entry.position || undefined,
+        base_salary: entry.gross_amount,
+        agreement_type: 'gross',
+      });
+      setCreatedEmployees((prev) => [...prev, newEmployee]);
+      setSelections((prev) => ({ ...prev, [rowIndex]: newEmployee.id }));
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setCreatingIndex(null);
+    }
+  };
+
   const handleCommit = async () => {
     if (!preview) return;
     const entries: PayrollImportCommitEntry[] = preview.entries
@@ -94,7 +132,7 @@ export default function PayrollPdfImportModal({ visible, onClose, employees, onI
       const result = await api.commitPayrollImport(entries);
       setCommitSummary({ imported: result.imported, total: entries.length, skippedCount: result.skipped.length });
       setStep('done');
-      onImported();
+      onImported(preview.period_month, preview.period_year);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
       setStep('preview');
@@ -168,7 +206,7 @@ export default function PayrollPdfImportModal({ visible, onClose, employees, onI
                             {t('payroll.importPdfSkip')}
                           </Text>
                         </TouchableOpacity>
-                        {employees.map((emp) => (
+                        {allEmployees.map((emp) => (
                           <TouchableOpacity
                             key={emp.id}
                             style={[styles.chip, selections[i] === emp.id && styles.chipActive]}
@@ -179,6 +217,19 @@ export default function PayrollPdfImportModal({ visible, onClose, employees, onI
                             </Text>
                           </TouchableOpacity>
                         ))}
+                        <TouchableOpacity
+                          style={[styles.chip, styles.chipNew]}
+                          onPress={() => handleCreateEmployee(i)}
+                          disabled={creatingIndex === i}
+                        >
+                          {creatingIndex === i ? (
+                            <ActivityIndicator size="small" color={COLORS.primary} />
+                          ) : (
+                            <Text style={[styles.chipText, styles.chipNewText]}>
+                              {t('payroll.importPdfNewEmployee')}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
                       </View>
                     )}
                   </View>
@@ -375,6 +426,14 @@ const styles = StyleSheet.create({
   chipActive: {
     backgroundColor: COLORS.primary,
     borderColor: COLORS.primary,
+  },
+  chipNew: {
+    borderStyle: 'dashed',
+    borderColor: COLORS.primary,
+  },
+  chipNewText: {
+    color: COLORS.primary,
+    fontWeight: '600',
   },
   chipText: {
     fontSize: 12,

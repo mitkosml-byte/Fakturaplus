@@ -564,6 +564,48 @@ def test_payroll_import_preview_size_gate(client):
     assert r.status_code in (413, 503)
 
 
+def test_payroll_import_commit_reflects_in_statistics_summary(client):
+    """The whole point of importing the accountant's real ведомост is that
+    it counts toward business expenses exactly like a manually-entered
+    payroll entry does (get_payroll_cost_for_period, surfaced as
+    total_payroll_cost in /statistics/summary) - same assertion pattern as
+    test_payroll_counted_in_expenses_toggle, but for the accountant_import
+    path specifically, since that's the one a user can't otherwise verify
+    without a live Anthropic call."""
+    owner = h(STATE["owner_token"])
+
+    r = client.post("/api/employees", headers=owner, json={"name": "Import Stats Test Employee", "base_salary": 500})
+    assert r.status_code == 200, r.text
+    employee_id = r.json()["id"]
+
+    r = client.get("/api/statistics/summary?start_date=2026-08-01&end_date=2026-08-31", headers=owner)
+    assert r.status_code == 200
+    baseline_payroll_cost = r.json()["total_payroll_cost"]
+
+    entry = {
+        "employee_id": employee_id, "period_month": 8, "period_year": 2026,
+        "gross_amount": 500, "insurance_base": 500,
+        "employee_contributions": 68.9, "employer_contributions": 94.6,
+        "income_tax": 43.11, "other_deductions": 0, "net_amount": 387.99,
+    }
+    r = client.post("/api/payroll/import/commit", headers=owner, json={"entries": [entry]})
+    assert r.status_code == 200, r.text
+    assert r.json()["imported"] == 1
+
+    r = client.get("/api/payroll?year=2026&month=8", headers=owner)
+    entry_id = next(e for e in r.json() if e["employee_id"] == employee_id)["id"]
+    expected_employer_cost = round(500 + 94.6, 2)
+
+    r = client.get("/api/statistics/summary?start_date=2026-08-01&end_date=2026-08-31", headers=owner)
+    assert r.status_code == 200
+    assert round(r.json()["total_payroll_cost"], 2) == round(baseline_payroll_cost + expected_employer_cost, 2)
+
+    r = client.delete(f"/api/payroll/{entry_id}", headers=owner)
+    assert r.status_code == 200
+    r = client.delete(f"/api/employees/{employee_id}", headers=owner)
+    assert r.status_code == 200
+
+
 def test_fixed_assets(client):
     owner = h(STATE["owner_token"])
     r = client.post("/api/assets", headers=owner, json={

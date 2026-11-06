@@ -424,6 +424,12 @@ export default function PayrollScreen() {
 
                   {entry ? (
                     <View style={styles.entrySummary}>
+                      {entry.source === 'accountant_import' && (
+                        <View style={styles.importedBadge}>
+                          <Ionicons name="document-attach" size={11} color={COLORS.success} />
+                          <Text style={styles.importedBadgeText}>{t('payroll.importedBadge')}</Text>
+                        </View>
+                      )}
                       <View style={styles.entrySummaryRow}>
                         <Text style={styles.entrySummaryLabel}>{t('payroll.netAmount')}</Text>
                         <Text style={styles.entrySummaryValue}>{entry.net_amount.toFixed(2)} €</Text>
@@ -753,7 +759,14 @@ export default function PayrollScreen() {
         visible={pdfImportModalVisible}
         onClose={() => setPdfImportModalVisible(false)}
         employees={employees}
-        onImported={loadData}
+        onImported={(importedMonth, importedYear) => {
+          // Jumps the screen to the period that was just imported - loadData
+          // re-runs automatically via the effect watching periodMonth/
+          // periodYear below, so a successful import is immediately visible
+          // instead of silently landing on whatever month happened to be
+          // selected before the import.
+          setSelectedMonth(new Date(importedYear, importedMonth - 1, 1));
+        }}
       />
     </View>
     </ScreenEnter>
@@ -815,6 +828,8 @@ const styles = StyleSheet.create({
   },
   processButtonText: { color: 'white', fontSize: 13, fontWeight: '600' },
   entrySummary: { backgroundColor: COLORS.background, borderRadius: 10, padding: 12 },
+  importedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginBottom: 6 },
+  importedBadgeText: { fontSize: 10, color: COLORS.success, fontWeight: '600' },
   entrySummaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
   entrySummaryLabel: { fontSize: 12, color: COLORS.textSecondary },
   entrySummaryValue: { fontSize: 13, fontWeight: '600', color: 'white' },

@@ -4009,6 +4009,8 @@ export const translations: Translations = {
   'payroll.importPdfNet': { bg: 'Нето', en: 'Net' },
   'payroll.importPdfAlreadyImported': { bg: 'Вече е импортирано за този период', en: 'Already imported for this period' },
   'payroll.importPdfSkip': { bg: 'Пропусни', en: 'Skip' },
+  'payroll.importPdfNewEmployee': { bg: '+ Нов служител', en: '+ New employee' },
+  'payroll.importedBadge': { bg: 'От ведомост (PDF)', en: 'From payslip (PDF)' },
   'payroll.importPdfCommit': { bg: 'Импортирай {count} записа', en: 'Import {count} entries' },
   'payroll.importPdfNoneSelected': {
     bg: 'Изберете служител поне за един ред, за да продължите.',
