@@ -24,6 +24,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
+import PayrollPdfImportModal from '../src/components/PayrollPdfImportModal';
 import { COLORS } from '../src/theme/colors';
 
 const emptyEmployeeForm = () => ({
@@ -33,6 +34,7 @@ const emptyEmployeeForm = () => ({
   agreement_type: 'gross' as PayrollAgreementType,
   food_vouchers: '',
   additional_insurance: '',
+  linked_user_id: null as string | null,
 });
 
 export default function PayrollScreen() {
@@ -49,8 +51,13 @@ export default function PayrollScreen() {
 
   const [employeeModalVisible, setEmployeeModalVisible] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
+  const [pdfImportModalVisible, setPdfImportModalVisible] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm());
+  // Optional link from this payroll record to the SAME person's own app
+  // account, so work-schedule can cross-check a shift against their
+  // already-recorded leave. Loaded once, used only to populate the picker.
+  const [directory, setDirectory] = useState<{ user_id: string; name: string; picture: string | null }[]>([]);
 
   const [payrollModalVisible, setPayrollModalVisible] = useState(false);
   const [payrollEmployee, setPayrollEmployee] = useState<Employee | null>(null);
@@ -76,14 +83,16 @@ export default function PayrollScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const [employeesData, entriesData, ratesData] = await Promise.all([
+      const [employeesData, entriesData, ratesData, directoryData] = await Promise.all([
         api.getEmployees(),
         api.getPayrollEntries({ month: periodMonth, year: periodYear }),
         api.getPayrollRates(),
+        api.getCompanyDirectory(),
       ]);
       setEmployees(employeesData);
       setEntries(entriesData);
       setRates(ratesData);
+      setDirectory(directoryData);
     } catch (error) {
       console.error('Error loading payroll data:', error);
     } finally {
@@ -106,7 +115,13 @@ export default function PayrollScreen() {
   };
 
   const entryForEmployee = (employeeId: string) => entries.find((e) => e.employee_id === employeeId);
-  const totalCostThisMonth = entries.reduce((sum, e) => sum + e.total_employer_cost, 0);
+  // Matches the backend's own get_payroll_cost_for_period filter - an
+  // entry switched off here must disappear from this total too, or the
+  // screen would show a number that contradicts what actually counts
+  // toward business expenses elsewhere in the app.
+  const totalCostThisMonth = entries
+    .filter((e) => e.counted_in_expenses !== false)
+    .reduce((sum, e) => sum + e.total_employer_cost, 0);
 
   // ---- Employee CRUD ----
   const openNewEmployee = () => {
@@ -124,6 +139,7 @@ export default function PayrollScreen() {
       agreement_type: emp.agreement_type,
       food_vouchers: emp.food_vouchers ? String(emp.food_vouchers) : '',
       additional_insurance: emp.additional_insurance ? String(emp.additional_insurance) : '',
+      linked_user_id: emp.linked_user_id || null,
     });
     setEmployeeModalVisible(true);
   };
@@ -140,6 +156,7 @@ export default function PayrollScreen() {
       agreement_type: employeeForm.agreement_type,
       food_vouchers: parseFloat(employeeForm.food_vouchers) || 0,
       additional_insurance: parseFloat(employeeForm.additional_insurance) || 0,
+      linked_user_id: employeeForm.linked_user_id,
     };
     try {
       if (editingEmployee) {
@@ -259,6 +276,16 @@ export default function PayrollScreen() {
     }
   };
 
+  const toggleCountedInExpenses = async (entry: PayrollEntry) => {
+    const next = !(entry.counted_in_expenses !== false);
+    try {
+      await api.setPayrollEntryCountedInExpenses(entry.id, next);
+      await loadData();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    }
+  };
+
   const deletePayrollEntry = (entry: PayrollEntry) => {
     Alert.alert(
       t('common.confirm'),
@@ -324,6 +351,12 @@ export default function PayrollScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('payroll.title')}</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity onPress={() => router.push('/pay-run')} style={styles.backButton} accessibilityLabel={t('payroll.payTeam')}>
+              <Ionicons name="cash-outline" size={22} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setPdfImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('payroll.importPdfButton')}>
+              <Ionicons name="document-attach-outline" size={22} color="white" />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('import.button')}>
               <Ionicons name="cloud-upload-outline" size={22} color="white" />
             </TouchableOpacity>
@@ -391,6 +424,12 @@ export default function PayrollScreen() {
 
                   {entry ? (
                     <View style={styles.entrySummary}>
+                      {entry.source === 'accountant_import' && (
+                        <View style={styles.importedBadge}>
+                          <Ionicons name="document-attach" size={11} color={COLORS.success} />
+                          <Text style={styles.importedBadgeText}>{t('payroll.importedBadge')}</Text>
+                        </View>
+                      )}
                       <View style={styles.entrySummaryRow}>
                         <Text style={styles.entrySummaryLabel}>{t('payroll.netAmount')}</Text>
                         <Text style={styles.entrySummaryValue}>{entry.net_amount.toFixed(2)} €</Text>
@@ -399,6 +438,14 @@ export default function PayrollScreen() {
                         <Text style={styles.entrySummaryLabel}>{t('payroll.totalEmployerCost')}</Text>
                         <Text style={[styles.entrySummaryValue, { color: COLORS.primary }]}>{entry.total_employer_cost.toFixed(2)} €</Text>
                       </View>
+                      <TouchableOpacity style={styles.countedToggleRow} onPress={() => toggleCountedInExpenses(entry)}>
+                        <Ionicons
+                          name={entry.counted_in_expenses !== false ? 'checkbox' : 'square-outline'}
+                          size={18}
+                          color={COLORS.primary}
+                        />
+                        <Text style={styles.countedToggleText}>{t('payroll.countedInExpenses')}</Text>
+                      </TouchableOpacity>
                       <TouchableOpacity style={styles.deleteEntryButton} onPress={() => deletePayrollEntry(entry)}>
                         <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
                         <Text style={styles.deleteEntryText}>{t('payroll.removeEntry')}</Text>
@@ -498,6 +545,30 @@ export default function PayrollScreen() {
                     placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
+              </View>
+
+              <Text style={styles.inputLabel}>{t('payroll.linkedAccount')}</Text>
+              <Text style={styles.linkedAccountHint}>{t('payroll.linkedAccountHint')}</Text>
+              <View style={styles.linkChipRow}>
+                <TouchableOpacity
+                  style={[styles.linkChip, !employeeForm.linked_user_id && styles.linkChipActive]}
+                  onPress={() => setEmployeeForm((p) => ({ ...p, linked_user_id: null }))}
+                >
+                  <Text style={[styles.linkChipText, !employeeForm.linked_user_id && styles.linkChipTextActive]}>
+                    {t('payroll.noLinkedAccount')}
+                  </Text>
+                </TouchableOpacity>
+                {directory.map((d) => (
+                  <TouchableOpacity
+                    key={d.user_id}
+                    style={[styles.linkChip, employeeForm.linked_user_id === d.user_id && styles.linkChipActive]}
+                    onPress={() => setEmployeeForm((p) => ({ ...p, linked_user_id: d.user_id }))}
+                  >
+                    <Text style={[styles.linkChipText, employeeForm.linked_user_id === d.user_id && styles.linkChipTextActive]}>
+                      {d.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
               <View style={styles.modalButtons}>
@@ -683,6 +754,20 @@ export default function PayrollScreen() {
         ]}
         onImported={loadData}
       />
+
+      <PayrollPdfImportModal
+        visible={pdfImportModalVisible}
+        onClose={() => setPdfImportModalVisible(false)}
+        employees={employees}
+        onImported={(importedMonth, importedYear) => {
+          // Jumps the screen to the period that was just imported - loadData
+          // re-runs automatically via the effect watching periodMonth/
+          // periodYear below, so a successful import is immediately visible
+          // instead of silently landing on whatever month happened to be
+          // selected before the import.
+          setSelectedMonth(new Date(importedYear, importedMonth - 1, 1));
+        }}
+      />
     </View>
     </ScreenEnter>
   );
@@ -743,11 +828,15 @@ const styles = StyleSheet.create({
   },
   processButtonText: { color: 'white', fontSize: 13, fontWeight: '600' },
   entrySummary: { backgroundColor: COLORS.background, borderRadius: 10, padding: 12 },
+  importedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginBottom: 6 },
+  importedBadgeText: { fontSize: 10, color: COLORS.success, fontWeight: '600' },
   entrySummaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
   entrySummaryLabel: { fontSize: 12, color: COLORS.textSecondary },
   entrySummaryValue: { fontSize: 13, fontWeight: '600', color: 'white' },
   deleteEntryButton: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, alignSelf: 'flex-start' },
   deleteEntryText: { fontSize: 11, color: COLORS.danger },
+  countedToggleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  countedToggleText: { fontSize: 12, color: COLORS.textSecondary },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 22 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: 'white', textAlign: 'center' },
@@ -756,9 +845,19 @@ const styles = StyleSheet.create({
   input: { backgroundColor: COLORS.background, borderRadius: 10, padding: 12, color: 'white', fontSize: 15 },
   row2: { flexDirection: 'row', gap: 12 },
   agreementRow: { flexDirection: 'row', gap: 10 },
-  agreementChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.background, alignItems: 'center' },
+  // minWidth: 0 overrides flex items' web default of min-width: auto, which
+  // refuses to shrink a chip below its text's natural width and overflows
+  // a longer label past its border instead of wrapping (same fix as
+  // ChipTabs' chip style and users-management's roleOption).
+  agreementChip: { flex: 1, minWidth: 0, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.background, alignItems: 'center' },
   agreementChipActive: { backgroundColor: COLORS.primary },
-  agreementChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  agreementChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500', textAlign: 'center' },
+  linkedAccountHint: { fontSize: 11, color: COLORS.textMuted, marginBottom: 8 },
+  linkChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  linkChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: COLORS.background },
+  linkChipActive: { backgroundColor: COLORS.primary },
+  linkChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  linkChipTextActive: { color: 'white' },
   agreementChipTextActive: { color: 'white' },
   attachButton: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, alignSelf: 'flex-start' },
   attachButtonText: { fontSize: 13, color: COLORS.primary, fontWeight: '500' },

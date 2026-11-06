@@ -26,7 +26,7 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 export default function AccountSecurityScreen() {
   const router = useRouter();
   const { t } = useTranslation();
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const hasPassword = !!user?.has_password;
 
   const [currentPassword, setCurrentPassword] = useState('');
@@ -35,6 +35,10 @@ export default function AccountSecurityScreen() {
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [deletePassword, setDeletePassword] = useState('');
+  const [showDeletePassword, setShowDeletePassword] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleSave = async () => {
     if (hasPassword && !currentPassword.trim()) {
@@ -70,6 +74,38 @@ export default function AccountSecurityScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleDeleteAccount = () => {
+    if (hasPassword && !deletePassword.trim()) {
+      Alert.alert(t('common.error'), t('accountSecurity.enterPasswordToDelete'));
+      return;
+    }
+    Alert.alert(
+      t('accountSecurity.deleteAccountTitle'),
+      t('accountSecurity.deleteAccountConfirm'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('accountSecurity.deleteAccountConfirmButton'),
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await api.deleteAccount(hasPassword ? deletePassword : undefined);
+              Haptics.success();
+              // Root layout's auth guard redirects to "/login" as soon as
+              // isAuthenticated flips false, same as the regular logout
+              // flow - no manual navigation needed.
+              await logout();
+            } catch (error: any) {
+              Alert.alert(t('common.error'), error.message);
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -162,6 +198,51 @@ export default function AccountSecurityScreen() {
                 <Text style={{ color: COLORS.textLight, fontWeight: '600' }}>{user?.email}</Text>
                 {t('accountSecurity.emailChangeUnavailable')}
               </Text>
+            </View>
+
+            <View style={styles.dangerSection}>
+              <View style={styles.sectionHeader}>
+                <View style={[styles.sectionIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+                  <Ionicons name="warning" size={24} color={COLORS.danger} />
+                </View>
+                <View style={styles.sectionTitleContainer}>
+                  <Text style={[styles.sectionTitle, { color: COLORS.danger }]}>
+                    {t('accountSecurity.deleteAccountTitle')}
+                  </Text>
+                  <Text style={styles.sectionSubtitle}>{t('accountSecurity.deleteAccountHint')}</Text>
+                </View>
+              </View>
+
+              {hasPassword && (
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputLabel}>{t('accountSecurity.currentPassword')}</Text>
+                  <View style={styles.passwordRow}>
+                    <TextInput
+                      style={styles.passwordInput}
+                      value={deletePassword}
+                      onChangeText={setDeletePassword}
+                      secureTextEntry={!showDeletePassword}
+                      placeholder="••••••••"
+                      placeholderTextColor={COLORS.textMuted}
+                    />
+                    <TouchableOpacity onPress={() => setShowDeletePassword(!showDeletePassword)}>
+                      <Ionicons name={showDeletePassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={[styles.deleteButton, deleting && styles.saveButtonDisabled]}
+                onPress={handleDeleteAccount}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <ActivityIndicator color={COLORS.danger} />
+                ) : (
+                  <Text style={styles.deleteButtonText}>{t('accountSecurity.deleteAccountButton')}</Text>
+                )}
+              </TouchableOpacity>
             </View>
           </ScrollView>
 
@@ -266,6 +347,24 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   infoText: { flex: 1, fontSize: 13, color: COLORS.textMuted, lineHeight: 20 },
+  dangerSection: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 32,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  deleteButton: {
+    marginTop: 16,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+  },
+  deleteButtonText: { color: COLORS.danger, fontSize: 16, fontWeight: '600' },
   footer: { padding: 16, borderTopWidth: 1, borderTopColor: COLORS.surface },
   saveButton: {
     backgroundColor: COLORS.primary,

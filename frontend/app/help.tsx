@@ -211,8 +211,8 @@ export default function HelpScreen() {
       icon: 'cloud-upload',
       title: 'Backup',
       content: [
-        '☁️ Профил → Google Drive бекъп',
-        '📤 Създайте backup и го запазете в Google Drive',
+        '☁️ Профил → Износ/импорт на бекъп',
+        '📤 Създайте backup и го запазете където пожелаете (Google Drive, имейл, локално)',
         '📥 Възстановете данни от backup файл',
         '🔒 Данните се съхраняват сигурно в базата данни на приложението',
       ],
@@ -379,8 +379,8 @@ export default function HelpScreen() {
       icon: 'cloud-upload',
       title: 'Backup',
       content: [
-        '☁️ Profile → Google Drive backup',
-        '📤 Create a backup and save it to Google Drive',
+        '☁️ Profile → Backup export/import',
+        '📤 Create a backup and save it wherever you like (Google Drive, email, locally)',
         '📥 Restore data from a backup file',
         "🔒 Data is stored securely in the app's own database",
       ],

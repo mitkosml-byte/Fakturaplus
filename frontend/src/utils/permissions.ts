@@ -37,10 +37,12 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<ConfigurableRole, Permission[]> = 
     'manage_budget', 'export_data', 'view_statistics', 'manage_invoices', 'add_revenue', 'add_expenses',
     'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'team_collaboration',
   ],
-  staff: [
-    'manage_invoices', 'add_revenue', 'add_expenses',
-    'view_pocket_money', 'view_off_book_expenses',
-  ],
+  // Empty by design: a newly invited staff member starts with no
+  // permission at all - everything these gate is opt-in, ticked explicitly
+  // per person. Their own Work Schedule shifts and their own Account/
+  // profile settings aren't gated by any of these, so those stay reachable
+  // regardless.
+  staff: [],
   accountant: [
     'view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices',
     'view_profit', 'team_collaboration',

@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { api } from '../services/api';
+import { useScanBalance } from '../queries/useScanBalance';
 import { COLORS } from '../theme/colors';
 
 // Small persistent pill showing remaining scan credits, mounted in the
@@ -16,26 +16,27 @@ import { COLORS } from '../theme/colors';
 // actual tappable entry point to the billing screen.
 export function ScanCreditsBadge() {
   const router = useRouter();
-  const [remaining, setRemaining] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.getScanBalance()
-      .then((balance) => { if (!cancelled) setRemaining(balance.total_remaining); })
-      .catch(() => { /* silent - this is a convenience indicator, not critical path */ });
-    return () => { cancelled = true; };
-  }, []);
+  const { data: balance } = useScanBalance();
+  const remaining = balance?.total_remaining ?? null;
 
   if (remaining === null) return null;
 
+  // Previously only turned amber at exactly zero - the first the owner
+  // ever heard about running low was the scan they couldn't make. A
+  // small absolute cutoff (not a percentage of the total, which would
+  // warn "3 left" differently for a 10-scan free account than a 150-scan
+  // purchased one, when 3 is 3 either way) gives real advance notice.
+  const isLow = remaining > 0 && remaining <= 3;
+  const isEmpty = remaining === 0;
+
   return (
     <TouchableOpacity
-      style={[styles.badge, remaining === 0 && styles.badgeEmpty]}
+      style={[styles.badge, (isLow || isEmpty) && styles.badgeEmpty]}
       onPress={() => router.push('/scan-credits')}
       accessibilityLabel={`${remaining}`}
     >
-      <Ionicons name="scan-outline" size={14} color={remaining === 0 ? COLORS.warning : COLORS.teal} />
-      <Text style={[styles.text, remaining === 0 && styles.textEmpty]}>{remaining}</Text>
+      <Ionicons name="scan-outline" size={14} color={(isLow || isEmpty) ? COLORS.warning : COLORS.teal} />
+      <Text style={[styles.text, (isLow || isEmpty) && styles.textEmpty]}>{remaining}</Text>
     </TouchableOpacity>
   );
 }

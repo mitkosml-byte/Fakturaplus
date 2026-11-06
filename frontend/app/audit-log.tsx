@@ -18,7 +18,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
-import { AccessDenied, ScreenEnter, AnimatedEmptyIcon } from '../src/components';
+import { AccessDenied, ScreenEnter, AnimatedEmptyIcon, Avatar } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 type ActionFilter = 'all' | 'create' | 'update' | 'delete' | 'export';
@@ -52,6 +52,9 @@ export default function AuditLogScreen() {
   const [actionFilter, setActionFilter] = useState<ActionFilter>('all');
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // Log entries only ever stored user_name (a snapshot) - resolved from
+  // the company directory instead, same approach as message-thread.tsx.
+  const [pictureByUserId, setPictureByUserId] = useState<Record<string, string | null>>({});
 
   // Takes an optional override so the "clear" button can search with an
   // empty string immediately, instead of racing the setSearchQuery('')
@@ -81,6 +84,12 @@ export default function AuditLogScreen() {
     loadLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionFilter]);
+
+  useEffect(() => {
+    api.getCompanyDirectory()
+      .then((dir) => setPictureByUserId(Object.fromEntries(dir.map((d) => [d.user_id, d.picture]))))
+      .catch(() => {});
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -234,9 +243,12 @@ export default function AuditLogScreen() {
                   <Ionicons name={icon.name} size={18} color={icon.color} />
                 </View>
                 <View style={styles.logContent}>
-                  <Text style={styles.logSummary}>
-                    <Text style={styles.logUser}>{entry.user_name}</Text> · {describeEntry(entry)}
-                  </Text>
+                  <View style={styles.logSummaryRow}>
+                    <Avatar uri={pictureByUserId[entry.user_id]} name={entry.user_name} size={16} />
+                    <Text style={styles.logSummary}>
+                      <Text style={styles.logUser}>{entry.user_name}</Text> · {describeEntry(entry)}
+                    </Text>
+                  </View>
                   <Text style={styles.logTimestamp}>{formatTimestamp(entry.created_at)}</Text>
                   {canRestore(entry) && (
                     <TouchableOpacity
@@ -367,7 +379,13 @@ const styles = StyleSheet.create({
   logContent: {
     flex: 1,
   },
+  logSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
   logSummary: {
+    flex: 1,
     fontSize: 14,
     color: COLORS.textLight,
     lineHeight: 20,
