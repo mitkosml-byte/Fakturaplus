@@ -902,6 +902,9 @@ def _size_free_key(name: str) -> str:
 # likely been dropped than forgotten: it stops being "time to reorder" and
 # becomes the question "do you still buy it?" (see reorder_overview).
 STALE_CADENCE_CYCLES = 4
+# A gap this many times the item's usual one is a pause (an off-season, a
+# closure), not part of its rhythm.
+PAUSE_GAP_FACTOR = 4
 
 
 async def _revenue_trend_ratio(company_id: str, window_days: int) -> float:
@@ -1072,7 +1075,15 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
             continue
         entries_sorted = sorted((tuple(v) for v in by_day.values()), key=lambda e: e[0])
         dates_sorted = [e[0] for e in entries_sorted]
-        gaps = [(dates_sorted[i + 1].date() - dates_sorted[i].date()).days for i in range(len(dates_sorted) - 1)]
+        all_gaps = [(dates_sorted[i + 1].date() - dates_sorted[i].date()).days for i in range(len(dates_sorted) - 1)]
+        # Pauses (an off-season, a closure) are left out of the rhythm:
+        # one summer break used to make a weekly item "irregular" for good,
+        # so a seasonal business lost its reorder suggestions every season.
+        typical_gap = statistics.median(all_gaps)
+        gaps = [g for g in all_gaps if g <= PAUSE_GAP_FACTOR * typical_gap]
+        pauses = len(all_gaps) - len(gaps)
+        if len(gaps) < MIN_PURCHASES_FOR_CADENCE - 1:
+            continue
         median_gap = statistics.median(gaps)
         mean_gap = statistics.mean(gaps)
         if median_gap <= 0 or mean_gap <= 0:
@@ -1085,7 +1096,6 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
             continue
 
         last_date = dates_sorted[-1]
-        first_date = dates_sorted[0]
         stopped_at = discontinued.get(canonical)
         if stopped_at and last_date <= stopped_at:
             continue
@@ -1105,7 +1115,9 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
         # blended across whatever conditions actually occurred - not just
         # the last order), scaled by the company-wide revenue trend over a
         # matching window, then projected across one full cadence cycle.
-        window_days = max((last_date - first_date).days, round(median_gap))
+        # A pause counts as one ordinary cycle (the purchase before it
+        # lasted about that long), not as months of consumption.
+        window_days = max(sum(gaps) + pauses * round(median_gap), round(median_gap))
         total_quantity = sum(qty for _, _, qty in entries_sorted)
         baseline_daily_quantity = total_quantity / window_days if window_days > 0 else 0
         trend_ratio = await _revenue_trend_ratio(company_id, window_days)

@@ -322,3 +322,29 @@ def test_switching_pack_size_is_not_an_overdue_reorder():
 
     names = {i["item_name"] for i in asyncio.run(_run())["items"]}
     assert "доматен сос 1кг" not in names
+
+
+def test_seasonal_pause_does_not_hide_a_regular_item():
+    """Filet every 5 days in season, a 5-month summer break, then every 5
+    days again: the break used to make the item "irregular" for good, so a
+    seasonal business lost its reorder suggestions every season. The
+    break is a pause, not part of the rhythm - nor months of consumption."""
+    company_id, user = _owner()
+    now = datetime.now(timezone.utc)
+
+    async def _run():
+        await _register(user)
+        days = list(range(210, 330, 5)) + list(range(5, 65, 5))
+        await server.db.item_price_history.insert_many([
+            {"company_id": company_id, "supplier": "Месо", "item_name": "филе капка", "unit_price": 7.8,
+             "quantity": 20, "unit": "кг", "invoice_id": f"inv-{d}", "invoice_number": f"N{d}",
+             "invoice_date": now - timedelta(days=d)}
+            for d in days
+        ])
+        return await get_reorder_recommendations(current_user=user)
+
+    items = {i["item_name"]: i for i in asyncio.run(_run())["items"]}
+    assert items["филе капка"]["median_days_between"] == 5
+    # 36 purchases x 20 kg over 35 cycles of 5 days (the pause counted as one
+    # cycle) = 20.6 -> 21 kg; averaged over the 150-day pause it was ~11.
+    assert items["филе капка"]["recommended_quantity"] == 21
