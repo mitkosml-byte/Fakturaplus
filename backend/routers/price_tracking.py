@@ -887,6 +887,17 @@ async def get_item_by_supplier(
 # Needs at least 4 purchases to call anything a "usual" cadence - same
 # minimum-sample-size reasoning as ForecastService's trend gate.
 MIN_PURCHASES_FOR_CADENCE = 4
+# A number with an optional unit right after it ("1кг", "0,5 л", "6 бр.") -
+# what tells two pack sizes of one product apart.
+_SIZE_TOKEN = re.compile(r'\d+(?:[.,]\d+)?\s*(?:кг|гр|г|мл|л|бр|kg|g|ml|l)?(?![^\W\d_])\.?', re.IGNORECASE)
+
+
+def _size_free_key(name: str) -> str:
+    """"Доматен сос 1кг" and "Доматен сос 5кг" -> one key: the same
+    product in two pack sizes."""
+    return _compare_key(_SIZE_TOKEN.sub(' ', name or ""))
+
+
 # Past this many of its own cycles without a purchase, an item has far more
 # likely been dropped than forgotten: it stops being "time to reorder" and
 # becomes the question "do you still buy it?" (see reorder_overview).
@@ -1017,17 +1028,28 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
     # for no reason.
     original_name_by_canonical: Dict[str, str] = {}
     unit_by_canonical: Dict[str, str] = {}
+    first_seen: Dict[str, datetime] = {}
     for r in records:
         date = r.get("invoice_date")
         if not isinstance(date, datetime):
             continue
         name_lower = r["item_name"].lower()
         canonical = variant_to_canonical.get(name_lower, name_lower)
+        aware_date = _aware(date)
+        if canonical not in first_seen or aware_date < first_seen[canonical]:
+            first_seen[canonical] = aware_date
         groups[canonical].append((date, r.get("unit_price", 0) * r.get("quantity", 0), r.get("quantity", 0)))
         suppliers_by_item[canonical].add(r["supplier"])
         original_name_by_canonical[canonical] = r["item_name"]
         if r.get("unit"):
             unit_by_canonical[canonical] = r["unit"]
+
+    # Pack sizes of one product, so a switch from one size to another reads
+    # as a switch - not as the old size being "overdue" for ever.
+    sizes_of_product: Dict[str, List[str]] = defaultdict(list)
+    for canonical in first_seen:
+        if item_size_signature(canonical):
+            sizes_of_product[_size_free_key(canonical)].append(canonical)
 
     now = datetime.now(timezone.utc)
     items = []
@@ -1066,6 +1088,13 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
         first_date = dates_sorted[0]
         stopped_at = discontinued.get(canonical)
         if stopped_at and last_date <= stopped_at:
+            continue
+        # Replaced by another size of the same product, first bought after
+        # this size's last purchase (1 kg tins -> 5 kg tins).
+        if item_size_signature(canonical) and any(
+            other != canonical and first_seen[other] > last_date
+            for other in sizes_of_product.get(_size_free_key(canonical), [])
+        ):
             continue
         days_since_last = (now - last_date).days
         avg_order_value = statistics.mean(amount for _, amount, _ in entries_sorted)

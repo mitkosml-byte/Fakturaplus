@@ -297,3 +297,28 @@ def test_scan_time_price_check_flags_pack_before_saving(client):
     assert 1 not in hints  # never bought before: nothing to compare with
     assert hints[2]["kind"] == "price_change" and hints[2]["monthly_impact"] > 100
     assert asyncio.run(server.db.item_price_history.count_documents({"company_id": company_id})) == rows_before
+
+
+def test_switching_pack_size_is_not_an_overdue_reorder():
+    """1 kg tins every 15 days, then the owner switched to 5 kg tins three
+    weeks ago. Kept apart (as they must be for prices), the 1 kg size must
+    not then look "overdue" for ever - it was replaced, not forgotten."""
+    company_id, user = _owner()
+    now = datetime.now(timezone.utc)
+
+    def _rows(name, days_ago):
+        return [
+            {"company_id": company_id, "supplier": "Метро", "item_name": name, "unit_price": 2.4,
+             "quantity": 4, "unit": "бр.", "invoice_id": f"inv-{name}-{d}", "invoice_number": f"N{d}",
+             "invoice_date": now - timedelta(days=d)}
+            for d in days_ago
+        ]
+
+    async def _run():
+        await _register(user)
+        await server.db.item_price_history.insert_many(_rows("доматен сос 1кг", range(30, 120, 15)))
+        await server.db.item_price_history.insert_many(_rows("доматен сос 5кг", [21, 6]))
+        return await get_reorder_recommendations(current_user=user)
+
+    names = {i["item_name"] for i in asyncio.run(_run())["items"]}
+    assert "доматен сос 1кг" not in names

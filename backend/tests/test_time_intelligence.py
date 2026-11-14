@@ -120,3 +120,27 @@ def test_forecast_lookback_presets_are_whole_months():
     # A custom range counts a month only when it covers it to its last day.
     start, end = _resolve_window(None, "2025-03-15", "2025-06-30")
     assert (start.month, end.month) == (4, 7)
+
+
+def test_partial_first_month_of_records_is_not_read_as_growth():
+    """Invoices start on the 17th, four months ago: that month holds half a
+    month of purchases. Counted, it reads as "+30% expenses" afterwards."""
+    company_id, user = _new_company(["view_statistics"])
+    now = datetime.now(timezone.utc)
+
+    def _month(k, day):
+        y, m = server._ym_add(now.year, now.month, -k)
+        return datetime(y, m, day, 10, tzinfo=timezone.utc)
+
+    async def _run():
+        await _register(user)
+        await server.db.invoices.insert_many([
+            {"id": f"inv-{k}", "company_id": company_id, "user_id": user.user_id, "date": _month(k, day),
+             "total_amount": amount, "supplier": "Метро", "invoice_number": f"N{k}"}
+            for k, day, amount in ((4, 17, 500), (3, 5, 1000), (2, 5, 1000), (1, 5, 1000))
+        ])
+        return await server.forecast_service.get_expense_forecast(company_id, months_ahead=1)
+
+    result = asyncio.run(_run())
+    assert [h["amount"] for h in result["historical"]] == [1000, 1000, 1000]
+    assert result["trend"] == "insufficient_data"

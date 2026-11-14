@@ -2893,7 +2893,7 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> List[d
     # trend-adjusted suggestion (see _compute_recurring_item_cadences),
     # just for the single most-worth-surfacing item here.
     quantity_note = (
-        f" Препоръчано количество: ~{top['recommended_quantity']} {top['unit']}."
+        f" Препоръчано количество: ~{top['recommended_quantity']} {top['unit'].rstrip('.')}."
         if top.get("recommended_quantity") else ""
     )
     signals.append({

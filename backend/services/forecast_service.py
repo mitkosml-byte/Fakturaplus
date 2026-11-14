@@ -85,6 +85,18 @@ def _resolve_window(
     return _month_start(y, m), end_exclusive
 
 
+def _drop_partial_first_month(monthly_totals: Dict[str, float], first_activity: Optional[datetime]) -> None:
+    """The month a company started recording (if it started after the 3rd)
+    holds only part of a month's business - a weak first month followed by
+    what looks like 30% "growth". Left out once other months exist to
+    forecast from; kept when it is the only month there is."""
+    if not first_activity or first_activity.day <= 3:
+        return
+    key = first_activity.strftime("%Y-%m")
+    if key in monthly_totals and len(monthly_totals) > 1:
+        del monthly_totals[key]
+
+
 def _robust_trend(amounts: List[float]) -> tuple:
     """Theil-Sen slope (the median of every pairwise slope between two
     points) over the whole window, one point per month, instead of a
@@ -192,6 +204,18 @@ class ForecastService:
     def __init__(self, db):
         self.db = db
 
+    async def _first_record_date(self, collection, query: dict) -> Optional[datetime]:
+        docs = await collection.find(query, {"_id": 0, "date": 1}).sort("date", 1).limit(1).to_list(1)
+        value = docs[0].get("date") if docs else None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and len(value) >= 10:
+            try:
+                return datetime.fromisoformat(value[:10])
+            except ValueError:
+                return None
+        return None
+
     async def get_expense_forecast(
         self,
         company_id: str,
@@ -279,6 +303,15 @@ class ForecastService:
                 monthly_totals[month_key] += month_total
             y, m = _ym_add(y, m, 1)
 
+        # Expenses start with the first invoice or expense ever recorded.
+        firsts = [
+            d for d in (
+                await self._first_record_date(self.db.invoices, {"company_id": company_id}),
+                await self._first_record_date(self.db.expenses, {"user_id": {"$in": user_ids}}),
+            ) if d
+        ]
+        _drop_partial_first_month(monthly_totals, min((d.replace(tzinfo=None) for d in firsts), default=None))
+
         sorted_months = sorted(monthly_totals.keys())
         historical = [{"month": mk, "amount": monthly_totals[mk]} for mk in sorted_months]
         return _build_forecast(historical, months_ahead)
@@ -330,6 +363,10 @@ class ForecastService:
                 monthly_totals[month_key] += float(rev.get("fiscal_revenue", 0))
                 if include_pocket_money:
                     monthly_totals[month_key] += float(rev.get("pocket_money", 0))
+
+        _drop_partial_first_month(
+            monthly_totals, await self._first_record_date(self.db.daily_revenue, {"user_id": {"$in": user_ids}})
+        )
 
         sorted_months = sorted(monthly_totals.keys())
         historical = [{"month": mk, "amount": monthly_totals[mk]} for mk in sorted_months]
