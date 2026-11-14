@@ -10,6 +10,7 @@ import { useTranslation } from '../../i18n';
 import { Invoice, VatTreatment } from '../../types';
 import { Avatar } from '../Avatar';
 import { COLORS } from '../../theme/colors';
+import { isPackSuspect, priceAlertMeaning } from '../../utils/priceAlert';
 
 // Extracted from invoices.tsx (Module 1 audit finding #4). The single
 // largest remaining modal on this screen - view/edit for one invoice,
@@ -440,7 +441,14 @@ export function InvoiceDetailModal({
                     </View>
 
                     {items.map((item, index) => {
-                      const alert = selectedInvoiceAlerts.find((a) => a.item_name === item.name);
+                      // By line id; alerts from before lines had ids fall back
+                      // to the item name, compared case-insensitively.
+                      const alert = selectedInvoiceAlerts.find((a) => (
+                        a.line_item_id
+                          ? a.line_item_id === item.id
+                          : (a.item_name || '').trim().toLowerCase() === (item.name || '').trim().toLowerCase()
+                      ));
+                      const isPack = !!alert && isPackSuspect(alert);
                       const lineTotal = item.total_price ?? (item.quantity || 0) * item.unit_price;
                       return (
                         <View key={index} style={styles.itemRow}>
@@ -459,11 +467,15 @@ export function InvoiceDetailModal({
                                 <Text style={[
                                   styles.itemPriceAlertText,
                                   alert.direction === 'decrease' && styles.itemPriceAlertTextDecrease,
+                                  isPack && { color: COLORS.warning },
                                 ]}>
-                                  {alert.change_percent > 0 ? '+' : ''}{alert.change_percent}%{' '}
-                                  {(alert.baseline_purchase_count || 1) > 1
-                                    ? t('invoices.vsBaseline').replace('{count}', String(alert.baseline_purchase_count))
-                                    : t('invoices.vsBaselineSingle')}
+                                  {isPack
+                                    ? priceAlertMeaning(alert, t)
+                                    : `${alert.change_percent > 0 ? '+' : ''}${alert.change_percent}% ${
+                                      (alert.baseline_purchase_count || 1) > 1
+                                        ? t('invoices.vsBaseline').replace('{count}', String(alert.baseline_purchase_count))
+                                        : t('invoices.vsBaselineSingle')
+                                    }`}
                                 </Text>
                               </View>
                             )}

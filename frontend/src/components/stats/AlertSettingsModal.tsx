@@ -80,12 +80,12 @@ export function AlertSettingsModal({
             </View>
 
             <View style={styles.alertSettingsField}>
-              <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.minAbsoluteChange')}</Text>
-              <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.minAbsoluteChangeHint')}</Text>
+              <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.minMonthlyImpact')}</Text>
+              <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.minMonthlyImpactHint')}</Text>
               <TextInput
                 style={styles.alertSettingsInput}
-                value={String(alertSettings.min_absolute_change)}
-                onChangeText={(v) => onChangeSettings({ ...alertSettings, min_absolute_change: parseFloat(v) || 0 })}
+                value={String(alertSettings.min_monthly_impact ?? 10)}
+                onChangeText={(v) => onChangeSettings({ ...alertSettings, min_monthly_impact: parseFloat(v) || 0 })}
                 keyboardType="decimal-pad"
                 placeholderTextColor={COLORS.textMuted}
               />

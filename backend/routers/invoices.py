@@ -31,6 +31,15 @@ from server import (
     _team_channel_id,
 )
 import server
+from routers.price_tracking import (
+    evaluate_price_change,
+    get_price_alert_settings_dict,
+    price_history_row,
+    purge_invoice_price_data,
+    rebuild_invoice_price_history,
+    resync_invoice_header,
+    resync_invoice_line,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -121,13 +130,17 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     if invoice_dict.get("vat_treatment") == VatTreatment.REVERSE_CHARGE:
         invoice_dict["protocol_number"] = await next_protocol_number(company_id, current_user.user_id, invoice_date.year)
 
-    # Process items and convert to dict format
+    # Process items and convert to dict format. The invoice id is fixed up
+    # front so every price-history row and alert is written already linked
+    # to its invoice and line - no after-the-fact backfill that could miss.
+    invoice_id = str(uuid.uuid4())
     items_list = None
+    history_rows = []
     price_alerts = []
-    item_normalized_names = {}  # item_dict["id"] -> normalized_name, reused below when backfilling invoice_id
 
     if invoice.items:
         items_list = []
+        alert_settings = await get_price_alert_settings_dict(company_id) if company_id else None
         for item in invoice.items:
             item_dict = item.model_dump()
             # Calculate total_price if not provided
@@ -140,87 +153,18 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
             item_dict["id"] = str(uuid.uuid4())
             items_list.append(item_dict)
 
-            # A negative-priced row is a discount/rebate line ("отстъпка"),
-            # not a product with its own trackable price - skip price-change
-            # alerts and price history for it so it doesn't get compared
-            # against (or pollute) a real item's price trend.
-            if company_id and item.unit_price >= 0:
-                normalized_name, _ = await normalize_item_name(item.name, company_id)
-                item_normalized_names[item_dict["id"]] = normalized_name
-
-                # Baseline = median of the last up-to-3 purchases of this item
-                # from this supplier, not just the single last one - a lone
-                # one-off (a misread, a rush order, a one-time discount) used
-                # to become "the price" and make the *next* normal purchase
-                # look like the anomaly.
-                recent_records = await server.db.item_price_history.find(
-                    {
-                        "company_id": company_id,
-                        "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"},
-                        "item_name": normalized_name
-                    },
-                    {"_id": 0},
-                    sort=[("invoice_date", -1)]
-                ).to_list(3)
-
-                # Get threshold/mute settings
-                alert_settings = await server.db.price_alert_settings.find_one(
-                    {"company_id": company_id},
-                    {"_id": 0}
+            if company_id and alert_settings:
+                row = await price_history_row(
+                    company_id, invoice.supplier, invoice_id, invoice.invoice_number, invoice_date, item_dict
                 )
-                threshold = alert_settings.get("threshold_percent", 10.0) if alert_settings else 10.0
-                min_absolute_change = alert_settings.get("min_absolute_change", 2.0) if alert_settings else 2.0
-                alert_on_decrease = alert_settings.get("alert_on_decrease", False) if alert_settings else False
-                alert_enabled = alert_settings.get("enabled", True) if alert_settings else True
+                if row:
+                    alert = await evaluate_price_change(company_id, row, alert_settings)
+                    if alert:
+                        price_alerts.append(PriceAlert(company_id=company_id, **alert))
+                    history_rows.append(row)
 
-                is_muted = alert_enabled and bool(await server.db.price_alert_mutes.find_one({
-                    "company_id": company_id,
-                    "item_name": normalized_name,
-                    "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"},
-                }))
-
-                if recent_records and alert_enabled and not is_muted:
-                    old_price = statistics.median(r["unit_price"] for r in recent_records)
-                    new_price = item.unit_price
-
-                    if old_price > 0:
-                        change_percent = ((new_price - old_price) / old_price) * 100
-                        absolute_change = abs(new_price - old_price)
-                        crosses_threshold = (
-                            (change_percent >= threshold) or
-                            (alert_on_decrease and change_percent <= -threshold)
-                        )
-
-                        if crosses_threshold and absolute_change >= min_absolute_change:
-                            alert = PriceAlert(
-                                company_id=company_id,
-                                item_name=item.name,
-                                supplier=invoice.supplier,
-                                old_price=round(old_price, 4),
-                                new_price=new_price,
-                                change_percent=round(change_percent, 2),
-                                direction="increase" if change_percent >= 0 else "decrease",
-                                baseline_purchase_count=len(recent_records),
-                                invoice_id="",  # Will be set after invoice is created
-                                invoice_number=invoice.invoice_number
-                            )
-                            price_alerts.append(alert)
-                
-                # Save to price history
-                price_history = ItemPriceHistory(
-                    company_id=company_id,
-                    supplier=invoice.supplier,
-                    item_name=normalized_name,
-                    unit_price=item.unit_price,
-                    quantity=item.quantity,
-                    unit=item.unit,
-                    invoice_id="",  # Will be set after invoice is created
-                    invoice_number=invoice.invoice_number,
-                    invoice_date=invoice_date
-                )
-                await server.db.item_price_history.insert_one(price_history.model_dump())
-    
     invoice_obj = Invoice(
+        id=invoice_id,
         user_id=current_user.user_id,
         company_id=company_id,
         date=invoice_date,
@@ -232,28 +176,18 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         **{k: v for k, v in invoice_dict.items() if k not in ["date", "items", "payment_due_date"]}
     )
     await server.db.invoices.insert_one(invoice_obj.model_dump())
-    
-    # Update price history and alerts with invoice_id
-    if company_id and invoice.items:
-        for item_dict in items_list:
-            normalized_name = item_normalized_names.get(item_dict["id"], item_dict["name"].strip().lower())
-            await server.db.item_price_history.update_many(
-                {
-                    "company_id": company_id,
-                    "invoice_number": invoice.invoice_number,
-                    "item_name": normalized_name,
-                    "invoice_id": ""
-                },
-                {"$set": {"invoice_id": invoice_obj.id}}
-            )
-        
-        # Save alerts with invoice_id
-        for alert in price_alerts:
-            alert.invoice_id = invoice_obj.id
-            await server.db.price_alerts.insert_one(alert.model_dump())
 
-        if price_alerts:
-            background_tasks.add_task(send_price_alert_pushes, company_id, price_alerts)
+    if company_id and invoice.items:
+        if history_rows:
+            await server.db.item_price_history.insert_many(history_rows)
+        for price_alert in price_alerts:
+            await server.db.price_alerts.insert_one(price_alert.model_dump())
+
+        # A suspected pack misread is a question about this invoice, not
+        # news worth a phone notification - only real price changes push.
+        price_changes = [a for a in price_alerts if a.kind == "price_change"]
+        if price_changes:
+            background_tasks.add_task(send_price_alert_pushes, company_id, price_changes)
 
         # Keep raw-material grouping fresh automatically, without the user
         # having to trigger it - throttled inside the task itself.
@@ -423,6 +357,18 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
             company_id, current_user.user_id, protocol_year
         )
 
+    # The invoice's price history and alerts follow its header: a corrected
+    # supplier, number or date must not leave them pointing at the old one.
+    header = {
+        "supplier": update_data.get("supplier", existing.get("supplier", "")),
+        "invoice_number": update_data.get("invoice_number", existing.get("invoice_number", "")),
+        "date": update_data.get("date", existing["date"]),
+    }
+    if company_id:
+        header_changes = {k: update_data[k] for k in ("supplier", "invoice_number", "date") if k in update_data}
+        if header_changes:
+            await resync_invoice_header(company_id, invoice_id, header_changes)
+
     # Correcting one or more already-saved line items - the real incident
     # this guards against: OCR (or a fat-fingered manual entry) read a
     # 6-pack as "1 бр.", so the per-unit price looked 6x higher than it
@@ -452,30 +398,13 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
             merged["vat_amount"] = round(merged["total_price"] * 0.2, 2)
             merged_items[i] = merged
 
-            # Keep item_price_history (what price alerts and reorder-
-            # nudges actually read) in sync - without this, fixing the
-            # invoice here would leave the exact same wrong per-unit price
-            # poisoning every future comparison. item_price_history has no
-            # field linking it back to one specific line item, so the old
-            # quantity+unit_price pair (unique enough in practice) is the
-            # most reliable way to find the one record this edit applies
-            # to, among every item_price_history row this invoice wrote.
+            # Re-derive this line's price history and its alert from the
+            # corrected values - otherwise the wrong per-unit price keeps
+            # poisoning every future comparison and its bogus alert stays.
             if company_id:
-                name_set: Dict[str, Any] = {}
-                if upd.get("name") is not None:
-                    new_normalized_name, _ = await normalize_item_name(merged["name"], company_id)
-                    name_set["item_name"] = new_normalized_name
-                await server.db.item_price_history.update_many(
-                    {
-                        "company_id": company_id, "invoice_id": invoice_id,
-                        "quantity": old_item["quantity"], "unit_price": old_item["unit_price"],
-                    },
-                    {"$set": {
-                        "quantity": merged["quantity"],
-                        "unit_price": merged["unit_price"],
-                        "unit": merged["unit"],
-                        **name_set,
-                    }},
+                await resync_invoice_line(
+                    company_id, invoice_id, header["supplier"], header["invoice_number"], header["date"],
+                    old_item, merged,
                 )
         update_data["items"] = merged_items
 
@@ -509,6 +438,8 @@ async def delete_invoice(invoice_id: str, current_user: User = Depends(get_curre
     result = await server.db.invoices.delete_one({"id": invoice_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+    if company_id:
+        await purge_invoice_price_data(company_id, invoice_id)
 
     await audit_service.log_action(
         user_id=current_user.user_id,
@@ -559,6 +490,7 @@ async def restore_audit_entry(log_id: str, current_user: User = Depends(get_curr
         raise HTTPException(status_code=400, detail="Вече съществува фактура с това ID")
 
     await server.db.invoices.insert_one(dict(snapshot))
+    await rebuild_invoice_price_history(company_id, snapshot)
     await server.db.audit_logs.update_one({"id": log_id}, {"$set": {"details.restored": True}})
 
     await audit_service.log_action(

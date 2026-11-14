@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
+import { isPackSuspect, priceAlertMeaning } from '../../utils/priceAlert';
 
 // Extracted from stats.tsx (Module 1 audit finding #4 - its own named
 // example of a "clean extraction candidate"). Pure presentation + the
@@ -42,6 +43,8 @@ export function PriceAlertsCard({ priceAlerts, unreadAlerts, onOpenSettings, onV
       ) : (
         visibleAlerts.slice(0, 5).map((alert) => {
           const isDecrease = alert.direction === 'decrease';
+          const isPack = isPackSuspect(alert);
+          const meaning = priceAlertMeaning(alert, t);
           return (
             <View key={alert.id} style={[styles.alertItem, alert.status === 'unread' && styles.alertItemUnread]}>
               <View style={styles.alertInfo}>
@@ -53,12 +56,23 @@ export function PriceAlertsCard({ priceAlerts, unreadAlerts, onOpenSettings, onV
                   <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
                   <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
                   <Text style={[styles.alertNewPrice, isDecrease && { color: COLORS.success }]}>{alert.new_price.toFixed(2)}€</Text>
-                  <View style={[styles.alertChangeBadge, isDecrease && { backgroundColor: '#22C55E20' }]}>
-                    <Text style={[styles.alertChangeText, isDecrease && { color: COLORS.success }]}>
-                      {alert.change_percent > 0 ? '+' : ''}{alert.change_percent}%
-                    </Text>
-                  </View>
+                  {isPack ? (
+                    <View style={[styles.alertChangeBadge, { backgroundColor: COLORS.warning + '20' }]}>
+                      <Text style={[styles.alertChangeText, { color: COLORS.warning }]}>
+                        {t('priceAlert.packBadge').replace('{k}', String(alert.pack_multiple))}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.alertChangeBadge, isDecrease && { backgroundColor: '#22C55E20' }]}>
+                      <Text style={[styles.alertChangeText, isDecrease && { color: COLORS.success }]}>
+                        {alert.change_percent > 0 ? '+' : ''}{alert.change_percent}%
+                      </Text>
+                    </View>
+                  )}
                 </View>
+                {meaning && (
+                  <Text style={[styles.alertMeaningText, isPack && { color: COLORS.warning }]}>{meaning}</Text>
+                )}
                 <Text style={styles.alertBasisText}>
                   {(alert.baseline_purchase_count || 1) > 1
                     ? t('priceAlertPopup.basisMultiple').replace('{count}', String(alert.baseline_purchase_count))
@@ -94,6 +108,12 @@ export function PriceAlertsCard({ priceAlerts, unreadAlerts, onOpenSettings, onV
 }
 
 const styles = StyleSheet.create({
+  alertMeaningText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'white',
+    marginTop: 4,
+  },
   priceAlertsCard: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,

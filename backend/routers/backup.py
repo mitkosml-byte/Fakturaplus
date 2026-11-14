@@ -31,6 +31,7 @@ from server import (
     _team_channel_id,
 )
 import server
+from routers.price_tracking import rebuild_invoice_price_history
 
 router = APIRouter(prefix="/api")
 
@@ -180,6 +181,8 @@ async def restore_backup(request: Request, backup_data: BackupRestoreRequest, cu
                 if doc.get("created_at") else datetime.now(timezone.utc)
             )
             await server.db.invoices.insert_one(doc)
+            if company_id:
+                await rebuild_invoice_price_history(company_id, doc)
             restored_counts["invoices"] += 1
         except Exception as e:
             logger.warning(f"Backup restore: skipped invalid invoice {invoice.id}: {e}")

@@ -36,6 +36,339 @@ import server
 
 router = APIRouter(prefix="/api")
 
+# ===================== PRICE HISTORY & ALERT ENGINE =====================
+# The one place an invoice line becomes a price-history row and is judged
+# for an alert. Create, edit, delete and restore all go through it, so the
+# derived price data can never drift from the invoices it came from (it
+# used to: a deleted invoice left its rows behind, a corrected line kept
+# its alert).
+
+PRICE_BASELINE_PURCHASES = 3
+IMPACT_WINDOW_DAYS = 120
+# Common retail pack counts. A new unit price that is (almost exactly) one
+# of these multiples of the usual one is far more often a pack read as a
+# single unit - or the reverse - than a real price change.
+PACK_MULTIPLES = (2, 3, 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 24, 30, 36, 40, 48, 50, 60, 100)
+PACK_RATIO_TOLERANCE = 0.03
+# The same price change on a later invoice of the same item is one event,
+# not a fresh alert each time the median baseline catches up.
+ALERT_DEDUPE_DAYS = 60
+DEFAULT_PRICE_ALERT_SETTINGS = {
+    "threshold_percent": 10.0, "min_monthly_impact": 10.0, "alert_on_decrease": False, "enabled": True,
+}
+
+
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+def _pack_multiple(ratio: float) -> Optional[int]:
+    if ratio <= 0:
+        return None
+    for value in (ratio, 1 / ratio):
+        for k in PACK_MULTIPLES:
+            if abs(value - k) <= k * PACK_RATIO_TOLERANCE:
+                return k
+    return None
+
+
+async def get_price_alert_settings_dict(company_id: Optional[str]) -> dict:
+    settings = dict(DEFAULT_PRICE_ALERT_SETTINGS)
+    if company_id:
+        stored = await server.db.price_alert_settings.find_one({"company_id": company_id}, {"_id": 0})
+        if stored:
+            settings.update({k: stored[k] for k in DEFAULT_PRICE_ALERT_SETTINGS if k in stored})
+    return settings
+
+
+async def price_history_row(
+    company_id: str, supplier: str, invoice_id: str, invoice_number: str, invoice_date: datetime, item: dict,
+) -> Optional[dict]:
+    """The price-history row for one invoice line, or None for a line with
+    no price of its own (a negative discount/rebate row, or a malformed one)."""
+    unit_price = item.get("unit_price")
+    if not item.get("name") or unit_price is None or unit_price < 0:
+        return None
+    normalized_name, _ = await normalize_item_name(item["name"], company_id)
+    return ItemPriceHistory(
+        company_id=company_id, supplier=supplier, item_name=normalized_name, raw_name=item["name"],
+        unit_price=unit_price, quantity=item.get("quantity") or 1, unit=item.get("unit") or "бр.",
+        invoice_id=invoice_id, line_item_id=item.get("id"), invoice_number=invoice_number,
+        invoice_date=_aware(invoice_date),
+    ).model_dump()
+
+
+def _typical_monthly_quantity(same_unit_records: List[dict], row: dict) -> float:
+    """This item's usual quantity per month over the last IMPACT_WINDOW_DAYS
+    of purchases (same supplier and unit) plus the new one. With no earlier
+    purchase in that window, the new purchase alone stands in for a month -
+    the cautious reading for something bought rarely."""
+    row_date = _aware(row["invoice_date"])
+    window_start = row_date - timedelta(days=IMPACT_WINDOW_DAYS)
+    in_window = [
+        r for r in same_unit_records
+        if isinstance(r.get("invoice_date"), datetime) and window_start <= _aware(r["invoice_date"]) <= row_date
+    ]
+    if not in_window:
+        return float(row.get("quantity") or 0)
+    first = min(_aware(r["invoice_date"]) for r in in_window)
+    span_days = max((row_date - first).days, 30)
+    total = sum(r.get("quantity", 0) for r in in_window) + (row.get("quantity") or 0)
+    return total * 30 / span_days
+
+
+async def evaluate_price_change(company_id: str, row: dict, settings: dict, dedupe: bool = True) -> Optional[dict]:
+    """The alert one new price-history row deserves, if any, judged against
+    this company's own earlier purchases of the same item from the same
+    supplier in the same unit (a "стек" price is never compared with a "бр."
+    one). Returns PriceAlert fields:
+
+    - "pack_suspect" when the new unit price is a pack multiple of the usual
+      one: almost always a misread pack, so it asks rather than claiming
+      +500%;
+    - "price_change" when the move crosses threshold_percent AND costs at
+      least min_monthly_impact EUR a month at the usual quantity - the size
+      of the move in money, not per unit, decides whether it matters."""
+    if not settings["enabled"]:
+        return None
+    supplier_filter = {"$regex": f"^{re.escape(row['supplier'])}$", "$options": "i"}
+    if await server.db.price_alert_mutes.find_one(
+        {"company_id": company_id, "item_name": row["item_name"], "supplier": supplier_filter}
+    ):
+        return None
+
+    unit_key = normalize_unit(row["unit"])
+    earlier = await server.db.item_price_history.find(
+        {"company_id": company_id, "supplier": supplier_filter, "item_name": row["item_name"],
+         "invoice_id": {"$ne": row["invoice_id"]}},
+        {"_id": 0, "unit_price": 1, "quantity": 1, "unit": 1, "invoice_date": 1},
+        sort=[("invoice_date", -1)],
+    ).to_list(500)
+    same_unit = [r for r in earlier if normalize_unit(r.get("unit")) == unit_key and r.get("unit_price", 0) > 0]
+    if not same_unit:
+        return None
+
+    recent = same_unit[:PRICE_BASELINE_PURCHASES]
+    old_price = statistics.median(r["unit_price"] for r in recent)
+    new_price = row["unit_price"]
+    if old_price <= 0 or new_price <= 0:
+        return None
+    change_percent = (new_price - old_price) / old_price * 100
+    alert = {
+        "item_name": row["item_name"], "supplier": row["supplier"], "unit": row["unit"],
+        "old_price": round(old_price, 4), "new_price": new_price, "change_percent": round(change_percent, 2),
+        "direction": "increase" if change_percent >= 0 else "decrease",
+        "baseline_purchase_count": len(recent), "invoice_id": row["invoice_id"],
+        "line_item_id": row.get("line_item_id"), "invoice_number": row["invoice_number"],
+    }
+
+    multiple = _pack_multiple(new_price / old_price)
+    if multiple:
+        return {**alert, "kind": "pack_suspect", "pack_multiple": multiple}
+
+    threshold = settings["threshold_percent"]
+    if not (change_percent >= threshold or (settings["alert_on_decrease"] and change_percent <= -threshold)):
+        return None
+    monthly_impact = round((new_price - old_price) * _typical_monthly_quantity(same_unit, row), 2)
+    if abs(monthly_impact) < settings["min_monthly_impact"]:
+        return None
+
+    if not dedupe:
+        return {**alert, "kind": "price_change", "monthly_impact": monthly_impact}
+    already_alerted = await server.db.price_alerts.find_one({
+        "company_id": company_id, "item_name": row["item_name"], "supplier": supplier_filter,
+        "kind": {"$ne": "pack_suspect"}, "new_price": {"$gte": new_price * 0.995, "$lte": new_price * 1.005},
+        "created_at": {"$gte": datetime.now(timezone.utc) - timedelta(days=ALERT_DEDUPE_DAYS)},
+    }, {"_id": 1})
+    if already_alerted:
+        return None
+    return {**alert, "kind": "price_change", "monthly_impact": monthly_impact}
+
+
+async def purge_invoice_price_data(company_id: str, invoice_id: str) -> None:
+    """A deleted invoice takes its price history and alerts with it - left
+    behind, they double-counted quantities and, as same-day duplicates,
+    knocked items out of reorder suggestions entirely."""
+    await server.db.item_price_history.delete_many({"company_id": company_id, "invoice_id": invoice_id})
+    await server.db.price_alerts.delete_many({"company_id": company_id, "invoice_id": invoice_id})
+
+
+async def rebuild_invoice_price_history(company_id: str, invoice_doc: dict) -> None:
+    """Re-derives the price history of a restored invoice (no alerts - a
+    restore is not a new purchase)."""
+    invoice_date = invoice_doc.get("date")
+    if isinstance(invoice_date, str):
+        invoice_date = datetime.fromisoformat(invoice_date.replace("Z", "+00:00"))
+    if not isinstance(invoice_date, datetime):
+        return
+    rows = []
+    for item in invoice_doc.get("items") or []:
+        row = await price_history_row(
+            company_id, invoice_doc.get("supplier", ""), invoice_doc["id"],
+            invoice_doc.get("invoice_number", ""), invoice_date, item,
+        )
+        if row:
+            rows.append(row)
+    await server.db.item_price_history.delete_many({"company_id": company_id, "invoice_id": invoice_doc["id"]})
+    if rows:
+        await server.db.item_price_history.insert_many(rows)
+
+
+async def resync_invoice_header(company_id: str, invoice_id: str, changes: dict) -> None:
+    """Carries an edited supplier, number or date over to the invoice's
+    price history and alerts."""
+    shared = {k: changes[k] for k in ("supplier", "invoice_number") if k in changes}
+    history_fields = dict(shared)
+    if "date" in changes:
+        history_fields["invoice_date"] = _aware(changes["date"])
+    if history_fields:
+        await server.db.item_price_history.update_many(
+            {"company_id": company_id, "invoice_id": invoice_id}, {"$set": history_fields}
+        )
+    if shared:
+        await server.db.price_alerts.update_many(
+            {"company_id": company_id, "invoice_id": invoice_id}, {"$set": shared}
+        )
+
+
+async def resync_invoice_line(
+    company_id: str, invoice_id: str, supplier: str, invoice_number: str, invoice_date: datetime,
+    old_item: dict, new_item: dict,
+) -> None:
+    """Re-derives the price-history row AND the alert of one corrected
+    invoice line - fixing a 6-pack misread as one unit removes the bogus
+    +500% alert it raised, instead of leaving it to be dismissed by hand.
+    An alert that survives the correction unchanged keeps its read status."""
+    # Rows and alerts written before line_item_id existed carry the line's
+    # normalized name (or, for some, its raw text) instead.
+    old_raw_name = old_item.get("name") or ""
+    old_normalized, _ = await normalize_item_name(old_raw_name, company_id)
+    legacy_names: List[Dict[str, Any]] = [
+        {"item_name": old_normalized},
+        {"item_name": {"$regex": f"^{re.escape(old_raw_name)}$", "$options": "i"}},
+    ]
+
+    line_filter: Dict[str, Any] = {"company_id": company_id, "invoice_id": invoice_id}
+    if old_item.get("id") and await server.db.item_price_history.find_one(
+        {**line_filter, "line_item_id": old_item["id"]}, {"_id": 1}
+    ):
+        line_filter["line_item_id"] = old_item["id"]
+    else:
+        # Legacy row: its name, old quantity and old unit price identify
+        # the line within its own invoice.
+        line_filter.update({
+            "quantity": old_item.get("quantity"), "unit_price": old_item.get("unit_price"), "$or": legacy_names,
+        })
+    await server.db.item_price_history.delete_many(line_filter)
+
+    alert_matches: List[dict] = [{"line_item_id": None, **name} for name in legacy_names]
+    if old_item.get("id"):
+        alert_matches.append({"line_item_id": old_item["id"]})
+    alert_filter = {"company_id": company_id, "invoice_id": invoice_id, "$or": alert_matches}
+    previous = await server.db.price_alerts.find_one(alert_filter, {"_id": 0})
+    await server.db.price_alerts.delete_many(alert_filter)
+
+    row = await price_history_row(company_id, supplier, invoice_id, invoice_number, invoice_date, new_item)
+    if not row:
+        return
+    alert = await evaluate_price_change(company_id, row, await get_price_alert_settings_dict(company_id))
+    await server.db.item_price_history.insert_one(row)
+    if alert:
+        unchanged = (
+            previous is not None
+            and previous.get("kind", "price_change") == alert["kind"]
+            and abs(previous.get("new_price", 0) - alert["new_price"]) < 1e-9
+        )
+        status = previous["status"] if unchanged and previous else "unread"
+        await server.db.price_alerts.insert_one(PriceAlert(company_id=company_id, status=status, **alert).model_dump())
+
+
+async def cleanup_orphan_price_data() -> dict:
+    """One-time repair of data written before deletes and edits kept price
+    data in sync: history rows and alerts of invoices that no longer exist,
+    and unread alerts whose invoice line has since been corrected to a
+    different price. Recorded in data_migrations so it runs once."""
+    marker = "price_data_cleanup_v1"
+    if await server.db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+
+    removed = {"item_price_history": 0, "price_alerts": 0}
+    for name in removed:
+        collection = server.db[name]
+        invoice_ids = [i for i in await collection.distinct("invoice_id") if i]
+        existing: set = set()
+        for start in range(0, len(invoice_ids), 500):
+            chunk = invoice_ids[start:start + 500]
+            existing.update(d["id"] for d in await server.db.invoices.find({"id": {"$in": chunk}}, {"id": 1}).to_list(len(chunk)))
+        orphans = [i for i in invoice_ids if i not in existing]
+        for start in range(0, len(orphans), 500):
+            result = await collection.delete_many({"invoice_id": {"$in": orphans[start:start + 500]}})
+            removed[name] += result.deleted_count
+    removed_rows, removed_alerts = removed["item_price_history"], removed["price_alerts"]
+
+    unread = await server.db.price_alerts.find({"status": "unread"}, {"_id": 0}).to_list(10000)
+    for alert in unread:
+        if not alert.get("invoice_id"):
+            continue
+        invoice = await server.db.invoices.find_one({"id": alert["invoice_id"]}, {"_id": 0, "items": 1})
+        invoice_items: List[dict] = (invoice.get("items") if invoice else None) or []
+        lines = [
+            it for it in invoice_items
+            if (alert.get("line_item_id") and it.get("id") == alert["line_item_id"])
+            or (not alert.get("line_item_id") and (it.get("name") or "").lower() == (alert.get("item_name") or "").lower())
+        ]
+        if lines and all(abs(it.get("unit_price", 0) - alert["new_price"]) > 1e-9 for it in lines):
+            await server.db.price_alerts.delete_one({"id": alert["id"]})
+            removed_alerts += 1
+
+    await server.db.data_migrations.insert_one({"_id": marker, "ran_at": datetime.now(timezone.utc)})
+    return {"removed_rows": removed_rows, "removed_alerts": removed_alerts}
+
+
+class PriceCheckLine(BaseModel):
+    name: str
+    quantity: float = 1
+    unit: str = "бр."
+    unit_price: float
+
+
+class PriceCheckRequest(BaseModel):
+    supplier: str
+    items: List[PriceCheckLine] = Field(default_factory=list, max_length=200)
+
+
+@router.post("/items/price-check")
+@limiter.limit("30/minute")
+async def check_item_prices(request: Request, body: PriceCheckRequest, current_user: User = Depends(get_current_user)):
+    """Scan-review preview of what each recognized line would raise once
+    saved, judged by the same engine as the saved invoice: a "стек ли е?"
+    question when the price is a pack multiple of the usual one, or the
+    size of a real price change in EUR a month - so a misread can be fixed
+    before it ever reaches the price history. Writes nothing."""
+    require_permission(current_user, "manage_invoices")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id or not body.supplier.strip() or not body.items:
+        return {"hints": []}
+    supplier, _ = await normalize_supplier_name(body.supplier, company_id)
+    settings = await get_price_alert_settings_dict(company_id)
+    now = datetime.now(timezone.utc)
+    hints = []
+    for index, line in enumerate(body.items):
+        row = await price_history_row(company_id, supplier, "__preview__", "", now, line.model_dump())
+        if not row:
+            continue
+        result = await evaluate_price_change(company_id, row, settings, dedupe=False)
+        if result:
+            hints.append({
+                "index": index,
+                **{k: result.get(k) for k in (
+                    "kind", "old_price", "new_price", "change_percent", "direction",
+                    "pack_multiple", "monthly_impact", "unit",
+                )},
+            })
+    return {"hints": hints}
+
+
 @router.get("/items/price-alerts")
 async def get_price_alerts(
     status: Optional[str] = None,  # unread, read, dismissed
@@ -59,6 +392,12 @@ async def get_price_alerts(
         query["invoice_id"] = invoice_id
 
     alerts = await server.db.price_alerts.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    # Unread first, and among them the costliest per month first - the
+    # newest-first order stays for everything else (the sort is stable).
+    alerts.sort(key=lambda a: (
+        a.get("status") != "unread",
+        -abs(a.get("monthly_impact") or 0) if a.get("status") == "unread" else 0,
+    ))
 
     # Count unread
     unread_count = await server.db.price_alerts.count_documents({**scope, "status": "unread"})
@@ -102,22 +441,7 @@ async def update_price_alert(
 async def get_price_alert_settings(current_user: User = Depends(get_current_user)):
     """Връща настройки за ценови аларми"""
     company_id, _ = await get_company_scope(current_user)
-    
-    defaults = {"threshold_percent": 10.0, "min_absolute_change": 2.0, "alert_on_decrease": False, "enabled": True}
-    if not company_id:
-        return defaults
-
-    settings = await server.db.price_alert_settings.find_one({"company_id": company_id}, {"_id": 0})
-
-    if not settings:
-        return defaults
-
-    return {
-        "threshold_percent": settings.get("threshold_percent", 10.0),
-        "min_absolute_change": settings.get("min_absolute_change", 2.0),
-        "alert_on_decrease": settings.get("alert_on_decrease", False),
-        "enabled": settings.get("enabled", True)
-    }
+    return await get_price_alert_settings_dict(company_id)
 
 @router.put("/items/price-alert-settings")
 async def update_price_alert_settings(
@@ -140,8 +464,8 @@ async def update_price_alert_settings(
     update_data: Dict[str, Any] = {}
     if "threshold_percent" in body:
         update_data["threshold_percent"] = float(body["threshold_percent"])
-    if "min_absolute_change" in body:
-        update_data["min_absolute_change"] = float(body["min_absolute_change"])
+    if "min_monthly_impact" in body:
+        update_data["min_monthly_impact"] = max(0.0, float(body["min_monthly_impact"]))
     if "alert_on_decrease" in body:
         update_data["alert_on_decrease"] = bool(body["alert_on_decrease"])
     if "enabled" in body:
@@ -651,13 +975,9 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
     mappings = await server.db.item_merge_mappings.find(
         {"company_id": company_id}, {"_id": 0}
     ).to_list(1000)
-    variant_to_canonical: Dict[str, str] = {}
-    canonical_display: Dict[str, str] = {}
-    for m in mappings:
-        canonical = m["canonical_name"]
-        canonical_display[canonical] = m.get("display_name", canonical)
-        for variant in m.get("variants", []):
-            variant_to_canonical[variant.lower()] = canonical
+    # Size-safe: a stored mapping that folded "1кг" into "5кг" (written
+    # before merges checked sizes) is ignored for that variant.
+    variant_to_canonical, canonical_display = build_variant_to_canonical(mappings)
 
     records = await server.db.item_price_history.find(
         {"company_id": company_id},
@@ -689,19 +1009,25 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
     now = datetime.now(timezone.utc)
     items = []
     for canonical, entries in groups.items():
-        if len(entries) < MIN_PURCHASES_FOR_CADENCE:
+        # Several invoices for the same item on one day (a top-up order, a
+        # second supplier, a re-scanned invoice) are ONE purchase event for
+        # cadence purposes: summed per calendar day. Previously the 0-day
+        # gap they produced dropped the item from reorder suggestions
+        # altogether - the most-bought items were the likeliest to vanish.
+        by_day: Dict[Any, list] = {}
+        for d, amount, qty in entries:
+            d = d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d
+            day_entry = by_day.get(d.date())
+            if day_entry is None:
+                by_day[d.date()] = [d, amount, qty]
+            else:
+                day_entry[1] += amount
+                day_entry[2] += qty
+        if len(by_day) < MIN_PURCHASES_FOR_CADENCE:
             continue
-        entries_sorted = sorted(
-            (
-                (d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d, amount, qty)
-                for d, amount, qty in entries
-            ),
-            key=lambda e: e[0],
-        )
+        entries_sorted = sorted((tuple(v) for v in by_day.values()), key=lambda e: e[0])
         dates_sorted = [e[0] for e in entries_sorted]
-        gaps = [(dates_sorted[i + 1] - dates_sorted[i]).days for i in range(len(dates_sorted) - 1)]
-        if any(g <= 0 for g in gaps):
-            continue
+        gaps = [(dates_sorted[i + 1].date() - dates_sorted[i].date()).days for i in range(len(dates_sorted) - 1)]
         median_gap = statistics.median(gaps)
         mean_gap = statistics.mean(gaps)
         if median_gap <= 0 or mean_gap <= 0:
@@ -748,7 +1074,10 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
             "is_overdue": days_since_last > median_gap * 1.5,
             # Not returned from either endpoint - ranking helpers only.
             "_overdue_ratio": overdue_ratio,
-            "_impact_score": overdue_ratio * (avg_order_value if avg_order_value > 0 else 1.0),
+            # Capped: past 4 cycles "more overdue" stops meaning "more
+            # urgent" - it usually means the item was dropped - so a long
+            # gone item can't outrank a live one forever.
+            "_impact_score": min(overdue_ratio, 4.0) * (avg_order_value if avg_order_value > 0 else 1.0),
         })
     return items
 
@@ -904,14 +1233,8 @@ async def get_merged_item_statistics(
         {"_id": 0}
     ).to_list(1000)
     
-    # Create variant to canonical mapping
-    variant_to_canonical = {}
-    canonical_display = {}
-    for m in mappings:
-        canonical = m["canonical_name"]
-        canonical_display[canonical] = m.get("display_name", canonical)
-        for variant in m.get("variants", []):
-            variant_to_canonical[variant.lower()] = canonical
+    # Variant -> canonical, skipping any stored variant of a different size
+    variant_to_canonical, canonical_display = build_variant_to_canonical(mappings)
 
     # Build date query
     query = {"company_id": company_id}

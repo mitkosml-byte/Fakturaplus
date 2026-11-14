@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
 import { Toast } from '../utils/toast';
+import { isPackSuspect, priceAlertMeaning } from '../utils/priceAlert';
 
 // Surfaces unread price-change alerts, on top of their existing passive
 // listing in Statistics -> Items. Re-checks whenever the user returns to
@@ -116,6 +117,8 @@ export function PriceAlertPopup() {
           <ScrollView style={styles.list}>
             {alerts.slice(0, 6).map((alert) => {
               const isDecrease = alert.direction === 'decrease';
+              const isPack = isPackSuspect(alert);
+              const meaning = priceAlertMeaning(alert, t);
               return (
                 <View key={alert.id} style={styles.alertRow}>
                   <View style={styles.alertTopLine}>
@@ -132,12 +135,23 @@ export function PriceAlertPopup() {
                         {alert.new_price.toFixed(2)}€
                       </Text>
                     </View>
-                    <View style={[styles.changeBadge, isDecrease && styles.changeBadgeDecrease]}>
-                      <Text style={[styles.changeText, isDecrease && styles.changeTextDecrease]}>
-                        {alert.change_percent > 0 ? '+' : ''}{alert.change_percent}%
-                      </Text>
-                    </View>
+                    {isPack ? (
+                      <View style={[styles.changeBadge, { backgroundColor: COLORS.warning + '20' }]}>
+                        <Text style={[styles.changeText, { color: COLORS.warning }]}>
+                          {t('priceAlert.packBadge').replace('{k}', String(alert.pack_multiple))}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.changeBadge, isDecrease && styles.changeBadgeDecrease]}>
+                        <Text style={[styles.changeText, isDecrease && styles.changeTextDecrease]}>
+                          {alert.change_percent > 0 ? '+' : ''}{alert.change_percent}%
+                        </Text>
+                      </View>
+                    )}
                   </View>
+                  {meaning && (
+                    <Text style={[styles.alertMeaningText, isPack && { color: COLORS.warning }]}>{meaning}</Text>
+                  )}
                   <Text style={styles.alertBasisText}>
                     {(alert.baseline_purchase_count || 1) > 1
                       ? t('priceAlertPopup.basisMultiple').replace('{count}', String(alert.baseline_purchase_count))
@@ -177,6 +191,12 @@ export function PriceAlertPopup() {
 }
 
 const styles = StyleSheet.create({
+  alertMeaningText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'white',
+    marginTop: 4,
+  },
   floatingWrap: {
     position: 'absolute',
     top: 56,

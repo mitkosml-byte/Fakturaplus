@@ -151,6 +151,7 @@ async def lifespan(app: FastAPI):
     await start_notification_settings_loop()
     await start_scan_credit_depletion_loop()
     await create_indexes()
+    await run_data_migrations()
     yield
     # Shutdown
     await shutdown_db_client()
@@ -395,10 +396,16 @@ class ItemPriceHistory(BaseModel):
     company_id: str
     supplier: str  # Доставчик
     item_name: str  # Нормализирано име на артикул
+    # The line's name as printed/typed, before normalization merged it -
+    # kept so a later, better grouping can be recomputed from the original.
+    raw_name: Optional[str] = None
     unit_price: float  # Единична цена
     quantity: float  # Количество
     unit: str  # Мерна единица
     invoice_id: str  # Връзка към фактурата
+    # The invoice line this row came from, so editing or deleting that one
+    # line updates exactly this row (older rows have none).
+    line_item_id: Optional[str] = None
     invoice_number: str
     invoice_date: datetime
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -408,10 +415,11 @@ class PriceAlertSettings(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     company_id: str
     threshold_percent: float = 10.0  # Праг за аларма в %
-    # A %-only threshold fires the same for a 0.10 lv item as for a 500 lv
-    # one - this absolute floor (in the invoice's currency) filters out
-    # changes that cross the % threshold but are financially noise.
-    min_absolute_change: float = 2.0
+    # The change's cost per month at this company's own usual quantity
+    # (price change x typical monthly quantity), not per unit - +0.07 EUR on
+    # 4000 pitas a month is 280 EUR and must alert, +2.10 EUR on one bottle
+    # of cleaner a month must not.
+    min_monthly_impact: float = 10.0
     # Price *drops* are also useful (renegotiate elsewhere, switch item) -
     # off by default so existing companies' alert volume doesn't change
     # until they opt in.
@@ -424,15 +432,25 @@ class PriceAlert(BaseModel):
     company_id: str
     item_name: str
     supplier: str
+    # "price_change" - a real price move; "pack_suspect" - the new unit
+    # price is (almost exactly) a pack multiple of the usual one, so the
+    # line was most likely a pack read as one unit and the alert asks
+    # instead of claiming a +500% increase.
+    kind: str = "price_change"
     old_price: float  # Базова цена (медиана/средно от последните покупки) - виж baseline_purchase_count
     new_price: float
     change_percent: float
     direction: str = "increase"  # increase | decrease
+    # (new - old) x this item's typical monthly quantity, in EUR per month.
+    monthly_impact: Optional[float] = None
+    pack_multiple: Optional[int] = None
+    unit: Optional[str] = None
     # How many prior purchases the baseline (old_price) was computed from -
     # shown to the user so a one-off anomaly isn't silently treated as "the
     # real price" without any indication of where the number came from.
     baseline_purchase_count: int = 1
     invoice_id: str
+    line_item_id: Optional[str] = None
     invoice_number: str
     status: str = "unread"  # unread, read, dismissed
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -1302,6 +1320,56 @@ def _compare_key(value: str) -> str:
 def _similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
+def item_size_signature(name: str) -> tuple:
+    """The numbers in an item name, sorted ("Доматен сос 5кг" -> ('5',),
+    "Кока-Кола 0,5л x 6" -> ('0.5', '6')). Two names that differ in these
+    are different products for pricing purposes - a 1 kg and a 5 kg tin, a
+    single bottle and a 6-pack - however similar the rest of the text, so
+    every item-merging path (fuzzy match at write time, AI grouping, saved
+    merge mappings) refuses to join names whose signatures differ."""
+    normalized = []
+    for n in re.findall(r'\d+(?:[.,]\d+)?', name or ""):
+        int_part, _, frac = n.replace(',', '.').partition('.')
+        int_part = int_part.lstrip('0') or '0'
+        frac = frac.rstrip('0')
+        normalized.append(f"{int_part}.{frac}" if frac else int_part)
+    return tuple(sorted(normalized))
+
+_UNIT_ALIASES = {
+    "бр": "бр", "броя": "бр", "брой": "бр", "pcs": "бр", "pc": "бр", "бройка": "бр",
+    "кг": "кг", "kg": "кг", "килограм": "кг", "килограма": "кг",
+    "г": "г", "гр": "г", "g": "г", "грам": "г",
+    "л": "л", "l": "л", "литър": "л", "литра": "л", "lt": "л",
+    "мл": "мл", "ml": "мл",
+    "м": "м", "m": "м", "метър": "м",
+    "оп": "оп", "опаковка": "оп", "опак": "оп", "пак": "оп", "пакет": "оп",
+    "стек": "стек", "кашон": "кашон", "кутия": "кутия", "кут": "кутия",
+}
+
+def normalize_unit(unit: Optional[str]) -> str:
+    """Folds the spellings OCR and people use for one unit ("бр", "бр.",
+    "БР", "броя", "pcs") into one key, so a price is only ever compared
+    with earlier prices in the same unit."""
+    key = re.sub(r'[\s.]', '', (unit or "").lower())
+    return _UNIT_ALIASES.get(key, key or "бр")
+
+def build_variant_to_canonical(mappings: List[dict]) -> tuple:
+    """(variant -> canonical, canonical -> display name) from saved
+    item_merge_mappings, skipping any variant whose size signature differs
+    from its canonical's - older AI groupings were told to merge different
+    pack sizes, and those joins must not keep comparing a 5 kg price with a
+    1 kg one. Every reader of merge mappings goes through this one place."""
+    variant_to_canonical: Dict[str, str] = {}
+    canonical_display: Dict[str, str] = {}
+    for m in mappings:
+        canonical = m["canonical_name"]
+        canonical_display[canonical] = m.get("display_name", canonical)
+        canonical_signature = item_size_signature(canonical)
+        for variant in m.get("variants", []):
+            if item_size_signature(variant) == canonical_signature:
+                variant_to_canonical[variant.lower()] = canonical
+    return variant_to_canonical, canonical_display
+
 async def normalize_supplier_name(supplier: str, company_id: Optional[str] = None) -> tuple[str, bool]:
     """Нормализира име на доставчик/контрагент и го съпоставя с вече познати
     доставчици на фирмата, независимо от препинателни знаци, интервали и
@@ -1388,25 +1456,29 @@ async def normalize_item_name(item_name: str, company_id: Optional[str] = None) 
     compare_key = _compare_key(cleaned)
     if not compare_key:
         return cleaned, False
+    signature = item_size_signature(cleaned)
 
-    # 1. Прилагаме вече запазено AI групиране (/items/ai-merge), ако има.
+    # 1. Прилагаме вече запазено AI групиране (/items/ai-merge), ако има -
+    # освен ако групата слепва различни размери (виж item_size_signature).
     mapping = await db.item_merge_mappings.find_one(
         {"company_id": company_id, "variants": cleaned},
         {"_id": 0, "canonical_name": 1}
     )
-    if mapping:
+    if mapping and item_size_signature(mapping["canonical_name"]) == signature:
         return mapping["canonical_name"], True
 
     # 2. Иначе - fuzzy съпоставяне с вече записани артикули на фирмата, за
     # да се слеят очевидни варианти (правопис, регистър, пунктуация) веднага,
-    # без да се чака периодичния AI анализ.
+    # без да се чака периодичния AI анализ. Само между имена с еднакви
+    # числа: "Доматен сос 1кг" и "Доматен сос 5кг" са 92% сходни, но са
+    # различни артикули с различни цени.
     existing_names = await db.item_price_history.distinct("item_name", {"company_id": company_id})
 
     best_match = None
     best_score = 0.0
     for existing in existing_names:
         existing_key = _compare_key(existing)
-        if not existing_key:
+        if not existing_key or item_size_signature(existing) != signature:
             continue
         if existing_key == compare_key:
             return existing, existing != cleaned
@@ -2701,17 +2773,74 @@ async def _signal_budget(company_id, scope, current_user, visibility) -> Optiona
         }
     return None
 
+def _eur(value: float) -> str:
+    return f"{value:,.0f}".replace(",", " ") if abs(value) >= 10 else f"{value:.2f}".replace(".", ",")
+
+
 async def _signal_price_alerts(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Unread price alerts, weighed by money: the total monthly cost of the
+    price rises (change x usual monthly quantity), not how many alerts
+    there are - a 280 EUR/month rise on pitas must outrank a 2 EUR/month
+    one on detergent, which the old per-alert count ranked equally.
+    Suspected pack misreads are questions about the data and are named
+    separately, never counted as price rises."""
     if "view_statistics" not in set(current_user.permissions or []):
         return None
-    unread_count = await db.price_alerts.count_documents({**scope, "status": "unread"})
-    if unread_count == 0:
+    unread = await db.price_alerts.find(
+        {**scope, "status": "unread"},
+        {"_id": 0, "item_name": 1, "supplier": 1, "kind": 1, "monthly_impact": 1, "change_percent": 1,
+         "old_price": 1, "new_price": 1, "pack_multiple": 1, "invoice_number": 1},
+    ).to_list(500)
+    if not unread:
         return None
+    packs = [a for a in unread if a.get("kind") == "pack_suspect"]
+    changes = [a for a in unread if a.get("kind") != "pack_suspect"]
+    rises = sorted(
+        (a for a in changes if (a.get("monthly_impact") or 0) > 0),
+        key=lambda a: a["monthly_impact"], reverse=True,
+    )
+    monthly_total = sum(a["monthly_impact"] for a in rises)
+
+    pack_note = ""
+    if packs:
+        p = packs[0]
+        pack_note = (
+            f"\"{p['item_name']}\" във фактура {p.get('invoice_number', '')}: цената е точно "
+            f"{p.get('pack_multiple')}× обичайната - стек ли е?"
+        )
+        if len(packs) > 1:
+            pack_note += f" (+{len(packs) - 1} още за проверка)"
+
+    if rises:
+        top = rises[0]
+        others = len(changes) - 1
+        detail = (
+            f"\"{top['item_name']}\" при {top['supplier']}: {top['old_price']:.2f} → {top['new_price']:.2f} € "
+            f"({top['change_percent']:+.0f}%), ≈ {_eur(top['monthly_impact'])} € на месец."
+        )
+        if others > 0:
+            detail += f" Още {others} промени."
+        if pack_note:
+            detail += f" Провери и: {pack_note}"
+        return {
+            "key": "price_alerts", "severity": "warning" if monthly_total >= 100 else "info",
+            "priority": min(75, round(45 + min(30, monthly_total / 20))),
+            "title": f"Доставките поскъпват с ≈ {_eur(monthly_total)} € на месец",
+            "detail": detail,
+            "route": "/(tabs)/stats",
+        }
+    if packs:
+        return {
+            "key": "price_alerts", "severity": "info", "priority": 48,
+            "title": "Провери опаковка във фактура",
+            "detail": pack_note[0].upper() + pack_note[1:] if pack_note else "",
+            "route": "/(tabs)/stats",
+        }
+    # Only falls or alerts from before money impact was measured
     return {
-        "key": "price_alerts", "severity": "warning" if unread_count >= 3 else "info",
-        "priority": min(72, 40 + unread_count * 6),
+        "key": "price_alerts", "severity": "info", "priority": 40,
         "title": "Промени в цените на доставчици",
-        "detail": f"{unread_count} непрочетени известия за промяна в цените.",
+        "detail": f"{len(changes)} непрочетени известия за промяна в цените.",
         "route": "/(tabs)/stats",
     }
 
@@ -3160,12 +3289,13 @@ async def run_ai_item_merge(company_id: str) -> dict:
         items_text = "\n".join(unique_items[:200])
 
         prompt = f"""Анализирай следния списък с имена на продукти/суровини и групирай сходните продукти.
-Търси продукти, които са едни и същи, но са записани по различен начин: различен регистър на буквите, пунктуация, съкращения, правописни грешки, синоними, различен словоред или разфасовка на един и същ артикул.
+Търси продукти, които са едни и същи, но са записани по различен начин: различен регистър на буквите, пунктуация, съкращения, правописни грешки, синоними или различен словоред.
 
 Списък с продукти:
 {items_text}
 
 Не групирай продукти, които са наистина различни (например "Олио" и "Оцет" са РАЗЛИЧНИ продукти).
+НИКОГА не групирай различни размери или разфасовки на един продукт (например "Доматен сос 1кг" и "Доматен сос 5кг", или "Кола 0.5л" и "Кола 0.5л x 6") - те имат различна цена и количество и трябва да останат отделни.
 Групирай САМО ако очевидно става дума за същия продукт/суровина с различно изписване.
 Върни само групи с 2 или повече варианта - пропусни продукти без дубликат."""
 
@@ -3180,7 +3310,17 @@ async def run_ai_item_merge(company_id: str) -> dict:
 
         parsed = response.parsed_output
         groups = parsed.groups if parsed else []
-        merged_groups = [g.model_dump() for g in groups if g.canonical_name and g.variants]
+        # The prompt forbids joining different sizes, but this is enforced
+        # here too: a size-mismatched variant is dropped, and a group left
+        # with nothing to merge is dropped with it.
+        merged_groups: List[Dict[str, Any]] = []
+        for g in groups:
+            if not g.canonical_name:
+                continue
+            signature = item_size_signature(g.canonical_name)
+            same_size = [v for v in g.variants if item_size_signature(v) == signature]
+            if any(v.lower() != g.canonical_name.lower() for v in same_size):
+                merged_groups.append({"canonical_name": g.canonical_name, "variants": same_size})
 
         # Save merge mappings to database
         for group in merged_groups:
@@ -3286,9 +3426,14 @@ async def send_price_alert_pushes(company_id: str, alerts: List["PriceAlert"]):
         a = alerts[0]
         title = "Промяна в цена"
         body = f"{a.item_name} при {a.supplier}: {a.old_price:.2f} → {a.new_price:.2f} € ({a.change_percent:+.1f}%)"
+        if a.monthly_impact:
+            body += f", ≈ {_eur(a.monthly_impact)} € на месец"
     else:
         title = "Промени в цени"
         body = f"{len(alerts)} артикула с променена цена в последната сканирана фактура."
+        total = sum(a.monthly_impact or 0 for a in alerts)
+        if total:
+            body += f" Общо ≈ {_eur(total)} € на месец."
 
     await push_service.send_to_users(
         db, recipient_ids, title=title, body=body,
@@ -4576,6 +4721,9 @@ async def create_indexes():
         # Price history indexes
         await db.item_price_history.create_index([("company_id", 1), ("item_name", 1)])
         await db.item_price_history.create_index([("company_id", 1), ("supplier", 1)])
+        # Edits/deletes of an invoice resync its rows by invoice_id
+        await db.item_price_history.create_index([("company_id", 1), ("invoice_id", 1)])
+        await db.price_alerts.create_index([("company_id", 1), ("invoice_id", 1)])
 
         # Price alerts - read on every app open via GET /items/price-alerts
         # (mounted in app/_layout.tsx), so this one matters more than its
@@ -4638,6 +4786,20 @@ async def create_indexes():
         logger.info("Database indexes created successfully")
     except Exception as e:
         logger.error(f"Error creating indexes: {e}")
+
+
+async def run_data_migrations():
+    """One-time data repairs, each guarded by its own marker in
+    `data_migrations` so a restart never re-runs them. A failure is logged
+    and swallowed - a broken migration must never keep the API from
+    starting."""
+    from routers.price_tracking import cleanup_orphan_price_data
+    try:
+        result = await cleanup_orphan_price_data()
+        if result:
+            logger.info(f"Price data cleanup: {result}")
+    except Exception:
+        logger.exception("Price data cleanup failed")
 
 # ===================== HEALTH CHECK =====================
 

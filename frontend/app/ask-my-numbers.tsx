@@ -305,6 +305,7 @@ export default function AskMyNumbersScreen() {
                                     .replace('{item}', it.name)
                                     .replace('{quantity}', String(it.quantity))
                                     .replace('{unit}', it.unit)
+                                    .replace('{spent}', String(it.total_spent))
                                     .replace('{count}', String(it.purchases_count))}
                                 </Text>
                               ))}

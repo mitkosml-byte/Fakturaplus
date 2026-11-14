@@ -1681,6 +1681,11 @@ def test_item_purchases_in_chat_digest():
     assert items["Хляб"]["quantity"] == 12
     assert items["Хляб"]["purchases_count"] == 2
 
+    # Ranked by money spent (a quantity ranking adds litres to pieces)
+    assert items["мляко"]["total_spent"] == 30
+    assert items["Хляб"]["total_spent"] == 12
+    assert [it["name"] for it in digest["item_purchases"]] == ["мляко", "Хляб"]
+
 
 def test_proactive_signals(client):
     """Module 11 Finding #1: one ranked signal list over every other

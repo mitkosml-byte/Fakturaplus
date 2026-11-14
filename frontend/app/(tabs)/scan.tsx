@@ -23,7 +23,8 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
-import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod } from '../../src/types';
+import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint } from '../../src/types';
+import { formatEur, priceAlertMeaning } from '../../src/utils/priceAlert';
 import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
@@ -62,12 +63,14 @@ export default function ScanScreen() {
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
   const [ocrCorrections, setOcrCorrections] = useState<string[]>([]);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
-  // "You've paid less for this before" - previously only a buried
-  // drill-down in Stats, now surfaced right where a price actually gets
-  // typed in, by reusing the same per-item/per-supplier history lookup.
-  // Keyed by the item's index in `items` (its name alone isn't a stable
-  // key - two rows can share a name before the user's edited them apart).
-  const [itemPriceNotes, setItemPriceNotes] = useState<Record<number, { lastPrice: number; changePercent: number }>>({});
+  // What each recognized line would raise once saved, judged by the same
+  // engine as a saved invoice: a "pack of N?" question when the price is
+  // exactly a pack multiple of the usual one (with a one-tap fix), or a
+  // real change with its size in EUR a month - so a misread is fixed here,
+  // before it reaches the price history. Keyed by the item's index in
+  // `items` (its name alone isn't a stable key - two rows can share a
+  // name before the user's edited them apart).
+  const [itemPriceHints, setItemPriceHints] = useState<Record<number, ItemPriceHint>>({});
 
   // Form fields (editable after OCR)
   const [supplier, setSupplier] = useState('');
@@ -256,34 +259,52 @@ export default function ScanScreen() {
     }
   };
 
-  // Looks up each recognized item's price history from THIS supplier and
-  // flags a meaningful change (same >=10%/>=2 threshold the saved-invoice
-  // price-alert uses) right in the review screen, before the scan is even
-  // saved - reuses the existing per-item/per-supplier statistics lookup,
-  // no new backend endpoint needed. Best-effort: a failed lookup (e.g. a
-  // viewer without view_statistics) just leaves that item without a note,
+  // Best-effort: a failed check just leaves the lines without hints,
   // never blocks the scan.
-  const loadItemPriceNotes = async (ocrItems: { name: string; unit_price: number }[], supplierName: string) => {
-    const normalizedSupplier = supplierName.trim().toLowerCase();
-    const results = await Promise.all(
-      ocrItems.map(async (item) => {
-        try {
-          const data = await api.getItemBySupplier(item.name);
-          const match = data.suppliers.find((s) => s.supplier.trim().toLowerCase() === normalizedSupplier);
-          if (!match || !match.last_price || match.last_price <= 0) return null;
-          const changePercent = ((item.unit_price - match.last_price) / match.last_price) * 100;
-          if (Math.abs(changePercent) < 10 || Math.abs(item.unit_price - match.last_price) < 2) return null;
-          return { lastPrice: match.last_price, changePercent };
-        } catch {
-          return null;
-        }
-      })
-    );
-    const notes: Record<number, { lastPrice: number; changePercent: number }> = {};
-    results.forEach((note, index) => {
-      if (note) notes[index] = note;
-    });
-    setItemPriceNotes(notes);
+  const loadItemPriceHints = async (
+    ocrItems: { name: string; quantity: number; unit?: string; unit_price: number }[],
+    supplierName: string,
+  ) => {
+    if (!supplierName.trim() || ocrItems.length === 0) return;
+    try {
+      const { hints } = await api.checkItemPrices(supplierName, ocrItems.map((item) => ({
+        name: item.name,
+        quantity: item.quantity || 1,
+        unit: item.unit || 'бр.',
+        unit_price: item.unit_price,
+      })));
+      const byIndex: Record<number, ItemPriceHint> = {};
+      hints.forEach((hint) => {
+        byIndex[hint.index] = hint;
+      });
+      setItemPriceHints(byIndex);
+    } catch {
+      // no hints
+    }
+  };
+
+  // The line as it would read if it really was a pack: N times the
+  // quantity at 1/N the price (or the reverse when the price came in N
+  // times BELOW the usual pack price). Same line total either way.
+  const packFixValues = (index: number): { quantity: number; unitPrice: number } | null => {
+    const hint = itemPriceHints[index];
+    const item = items[index];
+    if (!hint || hint.kind !== 'pack_suspect' || !hint.pack_multiple || !item) return null;
+    const k = hint.pack_multiple;
+    const qty = parseFloat(item.quantity.replace(',', '.')) || 1;
+    const price = parseFloat(item.unit_price.replace(',', '.'));
+    if (!price) return null;
+    const split = hint.direction !== 'decrease';
+    return {
+      quantity: Math.round((split ? qty * k : qty / k) * 1000) / 1000,
+      unitPrice: Math.round((split ? price / k : price * k) * 10000) / 10000,
+    };
+  };
+
+  const applyPackFix = (index: number) => {
+    const fix = packFixValues(index);
+    if (!fix) return;
+    updateItem(index, { quantity: String(fix.quantity), unit_price: String(fix.unitPrice) });
   };
 
   const processImages = async (images: string[]) => {
@@ -316,8 +337,8 @@ export default function ScanScreen() {
           unit: item.unit || 'бр.',
           unit_price: String(item.unit_price),
         })));
-        setItemPriceNotes({});
-        loadItemPriceNotes(result.items, result.supplier);
+        setItemPriceHints({});
+        loadItemPriceHints(result.items, result.supplier);
       }
       
       // Set invoice date from OCR if available - and flag it clearly when
@@ -450,10 +471,27 @@ export default function ScanScreen() {
 
   const updateItem = (index: number, patch: Partial<EditableItem>) => {
     setItems(prev => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+    // A hint judged the line as recognized - once edited, it no longer applies.
+    setItemPriceHints(prev => {
+      if (!(index in prev)) return prev;
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
   };
 
   const removeItem = (index: number) => {
     setItems(prev => prev.filter((_, i) => i !== index));
+    // Hints are keyed by position: the rows below the removed one move up.
+    setItemPriceHints(prev => {
+      const next: Record<number, ItemPriceHint> = {};
+      Object.entries(prev).forEach(([key, hint]) => {
+        const i = Number(key);
+        if (i < index) next[i] = hint;
+        else if (i > index) next[i - 1] = hint;
+      });
+      return next;
+    });
   };
 
   const addItem = () => {
@@ -473,6 +511,7 @@ export default function ScanScreen() {
     setVatTreatment('');
     setNotes('');
     setItems([]);
+    setItemPriceHints({});
     setInvoiceDate(new Date());
     setDateFoundByOcr(null);
     setPaymentMethod('');
@@ -981,17 +1020,41 @@ export default function ScanScreen() {
                               <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
                             </TouchableOpacity>
                           </View>
-                          {itemPriceNotes[index] && (
-                            <Text style={[
-                              styles.itemPriceNote,
-                              { color: itemPriceNotes[index].changePercent > 0 ? COLORS.danger : COLORS.success },
-                            ]}>
-                              {itemPriceNotes[index].changePercent > 0 ? '▲' : '▼'}{' '}
-                              {t('scan.priceNote')
-                                .replace('{percent}', Math.abs(itemPriceNotes[index].changePercent).toFixed(0))
-                                .replace('{lastPrice}', itemPriceNotes[index].lastPrice.toFixed(2))}
-                            </Text>
-                          )}
+                          {itemPriceHints[index] && (() => {
+                            const hint = itemPriceHints[index];
+                            if (hint.kind === 'pack_suspect') {
+                              const fix = packFixValues(index);
+                              return (
+                                <View>
+                                  <Text style={[styles.itemPriceNote, { color: COLORS.warning }]}>
+                                    {priceAlertMeaning(hint, t)}
+                                  </Text>
+                                  {fix && (
+                                    <TouchableOpacity style={styles.packFixButton} onPress={() => applyPackFix(index)}>
+                                      <Ionicons name="cube-outline" size={14} color={COLORS.warning} />
+                                      <Text style={styles.packFixButtonText}>
+                                        {t(hint.direction === 'decrease' ? 'scan.packFixCombine' : 'scan.packFixSplit')
+                                          .replace('{k}', String(hint.pack_multiple))
+                                          .replace('{qty}', String(fix.quantity))
+                                          .replace('{price}', String(fix.unitPrice))}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                              );
+                            }
+                            const up = hint.change_percent > 0;
+                            const meaning = priceAlertMeaning(hint, t);
+                            return (
+                              <Text style={[styles.itemPriceNote, { color: up ? COLORS.danger : COLORS.success }]}>
+                                {up ? '▲' : '▼'}{' '}
+                                {t('scan.priceHintChange')
+                                  .replace('{percent}', Math.abs(hint.change_percent).toFixed(0))
+                                  .replace('{old}', formatEur(hint.old_price))}
+                                {meaning ? ` · ${meaning}` : ''}
+                              </Text>
+                            );
+                          })()}
                         </View>
                       ))
                     )}
@@ -1515,6 +1578,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     marginTop: 6,
+  },
+  packFixButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.warning + '60',
+    backgroundColor: COLORS.warning + '15',
+  },
+  packFixButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.warning,
   },
   itemSmallInput: {
     flex: 1,

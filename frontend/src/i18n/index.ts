@@ -331,12 +331,12 @@ export const translations: Translations = {
     en: '{item} - usually reordered every {days} days for ~{value} €, last ordered {since} days ago. Suggested quantity: ~{quantity} {unit}.',
   },
   'askMyNumbers.itemPurchasesTitle': {
-    bg: 'Поръчани количества (цялата история)',
-    en: 'Ordered quantities (all-time)',
+    bg: 'Най-големи разходи по артикул (цялата история)',
+    en: 'Top items by spend (all-time)',
   },
   'askMyNumbers.itemPurchaseLine': {
-    bg: '{item}: {quantity} {unit} ({count}x поръчано)',
-    en: '{item}: {quantity} {unit} (ordered {count}x)',
+    bg: '{item}: {quantity} {unit} за {spent} € ({count}x поръчано)',
+    en: '{item}: {quantity} {unit} for {spent} € (ordered {count}x)',
   },
   'askMyNumbers.genericError': {
     bg: 'Нещо се обърка. Опитай отново.',
@@ -1027,10 +1027,6 @@ export const translations: Translations = {
   'scan.pricePlaceholder': {
     bg: 'Цена',
     en: 'Price',
-  },
-  'scan.priceNote': {
-    bg: '{percent}% спрямо последно {lastPrice} €',
-    en: '{percent}% vs last time ({lastPrice} €)',
   },
   'scan.notesPlaceholder': {
     bg: 'Допълнителни бележки...',
@@ -2874,13 +2870,41 @@ export const translations: Translations = {
     bg: 'Алармирай само при промяна поне с толкова процента спрямо средната от последните покупки.',
     en: 'Only alert when the change is at least this many percent vs. the recent-purchases average.',
   },
-  'priceAlertSettings.minAbsoluteChange': {
-    bg: 'Минимална разлика (€)',
-    en: 'Minimum difference (€)',
+  'priceAlertSettings.minMonthlyImpact': {
+    bg: 'Минимално въздействие на месец (€)',
+    en: 'Minimum impact per month (€)',
   },
-  'priceAlertSettings.minAbsoluteChangeHint': {
-    bg: 'Пропускай промени под тази сума - за да не се получават аларми заради стотинки разлика в евтини артикули.',
-    en: "Skip changes smaller than this amount - so cheap items don't trigger alerts over a few cents.",
+  'priceAlertSettings.minMonthlyImpactHint': {
+    bg: 'Алармирай само ако промяната струва поне толкова на месец при обичайното ти количество - 18% по-скъпи питки, купувани с хиляди, алармират; 12% по-скъп препарат за 2 € на месец - не.',
+    en: 'Only alert when the change costs at least this much a month at your usual quantity - pitas bought by the thousand alert at +18%; a detergent costing 2 € more a month does not.',
+  },
+  'priceAlert.monthlyImpact': {
+    bg: '≈ {amount} € на месец при обичайното количество',
+    en: '≈ {amount} € a month at your usual quantity',
+  },
+  'priceAlert.packQuestionUp': {
+    bg: 'Цената е точно {k}× обичайната ({old} €) – стек от {k} ли е, записан като 1 бр.?',
+    en: 'The price is exactly {k}× the usual ({old} €) – a pack of {k} entered as 1 piece?',
+  },
+  'priceAlert.packQuestionDown': {
+    bg: 'Цената е точно {k} пъти под обичайната ({old} €) – по бройка ли е, вместо на стек от {k}?',
+    en: 'The price is exactly {k} times below the usual ({old} €) – per piece instead of per pack of {k}?',
+  },
+  'priceAlert.packBadge': {
+    bg: '×{k}?',
+    en: '×{k}?',
+  },
+  'scan.packFixSplit': {
+    bg: 'Да, стек от {k}: {qty} × {price} €',
+    en: 'Yes, pack of {k}: {qty} × {price} €',
+  },
+  'scan.packFixCombine': {
+    bg: 'Да, по {k} в стек: {qty} × {price} €',
+    en: 'Yes, {k} per pack: {qty} × {price} €',
+  },
+  'scan.priceHintChange': {
+    bg: '{percent}% спрямо обичайните {old} €',
+    en: '{percent}% vs the usual {old} €',
   },
   'priceAlertSettings.mutedTitle': {
     bg: 'Спрени аларми за артикули',

@@ -293,6 +293,7 @@ export interface BusinessChatItemPurchase {
   quantity: number;
   unit: string;
   purchases_count: number;
+  total_spent: number;
 }
 
 export interface BusinessChatForecastSummary {
@@ -565,6 +566,28 @@ export interface PriceAlert {
   invoice_number: string;
   status: 'unread' | 'read' | 'dismissed';
   created_at: string;
+  // "pack_suspect": the new unit price is exactly a pack multiple of the
+  // usual one - a question about a likely misread, not a price rise.
+  kind?: 'price_change' | 'pack_suspect';
+  // (new - old) x usual monthly quantity, EUR per month
+  monthly_impact?: number | null;
+  pack_multiple?: number | null;
+  unit?: string | null;
+  line_item_id?: string | null;
+}
+
+// Scan-review preview of what a recognized line would raise once saved
+// (POST /items/price-check) - index points into the request's items.
+export interface ItemPriceHint {
+  index: number;
+  kind: 'price_change' | 'pack_suspect';
+  old_price: number;
+  new_price: number;
+  change_percent: number;
+  direction: 'increase' | 'decrease';
+  pack_multiple: number | null;
+  monthly_impact: number | null;
+  unit: string | null;
 }
 
 export interface PriceAlertMute {
@@ -575,7 +598,7 @@ export interface PriceAlertMute {
 
 export interface PriceAlertSettings {
   threshold_percent: number;
-  min_absolute_change: number;
+  min_monthly_impact: number;
   alert_on_decrease: boolean;
   enabled: boolean;
 }

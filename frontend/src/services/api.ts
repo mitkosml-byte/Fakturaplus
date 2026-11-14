@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
-PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult } from '../types';
+PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint } from '../types';
 import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -822,6 +822,19 @@ class ApiService {
     return this.fetch(`/items/price-alerts${query ? `?${query}` : ''}`);
   }
 
+  // Scan review: what each recognized line would raise once saved (a
+  // "pack of N?" question or a real price change with its EUR/month) -
+  // writes nothing.
+  async checkItemPrices(
+    supplier: string,
+    items: { name: string; quantity: number; unit: string; unit_price: number }[],
+  ): Promise<{ hints: ItemPriceHint[] }> {
+    return this.fetch('/items/price-check', {
+      method: 'POST',
+      body: JSON.stringify({ supplier, items }),
+    });
+  }
+
   async updatePriceAlert(alertId: string, status: 'read' | 'dismissed'): Promise<{ message: string }> {
     return this.fetch(`/items/price-alerts/${alertId}`, {
       method: 'PUT',
@@ -831,7 +844,7 @@ class ApiService {
 
   async getPriceAlertSettings(): Promise<{
     threshold_percent: number;
-    min_absolute_change: number;
+    min_monthly_impact: number;
     alert_on_decrease: boolean;
     enabled: boolean;
   }> {
@@ -840,7 +853,7 @@ class ApiService {
 
   async updatePriceAlertSettings(settings: {
     threshold_percent?: number;
-    min_absolute_change?: number;
+    min_monthly_impact?: number;
     alert_on_decrease?: boolean;
     enabled?: boolean;
   }): Promise<{ message: string }> {

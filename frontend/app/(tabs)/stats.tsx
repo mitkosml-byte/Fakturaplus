@@ -442,7 +442,7 @@ export default function StatsScreen() {
     try {
       await api.updatePriceAlertSettings({
         threshold_percent: alertSettings.threshold_percent,
-        min_absolute_change: alertSettings.min_absolute_change,
+        min_monthly_impact: alertSettings.min_monthly_impact,
         alert_on_decrease: alertSettings.alert_on_decrease,
         enabled: alertSettings.enabled,
       });
