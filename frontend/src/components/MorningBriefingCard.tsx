@@ -52,6 +52,8 @@ function actionLabelKey(signal: ProactiveSignal, action: ProactiveSignalAction):
       return 'briefing.stillBuying';
     case 'discontinue':
       return 'briefing.discontinue';
+    case 'mark_paid':
+      return 'briefing.markPaid';
   }
 }
 
@@ -84,7 +86,38 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
 
   // The answer is remembered server-side, so the signal doesn't come back
   // tomorrow unchanged; it leaves the list at once and returns if saving fails.
+  // A bulk change to invoices - confirmed first, then applied.
+  const markPaid = (signal: ProactiveSignal) => {
+    const ids = signal.invoice_ids || [];
+    if (ids.length === 0) return;
+    Alert.alert(
+      t('briefing.markPaidConfirmTitle'),
+      t('briefing.markPaidConfirmBody').replace('{count}', String(ids.length)),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('briefing.markPaid'),
+          onPress: async () => {
+            setSignals((prev) => prev.filter((s) => s !== signal));
+            try {
+              const { updated } = await api.markInvoicesPaid(ids);
+              Toast.success(t('briefing.markedPaid').replace('{count}', String(updated)));
+              refresh();
+            } catch (error: any) {
+              setSignals((prev) => [...prev, signal].sort((a, b) => b.priority - a.priority));
+              Alert.alert(t('common.error'), error?.message || '');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const act = async (signal: ProactiveSignal, action: ProactiveSignalAction) => {
+    if (action === 'mark_paid') {
+      markPaid(signal);
+      return;
+    }
     setSignals((prev) => prev.filter((s) => s !== signal));
     try {
       await api.updateSignalState({
@@ -142,10 +175,10 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
                 {signal.actions.map((action) => (
                   <TouchableOpacity
                     key={action}
-                    style={[styles.actionBtn, action === 'discontinue' && styles.actionBtnStrong]}
+                    style={[styles.actionBtn, (action === 'discontinue' || action === 'mark_paid') && styles.actionBtnStrong]}
                     onPress={() => act(signal, action)}
                   >
-                    <Text style={[styles.actionText, action === 'discontinue' && styles.actionTextStrong]}>
+                    <Text style={[styles.actionText, (action === 'discontinue' || action === 'mark_paid') && styles.actionTextStrong]}>
                       {t(actionLabelKey(signal, action))}
                     </Text>
                   </TouchableOpacity>

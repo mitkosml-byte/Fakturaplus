@@ -1027,6 +1027,15 @@ class ApiService {
     return this.fetch('/proactive/signals');
   }
 
+  // Marks several unpaid invoices fully paid at once (the "these overdue
+  // invoices look paid" question on Home).
+  async markInvoicesPaid(invoiceIds: string[]): Promise<{ updated: number }> {
+    return this.fetch('/invoices/mark-paid', {
+      method: 'POST',
+      body: JSON.stringify({ invoice_ids: invoiceIds }),
+    });
+  }
+
   // Remembers "snooze" / "done" (and the reorder question's answer) for a
   // Home signal, so it doesn't come back every day unchanged.
   async updateSignalState(body: {

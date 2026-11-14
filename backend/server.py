@@ -2681,38 +2681,92 @@ class BusinessChatResponse(BaseModel):
 # failure mode this engine exists to avoid.
 PROACTIVE_PUSH_WORTHY_PRIORITY = 70
 
-async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -> Optional[dict]:
-    unpaid_invoices = await db.invoices.find(
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+async def _latest_invoice_date_by_supplier(scope: dict, suppliers: set) -> Dict[str, datetime]:
+    """Newest invoice date per supplier (keys lower-cased), one indexed
+    query per supplier - only ever asked for the few with overdue invoices."""
+    latest: Dict[str, datetime] = {}
+    for supplier in suppliers:
+        docs = await db.invoices.find(
+            {**scope, "supplier": {"$regex": f"^{re.escape(supplier)}$", "$options": "i"}},
+            {"_id": 0, "date": 1},
+        ).sort("date", -1).limit(1).to_list(1)
+        if docs and isinstance(docs[0].get("date"), datetime):
+            latest[supplier.lower()] = _as_utc(docs[0]["date"])
+    return latest
+
+async def split_overdue_invoices(scope: dict) -> tuple:
+    """(unpaid, overdue, likely_paid) for bank-transfer purchase invoices.
+
+    likely_paid = overdue invoices from a supplier the company bought from
+    again AFTER the due date: suppliers rarely keep delivering to a customer
+    who doesn't pay, so these are far more often paid by bank and simply
+    never ticked in the app than really overdue. The rest of `overdue` is
+    what stays a money-at-risk warning."""
+    unpaid = await db.invoices.find(
         {**scope, "payment_method": "bank_transfer", "is_paid": False},
-        {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1},
+        {"_id": 0, "id": 1, "supplier": 1, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1},
     ).to_list(1000)
-    if not unpaid_invoices:
-        return None
     now_ts = datetime.now(timezone.utc)
+    overdue = [
+        inv for inv in unpaid
+        if isinstance(inv.get("payment_due_date"), datetime) and _as_utc(inv["payment_due_date"]) < now_ts
+    ]
+    latest = await _latest_invoice_date_by_supplier(scope, {inv.get("supplier") or "" for inv in overdue} - {""})
+    likely_paid = [
+        inv for inv in overdue
+        if (inv.get("supplier") or "").lower() in latest
+        and latest[(inv.get("supplier") or "").lower()] > _as_utc(inv["payment_due_date"])
+    ]
+    likely_ids = {inv["id"] for inv in likely_paid}
+    really_overdue = [inv for inv in overdue if inv["id"] not in likely_ids]
+    return unpaid, really_overdue, likely_paid
 
-    def _is_overdue(inv):
-        due = inv.get("payment_due_date")
-        if not due:
-            return False
-        if due.tzinfo is None:
-            due = due.replace(tzinfo=timezone.utc)
-        return due < now_ts
+def _owed(invoices: List[dict]) -> float:
+    return sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in invoices)
 
-    overdue = [inv for inv in unpaid_invoices if _is_overdue(inv)]
-    total_unpaid = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in unpaid_invoices)
+async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -> List[dict]:
+    """Unpaid supplier invoices, split three ways: really overdue (money at
+    risk, critical), overdue but most likely already paid (a question with a
+    one-tap "mark paid" - before, they were a permanent red alarm for any
+    owner who pays by bank and doesn't tick invoices off), and not yet due."""
+    unpaid, overdue, likely_paid = await split_overdue_invoices(scope)
+    if not unpaid:
+        return []
+    signals = []
     if overdue:
-        return {
+        signals.append({
             "key": "unpaid_invoices", "severity": "critical", "priority": 90,
             "title": "Просрочени фактури към доставчици",
-            "detail": f"{len(overdue)} от {len(unpaid_invoices)} неплатени фактури са просрочени - общо {total_unpaid:.2f} €.",
+            "detail": f"{len(overdue)} от {len(unpaid)} неплатени фактури са просрочени - общо {_owed(overdue):.2f} €.",
+            "route": "/(tabs)/invoices?paymentFilter=overdue",
+        })
+    if likely_paid:
+        suppliers = sorted({inv.get("supplier") or "" for inv in likely_paid} - {""})
+        names = ", ".join(suppliers[:3]) + (f" и още {len(suppliers) - 3}" if len(suppliers) > 3 else "")
+        count = len(likely_paid)
+        signals.append({
+            "key": "invoices_likely_paid", "severity": "info", "priority": 50,
+            "title": f"{count} просрочени фактури изглеждат платени" if count > 1 else "Просрочена фактура изглежда платена",
+            "detail": (
+                f"Купуваш от {names} и след падежа - най-вероятно са платени по банка, "
+                f"но не са отбелязани ({_owed(likely_paid):.2f} €). Отбележи ги като платени?"
+            ),
+            "route": "/(tabs)/invoices?paymentFilter=overdue",
+            "fingerprint": ",".join(sorted(inv["id"] for inv in likely_paid)),
+            "actions": ["mark_paid", "snooze"],
+            "invoice_ids": [inv["id"] for inv in likely_paid],
+        })
+    if not overdue and not likely_paid:
+        signals.append({
+            "key": "unpaid_invoices", "severity": "warning", "priority": 45,
+            "title": "Неплатени фактури към доставчици",
+            "detail": f"{len(unpaid)} неплатени фактури на обща стойност {_owed(unpaid):.2f} €.",
             "route": "/(tabs)/invoices",
-        }
-    return {
-        "key": "unpaid_invoices", "severity": "warning", "priority": 45,
-        "title": "Неплатени фактури към доставчици",
-        "detail": f"{len(unpaid_invoices)} неплатени фактури на обща стойност {total_unpaid:.2f} €.",
-        "route": "/(tabs)/invoices",
-    }
+        })
+    return signals
 
 async def _signal_receivables(company_id, scope, current_user, visibility) -> Optional[dict]:
     if "add_revenue" not in set(current_user.permissions or []):

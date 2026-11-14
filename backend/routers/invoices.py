@@ -205,6 +205,43 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
 
     return invoice_obj
 
+class MarkInvoicesPaidRequest(BaseModel):
+    invoice_ids: List[str] = Field(min_length=1, max_length=500)
+
+
+@router.post("/invoices/mark-paid")
+async def mark_invoices_paid(body: MarkInvoicesPaidRequest, current_user: User = Depends(get_current_user)):
+    """Marks several unpaid invoices fully paid in one go - the answer to
+    "these overdue invoices look paid, mark them?" on Home. Only unpaid
+    invoices of the caller's own company are touched; each change is
+    audit-logged like a single "mark paid"."""
+    require_permission(current_user, "manage_invoices")
+    company_id, scope = await get_company_scope(current_user)
+    now = datetime.now(timezone.utc)
+    invoices = await server.db.invoices.find(
+        {**scope, "id": {"$in": body.invoice_ids}, "is_paid": False},
+        {"_id": 0, "id": 1, "total_amount": 1, "supplier": 1, "invoice_number": 1},
+    ).to_list(len(body.invoice_ids))
+    for inv in invoices:
+        await server.db.invoices.update_one(
+            {**scope, "id": inv["id"]},
+            {"$set": {"is_paid": True, "paid_amount": inv.get("total_amount", 0), "paid_at": now}},
+        )
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+            action="update",
+            entity_type="invoice",
+            entity_id=inv["id"],
+            company_id=company_id,
+            details={
+                "is_paid": True, "marked_in_bulk": True,
+                "supplier": inv.get("supplier"), "invoice_number": inv.get("invoice_number"),
+            },
+        )
+    return {"updated": len(invoices)}
+
+
 @router.get("/invoices", response_model=List[Invoice])
 async def get_invoices(
     response: Response,

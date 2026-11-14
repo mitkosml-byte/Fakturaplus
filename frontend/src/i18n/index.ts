@@ -228,6 +228,22 @@ export const translations: Translations = {
     bg: 'Не, спрях го',
     en: 'No, I stopped',
   },
+  'briefing.markPaid': {
+    bg: 'Да, платени са',
+    en: 'Yes, they are paid',
+  },
+  'briefing.markPaidConfirmTitle': {
+    bg: 'Отбележи като платени?',
+    en: 'Mark as paid?',
+  },
+  'briefing.markPaidConfirmBody': {
+    bg: '{count} фактури ще бъдат отбелязани като изцяло платени. Можеш да промениш всяка от тях после.',
+    en: '{count} invoices will be marked as fully paid. You can change each of them later.',
+  },
+  'briefing.markedPaid': {
+    bg: 'Отбелязах {count} фактури като платени',
+    en: 'Marked {count} invoices as paid',
+  },
   'briefing.snoozed': {
     bg: 'Ще го видиш отново след 3 дни',
     en: "You'll see it again in 3 days",

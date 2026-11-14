@@ -200,7 +200,7 @@ export interface BillingDocument {
 // What the viewer can say about a Home signal. Money-at-risk signals offer
 // only "snooze"; "dismiss" hides a signal until its situation changes
 // (fingerprint); the reorder question offers still_buying/discontinue.
-export type ProactiveSignalAction = 'snooze' | 'dismiss' | 'still_buying' | 'discontinue';
+export type ProactiveSignalAction = 'snooze' | 'dismiss' | 'still_buying' | 'discontinue' | 'mark_paid';
 
 export interface ProactiveSignal {
   key: string;
@@ -212,6 +212,8 @@ export interface ProactiveSignal {
   fingerprint: string;
   actions: ProactiveSignalAction[];
   item_key?: string;
+  // invoices_likely_paid only: the invoices "mark paid" applies to
+  invoice_ids?: string[];
 }
 
 // "Ask your own numbers" chat (Module 4 Finding #3)
