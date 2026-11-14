@@ -900,6 +900,11 @@ async def _revenue_trend_ratio(company_id: str, window_days: int) -> float:
     from any single item, so this works the same whatever the item or
     business is.
 
+    Each half is averaged over the days that have revenue LOGGED - a day
+    nobody entered is unknown, not a zero-revenue day, so a few forgotten
+    entries in one half no longer read as the business slowing down.
+    Today is left out (it isn't over).
+
     Clamped to [0.4, 2.5]: a near-zero-revenue half (a closure, a data
     gap) could otherwise send a recommendation to zero or multiply it
     absurdly, and falls back to a neutral 1.0 (no adjustment) whenever
@@ -916,13 +921,16 @@ async def _revenue_trend_ratio(company_id: str, window_days: int) -> float:
     ).to_list(1000)
     user_ids = [u["user_id"] for u in company_users]
 
+    today_str = now.strftime("%Y-%m-%d")
     revenues = await server.db.daily_revenue.find(
-        {"user_id": {"$in": user_ids}, "date": {"$gte": earlier_start}},
+        {"user_id": {"$in": user_ids}, "date": {"$gte": earlier_start, "$lt": today_str}},
         {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1},
     ).to_list(10000)
 
     recent_total = 0.0
     earlier_total = 0.0
+    recent_days: set = set()
+    earlier_days: set = set()
     for r in revenues:
         date_str = r.get("date")
         if not isinstance(date_str, str):
@@ -930,12 +938,14 @@ async def _revenue_trend_ratio(company_id: str, window_days: int) -> float:
         amount = r.get("fiscal_revenue", 0) + r.get("pocket_money", 0)
         if date_str >= recent_start:
             recent_total += amount
+            recent_days.add(date_str)
         else:
             earlier_total += amount
+            earlier_days.add(date_str)
 
     if earlier_total <= 0 or recent_total <= 0:
         return 1.0
-    ratio = (recent_total / half) / (earlier_total / half)
+    ratio = (recent_total / len(recent_days)) / (earlier_total / len(earlier_days))
     return max(0.4, min(2.5, ratio))
 
 

@@ -42,7 +42,7 @@ export default function HomeScreen() {
   const { language, setLanguage } = useLanguageStore();
   const { isOwner, hasPermission, isLoading: authLoading } = useAuth();
   const router = useRouter();
-  const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string }>();
+  const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string; revenueDate?: string }>();
 
   const [summary, setSummary] = useState<Summary | null>(null);
   // Which period the dashboard cards below are showing - defaults to the
@@ -321,6 +321,19 @@ export default function HomeScreen() {
     return () => clearTimeout(clearParamsTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ocrParams.ocrDate, ocrParams.ocrFiscalRevenue, ocrParams.ocrVatRate]);
+
+  // Hand-off from the morning briefing's "missing revenue" signal: opens
+  // the same modal on the exact day that has nothing entered yet.
+  useEffect(() => {
+    if (!ocrParams.revenueDate || ocrParams.ocrDate || !/^\d{4}-\d{2}-\d{2}$/.test(ocrParams.revenueDate)) return;
+    setRevenueDate(new Date(`${ocrParams.revenueDate}T00:00:00`));
+    setRevenueModalVisible(true);
+    const clearParamsTimeout = setTimeout(() => {
+      router.setParams({ revenueDate: undefined });
+    }, 0);
+    return () => clearTimeout(clearParamsTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ocrParams.revenueDate]);
 
   // Load expenses for selected date when expense modal opens or date changes
   const loadDayExpenses = useCallback(async (date: Date) => {

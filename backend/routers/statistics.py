@@ -314,12 +314,15 @@ async def _daily_revenue_by_weekday(company_id: str, lookback_days: int = WEEKDA
     ForecastService's own revenue forecast uses) over the trailing
     lookback_days, bucketed by weekday (0=Monday..6=Sunday), skipping days
     the business is known to be closed (the recurring weekly pattern plus
-    one-off exceptions - see is_date_closed/get_closed_days_lookup). A day
-    with legitimately zero revenue because the business wasn't open isn't
-    a "weak day", it's already correctly closed - only open days ever
-    enter a bucket. A day that WAS open but genuinely has no revenue
-    logged counts as an actual 0 (not logging anything is itself
-    information), not a gap to skip."""
+    one-off exceptions - see is_date_closed/get_closed_days_lookup).
+
+    Only days with revenue actually LOGGED enter a bucket: an open day with
+    nothing entered is unknown, not zero - far more often a forgotten entry
+    than a day with no sales. Counting those as 0 turned three forgotten
+    Mondays into "Monday is 51% weaker, is a full working day worth it?".
+    The gap is surfaced on its own instead (_missing_revenue_days). Today
+    is left out too: it isn't over, so its partial total would read as a
+    weak day."""
     from collections import defaultdict
 
     now = datetime.now(timezone.utc)
@@ -348,12 +351,51 @@ async def _daily_revenue_by_weekday(company_id: str, lookback_days: int = WEEKDA
     buckets: Dict[int, List[float]] = defaultdict(list)
     d = start.date()
     today = now.date()
-    while d <= today:
+    while d < today:
         date_str = d.strftime("%Y-%m-%d")
-        if not is_date_closed(date_str, closed_weekdays, exceptions_map):
-            buckets[d.weekday()].append(revenue_by_date.get(date_str, 0.0))
+        if date_str in revenue_by_date and not is_date_closed(date_str, closed_weekdays, exceptions_map):
+            buckets[d.weekday()].append(revenue_by_date[date_str])
         d += timedelta(days=1)
     return buckets
+
+MISSING_REVENUE_LOOKBACK_DAYS = 14
+MISSING_REVENUE_COVERAGE_DAYS = 28
+# Below this share of open days logged, a company simply doesn't log
+# revenue day by day - reminding it about every unlogged day would be noise.
+MISSING_REVENUE_MIN_COVERAGE = 0.5
+
+async def _missing_revenue_days(company_id: str) -> List[str]:
+    """Open days of the last two weeks (today excluded - it isn't over)
+    with no revenue entry at all, oldest first - for a company that logs
+    most of its open days. Counted only from the first day it logged
+    anything in the last four weeks, so a company that just started isn't
+    told about the days before it did."""
+    today = datetime.now(timezone.utc).date()
+    window_start = today - timedelta(days=MISSING_REVENUE_COVERAGE_DAYS)
+    company_users = await server.db.users.find(
+        {"company_id": company_id}, {"_id": 0, "user_id": 1}
+    ).to_list(1000)
+    user_ids = [u["user_id"] for u in company_users]
+    logged = {
+        d for d in await server.db.daily_revenue.distinct(
+            "date", {"user_id": {"$in": user_ids}, "date": {"$gte": window_start.isoformat(), "$lt": today.isoformat()}}
+        ) if isinstance(d, str)
+    }
+    if not logged:
+        return []
+    first_logged = datetime.strptime(min(logged), "%Y-%m-%d").date()
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+    open_days = [
+        day for day in (first_logged + timedelta(days=i) for i in range((today - first_logged).days))
+        if not is_date_closed(day.isoformat(), closed_weekdays, exceptions_map)
+    ]
+    if not open_days:
+        return []
+    coverage = sum(1 for day in open_days if day.isoformat() in logged) / len(open_days)
+    if coverage < MISSING_REVENUE_MIN_COVERAGE:
+        return []
+    recent_start = today - timedelta(days=MISSING_REVENUE_LOOKBACK_DAYS)
+    return [day.isoformat() for day in open_days if day >= recent_start and day.isoformat() not in logged]
 
 async def _weak_day_suggestion(company_id: str) -> Optional[dict]:
     """Module: cross-data-source insight #2 (weekday revenue pattern). A

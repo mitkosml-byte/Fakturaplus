@@ -3047,11 +3047,56 @@ async def _signal_staffing_mismatch(company_id, scope, current_user, visibility)
         "route": "/(tabs)/stats",
     }
 
+_MONTHS_BG_GENITIVE = [
+    "януари", "февруари", "март", "април", "май", "юни",
+    "юли", "август", "септември", "октомври", "ноември", "декември",
+]
+
+def _bg_day_list(dates: List[str]) -> str:
+    """'2026-11-02', '2026-11-05', '2026-11-09' -> '2, 5 и 9 ноември'."""
+    parsed = [datetime.strptime(d, "%Y-%m-%d") for d in dates]
+    if len({(p.year, p.month) for p in parsed}) == 1:
+        parts = [str(p.day) for p in parsed]
+        suffix = f" {_MONTHS_BG_GENITIVE[parsed[0].month - 1]}"
+    else:
+        parts = [f"{p.day} {_MONTHS_BG_GENITIVE[p.month - 1]}" for p in parsed]
+        suffix = ""
+    joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " и " + parts[-1]
+    return joined + suffix
+
+async def _signal_missing_revenue(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Open days of the last two weeks with no revenue entered, for a
+    company that otherwise logs its days. Those days are now left out of
+    weekday patterns and trends instead of counting as zero revenue - this
+    asks for the missing numbers, and opens the entry form on the most
+    recent missing day."""
+    if not company_id or "add_revenue" not in set(current_user.permissions or []):
+        return None
+    from routers.statistics import _missing_revenue_days
+    missing = await _missing_revenue_days(company_id)
+    if not missing:
+        return None
+    shown = missing[-5:]
+    days_text = _bg_day_list(shown)
+    if len(missing) > len(shown):
+        days_text = f"{days_text} (и още {len(missing) - len(shown)})"
+    many = len(missing) >= 3
+    return {
+        "key": "missing_revenue", "severity": "warning" if many else "info",
+        "priority": 55 if many else 40,
+        "title": f"Липсва оборот за {_bg_day_list([missing[-1]])}" if len(missing) == 1 else f"Липсва оборот за {len(missing)} дни",
+        "detail": (
+            f"Няма въведен оборот за {days_text}. Без тях седмичните изводи "
+            "и прогнозите не са точни - въведи ги или отбележи деня като почивен."
+        ),
+        "route": f"/(tabs)?revenueDate={missing[-1]}",
+    }
+
 _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_unpaid_invoices, _signal_receivables, _signal_scan_credits,
     _signal_budget, _signal_price_alerts, _signal_reorder, _signal_forecast,
     _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
-    _signal_weak_weekday, _signal_staffing_mismatch,
+    _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
 ]
 
 async def get_proactive_signals(current_user: User) -> List[dict]:

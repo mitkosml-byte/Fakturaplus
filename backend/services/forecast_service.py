@@ -49,23 +49,40 @@ def _asset_depreciation_for_month(asset: dict, year: int, month: int) -> float:
     return round(min(monthly, remaining), 2)
 
 
+def _month_start(year: int, month: int) -> datetime:
+    return datetime(year, month, 1, tzinfo=timezone.utc)
+
+
 def _resolve_window(
     lookback_days: Optional[int], start_date: Optional[str], end_date: Optional[str]
 ) -> tuple:
     """Turns whatever the caller passed (a lookback-days preset, an
-    explicit custom start/end, or nothing) into a concrete (start, end)
-    datetime pair. An explicit start_date/end_date (the "custom period"
-    case) always wins over lookback_days; lookback_days alone (the preset
-    buttons) counts back from now; nothing at all keeps the original
-    6-month default so an un-migrated caller behaves exactly as before."""
+    explicit custom start/end, or nothing) into a concrete
+    (start, end_exclusive) pair of month starts. An explicit
+    start_date/end_date (the "custom period" case) always wins over
+    lookback_days; lookback_days alone (the preset buttons) counts back
+    whole months (30 -> 1, 90 -> 3, 180 -> 6, 365 -> 12) from the last
+    complete one; nothing at all keeps the 6-month default.
+
+    Only whole calendar months, and never the month in progress: a
+    half-finished month counted as a whole one made every forecast read
+    as a sharp fall in the first days of each month, and a window that
+    started mid-month did the same to its first month."""
     now = datetime.now(timezone.utc)
-    end = datetime.fromisoformat(end_date).replace(tzinfo=timezone.utc) if end_date else now
+    current_month = _month_start(now.year, now.month)
+    end_exclusive = current_month
+    if end_date:
+        # A month counts only if the range runs through its last day.
+        after_end = datetime.fromisoformat(end_date).replace(tzinfo=timezone.utc) + timedelta(days=1)
+        end_exclusive = min(current_month, _month_start(after_end.year, after_end.month))
     if start_date:
         start = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+        y, m = _ym_add(start.year, start.month, 0 if start.day == 1 else 1)
     else:
         days = lookback_days if lookback_days and lookback_days > 0 else LOOKBACK_DAYS_DEFAULT
-        start = end - timedelta(days=days)
-    return start, end
+        months = max(1, round(days / 30.44))
+        y, m = _ym_add(end_exclusive.year, end_exclusive.month, -months)
+    return _month_start(y, m), end_exclusive
 
 
 def _robust_trend(amounts: List[float]) -> tuple:
@@ -109,7 +126,11 @@ def _build_forecast(
     """Shared forecast/confidence logic for both expense and revenue
     forecasts - the only thing that differs between them is how
     `historical` gets built (invoices+expenses+payroll+depreciation vs.
-    daily_revenue), not how it's projected forward."""
+    daily_revenue), not how it's projected forward.
+
+    History ends with the last COMPLETE month, so forecast[0] is still
+    next calendar month: the projection steps over the month in progress
+    (fitted_last + slope x months from the last historical month)."""
     if not historical:
         return {
             "historical": [],
@@ -125,6 +146,8 @@ def _build_forecast(
     confidence = min(0.9, len(amounts) / 6)  # unchanged - more months = higher confidence
 
     current_date = datetime.now(timezone.utc)
+    last_y, last_m = (int(part) for part in historical[-1]["month"].split("-"))
+    targets = [_ym_add(current_date.year, current_date.month, i) for i in range(1, months_ahead + 1)]
     forecast = []
 
     if len(amounts) < MIN_MONTHS_FOR_TREND:
@@ -135,21 +158,19 @@ def _build_forecast(
         # compounding a trend_percent that would only be noise here.
         trend = "insufficient_data"
         trend_percent = 0.0
-        for i in range(1, months_ahead + 1):
-            future_date = current_date + timedelta(days=30 * i)
+        for ty, tm in targets:
             forecast.append({
-                "month": future_date.strftime("%Y-%m"),
+                "month": f"{ty}-{tm:02d}",
                 "predicted_amount": round(avg_monthly, 2),
                 "lower_bound": round(max(0, avg_monthly - std_dev), 2),
                 "upper_bound": round(avg_monthly + std_dev, 2),
             })
     else:
         slope, fitted_last, trend_percent, trend = _robust_trend(amounts)
-        for i in range(1, months_ahead + 1):
-            future_date = current_date + timedelta(days=30 * i)
-            predicted = max(0, fitted_last + slope * i)
+        for ty, tm in targets:
+            predicted = max(0, fitted_last + slope * _ym_diff(last_y, last_m, ty, tm))
             forecast.append({
-                "month": future_date.strftime("%Y-%m"),
+                "month": f"{ty}-{tm:02d}",
                 "predicted_amount": round(predicted, 2),
                 "lower_bound": round(max(0, predicted - std_dev), 2),
                 "upper_bound": round(predicted + std_dev, 2),
@@ -196,6 +217,7 @@ class ForecastService:
         Module 4 audit finding this replaced)."""
         window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
         window_start_str = window_start.strftime("%Y-%m-%d")
+        window_end_str = window_end.strftime("%Y-%m-%d")
 
         # expenses/daily_revenue are keyed by user_id, not company_id, so
         # resolve the company's member user_ids to include everyone's entries
@@ -206,13 +228,13 @@ class ForecastService:
 
         # Get invoice expenses
         invoices = await self.db.invoices.find(
-            {"company_id": company_id, "date": {"$gte": window_start, "$lte": window_end}},
+            {"company_id": company_id, "date": {"$gte": window_start, "$lt": window_end}},
             {"_id": 0, "date": 1, "total_amount": 1}
         ).to_list(10000)
 
         # Get non-invoice expenses (date is stored as a "YYYY-MM-DD" string)
         expenses = await self.db.expenses.find(
-            {"user_id": {"$in": user_ids}, "date": {"$gte": window_start_str}},
+            {"user_id": {"$in": user_ids}, "date": {"$gte": window_start_str, "$lt": window_end_str}},
             {"_id": 0, "date": 1, "amount": 1}
         ).to_list(10000) if include_off_book_expenses else []
 
@@ -240,7 +262,7 @@ class ForecastService:
 
         for p in payroll_entries:
             month_key = f"{p['period_year']}-{p['period_month']:02d}"
-            if month_key >= window_start_str[:7]:
+            if window_start_str[:7] <= month_key < window_end_str[:7]:
                 monthly_totals[month_key] += float(p.get("total_employer_cost", 0))
 
         # Depreciation expense (ДМА) - deterministic per-asset schedule,
@@ -250,7 +272,7 @@ class ForecastService:
         ).to_list(1000)
 
         y, m = window_start.year, window_start.month
-        while (y, m) <= (window_end.year, window_end.month):
+        while (y, m) < (window_end.year, window_end.month):
             month_key = f"{y}-{m:02d}"
             month_total = sum(_asset_depreciation_for_month(a, y, m) for a in assets)
             if month_total:
@@ -283,8 +305,9 @@ class ForecastService:
         outside the register - the forecast card could show a fraction of
         the real turnover with no indication why. False for a viewer
         without view_pocket_money, matching get_summary's own redaction."""
-        window_start, _window_end = _resolve_window(lookback_days, start_date, end_date)
+        window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
         window_start_str = window_start.strftime("%Y-%m-%d")
+        window_end_str = window_end.strftime("%Y-%m-%d")
 
         # daily_revenue is keyed by user_id, not company_id
         company_users = await self.db.users.find(
@@ -293,7 +316,7 @@ class ForecastService:
         user_ids = [u["user_id"] for u in company_users]
 
         revenues = await self.db.daily_revenue.find(
-            {"user_id": {"$in": user_ids}, "date": {"$gte": window_start_str}},
+            {"user_id": {"$in": user_ids}, "date": {"$gte": window_start_str, "$lt": window_end_str}},
             {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1}
         ).to_list(10000)
 
