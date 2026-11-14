@@ -20,6 +20,7 @@ import re
 import statistics
 import json
 import difflib
+import hashlib
 from passlib.context import CryptContext
 import certifi
 from anthropic import AsyncAnthropic
@@ -2788,11 +2789,13 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
         return None
     unread = await db.price_alerts.find(
         {**scope, "status": "unread"},
-        {"_id": 0, "item_name": 1, "supplier": 1, "kind": 1, "monthly_impact": 1, "change_percent": 1,
+        {"_id": 0, "id": 1, "item_name": 1, "supplier": 1, "kind": 1, "monthly_impact": 1, "change_percent": 1,
          "old_price": 1, "new_price": 1, "pack_multiple": 1, "invoice_number": 1},
     ).to_list(500)
     if not unread:
         return None
+    # Done = these alerts seen; a new one brings the signal back.
+    fingerprint = ",".join(sorted(str(a.get("id")) for a in unread))
     packs = [a for a in unread if a.get("kind") == "pack_suspect"]
     changes = [a for a in unread if a.get("kind") != "pack_suspect"]
     rises = sorted(
@@ -2828,6 +2831,7 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
             "title": f"Доставките поскъпват с ≈ {_eur(monthly_total)} € на месец",
             "detail": detail,
             "route": "/(tabs)/stats",
+            "fingerprint": fingerprint,
         }
     if packs:
         return {
@@ -2835,6 +2839,7 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
             "title": "Провери опаковка във фактура",
             "detail": pack_note[0].upper() + pack_note[1:] if pack_note else "",
             "route": "/(tabs)/stats",
+            "fingerprint": fingerprint,
         }
     # Only falls or alerts from before money impact was measured
     return {
@@ -2842,16 +2847,36 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
         "title": "Промени в цените на доставчици",
         "detail": f"{len(changes)} непрочетени известия за промяна в цените.",
         "route": "/(tabs)/stats",
+        "fingerprint": fingerprint,
     }
 
-async def _signal_reorder(company_id, scope, current_user, visibility) -> Optional[dict]:
-    if "view_statistics" not in set(current_user.permissions or []):
-        return None
-    data = await get_reorder_nudges(current_user)
-    nudges = data.get("nudges") or []
+async def _signal_reorder(company_id, scope, current_user, visibility) -> List[dict]:
+    """Up to two signals from one cadence computation: "time to reorder"
+    for the most significant overdue item, and - for an item not bought
+    for more than 4 of its own cycles - the question "do you still buy
+    it?", whose answer either stops reminders for it until it is bought
+    again or keeps quiet until the next purchase."""
+    if not company_id or "view_statistics" not in set(current_user.permissions or []):
+        return []
+    nudges, stale = await reorder_overview(company_id)
+    signals = []
+    if stale:
+        item = stale[0]
+        signals.append({
+            "key": "reorder_stale", "severity": "info", "priority": 30,
+            "title": f"Още ли купуваш \"{item['item_name']}\"?",
+            "detail": (
+                f"Поръчваше го на всеки {item['median_days_between']} дни, а последната покупка беше "
+                f"преди {item['days_since_last']} дни. Ако вече не го купуваш, спирам напомнянията за него."
+            ),
+            "route": "/(tabs)/stats",
+            "fingerprint": f"{item['item_key']}|{item['last_purchase_date']}",
+            "actions": ["still_buying", "discontinue"],
+            "item_key": item["item_key"],
+        })
     if not nudges:
-        return None
-    # get_reorder_nudges already ranks by business impact (how overdue
+        return signals
+    # reorder_overview already ranks by business impact (how overdue
     # relative to its own cadence, weighted by what reordering it is
     # usually worth) - nudges[0] is the single most worth surfacing, not
     # just whichever item happens to have the largest raw day gap.
@@ -2871,12 +2896,16 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> Option
         f" Препоръчано количество: ~{top['recommended_quantity']} {top['unit']}."
         if top.get("recommended_quantity") else ""
     )
-    return {
+    signals.append({
         "key": "reorder", "severity": "info", "priority": priority,
         "title": "Време е за нова поръчка",
         "detail": f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни{value_note} - вече мина {top['days_since_last']}.{quantity_note}",
         "route": "/(tabs)/stats",
-    }
+        # Done = until it is bought again (the day count in the text
+        # changes daily, so the text itself can't identify it)
+        "fingerprint": f"{top['item_key']}|{top['last_purchase_date']}",
+    })
+    return signals
 
 async def _signal_forecast(company_id, scope, current_user, visibility) -> Optional[dict]:
     if not company_id or "view_statistics" not in set(current_user.permissions or []):
@@ -2892,6 +2921,7 @@ async def _signal_forecast(company_id, scope, current_user, visibility) -> Optio
             "title": "Оборотът показва низходяща тенденция",
             "detail": f"Оборотът ти намалява с около {abs(revenue_forecast['trend_percent']):.0f}% спрямо предходния период.",
             "route": "/(tabs)/stats",
+            "fingerprint": f"decreasing|{datetime.now(timezone.utc):%Y-%m}",
         }
     expense_forecast = await forecast_service.get_expense_forecast(
         company_id, months_ahead=1, include_off_book_expenses=visibility["off_book_expenses"]
@@ -2906,6 +2936,7 @@ async def _signal_forecast(company_id, scope, current_user, visibility) -> Optio
             "title": "Разходите показват възходяща тенденция",
             "detail": f"Разходите ти нарастват с около {abs(expense_forecast['trend_percent']):.0f}% спрямо предходния период.",
             "route": "/(tabs)/stats",
+            "fingerprint": f"increasing|{datetime.now(timezone.utc):%Y-%m}",
         }
     return None
 
@@ -2987,6 +3018,7 @@ async def _signal_personal_wallet(company_id, scope, current_user, visibility) -
         "title": "Личните тегления надхвърлят безопасния лимит" if severity == "critical" else "Личните тегления се доближават до лимита",
         "detail": summary["advice"][0],
         "route": "/personal-expenses",
+        "fingerprint": f"{summary['status']}|{datetime.now(timezone.utc):%Y-%m}",
     }
 
 # Bulgarian weekday names, index 0=Monday matching Python's own
@@ -3009,6 +3041,7 @@ async def _signal_weak_weekday(company_id, scope, current_user, visibility) -> O
     day_name = _WEEKDAY_NAMES_BG[suggestion["weekday"]]
     return {
         "key": "weak_weekday", "severity": "info", "priority": 35,
+        "fingerprint": str(suggestion["weekday"]),
         "title": "Един ден от седмицата изостава",
         "detail": (
             f"Оборотът ти в {day_name} е средно {suggestion['avg_revenue']:.0f} € - "
@@ -3036,6 +3069,7 @@ async def _signal_staffing_mismatch(company_id, scope, current_user, visibility)
     under_name = _WEEKDAY_NAMES_BG[suggestion["understaffed_weekday"]]
     return {
         "key": "staffing_mismatch", "severity": "info", "priority": 36,
+        "fingerprint": f"{suggestion['overstaffed_weekday']}|{suggestion['understaffed_weekday']}",
         "title": "Графикът не пасва на оборота",
         "detail": (
             f"В {over_name} имаш пълен екип, но оборотът на отработен час е само "
@@ -3090,6 +3124,7 @@ async def _signal_missing_revenue(company_id, scope, current_user, visibility) -
             "и прогнозите не са точни - въведи ги или отбележи деня като почивен."
         ),
         "route": f"/(tabs)?revenueDate={missing[-1]}",
+        "fingerprint": missing[-1],
     }
 
 _PROACTIVE_SIGNAL_BUILDERS = [
@@ -3099,6 +3134,23 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
 ]
 
+# Signals about money at risk can only be put off for a few days, never
+# dismissed - a dismissed overdue-invoice warning is exactly how an overdue
+# invoice gets forgotten. Every other signal is an insight or a nudge and
+# can also be marked done/hidden: it then stays hidden until its situation
+# changes (a different fingerprint), not for ever.
+SNOOZE_ONLY_SIGNALS = {"unpaid_invoices", "receivables", "scan_credits", "budget", "schedule_unpaid"}
+SIGNAL_SNOOZE_DAYS = 3
+# A dismissed insight is looked at afresh after this long even if unchanged.
+SIGNAL_DISMISS_DAYS = 90
+
+def signal_fingerprint(signal: dict) -> str:
+    """What a "done" on this signal refers to. A builder gives its own
+    when its text changes daily for the same situation (days counters);
+    otherwise the text itself identifies the situation."""
+    raw = signal.get("fingerprint") or f"{signal['title']}|{signal['detail']}"
+    return hashlib.sha1(f"{signal['key']}|{raw}".encode()).hexdigest()[:16]
+
 async def get_proactive_signals(current_user: User) -> List[dict]:
     """Computes and ranks every signal this viewer is allowed to see - shared
     by GET /proactive/signals (the Home card) and the daily digest push
@@ -3106,17 +3158,40 @@ async def get_proactive_signals(current_user: User) -> List[dict]:
     viewer lacks the relevant permission or the underlying endpoint it
     reuses has nothing to report - a missing permission for one signal
     never fails the whole list, and a crash in one builder (logged, never
-    raised) never hides every other signal."""
+    raised) never hides every other signal. A builder may also return a
+    list of signals.
+
+    Remembers what this viewer said about each signal (signal_states): a
+    snoozed signal stays away for SIGNAL_SNOOZE_DAYS, a dismissed one until
+    its fingerprint changes - before this, every signal came back every
+    day however many times it had been seen and dealt with."""
     company_id, scope = await get_company_scope(current_user)
     visibility = get_financial_visibility(current_user)
-    signals = []
+    signals: List[dict] = []
     for builder in _PROACTIVE_SIGNAL_BUILDERS:
         try:
-            signal = await builder(company_id, scope, current_user, visibility)
-            if signal:
-                signals.append(signal)
+            produced = await builder(company_id, scope, current_user, visibility)
+            if isinstance(produced, list):
+                signals.extend(s for s in produced if s)
+            elif produced:
+                signals.append(produced)
         except Exception:
             logger.exception(f"Proactive engine: {builder.__name__} failed")
+
+    for s in signals:
+        s["fingerprint"] = signal_fingerprint(s)
+        s.setdefault("actions", ["snooze"] if s["key"] in SNOOZE_ONLY_SIGNALS else ["snooze", "dismiss"])
+
+    states = await db.signal_states.find(
+        {"user_id": current_user.user_id, "until": {"$gt": datetime.now(timezone.utc)}},
+        {"_id": 0, "key": 1, "fingerprint": 1, "action": 1},
+    ).to_list(1000)
+    snoozed = {st["key"] for st in states if st.get("action") == "snooze"}
+    dismissed = {(st["key"], st.get("fingerprint")) for st in states if st.get("action") == "dismiss"}
+    signals = [
+        s for s in signals
+        if s["key"] not in snoozed and (s["key"], s["fingerprint"]) not in dismissed
+    ]
     signals.sort(key=lambda s: s["priority"], reverse=True)
     return signals
 
@@ -4782,6 +4857,10 @@ async def create_indexes():
 
         # Proactive engine digest push dedup (one state doc per company)
         await db.proactive_digest_state.create_index([("company_id", 1)], unique=True)
+        # What each viewer snoozed/dismissed on Home (read on every Home load)
+        await db.signal_states.create_index([("user_id", 1), ("until", 1)])
+        await db.signal_states.create_index([("user_id", 1), ("key", 1), ("fingerprint", 1)], unique=True)
+        await db.item_preferences.create_index([("company_id", 1), ("item_key", 1)], unique=True)
 
         # Users indexes
         await db.users.create_index([("email", 1)], unique=True, sparse=True)
@@ -4888,7 +4967,7 @@ app.include_router(team_profile.router)
 # receivables/price_tracking's own logic instead of re-querying the same
 # data a second way.
 from routers.receivables import get_receivables_summary
-from routers.price_tracking import get_reorder_nudges
+from routers.price_tracking import reorder_overview
 from routers.invoices import create_invoice
 from routers.revenue_expenses import create_daily_revenue, create_expense
 from routers.budget import create_budget

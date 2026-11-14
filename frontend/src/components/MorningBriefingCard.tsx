@@ -4,8 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTranslation } from '../i18n';
 import { api } from '../services/api';
-import { ProactiveSignal } from '../types';
+import { ProactiveSignal, ProactiveSignalAction } from '../types';
 import { COLORS } from '../theme/colors';
+import { Toast } from '../utils/toast';
+import { Alert } from '../utils/alert';
 
 // Module 4 Finding #3 (Home card) + Module 11 Finding #1 (the engine
 // behind it): this card used to compute its own ad-hoc mix of unpaid
@@ -34,6 +36,25 @@ const SEVERITY_COLOR: Record<ProactiveSignal['severity'], string> = {
   info: COLORS.info,
 };
 
+// Pure observations - nothing to "do", so "dismiss" reads as "Hide" there
+// and as "Done" on everything else.
+const INSIGHT_KEYS = new Set([
+  'weak_weekday', 'staffing_mismatch', 'forecast_revenue', 'forecast_expense', 'team_on_leave', 'personal_wallet',
+]);
+
+function actionLabelKey(signal: ProactiveSignal, action: ProactiveSignalAction): string {
+  switch (action) {
+    case 'snooze':
+      return 'briefing.snooze';
+    case 'dismiss':
+      return INSIGHT_KEYS.has(signal.key) ? 'briefing.hide' : 'briefing.done';
+    case 'still_buying':
+      return 'briefing.stillBuying';
+    case 'discontinue':
+      return 'briefing.discontinue';
+  }
+}
+
 export function MorningBriefingCard({ refreshSignal }: Props) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -61,6 +82,22 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (refreshSignal != null) refresh(); }, [refreshSignal]);
 
+  // The answer is remembered server-side, so the signal doesn't come back
+  // tomorrow unchanged; it leaves the list at once and returns if saving fails.
+  const act = async (signal: ProactiveSignal, action: ProactiveSignalAction) => {
+    setSignals((prev) => prev.filter((s) => s !== signal));
+    try {
+      await api.updateSignalState({
+        key: signal.key, fingerprint: signal.fingerprint, action, item_key: signal.item_key,
+      });
+      if (action === 'snooze') Toast.success(t('briefing.snoozed'));
+      if (action === 'discontinue') Toast.success(t('briefing.discontinued'));
+    } catch (error: any) {
+      setSignals((prev) => [...prev, signal].sort((a, b) => b.priority - a.priority));
+      Alert.alert(t('common.error'), error?.message || '');
+    }
+  };
+
   if (loading && signals.length === 0) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
@@ -83,26 +120,39 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
         </View>
       ) : (
         signals.map((signal) => (
-          <TouchableOpacity
-            key={signal.key}
-            style={styles.row}
-            onPress={() => router.push(signal.route as any)}
-          >
-            <View style={[styles.rowIcon, { backgroundColor: `${SEVERITY_COLOR[signal.severity]}26` }]}>
-              <Ionicons name={SEVERITY_ICON[signal.severity]} size={16} color={SEVERITY_COLOR[signal.severity]} />
-            </View>
-            <View style={{ flex: 1 }}>
-              {/* "info" signals are soft, pattern-based suggestions (e.g.
-                  a reorder nudge), never an actual problem - the Daily
-                  Review used to give them the exact same bold title as a
-                  genuine critical/warning alert, making a minor restocking
-                  hint LOOK as urgent as overdue invoices or depleted scan
-                  credits. Only critical/warning get the bold treatment. */}
-              <Text style={signal.severity === 'info' ? styles.rowTitleSoft : styles.rowTitle}>{signal.title}</Text>
-              <Text style={styles.rowDetail}>{signal.detail}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
-          </TouchableOpacity>
+          <View key={`${signal.key}-${signal.fingerprint}`} style={styles.row}>
+            <TouchableOpacity style={styles.rowMain} onPress={() => router.push(signal.route as any)}>
+              <View style={[styles.rowIcon, { backgroundColor: `${SEVERITY_COLOR[signal.severity]}26` }]}>
+                <Ionicons name={SEVERITY_ICON[signal.severity]} size={16} color={SEVERITY_COLOR[signal.severity]} />
+              </View>
+              <View style={{ flex: 1 }}>
+                {/* "info" signals are soft, pattern-based suggestions (e.g.
+                    a reorder nudge), never an actual problem - the Daily
+                    Review used to give them the exact same bold title as a
+                    genuine critical/warning alert, making a minor restocking
+                    hint LOOK as urgent as overdue invoices or depleted scan
+                    credits. Only critical/warning get the bold treatment. */}
+                <Text style={signal.severity === 'info' ? styles.rowTitleSoft : styles.rowTitle}>{signal.title}</Text>
+                <Text style={styles.rowDetail}>{signal.detail}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+            </TouchableOpacity>
+            {(signal.actions || []).length > 0 && (
+              <View style={styles.actionsRow}>
+                {signal.actions.map((action) => (
+                  <TouchableOpacity
+                    key={action}
+                    style={[styles.actionBtn, action === 'discontinue' && styles.actionBtnStrong]}
+                    onPress={() => act(signal, action)}
+                  >
+                    <Text style={[styles.actionText, action === 'discontinue' && styles.actionTextStrong]}>
+                      {t(actionLabelKey(signal, action))}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
         ))
       )}
     </View>
@@ -144,10 +194,37 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   row: {
+    paddingVertical: 8,
+  },
+  rowMain: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 8,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+    marginLeft: 38,
+  },
+  actionBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  actionBtnStrong: {
+    borderColor: COLORS.primary,
+  },
+  actionText: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+  },
+  actionTextStrong: {
+    color: COLORS.primary,
+    fontWeight: '600',
   },
   rowIcon: {
     width: 28,

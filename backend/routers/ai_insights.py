@@ -325,3 +325,62 @@ async def ask_my_numbers(
 @router.get("/proactive/signals")
 async def list_proactive_signals(current_user: User = Depends(get_current_user)):
     return {"signals": await get_proactive_signals(current_user)}
+
+
+class SignalStateUpdate(BaseModel):
+    key: str = Field(min_length=1, max_length=64)
+    fingerprint: str = Field(min_length=1, max_length=64)
+    action: Literal["snooze", "dismiss", "still_buying", "discontinue"]
+    # reorder_stale only: which (merged) item the answer is about
+    item_key: Optional[str] = Field(default=None, max_length=300)
+
+
+@router.post("/proactive/signals/state")
+async def update_signal_state(body: SignalStateUpdate, current_user: User = Depends(get_current_user)):
+    """Remembers what this viewer said about a Home signal: "snooze" puts
+    it off for SIGNAL_SNOOZE_DAYS, "dismiss" (done/hide) hides it until
+    its situation changes. Money-at-risk signals can only be snoozed.
+
+    For the "do you still buy it?" question: "discontinue" also stops
+    reorder reminders for the item until it is bought again - company-wide,
+    since it is a fact about the business, not a view preference - and
+    "still_buying" just stops asking until the next purchase."""
+    now = datetime.now(timezone.utc)
+    if body.action in ("still_buying", "discontinue"):
+        if body.key != "reorder_stale" or not body.item_key:
+            raise HTTPException(status_code=400, detail="Невалидно действие за този сигнал")
+        require_permission(current_user, "view_statistics")
+        if body.action == "discontinue":
+            company_id, _ = await get_company_scope(current_user)
+            if not company_id:
+                raise HTTPException(status_code=400, detail="Нямате фирма")
+            item_key = body.item_key.strip().lower()
+            await server.db.item_preferences.update_one(
+                {"company_id": company_id, "item_key": item_key},
+                {"$set": {
+                    "company_id": company_id, "item_key": item_key,
+                    "discontinued_at": now, "discontinued_by": current_user.user_id,
+                }},
+                upsert=True,
+            )
+        stored_action = "dismiss"
+    elif body.action == "dismiss" and body.key in SNOOZE_ONLY_SIGNALS:
+        raise HTTPException(status_code=400, detail="Сигнал за пари в риск може само да се отложи")
+    else:
+        stored_action = body.action
+
+    days = SIGNAL_SNOOZE_DAYS if stored_action == "snooze" else SIGNAL_DISMISS_DAYS
+    await server.db.signal_states.update_one(
+        {"user_id": current_user.user_id, "key": body.key, "fingerprint": body.fingerprint},
+        {"$set": {
+            "user_id": current_user.user_id, "key": body.key, "fingerprint": body.fingerprint,
+            "action": stored_action, "until": now + timedelta(days=days), "updated_at": now,
+        }},
+        upsert=True,
+    )
+    # "Done" on the price signal means these alerts were seen - same as
+    # closing the price-alert popup, so the two never disagree.
+    if stored_action == "dismiss" and body.key == "price_alerts" and "view_statistics" in set(current_user.permissions or []):
+        _, scope = await get_company_scope(current_user)
+        await server.db.price_alerts.update_many({**scope, "status": "unread"}, {"$set": {"status": "read"}})
+    return {"ok": True, "action": stored_action}

@@ -887,6 +887,10 @@ async def get_item_by_supplier(
 # Needs at least 4 purchases to call anything a "usual" cadence - same
 # minimum-sample-size reasoning as ForecastService's trend gate.
 MIN_PURCHASES_FOR_CADENCE = 4
+# Past this many of its own cycles without a purchase, an item has far more
+# likely been dropped than forgotten: it stops being "time to reorder" and
+# becomes the question "do you still buy it?" (see reorder_overview).
+STALE_CADENCE_CYCLES = 4
 
 
 async def _revenue_trend_ratio(company_id: str, window_days: int) -> float:
@@ -988,6 +992,15 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
     # Size-safe: a stored mapping that folded "1кг" into "5кг" (written
     # before merges checked sizes) is ignored for that variant.
     variant_to_canonical, canonical_display = build_variant_to_canonical(mappings)
+    # Items the owner said they no longer buy - left out until bought again.
+    discontinued = {
+        p["item_key"]: _aware(p["discontinued_at"])
+        for p in await server.db.item_preferences.find(
+            {"company_id": company_id, "discontinued_at": {"$ne": None}},
+            {"_id": 0, "item_key": 1, "discontinued_at": 1},
+        ).to_list(1000)
+        if isinstance(p.get("discontinued_at"), datetime)
+    }
 
     records = await server.db.item_price_history.find(
         {"company_id": company_id},
@@ -1051,6 +1064,9 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
 
         last_date = dates_sorted[-1]
         first_date = dates_sorted[0]
+        stopped_at = discontinued.get(canonical)
+        if stopped_at and last_date <= stopped_at:
+            continue
         days_since_last = (now - last_date).days
         avg_order_value = statistics.mean(amount for _, amount, _ in entries_sorted)
         overdue_ratio = days_since_last / median_gap
@@ -1082,6 +1098,9 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
             "recommended_quantity": recommended_quantity,
             "trend_ratio": round(trend_ratio, 2),
             "is_overdue": days_since_last > median_gap * 1.5,
+            "is_stale": overdue_ratio > STALE_CADENCE_CYCLES,
+            # Stable identity of the (merged) item, for "no longer bought"
+            "item_key": canonical,
             # Not returned from either endpoint - ranking helpers only.
             "_overdue_ratio": overdue_ratio,
             # Capped: past 4 cycles "more overdue" stops meaning "more
@@ -1104,19 +1123,28 @@ async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
     if not company_id:
         return {"nudges": []}
 
-    items = await _compute_recurring_item_cadences(company_id)
-    nudges = [n for n in items if n["is_overdue"]]
-    # Most business-significant first: how overdue relative to its own
-    # cadence, weighted by what reordering it is usually worth - so a
-    # rarely-bought bulk ingredient genuinely worth flagging outranks an
-    # equally-overdue but economically trivial one instead of whichever
-    # happens to have the larger raw day gap.
-    nudges.sort(key=lambda n: n["_impact_score"], reverse=True)
-    for n in nudges:
-        del n["_impact_score"]
-        del n["_overdue_ratio"]
-        del n["is_overdue"]
+    nudges, _stale = await reorder_overview(company_id)
     return {"nudges": nudges[:10]}
+
+
+async def reorder_overview(company_id: str) -> tuple:
+    """(nudges, stale) from one cadence computation. nudges: overdue items
+    still within STALE_CADENCE_CYCLES of their cycle, most business-
+    significant first - how overdue relative to its own cadence, weighted
+    by what reordering it is usually worth, so a rarely-bought bulk
+    ingredient genuinely worth flagging outranks an equally-overdue but
+    economically trivial one. stale: items past that, costliest first -
+    most likely dropped, so they are asked about instead of nagged about
+    for ever (a dropped item used to stay "time to reorder" indefinitely)."""
+    items = await _compute_recurring_item_cadences(company_id)
+    nudges = [n for n in items if n["is_overdue"] and not n["is_stale"]]
+    nudges.sort(key=lambda n: n["_impact_score"], reverse=True)
+    stale = [n for n in items if n["is_stale"]]
+    stale.sort(key=lambda n: n["avg_order_value"], reverse=True)
+    for n in nudges + stale:
+        for private in ("_impact_score", "_overdue_ratio", "is_overdue", "is_stale"):
+            n.pop(private, None)
+    return nudges, stale
 
 
 @router.get("/items/reorder-recommendations")

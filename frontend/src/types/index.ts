@@ -197,6 +197,11 @@ export interface BillingDocument {
 
 // Proactive Second Brain engine (Module 11 Finding #1) - one ranked
 // signal list over every other piece of intelligence the app computes.
+// What the viewer can say about a Home signal. Money-at-risk signals offer
+// only "snooze"; "dismiss" hides a signal until its situation changes
+// (fingerprint); the reorder question offers still_buying/discontinue.
+export type ProactiveSignalAction = 'snooze' | 'dismiss' | 'still_buying' | 'discontinue';
+
 export interface ProactiveSignal {
   key: string;
   severity: 'critical' | 'warning' | 'info';
@@ -204,6 +209,9 @@ export interface ProactiveSignal {
   title: string;
   detail: string;
   route: string;
+  fingerprint: string;
+  actions: ProactiveSignalAction[];
+  item_key?: string;
 }
 
 // "Ask your own numbers" chat (Module 4 Finding #3)

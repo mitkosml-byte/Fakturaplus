@@ -208,6 +208,34 @@ export const translations: Translations = {
     bg: 'Нищо спешно днес - всичко изглежда наред.',
     en: 'Nothing urgent today - everything looks fine.',
   },
+  'briefing.snooze': {
+    bg: 'Отложи 3 дни',
+    en: 'Snooze 3 days',
+  },
+  'briefing.done': {
+    bg: 'Готово',
+    en: 'Done',
+  },
+  'briefing.hide': {
+    bg: 'Скрий',
+    en: 'Hide',
+  },
+  'briefing.stillBuying': {
+    bg: 'Да, още го купувам',
+    en: 'Yes, still buying it',
+  },
+  'briefing.discontinue': {
+    bg: 'Не, спрях го',
+    en: 'No, I stopped',
+  },
+  'briefing.snoozed': {
+    bg: 'Ще го видиш отново след 3 дни',
+    en: "You'll see it again in 3 days",
+  },
+  'briefing.discontinued': {
+    bg: 'Спрях напомнянията за този артикул, докато не го купиш отново',
+    en: "No more reminders for this item until you buy it again",
+  },
   // "Ask your own numbers" chat (Module 4 Finding #3) - plain-language Q&A
   // scoped strictly to the company's own stored data.
   'askMyNumbers.title': {
