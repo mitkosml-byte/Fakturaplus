@@ -338,7 +338,8 @@ export default function StatsScreen() {
     setLoadingCompare(true);
     setCompareModalVisible(true);
     try {
-      const data = await api.compareSuppliers(selectedForCompare);
+      // The same period as the list the suppliers were picked from.
+      const data = await api.compareSuppliers(selectedForCompare, reportRange);
       setCompareResult(data);
     } catch (error) {
       console.error('Error comparing suppliers:', error);
