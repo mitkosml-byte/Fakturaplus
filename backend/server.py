@@ -3103,7 +3103,7 @@ def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Op
     """Revenue falling or expenses rising. For a company whose months
     follow last year's, measured against the same months last year - a
     turn its yearly rhythm explains is not a fall or a rise."""
-    month = f"{datetime.now(timezone.utc):%Y-%m}"
+    month = f"{now_local():%Y-%m}"
     if revenue_forecast.get("method") == "year_back":
         vs_last_year = revenue_forecast.get("vs_last_year_percent")
         if vs_last_year is not None and vs_last_year <= -YEAR_BACK_WARNING_PERCENT:
@@ -3202,7 +3202,7 @@ async def _signal_forecast(company_id, scope, current_user, visibility) -> List[
     trend_signal = _forecast_trend_signal(revenue_forecast, expense_forecast)
     if trend_signal:
         signals.append(trend_signal)
-    if datetime.now(timezone.utc).day >= YEAR_BACK_NOTICE_FROM_DAY:
+    if today_local().day >= YEAR_BACK_NOTICE_FROM_DAY:
         for kind, forecast in (("revenue", revenue_forecast), ("expense", expense_forecast)):
             notice = _year_back_notice(kind, forecast)
             if notice:
@@ -3222,7 +3222,7 @@ async def _signal_schedule_unpaid(company_id, scope, current_user, visibility) -
     # safe here because every router is already fully loaded by the time
     # any request (and so this function) actually runs.
     from routers.schedule import _resolve_occurrences, payable_totals
-    month_start, month_end = _month_bounds(datetime.now(timezone.utc))
+    month_start, month_end = _month_bounds(now_local())
     shifts = await db.work_shifts.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
     if not shifts:
         return None
@@ -3287,7 +3287,7 @@ async def _signal_personal_wallet(company_id, scope, current_user, visibility) -
         "title": "Личните тегления надхвърлят безопасния лимит" if severity == "critical" else "Личните тегления се доближават до лимита",
         "detail": summary["advice"][0],
         "route": "/personal-expenses",
-        "fingerprint": f"{summary['status']}|{datetime.now(timezone.utc):%Y-%m}",
+        "fingerprint": f"{summary['status']}|{now_local():%Y-%m}",
     }
 
 # Bulgarian weekday names, index 0=Monday matching Python's own

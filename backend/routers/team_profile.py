@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from server import *
 from server import _month_bounds
 import server
+from services.business_calendar import now_local
 
 from routers.schedule import get_schedule_summary
 from routers.payroll import list_leave, list_holiday_work
@@ -112,7 +113,7 @@ async def get_team_member_profile(user_id: str, current_user: User = Depends(get
         {"_id": 0, "id": 1, "name": 1, "position": 1, "hire_date": 1, "active": 1},
     )
 
-    month_start, month_end = _month_bounds(datetime.now(timezone.utc))
+    month_start, month_end = _month_bounds(now_local())
     schedule_summary = await get_schedule_summary(
         start=month_start, end=month_end, user_id=user_id, current_user=current_user
     )

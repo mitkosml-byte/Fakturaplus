@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import server
+from services.business_calendar import today_local
 from routers.chat_tools import ChatDataTools, build_chat_tools, name_match_score
 
 FULL = {"statistics": True, "pocket_money": True, "off_book_expenses": True, "profit": True, "personal_investments": True}
@@ -174,6 +175,6 @@ def test_ask_my_numbers_hands_the_model_its_data_tools(client, monkeypatch):
     assert sorted(t.name for t in seen["tools"]) == [
         "item_purchases", "period_totals", "revenue_breakdown", "supplier_purchases", "top_expenses"]
     assert seen["fallbacks"] == "default" and seen["max_iterations"] == 6
-    assert datetime.now(timezone.utc).date().isoformat() in seen["system"]
+    assert today_local().isoformat() in seen["system"]
     logged = asyncio.run(server.db.ai_usage_log.count_documents({"company_id": company_id, "endpoint": "ask_my_numbers"}))
     assert logged == 2

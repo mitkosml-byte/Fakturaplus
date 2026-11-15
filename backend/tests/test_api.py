@@ -1781,7 +1781,8 @@ def test_proactive_signals_schedule_and_leave(client):
     # A shift THIS real month (the signal always looks at "now", unlike
     # most other schedule tests which use a fixed future month) with
     # nothing yet marked paid.
-    today = server_module.datetime.now(tz.utc)
+    # The business's own day and month, as the signals judge them.
+    today = server_module.now_local()
     month_date = today.strftime("%Y-%m-%d")
     # The shift is on another day of the month than the leave below: a
     # day of the person's leave is never paid by the schedule.
@@ -2037,7 +2038,7 @@ def test_reorder_recommendations_trend_adjusted_quantity():
         # €/day. trend_ratio must come out to exactly 50/100 = 0.5.
         revenue_docs = [
             {
-                "user_id": user_id, "date": (now - timedelta(days=d)).strftime("%Y-%m-%d"),
+                "user_id": user_id, "date": (server_module.today_local() - timedelta(days=d)).isoformat(),
                 "fiscal_revenue": 50 if d <= 10 else 100, "pocket_money": 0, "card_revenue": 0,
             }
             for d in range(1, 21)

@@ -11,6 +11,7 @@ import pytest
 from fastapi import HTTPException
 
 import server
+from services.business_calendar import today_local
 from routers.ai_insights import SignalStateUpdate, update_signal_state
 from routers.price_tracking import get_reorder_recommendations
 
@@ -41,7 +42,7 @@ def _by_key(signals):
 
 def test_done_hides_a_signal_until_its_situation_changes_and_snooze_hides_it_for_days():
     _, user = _new_company(["view_statistics", "add_revenue"])
-    today = datetime.now(timezone.utc).date()
+    today = today_local()
     forgotten = today - timedelta(days=3)
 
     async def _run():

@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import server
+from services.business_calendar import today_local
 from routers.statistics import _missing_revenue_days, _weak_day_suggestion
 
 
@@ -37,7 +38,7 @@ def test_forgotten_days_are_not_a_weak_weekday_and_are_asked_for():
     now Monday averages its five logged days (150) and the missing recent
     Monday is asked for instead, with the entry form opened on that day."""
     company_id, user = _new_company(["view_statistics", "add_revenue"])
-    today = datetime.now(timezone.utc).date()
+    today = today_local()
     mondays = [today - timedelta(days=i) for i in range(1, 57) if (today - timedelta(days=i)).weekday() == 0]
     forgotten = {mondays[0], mondays[2], mondays[4]}
 
@@ -61,7 +62,7 @@ def test_forgotten_days_are_not_a_weak_weekday_and_are_asked_for():
 
 def test_missing_revenue_stays_quiet_for_a_company_that_does_not_log_daily():
     company_id, user = _new_company(["view_statistics", "add_revenue"])
-    today = datetime.now(timezone.utc).date()
+    today = today_local()
 
     async def _run():
         await _register(user)
