@@ -119,17 +119,22 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
         )}
       </View>
 
-      {(isYearBack(revenueForecast) || isYearBack(expenseForecast)) && (
-        <Text style={[styles.forecastHint, styles.forecastNote]}>
-          {t(
-            isYearBack(revenueForecast) && isYearBack(expenseForecast) ? 'stats.forecastYearBackBoth'
-              : isYearBack(revenueForecast) ? 'stats.forecastYearBackRevenue'
-              : 'stats.forecastYearBackExpense'
+      {(isYearBack(revenueForecast) || isYearBack(expenseForecast) ||
+        isAverageOnly(revenueForecast) || isAverageOnly(expenseForecast)) && (
+        <View style={styles.forecastNotes}>
+          {(isYearBack(revenueForecast) || isYearBack(expenseForecast)) && (
+            <Text style={styles.forecastNote}>
+              {t(
+                isYearBack(revenueForecast) && isYearBack(expenseForecast) ? 'stats.forecastYearBackBoth'
+                  : isYearBack(revenueForecast) ? 'stats.forecastYearBackRevenue'
+                  : 'stats.forecastYearBackExpense'
+              )}
+            </Text>
           )}
-        </Text>
-      )}
-      {(isAverageOnly(revenueForecast) || isAverageOnly(expenseForecast)) && (
-        <Text style={styles.forecastHint}>{t('stats.forecastInsufficientData')}</Text>
+          {(isAverageOnly(revenueForecast) || isAverageOnly(expenseForecast)) && (
+            <Text style={styles.forecastNote}>{t('stats.forecastInsufficientData')}</Text>
+          )}
+        </View>
       )}
     </View>
   );
@@ -183,9 +188,13 @@ const styles = StyleSheet.create({
     marginTop: -4,
     marginBottom: 12,
   },
-  forecastNote: {
+  forecastNotes: {
     marginTop: 12,
-    marginBottom: 0,
+    gap: 8,
+  },
+  forecastNote: {
+    fontSize: 12,
+    color: COLORS.textMuted,
   },
   forecastRow: {
     flexDirection: 'row',

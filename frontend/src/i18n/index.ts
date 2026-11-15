@@ -3156,6 +3156,10 @@ export const translations: Translations = {
     bg: 'Същият продукт в друга опаковка, сравнен по цена за {unit}.',
     en: 'The same product in another pack size, compared per {unit}.',
   },
+  'stats.thisSizePrice': {
+    bg: 'Тази разфасовка: {price} €/{unit}.',
+    en: 'This size: {price} €/{unit}.',
+  },
   'stats.cheaperBy': {
     bg: 'с {pct}% по-евтино',
     en: '{pct}% cheaper',

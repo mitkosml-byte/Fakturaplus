@@ -2147,6 +2147,11 @@ export default function StatsScreen() {
                   <Text style={styles.detailCardTitle}>{t('stats.otherSizes')}</Text>
                   <Text style={styles.catalogDesc}>
                     {t('stats.otherSizesDesc').replace('{unit}', itemBySupplier.sizes[0].base_unit)}
+                    {itemPriceHistory?.statistics?.avg_base_price != null && itemPriceHistory.statistics.base_unit
+                      ? ` ${t('stats.thisSizePrice')
+                        .replace('{price}', formatUnitPrice(itemPriceHistory.statistics.avg_base_price))
+                        .replace('{unit}', itemPriceHistory.statistics.base_unit)}`
+                      : ''}
                   </Text>
                   {itemBySupplier.sizes.map((size: ItemOtherSize) => {
                     const diff = size.difference_percent;
