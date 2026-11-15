@@ -3124,6 +3124,66 @@ export const translations: Translations = {
     bg: 'Потенциални спестявания',
     en: 'Potential Savings',
   },
+  'stats.pricePerBaseUnit': {
+    bg: 'Цена за {unit}',
+    en: 'Price per {unit}',
+  },
+  'stats.comparedPerBase': {
+    bg: 'Сравнено по цена за {unit}',
+    en: 'Compared per {unit}',
+  },
+  'stats.otherSizes': {
+    bg: 'Други разфасовки',
+    en: 'Other pack sizes',
+  },
+  'stats.otherSizesDesc': {
+    bg: 'Същият продукт в друга опаковка, сравнен по цена за {unit}.',
+    en: 'The same product in another pack size, compared per {unit}.',
+  },
+  'stats.cheaperBy': {
+    bg: 'с {pct}% по-евтино',
+    en: '{pct}% cheaper',
+  },
+  'stats.dearerBy': {
+    bg: 'с {pct}% по-скъпо',
+    en: '{pct}% dearer',
+  },
+  'stats.samePricePerUnit': {
+    bg: 'същата цена',
+    en: 'same price',
+  },
+  'stats.catalogTitle': {
+    bg: 'Едно и също ли е?',
+    en: 'Is it the same item?',
+  },
+  'stats.catalogDesc': {
+    bg: 'Имената във фактурите не винаги съвпадат. Кажи кое е същият артикул – програмата ще го запомни.',
+    en: 'Names on invoices do not always match. Say which is the same item - the app will remember.',
+  },
+  'stats.mergedWith': {
+    bg: 'Обединено с',
+    en: 'Joined with',
+  },
+  'stats.similarNames': {
+    bg: 'Подобни имена',
+    en: 'Similar names',
+  },
+  'stats.markSame': {
+    bg: 'Същото',
+    en: 'Same',
+  },
+  'stats.markDifferent': {
+    bg: 'Различно',
+    en: 'Different',
+  },
+  'stats.separate': {
+    bg: 'Раздели',
+    en: 'Separate',
+  },
+  'stats.quantityByUnit': {
+    bg: 'Количеството се сравнява само в една мерна единица.',
+    en: 'Quantities are only compared within one unit.',
+  },
   'stats.totalItems': {
     bg: 'Общо артикули',
     en: 'Total Items',

@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
-PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction } from '../types';
+PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems } from '../types';
 import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -952,9 +952,39 @@ class ApiService {
   async getItemBySupplier(itemName: string): Promise<{
     item_name: string;
     suppliers: any[];
-    recommendation: { best_supplier: string; avg_price: number; potential_savings_percent: number } | null;
+    recommendation: {
+      best_supplier: string;
+      avg_price: number;
+      avg_base_price?: number | null;
+      base_unit?: string | null;
+      // 'base_unit' when suppliers were compared per kg / l / piece.
+      compared_per?: 'base_unit' | 'unit';
+      potential_savings_percent: number;
+    } | null;
+    sizes?: ItemOtherSize[];
   }> {
     return this.fetch(`/statistics/items/${encodeURIComponent(itemName)}/by-supplier`);
+  }
+
+  // The owner's word on what is one product: "same" joins two names (a
+  // misspelling the matching missed), "different" splits a wrong join and
+  // keeps them apart from then on. Pack sizes are never "the same".
+  async getRelatedItems(itemName: string): Promise<RelatedItems> {
+    return this.fetch(`/items/catalog/related?item_name=${encodeURIComponent(itemName)}`);
+  }
+
+  async markItemsSame(itemName: string, otherName: string): Promise<{ canonical_name: string; variants: string[] }> {
+    return this.fetch('/items/catalog/same', {
+      method: 'POST',
+      body: JSON.stringify({ item_name: itemName, other_name: otherName }),
+    });
+  }
+
+  async markItemsDifferent(itemName: string, otherName: string): Promise<{ separated: boolean; rows_moved: number }> {
+    return this.fetch('/items/catalog/different', {
+      method: 'POST',
+      body: JSON.stringify({ item_name: itemName, other_name: otherName }),
+    });
   }
 
   // AI Item Merging

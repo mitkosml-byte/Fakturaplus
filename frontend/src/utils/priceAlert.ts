@@ -30,6 +30,12 @@ export function formatEur(value: number): string {
   return abs >= 10 ? String(Math.round(value)) : value.toFixed(2);
 }
 
+// A price per kg / l / piece: two decimals, three below 0.10 (a gram-sized
+// price would otherwise read as 0.00).
+export function formatUnitPrice(value: number): string {
+  return Math.abs(value) >= 0.1 ? value.toFixed(2) : value.toFixed(3);
+}
+
 export function isPackSuspect(alert: PriceMeaningInput): boolean {
   return alert.kind === 'pack_suspect' && !!alert.pack_multiple;
 }

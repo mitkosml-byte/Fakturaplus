@@ -633,6 +633,12 @@ export interface ItemPriceHistory {
 export interface ItemStatistics {
   item_name: string;
   quantity: number;
+  // The line unit the quantity is counted in ("кг", "бр."), or the base
+  // unit when all purchases convert to one; null when they mix units.
+  unit?: string | null;
+  // Price per kg / l / piece, when every purchase converts to the same one.
+  base_unit?: string | null;
+  avg_base_price?: number | null;
   total_value: number;
   frequency: number;
   avg_price: number;
@@ -650,9 +656,30 @@ export interface ItemStatsResponse {
     unique_items: number;
   };
   top_by_quantity: ItemStatistics[];
+  // Quantity is only ranked within one unit: 40 kg and 400 pieces are not
+  // "more" than each other. Keyed by the unit label, most common unit first.
+  top_by_quantity_by_unit?: Record<string, ItemStatistics[]>;
   top_by_value: ItemStatistics[];
   top_by_frequency: ItemStatistics[];
   price_trends: ItemStatistics[];
+}
+
+// The same product in another pack size, compared per kg / l / piece.
+export interface ItemOtherSize {
+  item_name: string;
+  avg_base_price: number;
+  base_unit: string;
+  purchase_count: number;
+  difference_percent: number | null;
+}
+
+// The owner's own catalog: names joined with an item, look-alikes not yet
+// joined, and names the owner said are a different product.
+export interface RelatedItems {
+  item_name: string;
+  merged_with: string[];
+  similar: { item_name: string; similarity: number }[];
+  different_from: string[];
 }
 
 // Payroll / Ведомост за заплати

@@ -17,7 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { api } from '../../src/services/api';
-import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse, PriceAlertSettings, PriceAlertMute } from '../../src/types';
+import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse, PriceAlertSettings, PriceAlertMute, ItemStatistics, ItemOtherSize, RelatedItems } from '../../src/types';
+import { formatUnitPrice } from '../../src/utils/priceAlert';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -138,6 +139,12 @@ export default function StatsScreen() {
   const [itemPriceHistory, setItemPriceHistory] = useState<any>(null);
   const [itemBySupplier, setItemBySupplier] = useState<any>(null);
   const [loadingItemDetail, setLoadingItemDetail] = useState(false);
+  // The owner's catalog for the open item ("same" / "different" answers)
+  // and which of its look-alikes is being answered right now.
+  const [itemRelated, setItemRelated] = useState<RelatedItems | null>(null);
+  const [catalogBusy, setCatalogBusy] = useState<string | null>(null);
+  // Quantity ranking is per unit - which unit's ranking is shown.
+  const [quantityUnit, setQuantityUnit] = useState<string | null>(null);
 
   // Price inflation (overall spend-weighted price change across items over a period)
   const [inflationPeriod, setInflationPeriod] = useState<'month' | 'quarter' | 'year'>('quarter');
@@ -337,12 +344,14 @@ export default function StatsScreen() {
   const loadItemDetail = useCallback(async (itemName: string) => {
     setLoadingItemDetail(true);
     try {
-      const [historyData, supplierData] = await Promise.all([
+      const [historyData, supplierData, relatedData] = await Promise.all([
         api.getItemPriceHistory(itemName),
-        api.getItemBySupplier(itemName)
+        api.getItemBySupplier(itemName),
+        api.getRelatedItems(itemName).catch(() => null),
       ]);
       setItemPriceHistory(historyData);
       setItemBySupplier(supplierData);
+      setItemRelated(relatedData);
     } catch (error) {
       console.error('Error loading item detail:', error);
     } finally {
@@ -515,11 +524,50 @@ export default function StatsScreen() {
     setRefreshing(false);
   }, [loadData, loadSupplierStats, loadItemStats, activeTab]);
   
+  const closeItemDetail = () => {
+    setSelectedItem(null);
+    setItemPriceHistory(null);
+    setItemBySupplier(null);
+    setItemRelated(null);
+  };
+
+  // "Same" joins the look-alike into this item (or this item into the group
+  // the other already belongs to - then the detail follows the group name);
+  // "different" keeps the two apart from now on.
+  const answerCatalog = async (otherName: string, same: boolean) => {
+    if (!selectedItem || catalogBusy) return;
+    setCatalogBusy(otherName);
+    try {
+      if (same) {
+        const result = await api.markItemsSame(selectedItem, otherName);
+        if (result.canonical_name && result.canonical_name !== selectedItem) {
+          setSelectedItem(result.canonical_name);
+        } else {
+          await loadItemDetail(selectedItem);
+        }
+      } else {
+        await api.markItemsDifferent(selectedItem, otherName);
+        await loadItemDetail(selectedItem);
+      }
+      loadItemStats();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error?.message || '');
+    } finally {
+      setCatalogBusy(null);
+    }
+  };
+
+  // Quantity is ranked within one unit at a time - the units on offer, most
+  // common first, and the one currently shown.
+  const quantityUnits: string[] = Object.keys(itemStats?.top_by_quantity_by_unit || {});
+  const activeQuantityUnit = quantityUnit && quantityUnits.includes(quantityUnit) ? quantityUnit : quantityUnits[0] ?? null;
+
   // Get current item ranking
-  const getCurrentItemRanking = () => {
+  const getCurrentItemRanking = (): ItemStatistics[] => {
     if (!itemStats) return [];
     switch (itemRankingType) {
       case 'quantity':
+        if (activeQuantityUnit) return itemStats.top_by_quantity_by_unit?.[activeQuantityUnit] || [];
         return itemStats.top_by_quantity || [];
       case 'frequency':
         return itemStats.top_by_frequency || [];
@@ -1793,6 +1841,24 @@ export default function StatsScreen() {
                       </TouchableOpacity>
                     </View>
 
+                    {/* Quantity is compared within one unit: kg with kg, pieces with pieces */}
+                    {itemRankingType === 'quantity' && quantityUnits.length > 1 && (
+                      <View style={styles.unitChipsRow}>
+                        {quantityUnits.map((unit) => (
+                          <TouchableOpacity
+                            key={unit}
+                            style={[styles.unitChip, activeQuantityUnit === unit && styles.unitChipActive]}
+                            onPress={() => setQuantityUnit(unit)}
+                          >
+                            <Text style={[styles.unitChipText, activeQuantityUnit === unit && styles.unitChipTextActive]}>
+                              {unit}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                        <Text style={styles.unitChipsHint}>{t('stats.quantityByUnit')}</Text>
+                      </View>
+                    )}
+
                     {/* Items Ranking List */}
                     <View style={styles.topSuppliersCard}>
                       <View style={styles.topSuppliersHeader}>
@@ -1804,7 +1870,7 @@ export default function StatsScreen() {
                       </View>
                       
                       {getCurrentItemRanking().length > 0 ? (
-                        getCurrentItemRanking().map((item: any, index: number) => (
+                        getCurrentItemRanking().map((item, index) => (
                           <TouchableOpacity 
                             key={item.item_name} 
                             style={styles.supplierItem}
@@ -1828,8 +1894,8 @@ export default function StatsScreen() {
                             </View>
                             <View style={styles.supplierAmounts}>
                               <Text style={styles.supplierAmount}>
-                                {itemRankingType === 'quantity' 
-                                  ? `${item.quantity.toFixed(1)} ${t('units.pieces')}`
+                                {itemRankingType === 'quantity'
+                                  ? `${Number.isInteger(item.quantity) ? item.quantity : item.quantity.toFixed(1)} ${item.unit || ''}`.trim()
                                   : `${item.total_value.toFixed(2)} €`}
                               </Text>
                               <View style={styles.itemTrendBadge}>
@@ -1924,21 +1990,13 @@ export default function StatsScreen() {
         visible={!!selectedItem}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => {
-          setSelectedItem(null);
-          setItemPriceHistory(null);
-          setItemBySupplier(null);
-        }}
+        onRequestClose={closeItemDetail}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity 
               style={styles.modalCloseButton}
-              onPress={() => {
-                setSelectedItem(null);
-                setItemPriceHistory(null);
-                setItemBySupplier(null);
-              }}
+              onPress={closeItemDetail}
             >
               <Ionicons name="close" size={24} color="white" />
             </TouchableOpacity>
@@ -1979,6 +2037,18 @@ export default function StatsScreen() {
                       <Text style={styles.detailLabel}>{t('stats.priceTrends')}</Text>
                     </View>
                   </View>
+                  {/* Price per kg / l / piece - shown when it says something the
+                      line price does not (a 5 kg tin, a 250 ml bottle) */}
+                  {itemPriceHistory.statistics.avg_base_price != null && itemPriceHistory.statistics.base_unit &&
+                    Math.abs(itemPriceHistory.statistics.avg_base_price - itemPriceHistory.statistics.avg_price) > 0.005 && (
+                    <View style={styles.basePriceRow}>
+                      <Ionicons name="scale-outline" size={16} color={COLORS.primary} />
+                      <Text style={styles.basePriceText}>
+                        {t('stats.pricePerBaseUnit').replace('{unit}', itemPriceHistory.statistics.base_unit)}:{' '}
+                        <Text style={styles.basePriceValue}>{formatUnitPrice(itemPriceHistory.statistics.avg_base_price)} €</Text>
+                      </Text>
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -2020,8 +2090,19 @@ export default function StatsScreen() {
                       <View style={{ flex: 1, marginLeft: 8 }}>
                         <Text style={styles.recommendationTitle}>{t('stats.bestSupplier')}</Text>
                         <Text style={styles.recommendationText}>
-                          {itemBySupplier.recommendation.best_supplier} - {itemBySupplier.recommendation.avg_price}€
+                          {itemBySupplier.recommendation.best_supplier} - {
+                            itemBySupplier.recommendation.compared_per === 'base_unit' &&
+                            itemBySupplier.recommendation.avg_base_price != null &&
+                            itemBySupplier.recommendation.base_unit
+                              ? `${formatUnitPrice(itemBySupplier.recommendation.avg_base_price)}€/${itemBySupplier.recommendation.base_unit}`
+                              : `${itemBySupplier.recommendation.avg_price}€`
+                          }
                         </Text>
+                        {itemBySupplier.recommendation.compared_per === 'base_unit' && itemBySupplier.recommendation.base_unit && (
+                          <Text style={styles.recommendationSavings}>
+                            {t('stats.comparedPerBase').replace('{unit}', itemBySupplier.recommendation.base_unit)}
+                          </Text>
+                        )}
                         <Text style={styles.recommendationSavings}>
                           {t('stats.potentialSavings')}: {itemBySupplier.recommendation.potential_savings_percent}%
                         </Text>
@@ -2046,9 +2127,111 @@ export default function StatsScreen() {
                         </Text>
                       </View>
                       <View style={styles.supplierComparePrices}>
-                        <Text style={styles.supplierComparePrice}>{sup.avg_price}€</Text>
-                        <Text style={styles.supplierComparePriceLabel}>{t('stats.avgPrice')}</Text>
+                        <Text style={styles.supplierComparePrice}>{sup.avg_price}€{sup.unit ? `/${sup.unit}` : ''}</Text>
+                        {sup.avg_base_price != null && sup.base_unit && Math.abs(sup.avg_base_price - sup.avg_price) > 0.005 ? (
+                          <Text style={styles.supplierComparePriceLabel}>
+                            {formatUnitPrice(sup.avg_base_price)}€/{sup.base_unit}
+                          </Text>
+                        ) : (
+                          <Text style={styles.supplierComparePriceLabel}>{t('stats.avgPrice')}</Text>
+                        )}
                       </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Other pack sizes of the same product, per kg / l / piece */}
+              {(itemBySupplier?.sizes?.length ?? 0) > 0 && (
+                <View style={styles.detailCard}>
+                  <Text style={styles.detailCardTitle}>{t('stats.otherSizes')}</Text>
+                  <Text style={styles.catalogDesc}>
+                    {t('stats.otherSizesDesc').replace('{unit}', itemBySupplier.sizes[0].base_unit)}
+                  </Text>
+                  {itemBySupplier.sizes.map((size: ItemOtherSize) => {
+                    const diff = size.difference_percent;
+                    return (
+                      <TouchableOpacity
+                        key={size.item_name}
+                        style={styles.supplierCompareItem}
+                        onPress={() => setSelectedItem(size.item_name)}
+                      >
+                        <View style={styles.supplierCompareInfo}>
+                          <Text style={styles.supplierCompareName} numberOfLines={1}>{size.item_name}</Text>
+                          <Text style={styles.supplierCompareMeta}>{size.purchase_count} {t('stats.times')}</Text>
+                        </View>
+                        <View style={styles.supplierComparePrices}>
+                          <Text style={styles.supplierComparePrice}>{formatUnitPrice(size.avg_base_price)}€/{size.base_unit}</Text>
+                          {diff != null && (
+                            <Text style={[
+                              styles.supplierComparePriceLabel,
+                              { color: diff < -1 ? COLORS.success : diff > 1 ? COLORS.danger : COLORS.textMuted },
+                            ]}>
+                              {diff < -1
+                                ? t('stats.cheaperBy').replace('{pct}', String(Math.round(Math.abs(diff))))
+                                : diff > 1
+                                  ? t('stats.dearerBy').replace('{pct}', String(Math.round(diff)))
+                                  : t('stats.samePricePerUnit')}
+                            </Text>
+                          )}
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} style={{ marginLeft: 6 }} />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* The owner's catalog: is a look-alike name the same item? */}
+              {itemRelated && (itemRelated.merged_with.length > 0 || itemRelated.similar.length > 0) && (
+                <View style={styles.detailCard}>
+                  <Text style={styles.detailCardTitle}>{t('stats.catalogTitle')}</Text>
+                  <Text style={styles.catalogDesc}>{t('stats.catalogDesc')}</Text>
+                  {itemRelated.merged_with.length > 0 && (
+                    <Text style={styles.catalogSubtitle}>{t('stats.mergedWith')}</Text>
+                  )}
+                  {itemRelated.merged_with.map((name) => (
+                    <View key={`merged-${name}`} style={styles.catalogRow}>
+                      <Text style={styles.catalogName} numberOfLines={2}>{name}</Text>
+                      {catalogBusy === name ? (
+                        <ActivityIndicator size="small" color={COLORS.primary} />
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.catalogButton}
+                          disabled={!!catalogBusy}
+                          onPress={() => answerCatalog(name, false)}
+                        >
+                          <Text style={styles.catalogButtonText}>{t('stats.separate')}</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                  {itemRelated.similar.length > 0 && (
+                    <Text style={styles.catalogSubtitle}>{t('stats.similarNames')}</Text>
+                  )}
+                  {itemRelated.similar.map((similar) => (
+                    <View key={`similar-${similar.item_name}`} style={styles.catalogRow}>
+                      <Text style={styles.catalogName} numberOfLines={2}>{similar.item_name}</Text>
+                      {catalogBusy === similar.item_name ? (
+                        <ActivityIndicator size="small" color={COLORS.primary} />
+                      ) : (
+                        <View style={styles.catalogButtons}>
+                          <TouchableOpacity
+                            style={[styles.catalogButton, styles.catalogButtonPrimary]}
+                            disabled={!!catalogBusy}
+                            onPress={() => answerCatalog(similar.item_name, true)}
+                          >
+                            <Text style={[styles.catalogButtonText, styles.catalogButtonTextPrimary]}>{t('stats.markSame')}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.catalogButton}
+                            disabled={!!catalogBusy}
+                            onPress={() => answerCatalog(similar.item_name, false)}
+                          >
+                            <Text style={styles.catalogButtonText}>{t('stats.markDifferent')}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   ))}
                 </View>
@@ -3135,5 +3318,110 @@ const styles = StyleSheet.create({
   supplierComparePriceLabel: {
     fontSize: 10,
     color: COLORS.textMuted,
+  },
+
+  // Price per kg / l / piece
+  basePriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    backgroundColor: COLORS.background,
+    borderRadius: 10,
+    padding: 10,
+  },
+  basePriceText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  basePriceValue: {
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+
+  // Quantity ranking per unit
+  unitChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  unitChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  unitChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  unitChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  unitChipTextActive: {
+    color: 'white',
+  },
+  unitChipsHint: {
+    width: '100%',
+    fontSize: 11,
+    color: COLORS.textMuted,
+  },
+
+  // Same / different catalog
+  catalogDesc: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: -8,
+    marginBottom: 12,
+  },
+  catalogSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  catalogRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    gap: 8,
+  },
+  catalogName: {
+    flex: 1,
+    fontSize: 14,
+    color: 'white',
+  },
+  catalogButtons: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  catalogButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  catalogButtonPrimary: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  catalogButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  catalogButtonTextPrimary: {
+    color: 'white',
   },
 });

@@ -152,7 +152,8 @@ def test_size_signature():
     assert sig("Кола 0.5л") == sig("кола 0,50 л")
     assert sig("Кола 0.5л") != sig("Кола 0.5л x 6")
     assert sig("Доматен сос 1кг") != sig("Доматен сос 5кг")
-    assert sig("Сирене 0.50кг") == sig("сирене 0,5 кг") == ("0.5",)
+    assert sig("Сирене 0.50кг") == sig("сирене 0,5 кг") == sig("Сирене 500 г") == ("0.5кг",)
+    assert sig("Кола 500мл") == sig("Кола 0.5л")
     assert server.normalize_unit("Кг.") == server.normalize_unit("kg") == "кг"
     assert server.normalize_unit("бр.") == server.normalize_unit("pcs") == "бр"
 
@@ -410,3 +411,105 @@ def test_detect_pack_multiple():
     assert detect_pack_multiple(1, 10.0, 24, 0.4167) == 24
     assert detect_pack_multiple(2, 4.20, 12, 0.80) is None  # total changed: not the same line re-read
     assert detect_pack_multiple(10, 1.0, 10, 1.0) is None
+
+
+def test_item_content_and_price_per_base_unit():
+    """Pack size read from the name: "5кг" is 5 kg, "250мл" is 0.25 l, a
+    multipack multiplies, "30 бр" is 30 pieces; a line sold by weight or
+    volume already is its base unit. Price per kg / l / piece follows."""
+    assert server.item_content("Доматен сос 5кг") == (5.0, "кг")
+    assert server.item_content("Айран 250мл") == (0.25, "л")
+    assert server.item_content("Кола 0,5л x 6") == (3.0, "л")
+    assert server.item_content("Яйца 30 бр") == (30.0, "бр")
+    assert server.item_content("Питка") is None
+    assert server.base_unit_price(4.20, "Доматен сос 5кг", "бр") == (0.84, "кг")
+    assert server.base_unit_price(0.70, "Айран 250мл", "бр") == (2.8, "л")
+    assert server.base_unit_price(12.0, "Сирене", "кг") == (12.0, "кг")
+    assert server.base_unit_price(0.20, "Питка", "бр") == (0.20, "бр")  # a piece is its own base
+    assert server.base_unit_price(4.20, "Питка", "оп") is None  # a pack of unknown size
+
+
+def test_statistics_rank_quantities_per_unit_and_compare_suppliers_per_kg(client):
+    """Kilograms and pieces are never added together, and two suppliers
+    selling different pack sizes are compared per kilogram."""
+    company_id, user = _owner()
+    token = uuid.uuid4().hex
+
+    async def _setup():
+        await _register(user)
+        await server.db.user_sessions.insert_one({
+            "user_id": user.user_id, "session_token": token,
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=1), "created_at": datetime.now(timezone.utc),
+        })
+        await _invoice(user, "Q1", 30, [
+            {"name": "Брашно", "quantity": 50, "unit": "кг", "unit_price": 1.10},
+            {"name": "Питка", "quantity": 400, "unit": "бр", "unit_price": 0.20},
+        ])
+        await _invoice(user, "Q2", 20, [{"name": "Доматен сос 5кг", "quantity": 4, "unit": "бр", "unit_price": 20.0}])
+        await _invoice(user, "Q3", 10, [{"name": "Доматен сос 5кг", "quantity": 4, "unit": "бр", "unit_price": 18.0}],
+                       supplier="Кауфланд")
+        await _invoice(user, "Q4", 5, [{"name": "Доматен сос 1кг", "quantity": 10, "unit": "бр", "unit_price": 3.0}])
+
+    asyncio.run(_setup())
+    headers = {"Authorization": f"Bearer {token}"}
+    stats = client.get("/api/statistics/items", headers=headers).json()
+    by_unit = stats["top_by_quantity_by_unit"]
+    assert by_unit["кг"][0]["item_name"] == "брашно" and by_unit["бр."][0]["item_name"] == "питка"
+    assert all(i["unit"] == "бр." for i in by_unit["бр."])
+
+    detail = client.get("/api/statistics/items/доматен сос 5кг/by-supplier", headers=headers).json()
+    per_supplier = {s["supplier"]: s for s in detail["suppliers"]}
+    assert per_supplier["Кауфланд"]["avg_base_price"] == 3.6 and per_supplier["Кауфланд"]["base_unit"] == "кг"
+    assert detail["recommendation"]["best_supplier"] == "Кауфланд"
+    assert [s["item_name"] for s in detail["sizes"]] == ["доматен сос 1кг"]
+    assert detail["sizes"][0]["avg_base_price"] == 3.0
+
+
+def test_catalog_same_and_different(client):
+    """The owner's word wins: "different" splits a wrong automatic join and
+    keeps the names apart at the next invoice, "same" joins a look-alike,
+    and two pack sizes are never "the same"."""
+    company_id, user = _owner()
+    token = uuid.uuid4().hex
+
+    async def _setup():
+        await _register(user)
+        await server.db.user_sessions.insert_one({
+            "user_id": user.user_id, "session_token": token,
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=1), "created_at": datetime.now(timezone.utc),
+        })
+        await _invoice(user, "D1", 30, [{"name": "Сирене краве", "quantity": 10, "unit": "кг", "unit_price": 9.0}])
+        # A close spelling is filed under the existing name automatically.
+        await _invoice(user, "D2", 20, [{"name": "Сирене кравее", "quantity": 5, "unit": "кг", "unit_price": 9.5}])
+        names = await server.db.item_price_history.distinct("item_name", {"company_id": company_id})
+        return names
+
+    assert asyncio.run(_setup()) == ["сирене краве"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    r = client.post("/api/items/catalog/different", headers=headers,
+                    json={"item_name": "сирене краве", "other_name": "Сирене кравее"})
+    assert r.status_code == 200, r.text
+    assert r.json()["rows_moved"] == 1
+
+    async def _after_split():
+        await _invoice(user, "D3", 10, [{"name": "Сирене кравее", "quantity": 5, "unit": "кг", "unit_price": 9.5}])
+        return sorted(await server.db.item_price_history.distinct("item_name", {"company_id": company_id}))
+
+    assert asyncio.run(_after_split()) == ["сирене краве", "сирене кравее"]
+    related = client.get("/api/items/catalog/related", headers=headers, params={"item_name": "сирене краве"}).json()
+    assert related["different_from"] == ["сирене кравее"]
+    assert all(s["item_name"] != "сирене кравее" for s in related["similar"])
+
+    r = client.post("/api/items/catalog/same", headers=headers,
+                    json={"item_name": "Сирене краве", "other_name": "сирене кравее"})
+    assert r.status_code == 200, r.text
+    assert r.json()["rows_moved"] == 2  # both purchases printed as "кравее" join the history
+    related = client.get("/api/items/catalog/related", headers=headers, params={"item_name": "сирене краве"}).json()
+    assert related["merged_with"] == ["сирене кравее"] and related["different_from"] == []
+    names = asyncio.run(server.db.item_price_history.distinct("item_name", {"company_id": company_id}))
+    assert names == ["сирене краве"]
+
+    r = client.post("/api/items/catalog/same", headers=headers,
+                    json={"item_name": "Доматен сос 1кг", "other_name": "Доматен сос 5кг"})
+    assert r.status_code == 400

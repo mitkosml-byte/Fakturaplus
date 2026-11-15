@@ -656,19 +656,29 @@ async def get_item_price_history(
     for h in history:
         date_val = h.get("invoice_date")
         date_str = date_val.strftime("%Y-%m-%d") if isinstance(date_val, datetime) else str(date_val)[:10]
+        base_price = base_unit_price(h.get("unit_price") or 0, item_name, h.get("unit"))
         formatted_history.append({
             "date": date_str,
             "supplier": h.get("supplier"),
             "unit_price": h.get("unit_price"),
             "quantity": h.get("quantity"),
             "unit": h.get("unit"),
-            "invoice_number": h.get("invoice_number")
+            "invoice_number": h.get("invoice_number"),
+            "base_price": round(base_price[0], 4) if base_price else None,
+            "base_unit": unit_label(base_price[1]) if base_price else None,
         })
+
+    # Price per kg / l / piece, when every purchase converts to the same one
+    base_units = {row["base_unit"] for row in formatted_history}
+    base_prices = [row["base_price"] for row in formatted_history if row["base_price"] is not None]
+    same_base = len(base_units) == 1 and None not in base_units
     
     return {
         "item_name": item_name,
         "history": formatted_history,
         "statistics": {
+            "base_unit": next(iter(base_units)) if same_base else None,
+            "avg_base_price": round(sum(base_prices) / len(base_prices), 4) if same_base and base_prices else None,
             "avg_price": round(avg_price, 2),
             "min_price": round(min_price, 2),
             "max_price": round(max_price, 2),
@@ -721,13 +731,18 @@ async def get_item_statistics(
             "price_trends": []
         }
     
-    # Aggregate by item
+    # Aggregate by item - quantities kept per unit, and in kg / l / pieces
+    # where the unit or the name says what a unit holds, so pieces and
+    # kilograms are never added together.
     item_stats: Dict[str, Any] = defaultdict(lambda: {
         "quantity": 0,
         "total_value": 0,
         "frequency": 0,
         "prices": [],
-        "suppliers": set()
+        "suppliers": set(),
+        "by_unit": defaultdict(float),
+        "by_base": defaultdict(float),
+        "spend_by_base": defaultdict(float),
     })
     
     for record in history:
@@ -740,6 +755,11 @@ async def get_item_statistics(
         item_stats[name]["frequency"] += 1
         item_stats[name]["prices"].append(price)
         item_stats[name]["suppliers"].add(record["supplier"])
+        item_stats[name]["by_unit"][normalize_unit(record.get("unit"))] += qty
+        base = base_quantity(qty, name, record.get("unit"))
+        if base:
+            item_stats[name]["by_base"][base[1]] += base[0]
+            item_stats[name]["spend_by_base"][base[1]] += price * qty
     
     # Calculate statistics for each item
     items_list = []
@@ -762,9 +782,22 @@ async def get_item_statistics(
         else:
             trend = 0
         
+        # One unit to count this item in: its own unit when it is always
+        # bought in one, else kg / l / pieces when every line converts.
+        if len(stats["by_unit"]) == 1:
+            unit_key, quantity = next(iter(stats["by_unit"].items()))
+        elif len(stats["by_base"]) == 1 and sum(stats["spend_by_base"].values()) >= stats["total_value"] - 0.01:
+            unit_key, quantity = next(iter(stats["by_base"].items()))
+        else:
+            unit_key, quantity = None, None
+        base_unit = next(iter(stats["by_base"])) if len(stats["by_base"]) == 1 else None
         items_list.append({
             "item_name": name,
-            "quantity": round(stats["quantity"], 2),
+            "quantity": round(quantity, 2) if quantity is not None else round(stats["quantity"], 2),
+            "unit": unit_label(unit_key) if unit_key else None,
+            "base_unit": unit_label(base_unit) if base_unit else None,
+            "avg_base_price": round(stats["spend_by_base"][base_unit] / stats["by_base"][base_unit], 4)
+            if base_unit and stats["by_base"][base_unit] else None,
             "total_value": round(stats["total_value"], 2),
             "frequency": stats["frequency"],
             "avg_price": round(avg_price, 2),
@@ -775,8 +808,17 @@ async def get_item_statistics(
             "supplier_count": len(stats["suppliers"])
         })
     
-    # Sort by different criteria
-    top_by_quantity = sorted(items_list, key=lambda x: x["quantity"], reverse=True)[:top_n]
+    # Sort by different criteria. Quantity is ranked within one unit at a
+    # time - 40 kg and 400 pieces are not "more" than each other.
+    by_unit_lists: Dict[str, List[dict]] = defaultdict(list)
+    for entry in items_list:
+        if entry["unit"]:
+            by_unit_lists[entry["unit"]].append(entry)
+    top_by_quantity_by_unit = {
+        unit: sorted(entries, key=lambda x: x["quantity"], reverse=True)[:top_n]
+        for unit, entries in sorted(by_unit_lists.items(), key=lambda kv: len(kv[1]), reverse=True)
+    }
+    top_by_quantity = next(iter(top_by_quantity_by_unit.values()), [])
     top_by_value = sorted(items_list, key=lambda x: x["total_value"], reverse=True)[:top_n]
     top_by_frequency = sorted(items_list, key=lambda x: x["frequency"], reverse=True)[:top_n]
     
@@ -798,6 +840,7 @@ async def get_item_statistics(
             "unique_items": len(items_list)
         },
         "top_by_quantity": top_by_quantity,
+        "top_by_quantity_by_unit": top_by_quantity_by_unit,
         "top_by_value": top_by_value,
         "top_by_frequency": top_by_frequency,
         "price_trends": price_trends
@@ -841,12 +884,14 @@ async def get_price_inflation(
     if not history:
         return empty_response
 
+    # Per item AND unit: a first purchase per piece and a last one per pack
+    # are not a price change.
     by_item = defaultdict(list)
     for record in history:
-        by_item[record["item_name"]].append(record)
+        by_item[(record["item_name"], normalize_unit(record.get("unit")))].append(record)
 
     items_result = []
-    for item_name, records in by_item.items():
+    for (item_name, _unit), records in by_item.items():
         if len(records) < 2:
             continue  # Only one purchase in the period - no comparison point
         first, last = records[0], records[-1]
@@ -911,12 +956,14 @@ async def get_item_by_supplier(
         return {"item_name": item_name, "suppliers": [], "recommendation": None}
     
     # Group by supplier
-    supplier_data: Dict[str, Any] = defaultdict(lambda: {"prices": [], "quantities": [], "dates": []})
+    supplier_data: Dict[str, Any] = defaultdict(lambda: {"prices": [], "quantities": [], "dates": [], "base": [], "units": set()})
     
     for record in history:
         supplier = record["supplier"]
         supplier_data[supplier]["prices"].append(record["unit_price"])
         supplier_data[supplier]["quantities"].append(record["quantity"])
+        supplier_data[supplier]["base"].append(base_unit_price(record["unit_price"], normalized_name, record.get("unit")))
+        supplier_data[supplier]["units"].add(normalize_unit(record.get("unit")))
         date_val = record.get("invoice_date")
         if isinstance(date_val, datetime):
             supplier_data[supplier]["dates"].append(date_val)
@@ -927,6 +974,9 @@ async def get_item_by_supplier(
         prices = data["prices"]
         avg = sum(prices) / len(prices) if prices else 0
         last_date = max(data["dates"]) if data["dates"] else None
+        bases = data["base"]
+        base_units = {b[1] for b in bases if b}
+        comparable = bool(bases) and all(bases) and len(base_units) == 1
         
         suppliers.append({
             "supplier": supplier,
@@ -936,31 +986,82 @@ async def get_item_by_supplier(
             "last_price": round(prices[-1], 2) if prices else 0,
             "purchase_count": len(prices),
             "total_quantity": round(sum(data["quantities"]), 2),
-            "last_purchase": last_date.strftime("%Y-%m-%d") if last_date else None
+            "last_purchase": last_date.strftime("%Y-%m-%d") if last_date else None,
+            "unit": unit_label(next(iter(data["units"]))) if len(data["units"]) == 1 else None,
+            # Price per kg / l / piece - what makes suppliers selling in
+            # different units or pack sizes comparable at all.
+            "avg_base_price": round(sum(b[0] for b in bases) / len(bases), 4) if comparable else None,
+            "base_unit": unit_label(next(iter(base_units))) if comparable else None,
         })
     
-    # Sort by average price (cheapest first)
-    suppliers.sort(key=lambda x: x["avg_price"])
+    # Compare per kg / l / piece when every supplier converts to the same
+    # base unit, else per line unit only when all sell in the same unit -
+    # otherwise the prices are not comparable and nothing is recommended.
+    base_units_all = {s_["base_unit"] for s_ in suppliers}
+    line_units_all = {s_["unit"] for s_ in suppliers}
+    if None not in base_units_all and len(base_units_all) == 1:
+        metric = "avg_base_price"
+    elif None not in line_units_all and len(line_units_all) == 1:
+        metric = "avg_price"
+    else:
+        metric = None
+    suppliers.sort(key=lambda x: (x[metric] if metric else x["avg_price"]))
     
-    # Recommendation
     recommendation = None
-    if len(suppliers) >= 2:
+    if metric and len(suppliers) >= 2:
         cheapest = suppliers[0]
         most_expensive = suppliers[-1]
-        if cheapest["avg_price"] > 0:
-            savings_percent = ((most_expensive["avg_price"] - cheapest["avg_price"]) / most_expensive["avg_price"] * 100)
+        if cheapest[metric] > 0:
+            savings_percent = ((most_expensive[metric] - cheapest[metric]) / most_expensive[metric] * 100)
             if savings_percent > 5:
                 recommendation = {
                     "best_supplier": cheapest["supplier"],
                     "avg_price": cheapest["avg_price"],
+                    "avg_base_price": cheapest["avg_base_price"],
+                    "base_unit": cheapest["base_unit"],
+                    "compared_per": "base_unit" if metric == "avg_base_price" else "unit",
                     "potential_savings_percent": round(savings_percent, 1)
                 }
     
     return {
         "item_name": item_name,
         "suppliers": suppliers,
-        "recommendation": recommendation
+        "recommendation": recommendation,
+        "sizes": await _other_sizes(company_id, normalized_name, history),
     }
+
+
+async def _other_sizes(company_id: str, item_name: str, history: List[dict]) -> List[dict]:
+    """The same product in other pack sizes ("Доматен сос 5кг" for "Доматен
+    сос 1кг"), each with its price per kg / l / piece and how it compares -
+    a bigger pack is often cheaper per kg, which comparing tin prices hides."""
+    own = [base_unit_price(r["unit_price"], item_name, r.get("unit")) for r in history]
+    own_units = {b[1] for b in own if b}
+    if not own or not all(own) or len(own_units) != 1:
+        return []
+    own_unit = next(iter(own_units))
+    own_avg = sum(b[0] for b in own if b) / len(own)
+    product = _size_free_key(item_name)
+    signature = item_size_signature(item_name)
+    names = await server.db.item_price_history.distinct("item_name", {"company_id": company_id})
+    result = []
+    for name in names:
+        if name == item_name or _size_free_key(name) != product or item_size_signature(name) == signature:
+            continue
+        rows = await server.db.item_price_history.find(
+            {"company_id": company_id, "item_name": name}, {"_id": 0, "unit_price": 1, "unit": 1}
+        ).to_list(500)
+        prices = [base_unit_price(r["unit_price"], name, r.get("unit")) for r in rows]
+        if not prices or not all(prices) or {b[1] for b in prices if b} != {own_unit}:
+            continue
+        avg = sum(b[0] for b in prices if b) / len(prices)
+        result.append({
+            "item_name": name, "avg_base_price": round(avg, 4), "base_unit": unit_label(own_unit),
+            "purchase_count": len(rows),
+            "difference_percent": round((avg - own_avg) / own_avg * 100, 1) if own_avg else None,
+        })
+    result.sort(key=lambda x: x["avg_base_price"])
+    return result[:10]
 
 # Needs at least 4 purchases to call anything a "usual" cadence - same
 # minimum-sample-size reasoning as ForecastService's trend gate.
@@ -1319,6 +1420,154 @@ async def ai_merge_similar_items(
         return await run_ai_item_merge(company_id)
     except Exception as e:
         raise ai_exception_to_http(e, "AI item merge error")
+
+# ===================== CATALOG: SAME / DIFFERENT =====================
+# The owner's own word on what is one product: "same" joins two names (a
+# misspelling the automatic matching missed), "different" splits a wrong
+# join and keeps the two apart for good - in write-time matching, saved
+# merges and the AI grouping alike. Different pack sizes are never "same":
+# they are compared per kg / l / piece instead (see _other_sizes).
+
+class CatalogPair(BaseModel):
+    item_name: str = Field(min_length=1, max_length=300)
+    other_name: str = Field(min_length=1, max_length=300)
+
+
+def _clean_item(name: str) -> str:
+    return re.sub(r"\s+", " ", (name or "").strip().lower())
+
+
+async def _mapping_containing(company_id: str, name: str) -> Optional[dict]:
+    return await server.db.item_merge_mappings.find_one(
+        {"company_id": company_id, "$or": [{"canonical_name": name}, {"variants": name}]}, {"_id": 0}
+    )
+
+
+@router.get("/items/catalog/related")
+async def get_related_items(item_name: str, current_user: User = Depends(get_current_user)):
+    """Names joined with this item, and unjoined look-alikes of the same
+    size the owner may want to call the same product."""
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    name = _clean_item(item_name)
+    if not company_id or not name:
+        return {"item_name": name, "merged_with": [], "similar": []}
+    mapping = await _mapping_containing(company_id, name)
+    group = (set(mapping.get("variants") or []) | {mapping["canonical_name"]}) if mapping else {name}
+    distinct = await item_distinct_names(company_id, name)
+    signature = item_size_signature(name)
+    key = _compare_key(name)
+    similar = []
+    for other in await server.db.item_price_history.distinct("item_name", {"company_id": company_id}):
+        if other in group or other in distinct or item_size_signature(other) != signature:
+            continue
+        score = _similarity(_compare_key(other), key)
+        if score >= 0.72:
+            similar.append({"item_name": other, "similarity": round(score, 2)})
+    similar.sort(key=lambda x: x["similarity"], reverse=True)
+    return {
+        "item_name": name,
+        "merged_with": sorted(group - {name}),
+        "similar": similar[:8],
+        "different_from": sorted(distinct),
+    }
+
+
+@router.post("/items/catalog/same")
+async def mark_items_same(body: CatalogPair, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+    a, b = _clean_item(body.item_name), _clean_item(body.other_name)
+    if a == b:
+        raise HTTPException(status_code=400, detail="Това е едно и също име")
+    if item_size_signature(a) != item_size_signature(b):
+        raise HTTPException(
+            status_code=400,
+            detail="Различни разфасовки не се обединяват - сравни ги по цена за кг, л или брой.",
+        )
+    mapping_a = await _mapping_containing(company_id, a)
+    mapping_b = await _mapping_containing(company_id, b)
+    base = mapping_a or mapping_b
+    canonical = base["canonical_name"] if base else a
+    variants = {a, b, canonical}
+    for m in (mapping_a, mapping_b):
+        if m:
+            variants |= set(m.get("variants") or []) | {m["canonical_name"]}
+    if mapping_a and mapping_b and mapping_a["canonical_name"] != mapping_b["canonical_name"]:
+        await server.db.item_merge_mappings.delete_one(
+            {"company_id": company_id, "canonical_name": mapping_b["canonical_name"]}
+        )
+    await server.db.item_merge_mappings.update_one(
+        {"company_id": company_id, "canonical_name": canonical},
+        {"$set": {
+            "company_id": company_id, "canonical_name": canonical,
+            "display_name": (base or {}).get("display_name") or body.item_name.strip(),
+            "variants": sorted(variants), "source": "owner", "updated_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+    await server.db.item_distinctions.delete_many({"company_id": company_id, "a": min(a, b), "b": max(a, b)})
+    # Earlier purchases of the two names become one history too (stats,
+    # price baseline, reorder rhythm). Each row keeps its printed name, so
+    # a later "different" can put it back.
+    moved = 0
+    rows = await server.db.item_price_history.find(
+        {"company_id": company_id, "item_name": {"$in": sorted({a, b} - {canonical})}},
+        {"_id": 1, "item_name": 1, "raw_name": 1},
+    ).to_list(20000)
+    for row in rows:
+        update = {"item_name": canonical}
+        if not row.get("raw_name"):
+            update["raw_name"] = row["item_name"]
+        await server.db.item_price_history.update_one({"_id": row["_id"]}, {"$set": update})
+        moved += 1
+    return {"canonical_name": canonical, "variants": sorted(variants), "rows_moved": moved}
+
+
+@router.post("/items/catalog/different")
+async def mark_items_different(body: CatalogPair, current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+    a, b = _clean_item(body.item_name), _clean_item(body.other_name)
+    if a == b:
+        raise HTTPException(status_code=400, detail="Това е едно и също име")
+    mapping = await _mapping_containing(company_id, a)
+    if mapping and b in set(mapping.get("variants") or []) | {mapping["canonical_name"]}:
+        dropped = b if mapping["canonical_name"] != b else a
+        remaining = [v for v in mapping.get("variants") or [] if v != dropped]
+        if set(remaining) - {mapping["canonical_name"]}:
+            await server.db.item_merge_mappings.update_one(
+                {"company_id": company_id, "canonical_name": mapping["canonical_name"]},
+                {"$set": {"variants": remaining, "updated_at": datetime.now(timezone.utc)}},
+            )
+        else:
+            await server.db.item_merge_mappings.delete_one(
+                {"company_id": company_id, "canonical_name": mapping["canonical_name"]}
+            )
+    await server.db.item_distinctions.update_one(
+        {"company_id": company_id, "a": min(a, b), "b": max(a, b)},
+        {"$set": {"company_id": company_id, "a": min(a, b), "b": max(a, b),
+                  "created_by": current_user.user_id, "created_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    # Lines the write-time matching filed under the other name go back
+    # under their own (only rows that kept their name as printed).
+    moved = 0
+    rows = await server.db.item_price_history.find(
+        {"company_id": company_id, "item_name": {"$in": [a, b]}, "raw_name": {"$ne": None}},
+        {"_id": 1, "item_name": 1, "raw_name": 1},
+    ).to_list(20000)
+    for row in rows:
+        own = _clean_item(row.get("raw_name") or "")
+        if own in (a, b) and own != row["item_name"]:
+            await server.db.item_price_history.update_one({"_id": row["_id"]}, {"$set": {"item_name": own}})
+            moved += 1
+    return {"separated": True, "rows_moved": moved}
+
 
 @router.get("/items/merge-mappings")
 async def get_merge_mappings(current_user: User = Depends(get_current_user)):
