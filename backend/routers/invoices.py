@@ -568,6 +568,11 @@ async def delete_invoice(invoice_id: str, current_user: User = Depends(get_curre
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
     if company_id:
         await purge_invoice_price_data(company_id, invoice_id)
+    if invoice and invoice.get("asset_id"):
+        # The asset stays; it just no longer points at a purchase invoice.
+        await server.db.assets.update_one(
+            {"id": invoice["asset_id"], "invoice_id": invoice_id}, {"$set": {"invoice_id": None, "invoice_label": None}},
+        )
 
     await audit_service.log_action(
         user_id=current_user.user_id,
@@ -623,6 +628,15 @@ async def restore_audit_entry(log_id: str, current_user: User = Depends(get_curr
     for field in ("date", "payment_due_date"):
         if snapshot.get(field):
             snapshot[field] = stored_day(snapshot[field])
+    # Back on its asset only if that asset still has no other invoice.
+    if snapshot.get("asset_id"):
+        relinked = await server.db.assets.update_one(
+            {"id": snapshot["asset_id"], "company_id": company_id, "invoice_id": None},
+            {"$set": {"invoice_id": snapshot["id"],
+                      "invoice_label": f"{snapshot.get('supplier') or ''} № {snapshot.get('invoice_number') or ''}".strip()}},
+        )
+        if not relinked.modified_count:
+            snapshot["asset_id"] = None
     await server.db.invoices.insert_one(dict(snapshot))
     await rebuild_invoice_price_history(company_id, snapshot)
     await server.db.audit_logs.update_one({"id": log_id}, {"$set": {"details.restored": True}})

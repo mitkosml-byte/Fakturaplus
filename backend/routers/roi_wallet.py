@@ -122,7 +122,7 @@ async def _roi_month_data(
             month["fiscal_by_day"][day] += r.get("fiscal_revenue", 0)
             month["pocket_by_day"][day] += r.get("pocket_money", 0)
     invoices = await server.db.invoices.find(
-        {**scope, "date": {
+        {**scope, **NOT_AN_ASSET, "date": {
             "$gte": datetime.fromisoformat(first_start + "T00:00:00+00:00"),
             "$lt": datetime.fromisoformat(last_end + "T00:00:00+00:00"),
         }},

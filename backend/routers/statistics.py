@@ -222,7 +222,7 @@ async def get_chart_data(
     visibility = get_financial_visibility(current_user)
 
     invoices = await server.db.invoices.find(
-        {**scope, "date": shown.datetime_filter()}, {"_id": 0, "date": 1, "total_amount": 1, "vat_amount": 1}
+        {**scope, "date": shown.datetime_filter()}, {"_id": 0, "date": 1, "total_amount": 1, "vat_amount": 1, "asset_id": 1}
     ).to_list(ALL_ROWS)
     revenues = await server.db.daily_revenue.find(
         {**scope, "date": shown.text_filter()},
@@ -242,7 +242,8 @@ async def get_chart_data(
     for inv in invoices:
         inv_day = business_day(inv.get("date"))
         if inv_day and inv_day.isoformat() in days:
-            days[inv_day.isoformat()]["expense"] += inv.get("total_amount", 0)
+            if not inv.get("asset_id"):  # an asset's invoice: its depreciation is the expense
+                days[inv_day.isoformat()]["expense"] += inv.get("total_amount", 0)
             days[inv_day.isoformat()]["vat"] -= inv.get("vat_amount", 0)  # ДДС кредит
     for rev in revenues:
         date_str = rev["date"][:10] if isinstance(rev.get("date"), str) else None

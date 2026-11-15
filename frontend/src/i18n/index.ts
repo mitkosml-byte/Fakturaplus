@@ -1916,6 +1916,12 @@ export const translations: Translations = {
   },
   
   // Invoice details
+  'invoices.isAssetTitle': { bg: 'Дълготраен актив', en: 'Fixed asset' },
+  'invoices.isAssetText': {
+    bg: 'Не се брои като разход в деня си – брои се амортизацията на актива. ДДС остава кредит.',
+    en: 'Not an expense of its day – the asset\'s depreciation is. Its VAT stays a credit.',
+  },
+  'invoices.makeAsset': { bg: 'Запиши като дълготраен актив', en: 'Record as a fixed asset' },
   'invoices.invoiceNo': {
     bg: '№ Фактура',
     en: 'Invoice No.',
@@ -4512,6 +4518,16 @@ export const translations: Translations = {
   'assets.category': { bg: 'Данъчна категория', en: 'Tax category' },
   'assets.acquisitionDate': { bg: 'Дата на придобиване', en: 'Acquisition date' },
   'assets.inServiceDate': { bg: 'Дата на въвеждане в експлоатация', en: 'Date put into service' },
+  'assets.purchaseInvoice': { bg: 'Фактура за покупката', en: 'Purchase invoice' },
+  'assets.linkInvoice': { bg: 'Свържи с фактура', en: 'Link an invoice' },
+  'assets.invoiceSearchPlaceholder': { bg: 'Доставчик или номер на фактура', en: 'Supplier or invoice number' },
+  'assets.noInvoicesFound': { bg: 'Няма намерени фактури', en: 'No invoices found' },
+  'assets.invoiceTaken': { bg: 'към друг актив', en: 'on another asset' },
+  'assets.invoiceShort': { bg: 'Фактура', en: 'Invoice' },
+  'assets.purchaseInvoiceHint': {
+    bg: 'Свързаната фактура не се брои като разход в деня си – разходът е амортизацията, месец по месец. ДДС от нея остава данъчен кредит.',
+    en: 'The linked invoice is not an expense of its day – the depreciation is, month by month. Its VAT stays a tax credit.',
+  },
   'assets.depreciationRate': { bg: 'Годишна норма на амортизация (%)', en: 'Annual depreciation rate (%)' },
   'assets.depreciationRateHint': { bg: 'Това е данъчната норма по чл. 55 ЗКПО (максимална за категорията). Счетоводната Ви амортизация може да е различна, според собствената Ви амортизационна политика — коригирайте, ако е така.', en: 'This is the tax depreciation rate under Art. 55 CITA (the category maximum). Your real accounting depreciation may differ per your own policy — adjust if so.' },
   'assets.responsiblePerson': { bg: 'Материално отговорно лице', en: 'Responsible person' },

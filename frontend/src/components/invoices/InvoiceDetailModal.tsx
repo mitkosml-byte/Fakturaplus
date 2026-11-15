@@ -4,12 +4,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { format, Locale } from 'date-fns';
+import { useRouter } from 'expo-router';
 import DateTimePickerModal from '../AppDateTimePicker';
 import { PressableScale } from '..';
 import { useTranslation } from '../../i18n';
 import { Invoice, VatTreatment } from '../../types';
 import { Avatar } from '../Avatar';
 import { COLORS } from '../../theme/colors';
+import { useAuth } from '../../contexts/AuthContext';
 import { isPackSuspect, priceAlertMeaning } from '../../utils/priceAlert';
 
 // Extracted from invoices.tsx (Module 1 audit finding #4). The single
@@ -90,6 +92,10 @@ export function InvoiceDetailModal({
   scannedPages, loadingScannedPages, onViewPage, onDelete,
 }: Props) {
   const { t } = useTranslation();
+  const router = useRouter();
+  const { hasPermission } = useAuth();
+  // Recording the purchase as a fixed asset needs both screens' rights.
+  const canMakeAsset = hasPermission('manage_budget') && hasPermission('manage_invoices');
 
   const formatDate = (dateStr: string) => {
     try {
@@ -312,6 +318,29 @@ export function InvoiceDetailModal({
                   </View>
                 );
               })()}
+              {!editMode && invoice.asset_id ? (
+                <TouchableOpacity
+                  style={styles.assetBanner}
+                  onPress={() => { onClose(); router.push('/assets'); }}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="cube-outline" size={18} color={COLORS.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.assetBannerTitle}>{t('invoices.isAssetTitle')}</Text>
+                    <Text style={styles.assetBannerText}>{t('invoices.isAssetText')}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+                </TouchableOpacity>
+              ) : !editMode && canMakeAsset ? (
+                <TouchableOpacity
+                  style={styles.assetLink}
+                  onPress={() => { onClose(); router.push({ pathname: '/assets', params: { fromInvoice: invoice.id } }); }}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="cube-outline" size={16} color={COLORS.textSecondary} />
+                  <Text style={styles.assetLinkText}>{t('invoices.makeAsset')}</Text>
+                </TouchableOpacity>
+              ) : null}
               <View style={styles.detailSection}>
                 <Text style={styles.detailSectionLabel}>{t('invoices.invoiceNo')}</Text>
                 <Text style={styles.detailSectionValue}>{invoice.invoice_number}</Text>
@@ -559,6 +588,39 @@ export function InvoiceDetailModal({
 }
 
 const styles = StyleSheet.create({
+  assetBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  assetBannerTitle: {
+    color: COLORS.textLight,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  assetBannerText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+    lineHeight: 17,
+  },
+  assetLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    marginBottom: 10,
+  },
+  assetLinkText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    textDecorationLine: 'underline',
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',

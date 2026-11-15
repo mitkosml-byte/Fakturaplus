@@ -456,3 +456,46 @@ def test_p2_c4_the_running_month_is_counted_through_today_everywhere(client):
     if share < 1:
         # Where the month is heading carries the WHOLE month's salary.
         assert budget["is_running"] and budget["expected_month_end"] >= round(payroll_month, 2)
+
+
+def test_p3_an_asset_bought_on_an_invoice_is_expensed_once(client):
+    _, _, owner = _company()
+    day = "2026-09-10"
+    bought = client.post("/api/invoices", headers=owner, json={
+        "supplier": "Техно Мак ООД", "invoice_number": "8801", "date": day, "payment_method": "cash",
+        "amount_without_vat": 5000, "vat_amount": 1000, "total_amount": 6000,
+        "items": [{"name": "Пещ конвекторна", "quantity": 1, "unit": "бр.", "unit_price": 5000, "total_price": 5000}],
+    }).json()
+    month = "start_date=2026-09-01&end_date=2026-09-30"
+    before = client.get(f"/api/statistics/summary?{month}", headers=owner).json()
+
+    candidates = client.get("/api/assets/linkable-invoices?search=8801", headers=owner).json()
+    assert candidates and candidates[0]["id"] == bought["id"] and candidates[0]["first_item"] == "Пещ конвекторна"
+    asset = client.post("/api/assets", headers=owner, json={
+        "name": "Пещ конвекторна", "category": "cat_iv", "acquisition_date": day, "in_service_date": day,
+        "acquisition_value": 6000, "invoice_id": bought["id"],
+    })
+    assert asset.status_code == 200, asset.text
+    asset = asset.json()
+    assert asset["invoice_id"] == bought["id"] and "8801" in asset["invoice_label"]
+
+    after = client.get(f"/api/statistics/summary?{month}", headers=owner).json()
+    # The 6000 € is no longer an expense of 10 September - the asset's
+    # depreciation is - while its VAT stays a credit.
+    depreciation = after["total_depreciation_expense"] - before["total_depreciation_expense"]
+    assert round(after["total_expense"], 2) == round(before["total_expense"] - 6000 + depreciation, 2)
+    assert depreciation < 6000
+    assert after["vat_to_pay"] == before["vat_to_pay"]
+    chart = client.get(f"/api/statistics/chart?{month}", headers=owner).json()
+    assert all(point["expense"] < 6000 for point in (chart if isinstance(chart, list) else chart.get("data", [])))
+
+    # Another asset cannot take the same invoice; deleting the asset gives
+    # the expense back to its day.
+    other = client.post("/api/assets", headers=owner, json={
+        "name": "Втора пещ", "category": "cat_iv", "acquisition_date": day, "in_service_date": day,
+        "acquisition_value": 6000, "invoice_id": bought["id"],
+    })
+    assert other.status_code == 409
+    assert client.delete(f"/api/assets/{asset['id']}", headers=owner).status_code == 200
+    again = client.get(f"/api/statistics/summary?{month}", headers=owner).json()
+    assert round(again["total_expense"], 2) == round(before["total_expense"], 2)

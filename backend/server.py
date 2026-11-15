@@ -363,6 +363,9 @@ class Invoice(BaseModel):
     paid_amount: float = 0.0
     payment_due_date: Optional[datetime] = None  # само при bank_transfer
     paid_at: Optional[datetime] = None
+    # Set when this is the purchase invoice of a fixed asset (routers/assets):
+    # not an expense of its day then - the asset's depreciation is.
+    asset_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 # Invoice Item models
@@ -2360,6 +2363,11 @@ def _profit_formula(
     total_expense = invoice_total + off_book_expenses + payroll_cost + depreciation_cost
     return total_income, total_expense
 
+# Invoices that are expenses of their day: not the purchase of a fixed
+# asset (asset_id set when an asset is linked to its invoice).
+NOT_AN_ASSET: Dict[str, Any] = {"asset_id": None}
+
+
 def counted_period(period: Period) -> Period:
     """The days of a period that count now: a period still running counts
     through today ("so far" - its revenue and invoices up to today, and the
@@ -2381,10 +2389,16 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
     viewer's own (period_income_expense below does it for the profit
     formula), so two screens asking for the same period start from the
     same numbers."""
+    # An invoice for a fixed asset is not an expense of its day - the asset
+    # is expensed through its depreciation month by month - but its VAT is
+    # still a credit, and it is still one of the period's invoices.
     invoices = await db.invoices.aggregate([
+        {"$match": {**scope, "date": period.datetime_filter(), **NOT_AN_ASSET}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "net": {"$sum": "$amount_without_vat"}}},
+    ]).to_list(ALL_ROWS)
+    all_invoices = await db.invoices.aggregate([
         {"$match": {**scope, "date": period.datetime_filter()}},
-        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
-                    "net": {"$sum": "$amount_without_vat"}, "count": {"$sum": 1}}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"}, "count": {"$sum": 1}}},
     ]).to_list(ALL_ROWS)
     revenue_by_rate = await db.daily_revenue.aggregate([
         {"$match": {**scope, "date": period.text_filter()}},
@@ -2405,6 +2419,7 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
         if rate > 0:
             fiscal_vat += (row.get("fiscal") or 0) * rate / (100 + rate)
     invoice = invoices[0] if invoices else {}
+    every_invoice = all_invoices[0] if all_invoices else {}
     return {
         "period": period,
         "fiscal_revenue": float(sum(row.get("fiscal") or 0 for row in revenue_by_rate)),
@@ -2412,9 +2427,10 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
         "card_revenue": float(sum(row.get("card") or 0 for row in revenue_by_rate)),
         "fiscal_vat": fiscal_vat,
         "invoice_total": float(invoice.get("total") or 0),
-        "invoice_vat": float(invoice.get("vat") or 0),
+        "invoice_vat": float(every_invoice.get("vat") or 0),
         "invoice_net": float(invoice.get("net") or 0),
-        "invoice_count": int(invoice.get("count") or 0),
+        "invoice_count": int(every_invoice.get("count") or 0),
+        "asset_invoice_total": float(every_invoice.get("total") or 0) - float(invoice.get("total") or 0),
         "off_book_expenses": float(expenses[0].get("total") or 0) if expenses else 0.0,
         "payroll_cost": await get_payroll_cost_for_period(company_id, user_id, period.start, period.end),
         "depreciation_cost": await get_depreciation_cost_for_period(company_id, user_id, period.start, period.end),
@@ -2619,7 +2635,7 @@ async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: 
 
     period = Period.parse(start_date, end_date)
     invoices = await db.invoices.find(
-        {**scope, "date": period.datetime_filter()}, {"_id": 0, "total_amount": 1, "supplier": 1}
+        {**scope, "date": period.datetime_filter(), **NOT_AN_ASSET}, {"_id": 0, "total_amount": 1, "supplier": 1}
     ).to_list(ALL_ROWS)
 
     by_name: Dict[str, float] = defaultdict(float)
@@ -4552,6 +4568,10 @@ class FixedAsset(BaseModel):
     responsible_person: Optional[str] = None  # материално отговорно лице
     image_base64: Optional[str] = None
     notes: Optional[str] = None
+    # The purchase invoice: while linked, that invoice is not an expense of
+    # its day (the asset is expensed by its depreciation), VAT still counts.
+    invoice_id: Optional[str] = None
+    invoice_label: Optional[str] = None
     status: AssetStatus = AssetStatus.ACTIVE
     disposal_date: Optional[str] = None
     disposal_reason: Optional[str] = None
@@ -4570,6 +4590,7 @@ class FixedAssetCreate(BaseModel):
     responsible_person: Optional[str] = None
     image_base64: Optional[str] = None
     notes: Optional[str] = None
+    invoice_id: Optional[str] = None
 
 class FixedAssetUpdate(BaseModel):
     name: Optional[str] = None
@@ -4581,6 +4602,8 @@ class FixedAssetUpdate(BaseModel):
     responsible_person: Optional[str] = None
     image_base64: Optional[str] = None
     notes: Optional[str] = None
+    # "" unlinks the purchase invoice; None leaves the link as it is.
+    invoice_id: Optional[str] = None
 
 class AssetDisposeRequest(BaseModel):
     disposal_date: str

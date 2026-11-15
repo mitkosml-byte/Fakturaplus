@@ -124,6 +124,8 @@ export interface Invoice {
   payment_due_date?: string;
   paid_at?: string;
   created_at: string;
+  // Set when this is a fixed asset's purchase invoice (not an expense of its day).
+  asset_id?: string | null;
 }
 
 export interface DailyRevenue {
@@ -1187,6 +1189,21 @@ export interface FixedAsset {
   monthly_depreciation: number;
   accumulated_depreciation: number;
   net_book_value: number;
+  // Its purchase invoice: while linked, that invoice is not an expense of
+  // its day - the depreciation is - and its VAT is still a credit.
+  invoice_id?: string | null;
+  invoice_label?: string | null;
+}
+
+export interface LinkableInvoice {
+  id: string;
+  supplier: string;
+  invoice_number: string;
+  date: string | null;
+  total_amount: number;
+  amount_without_vat: number;
+  first_item?: string | null;
+  asset_id?: string | null;
 }
 
 export interface FixedAssetCreate {
@@ -1199,6 +1216,8 @@ export interface FixedAssetCreate {
   responsible_person?: string;
   image_base64?: string;
   notes?: string;
+  // "" removes the link (on an update).
+  invoice_id?: string;
 }
 
 export interface AssetsSummary {

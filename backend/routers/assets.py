@@ -33,6 +33,7 @@ _eik_check_digit,
     _team_channel_id,
 )
 import server
+import re
 
 router = APIRouter(prefix="/api")
 
@@ -43,10 +44,70 @@ async def get_asset_categories(current_user: User = Depends(get_current_user)):
         "low_value_threshold": ASSET_LOW_VALUE_THRESHOLD_EUR,
     }
 
+async def _attach_invoice(scope: dict, asset_id: str, invoice_id: str) -> str:
+    """Links an asset to its purchase invoice; returns the invoice's label.
+    The invoice then stops being an expense of its day (period_totals'
+    NOT_AN_ASSET) - the asset's depreciation is its expense - while its VAT
+    stays a credit."""
+    invoice = await server.db.invoices.find_one(
+        {"id": invoice_id, **scope}, {"_id": 0, "id": 1, "asset_id": 1, "supplier": 1, "invoice_number": 1},
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+    if invoice.get("asset_id") and invoice["asset_id"] != asset_id:
+        raise HTTPException(status_code=409, detail="Тази фактура вече е свързана с друг актив")
+    await server.db.invoices.update_one({"id": invoice_id, **scope}, {"$set": {"asset_id": asset_id}})
+    return f"{invoice.get('supplier') or ''} № {invoice.get('invoice_number') or ''}".strip()
+
+
+async def _detach_invoice(scope: dict, asset_id: str, invoice_id: Optional[str]) -> None:
+    """The invoice is an expense of its day again."""
+    if invoice_id:
+        await server.db.invoices.update_one({"id": invoice_id, "asset_id": asset_id, **scope}, {"$set": {"asset_id": None}})
+
+
+@router.get("/assets/linkable-invoices")
+async def get_linkable_invoices(
+    search: Optional[str] = None, invoice_id: Optional[str] = None, current_user: User = Depends(get_current_user),
+):
+    """Recent invoices an asset can be linked to (its purchase invoice), or
+    one by id ("Record as an asset" from an invoice) - for whoever manages
+    both assets and invoices."""
+    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_invoices")
+    _, scope = await get_company_scope(current_user)
+    query: Dict[str, Any] = dict(scope)
+    if invoice_id:
+        query = {"$and": [scope, {"id": invoice_id}]}
+    elif search and search.strip():
+        pattern = {"$regex": re.escape(search.strip()), "$options": "i"}
+        query = {"$and": [scope, {"$or": [{"supplier": pattern}, {"invoice_number": pattern}]}]}
+    invoices = await server.db.invoices.find(
+        query, {"_id": 0, "id": 1, "supplier": 1, "invoice_number": 1, "date": 1, "total_amount": 1,
+                "amount_without_vat": 1, "asset_id": 1, "items": {"$slice": 1}},
+    ).sort("date", -1).limit(40).to_list(40)
+    def _day_text(value: Any) -> Optional[str]:
+        day = business_day(value)
+        return day.isoformat() if day else None
+
+    return [
+        {
+            "id": inv["id"], "supplier": inv.get("supplier"), "invoice_number": inv.get("invoice_number"),
+            "date": _day_text(inv.get("date")),
+            "total_amount": inv.get("total_amount", 0), "amount_without_vat": inv.get("amount_without_vat", 0),
+            "first_item": ((inv.get("items") or [{}])[0] or {}).get("name"),
+            "asset_id": inv.get("asset_id"),
+        }
+        for inv in invoices
+    ]
+
+
 @router.post("/assets", response_model=FixedAsset)
 async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
+    if asset.invoice_id:
+        require_permission(current_user, "manage_invoices")
 
     category_info = ASSET_CATEGORY_INFO[asset.category.value]
     rate = asset.annual_depreciation_rate_percent
@@ -66,6 +127,8 @@ async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get
         annual_depreciation_rate_percent=rate,
         **asset.model_dump(exclude={"annual_depreciation_rate_percent"})
     )
+    if asset.invoice_id:
+        asset_obj.invoice_label = await _attach_invoice(scope, asset_obj.id, asset.invoice_id)
     await server.db.assets.insert_one(asset_obj.model_dump())
 
     await audit_service.log_action(
@@ -125,6 +188,17 @@ async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: Us
 
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
 
+    if "invoice_id" in update_data and update_data["invoice_id"] != existing.get("invoice_id"):
+        require_permission(current_user, "manage_invoices")
+        await _detach_invoice(scope, asset_id, existing.get("invoice_id"))
+        if update_data["invoice_id"]:
+            update_data["invoice_label"] = await _attach_invoice(scope, asset_id, update_data["invoice_id"])
+        else:
+            update_data["invoice_id"] = None
+            update_data["invoice_label"] = None
+    else:
+        update_data.pop("invoice_id", None)
+
     category = update_data.get("category", existing["category"])
     if "annual_depreciation_rate_percent" in update_data:
         category_info = ASSET_CATEGORY_INFO[category]
@@ -169,7 +243,10 @@ async def dispose_asset(asset_id: str, request: AssetDisposeRequest, current_use
 async def delete_asset(asset_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
     _, scope = await get_company_scope(current_user)
+    existing: Dict[str, Any] = dict(await server.db.assets.find_one({"id": asset_id, **scope}, {"_id": 0, "invoice_id": 1}) or {})
     result = await server.db.assets.delete_one({"id": asset_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Активът не е намерен")
+    # Its purchase invoice is an ordinary expense again.
+    await _detach_invoice(scope, asset_id, existing.get("invoice_id"))
     return {"message": "Активът е изтрит"}

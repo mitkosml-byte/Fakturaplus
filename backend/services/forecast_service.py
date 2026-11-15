@@ -526,7 +526,7 @@ class ForecastService:
         month = Period.month_of(today)
         elapsed, dim = today.day, month.days
         invoices = await self.db.invoices.find(
-            {**scope, "date": Period(month.start, today).datetime_filter()}, {"_id": 0, "total_amount": 1},
+            {**scope, "date": Period(month.start, today).datetime_filter(), "asset_id": None}, {"_id": 0, "total_amount": 1},
         ).to_list(None)
         variable = sum(float(i.get("total_amount", 0)) for i in invoices)
         if include_off_book_expenses:
@@ -569,8 +569,9 @@ class ForecastService:
         window_end_str = window_end.strftime("%Y-%m-%d")
 
         # Get invoice expenses
+        # A fixed asset's invoice is expensed through its depreciation, not on its day.
         invoices = await self.db.invoices.find(
-            {**scope, "date": {"$gte": window_start, "$lt": window_end}},
+            {**scope, "date": {"$gte": window_start, "$lt": window_end}, "asset_id": None},
             {"_id": 0, "date": 1, "total_amount": 1}
         ).to_list(None)
 
