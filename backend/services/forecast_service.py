@@ -5,6 +5,8 @@ from collections import defaultdict
 import calendar
 import statistics
 
+from services.business_calendar import business_day, now_local, today_local
+
 # Below this many months of history, a trend computed any way at all is
 # mostly noise dressed up as a number - with 2-3 points, a single unusual
 # month (a partial founding month, a one-off purchase) can swing a
@@ -90,8 +92,8 @@ def _resolve_window(
     half-finished month counted as a whole one made every forecast read
     as a sharp fall in the first days of each month, and a window that
     started mid-month did the same to its first month."""
-    now = datetime.now(timezone.utc)
-    current_month = _month_start(now.year, now.month)
+    today = today_local()
+    current_month = _month_start(today.year, today.month)
     end_exclusive = current_month
     if end_date:
         # A month counts only if the range runs through its last day.
@@ -280,7 +282,7 @@ def _build_forecast(
     std_dev = statistics.stdev(amounts) if len(amounts) > 1 else 0
     confidence = min(0.9, len(amounts) / 6)  # unchanged - more months = higher confidence
 
-    current_date = datetime.now(timezone.utc)
+    current_date = today_local()
     last_y, last_m = (int(part) for part in historical[-1]["month"].split("-"))
     targets = [_ym_add(current_date.year, current_date.month, i) for i in range(1, months_ahead + 1)]
     forecast = []
@@ -369,16 +371,19 @@ class ForecastService:
                 return None
         return None
 
-    async def _company_user_ids(self, company_id: str) -> List[str]:
-        # expenses/daily_revenue are keyed by user_id, not company_id, so
-        # resolve the company's member user_ids to include everyone's entries
-        company_users = await self.db.users.find(
-            {"company_id": company_id}, {"_id": 0, "user_id": 1}
-        ).to_list(1000)
-        return [u["user_id"] for u in company_users]
+    async def _company_scope(self, company_id: str) -> dict:
+        """The company's records - the same filter as server.company_data_scope
+        (repeated here: server imports this module): everything carrying the
+        company_id, plus older records without one from its current members.
+        So the forecast counts exactly what /statistics/summary counts - a
+        departed employee's entries included, which a filter by the current
+        members' user_ids used to drop."""
+        members = await self.db.users.find({"company_id": company_id}, {"_id": 0, "user_id": 1}).to_list(None)
+        member_ids = [m["user_id"] for m in members]
+        return {"$or": [{"company_id": company_id}, {"user_id": {"$in": member_ids}, "company_id": None}]}
 
     async def _expense_monthly_totals(
-        self, company_id: str, user_ids: List[str], window_start: datetime, window_end: datetime,
+        self, company_id: str, scope: dict, window_start: datetime, window_end: datetime,
         include_off_book_expenses: bool,
     ) -> tuple:
         """(monthly expense totals in [window_start, window_end), the date of
@@ -388,13 +393,13 @@ class ForecastService:
 
         # Get invoice expenses
         invoices = await self.db.invoices.find(
-            {"company_id": company_id, "date": {"$gte": window_start, "$lt": window_end}},
+            {**scope, "date": {"$gte": window_start, "$lt": window_end}},
             {"_id": 0, "date": 1, "total_amount": 1}
         ).to_list(None)
 
         # Get non-invoice expenses (date is stored as a "YYYY-MM-DD" string)
         expenses = await self.db.expenses.find(
-            {"user_id": {"$in": user_ids}, "date": {"$gte": window_start_str, "$lt": window_end_str}},
+            {**scope, "date": {"$gte": window_start_str, "$lt": window_end_str}},
             {"_id": 0, "date": 1, "amount": 1}
         ).to_list(None) if include_off_book_expenses else []
 
@@ -402,17 +407,16 @@ class ForecastService:
         # the most stable, predictable expense a business has
         payroll_entries = await self.db.payroll_entries.find(
             {"company_id": company_id},
-            {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1}
-        ).to_list(10000)
+            {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1, "counted_in_expenses": 1}
+        ).to_list(None)
 
         # Aggregate by month
         monthly_totals: Dict[str, float] = defaultdict(float)
 
         for inv in invoices:
-            date = inv.get("date")
-            if isinstance(date, datetime):
-                month_key = date.strftime("%Y-%m")
-                monthly_totals[month_key] += float(inv.get("total_amount", 0))
+            day = business_day(inv.get("date")) if isinstance(inv.get("date"), datetime) else None
+            if day:
+                monthly_totals[day.strftime("%Y-%m")] += float(inv.get("total_amount", 0))
 
         for exp in expenses:
             date_str = exp.get("date")
@@ -421,6 +425,10 @@ class ForecastService:
                 monthly_totals[month_key] += float(exp.get("amount", 0))
 
         for p in payroll_entries:
+            # An entry the owner excluded from expenses stays out here too,
+            # as in /statistics/summary.
+            if p.get("counted_in_expenses") is False:
+                continue
             month_key = f"{p['period_year']}-{p['period_month']:02d}"
             if window_start_str[:7] <= month_key < window_end_str[:7]:
                 monthly_totals[month_key] += float(p.get("total_employer_cost", 0))
@@ -429,7 +437,7 @@ class ForecastService:
         # folded into the same history window the average/trend is based on
         assets = await self.db.assets.find(
             {"company_id": company_id}, {"_id": 0}
-        ).to_list(1000)
+        ).to_list(None)
 
         y, m = window_start.year, window_start.month
         while (y, m) < (window_end.year, window_end.month):
@@ -442,20 +450,20 @@ class ForecastService:
         # Expenses start with the first invoice or expense ever recorded.
         firsts = [
             d for d in (
-                await self._first_record_date(self.db.invoices, {"company_id": company_id}),
-                await self._first_record_date(self.db.expenses, {"user_id": {"$in": user_ids}}),
+                await self._first_record_date(self.db.invoices, scope),
+                await self._first_record_date(self.db.expenses, scope),
             ) if d
         ]
         return dict(monthly_totals), min((d.replace(tzinfo=None) for d in firsts), default=None)
 
     async def _revenue_monthly_totals(
-        self, user_ids: List[str], window_start: datetime, window_end: datetime, include_pocket_money: bool,
+        self, scope: dict, window_start: datetime, window_end: datetime, include_pocket_money: bool,
     ) -> tuple:
         """(monthly revenue totals in [window_start, window_end), {month: the
         dates revenue was entered on})."""
         revenues = await self.db.daily_revenue.find(
             {
-                "user_id": {"$in": user_ids},
+                **scope,
                 "date": {"$gte": window_start.strftime("%Y-%m-%d"), "$lt": window_end.strftime("%Y-%m-%d")},
             },
             {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1}
@@ -510,17 +518,17 @@ class ForecastService:
         whole months, whatever window the forecast itself was asked for:
         months the company had not started yet, a partial first month and
         (for revenue) months logged on too few days are left out as unknown."""
-        now = datetime.now(timezone.utc)
+        now = now_local()
         end = _month_start(now.year, now.month)
         start = _month_start(*_ym_add(now.year, now.month, -SEASONAL_HISTORY_MONTHS))
-        user_ids = await self._company_user_ids(company_id)
+        scope = await self._company_scope(company_id)
         if kind == "revenue":
-            totals, entered_days = await self._revenue_monthly_totals(user_ids, start, end, include_hidden)
-            first = await self._first_record_date(self.db.daily_revenue, {"user_id": {"$in": user_ids}})
+            totals, entered_days = await self._revenue_monthly_totals(scope, start, end, include_hidden)
+            first = await self._first_record_date(self.db.daily_revenue, scope)
             if first:
                 first = first.replace(tzinfo=None)
         else:
-            totals, first = await self._expense_monthly_totals(company_id, user_ids, start, end, include_hidden)
+            totals, first = await self._expense_monthly_totals(company_id, scope, start, end, include_hidden)
         if not first or not totals:
             return None
         first_month = max(first.strftime("%Y-%m"), start.strftime("%Y-%m"))
@@ -557,9 +565,9 @@ class ForecastService:
         history shows a yearly rhythm, the months ahead are read from last
         year instead (see _year_back_analysis)."""
         window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
-        user_ids = await self._company_user_ids(company_id)
+        scope = await self._company_scope(company_id)
         monthly_totals, first = await self._expense_monthly_totals(
-            company_id, user_ids, window_start, window_end, include_off_book_expenses
+            company_id, scope, window_start, window_end, include_off_book_expenses
         )
         _drop_partial_first_month(monthly_totals, first)
 
@@ -591,11 +599,11 @@ class ForecastService:
         the real turnover with no indication why. False for a viewer
         without view_pocket_money, matching get_summary's own redaction."""
         window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
-        user_ids = await self._company_user_ids(company_id)
-        monthly_totals, _ = await self._revenue_monthly_totals(user_ids, window_start, window_end, include_pocket_money)
+        scope = await self._company_scope(company_id)
+        monthly_totals, _ = await self._revenue_monthly_totals(scope, window_start, window_end, include_pocket_money)
 
         _drop_partial_first_month(
-            monthly_totals, await self._first_record_date(self.db.daily_revenue, {"user_id": {"$in": user_ids}})
+            monthly_totals, await self._first_record_date(self.db.daily_revenue, scope)
         )
 
         sorted_months = sorted(monthly_totals.keys())

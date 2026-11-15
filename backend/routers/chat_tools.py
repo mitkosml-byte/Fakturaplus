@@ -34,7 +34,7 @@ def _parse_day(value: Optional[str], default: str) -> date_type:
 
 
 def _resolve_range(start_date: Optional[str], end_date: Optional[str]) -> tuple:
-    today = datetime.now(timezone.utc).date()
+    today = today_local()
     start = _parse_day(start_date, ALL_TIME_START)
     end = _parse_day(end_date, today.isoformat())
     if end < start:
@@ -83,10 +83,6 @@ class ChatDataTools:
         self.scope = scope
         self.visibility = visibility
 
-    async def _user_ids(self) -> List[str]:
-        members = await server.db.users.find({"company_id": self.company_id}, {"_id": 0, "user_id": 1}).to_list(1000)
-        return [m["user_id"] for m in members] or [self.user.user_id]
-
     async def period_totals(self, start_date: str, end_date: str) -> dict:
         start, end = _resolve_range(start_date, end_date)
         totals = await _business_digest_period(
@@ -95,7 +91,7 @@ class ChatDataTools:
         logged = await server.db.daily_revenue.distinct(
             "date", {**self.scope, "date": {"$gte": start.isoformat(), "$lte": end.isoformat()}}
         )
-        today = datetime.now(timezone.utc).date()
+        today = today_local()
         days = (min(end, today) - start).days + 1
         return {
             "from": start.isoformat(), "to": end.isoformat(), **totals,
@@ -105,10 +101,11 @@ class ChatDataTools:
 
     async def revenue_breakdown(self, start_date: str, end_date: str, group_by: str) -> dict:
         start, end = _resolve_range(start_date, end_date)
+        # The whole company's revenue - the same records Home counts.
         revenues = await server.db.daily_revenue.find(
-            {"user_id": {"$in": await self._user_ids()}, "date": {"$gte": start.isoformat(), "$lte": end.isoformat()}},
+            {**self.scope, "date": Period(start, end).text_filter()},
             {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1},
-        ).to_list(20000)
+        ).to_list(ALL_ROWS)
         by_day: Dict[str, float] = defaultdict(float)
         for r in revenues:
             if isinstance(r.get("date"), str):
@@ -159,12 +156,9 @@ class ChatDataTools:
         mappings = await server.db.item_merge_mappings.find({"company_id": self.company_id}, {"_id": 0}).to_list(1000)
         variant_to_canonical, canonical_display = build_variant_to_canonical(mappings)
         rows = await server.db.item_price_history.find(
-            {"company_id": self.company_id, "invoice_date": {
-                "$gte": datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
-                "$lte": datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc),
-            }},
+            {"company_id": self.company_id, "invoice_date": Period(start, end).datetime_filter()},
             {"_id": 0, "item_name": 1, "supplier": 1, "unit": 1, "quantity": 1, "unit_price": 1, "invoice_date": 1},
-        ).to_list(20000)
+        ).to_list(ALL_ROWS)
 
         # One entry per (item, unit): pieces and kilograms are never summed together.
         stats: Dict[tuple, Dict[str, Any]] = {}
@@ -184,8 +178,9 @@ class ChatDataTools:
             entry["purchases"] += 1
             entry["prices"].append(price)
             entry["suppliers"][r.get("supplier") or "—"] += qty
-            if isinstance(r.get("invoice_date"), datetime):
-                month = entry["by_month"][r["invoice_date"].strftime("%Y-%m")]
+            row_day = business_day(r["invoice_date"]) if isinstance(r.get("invoice_date"), datetime) else None
+            if row_day is not None:
+                month = entry["by_month"][row_day.strftime("%Y-%m")]
                 month[0] += qty
                 month[1] += qty * price
 
@@ -220,12 +215,9 @@ class ChatDataTools:
     async def supplier_purchases(self, supplier: str, start_date: Optional[str], end_date: Optional[str]) -> dict:
         start, end = _resolve_range(start_date, end_date)
         invoices = await server.db.invoices.find(
-            {**self.scope, "date": {
-                "$gte": datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
-                "$lte": datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc),
-            }},
+            {**self.scope, "date": Period(start, end).datetime_filter()},
             {"_id": 0, "supplier": 1, "total_amount": 1, "paid_amount": 1, "is_paid": 1, "payment_method": 1, "date": 1},
-        ).to_list(20000)
+        ).to_list(ALL_ROWS)
         by_supplier: Dict[str, Dict[str, Any]] = {}
         for inv in invoices:
             name = inv.get("supplier") or "—"
@@ -263,12 +255,9 @@ class ChatDataTools:
         rows = await server.db.item_price_history.find(
             {"company_id": self.company_id,
              "supplier": {"$regex": f"^{re.escape(supplier)}$", "$options": "i"},
-             "invoice_date": {
-                 "$gte": datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
-                 "$lte": datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc),
-             }},
+             "invoice_date": Period(start, end).datetime_filter()},
             {"_id": 0, "item_name": 1, "unit": 1, "quantity": 1, "unit_price": 1},
-        ).to_list(20000)
+        ).to_list(ALL_ROWS)
         spend: Dict[tuple, List[float]] = defaultdict(lambda: [0.0, 0.0])
         for r in rows:
             key = (r.get("item_name") or "—", r.get("unit") or "бр.")

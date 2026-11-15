@@ -18,6 +18,7 @@ import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFil
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import { toApiDate } from '../src/utils/periodRange';
 
 export default function ExportScreen() {
   const { t } = useTranslation();
@@ -59,7 +60,7 @@ export default function ExportScreen() {
     const targetMonth = ledgerPeriod === 'lastMonth' ? now.getMonth() - 1 : now.getMonth();
     const start = new Date(now.getFullYear(), targetMonth, 1);
     const end = new Date(now.getFullYear(), targetMonth + 1, 0);
-    const toDateStr = (d: Date) => d.toISOString().slice(0, 10);
+    const toDateStr = toApiDate;
     const endpoint = `/api/export/vat-ledger/excel?start_date=${toDateStr(start)}&end_date=${toDateStr(end)}`;
     const filename = `dnevnik_${toDateStr(start).slice(0, 7)}.xlsx`;
     downloadFile(endpoint, filename, 'ledger');

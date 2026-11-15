@@ -47,8 +47,17 @@ from slowapi.errors import RateLimitExceeded
 # first call.
 import services.scan_credit_service as scan_credit_service_module
 from services.scan_credit_service import ScanCreditService
+from services.business_calendar import (
+    BUSINESS_TZ, OPEN_END, OPEN_START, Period, business_day, day_start_utc, is_stored_day, now_local,
+    stored_day, today_local,
+)
 
 ROOT_DIR = Path(__file__).parent
+
+# cursor.to_list(ALL_ROWS) = every matching document - never a silent first-N
+# slice of data that feeds a sum. (Motor's stubs type the length as int; the
+# driver takes None for "all", hence Any.)
+ALL_ROWS: Any = None
 load_dotenv(ROOT_DIR / '.env')
 
 # Environment
@@ -2240,37 +2249,78 @@ def _profit_formula(
     total_expense = invoice_total + off_book_expenses + payroll_cost + depreciation_cost
     return total_income, total_expense
 
-async def _compute_month_profit(company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str) -> float:
-    """Reuses _profit_formula (see its docstring) so this never computes
-    profit a second, independently-maintained way - this module just
-    skips get_summary's permission-redaction machinery, using the real
-    pocket_money/off-book-expense totals unconditionally. Used so this
-    module doesn't need that machinery - whoever reaches these endpoints
-    already holds a personal-wallet permission, which implies the owner
-    trusts them with exactly this level of financial detail."""
-    date_query = {"$gte": start_date, "$lte": end_date}
-    revenues = await db.daily_revenue.find(
-        {**scope, "date": date_query}, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}
-    ).to_list(1000)
-    invoices = await db.invoices.find(
-        {**scope, "date": {
-            "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
-            "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
-        }}, {"_id": 0, "total_amount": 1}
-    ).to_list(1000)
-    expenses = await db.expenses.find(
-        {**scope, "date": date_query}, {"_id": 0, "amount": 1}
-    ).to_list(1000)
-    payroll_cost = await get_payroll_cost_for_period(company_id, user_id, start_date, end_date)
-    depreciation_cost = await get_depreciation_cost_for_period(company_id, user_id, start_date, end_date)
+async def period_totals(company_id: Optional[str], scope: dict, user_id: str, period: Period) -> Dict[str, Any]:
+    """Every money total of one period, read the one way all modules share:
+    the period's whole business days (services/business_calendar), every
+    record in them - summed in the database, never a first-1000 slice - and
+    monthly costs (payroll, depreciation) by their share of days in the
+    period. Raw values, no visibility redaction: each caller applies its
+    viewer's own (period_income_expense below does it for the profit
+    formula), so two screens asking for the same period start from the
+    same numbers."""
+    invoices = await db.invoices.aggregate([
+        {"$match": {**scope, "date": period.datetime_filter()}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
+                    "net": {"$sum": "$amount_without_vat"}, "count": {"$sum": 1}}},
+    ]).to_list(ALL_ROWS)
+    revenue_by_rate = await db.daily_revenue.aggregate([
+        {"$match": {**scope, "date": period.text_filter()}},
+        {"$group": {"_id": "$vat_rate_percent", "fiscal": {"$sum": "$fiscal_revenue"},
+                    "pocket": {"$sum": "$pocket_money"}, "card": {"$sum": "$card_revenue"}}},
+    ]).to_list(ALL_ROWS)
+    revenue_days = await db.daily_revenue.distinct("date", {**scope, "date": period.text_filter()})
+    expenses = await db.expenses.aggregate([
+        {"$match": {**scope, "date": period.text_filter()}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(ALL_ROWS)
 
-    total_income, total_expense = _profit_formula(
-        fiscal_revenue=sum(r.get("fiscal_revenue", 0) for r in revenues),
-        pocket_money=sum(r.get("pocket_money", 0) for r in revenues),
-        invoice_total=sum(i.get("total_amount", 0) for i in invoices),
-        off_book_expenses=sum(e.get("amount", 0) for e in expenses),
-        payroll_cost=payroll_cost, depreciation_cost=depreciation_cost,
+    # VAT inside fiscal revenue at each record's own rate (20% unless set,
+    # 9%, 0%...) - summed per rate, which is the same sum record by record.
+    fiscal_vat = 0.0
+    for row in revenue_by_rate:
+        rate = row["_id"] if isinstance(row["_id"], (int, float)) else 20.0
+        if rate > 0:
+            fiscal_vat += (row.get("fiscal") or 0) * rate / (100 + rate)
+    invoice = invoices[0] if invoices else {}
+    return {
+        "period": period,
+        "fiscal_revenue": float(sum(row.get("fiscal") or 0 for row in revenue_by_rate)),
+        "pocket_money": float(sum(row.get("pocket") or 0 for row in revenue_by_rate)),
+        "card_revenue": float(sum(row.get("card") or 0 for row in revenue_by_rate)),
+        "fiscal_vat": fiscal_vat,
+        "invoice_total": float(invoice.get("total") or 0),
+        "invoice_vat": float(invoice.get("vat") or 0),
+        "invoice_net": float(invoice.get("net") or 0),
+        "invoice_count": int(invoice.get("count") or 0),
+        "off_book_expenses": float(expenses[0].get("total") or 0) if expenses else 0.0,
+        "payroll_cost": await get_payroll_cost_for_period(company_id, user_id, period.start, period.end),
+        "depreciation_cost": await get_depreciation_cost_for_period(company_id, user_id, period.start, period.end),
+        "revenue_days": sorted(d for d in revenue_days if isinstance(d, str)),
+    }
+
+
+def period_income_expense(totals: Dict[str, Any], visibility: Optional[dict] = None) -> tuple:
+    """(income, expense) of period_totals through _profit_formula - with a
+    viewer's visibility, hidden pocket money and off-book expenses count as
+    zero (the same redaction /statistics/summary applies); without one, the
+    real values."""
+    show_pocket = visibility is None or visibility["pocket_money"]
+    show_off_book = visibility is None or visibility["off_book_expenses"]
+    return _profit_formula(
+        fiscal_revenue=totals["fiscal_revenue"], pocket_money=totals["pocket_money"] if show_pocket else 0,
+        invoice_total=totals["invoice_total"], off_book_expenses=totals["off_book_expenses"] if show_off_book else 0,
+        payroll_cost=totals["payroll_cost"], depreciation_cost=totals["depreciation_cost"],
     )
+
+
+async def _compute_month_profit(company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str) -> float:
+    """Profit for the personal-wallet module, read through period_totals
+    like every other profit in the app - with the real pocket money and
+    off-book expenses: whoever reaches these endpoints already holds a
+    personal-wallet permission, which implies the owner trusts them with
+    exactly this level of financial detail."""
+    totals = await period_totals(company_id, scope, user_id, Period.parse(start_date, end_date))
+    total_income, total_expense = period_income_expense(totals)
     return total_income - total_expense
 
 def generate_wallet_advice(
@@ -2372,40 +2422,16 @@ def generate_wallet_advice(
 async def _business_digest_period(
     company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str, visibility: dict
 ) -> dict:
-    """One period's totals for the chat digest - same figures and the same
-    visibility redaction as /statistics/summary, computed directly so a
-    viewer without view_profit/view_off_book_expenses etc. gets exactly the
-    same redaction here as everywhere else in the app."""
-    inv_start = datetime.fromisoformat(f"{start_date}T00:00:00+00:00")
-    inv_end = datetime.fromisoformat(f"{end_date}T23:59:59+00:00")
-
-    invoices = await db.invoices.find(
-        {**scope, "date": {"$gte": inv_start, "$lte": inv_end}}, {"_id": 0, "total_amount": 1}
-    ).to_list(10000)
-    revenues = await db.daily_revenue.find(
-        {**scope, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}
-    ).to_list(10000)
-    expenses = await db.expenses.find(
-        {**scope, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0, "amount": 1}
-    ).to_list(10000)
-
-    total_payroll_cost = await get_payroll_cost_for_period(company_id, user_id, start_date, end_date)
-    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, user_id, start_date, end_date)
-
-    total_invoice_amount = sum(i.get("total_amount", 0) for i in invoices)
-    total_fiscal_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues)
-    total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues) if visibility["pocket_money"] else 0
-    total_off_book_expenses = sum(e.get("amount", 0) for e in expenses) if visibility["off_book_expenses"] else 0
-
-    total_income = total_fiscal_revenue + total_pocket_money
-    total_expense = total_invoice_amount + total_off_book_expenses + total_payroll_cost + total_depreciation_expense
-    profit = round(total_income - total_expense, 2) if visibility["profit"] else None
-
+    """One period's totals for the chat digest - period_totals with the same
+    visibility redaction as /statistics/summary, so the chat and Home give
+    the same figures for the same period."""
+    totals = await period_totals(company_id, scope, user_id, Period.parse(start_date, end_date))
+    total_income, total_expense = period_income_expense(totals, visibility)
     return {
         "revenue": round(total_income, 2),
         "expenses": round(total_expense, 2),
-        "profit": profit,
-        "invoice_count": len(invoices),
+        "profit": round(total_income - total_expense, 2) if visibility["profit"] else None,
+        "invoice_count": totals["invoice_count"],
     }
 
 async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: str, visibility: dict, limit: int = 8) -> List[dict]:
@@ -2414,11 +2440,10 @@ async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: 
     style questions."""
     from collections import defaultdict
 
-    inv_start = datetime.fromisoformat(f"{start_date}T00:00:00+00:00")
-    inv_end = datetime.fromisoformat(f"{end_date}T23:59:59+00:00")
+    period = Period.parse(start_date, end_date)
     invoices = await db.invoices.find(
-        {**scope, "date": {"$gte": inv_start, "$lte": inv_end}}, {"_id": 0, "total_amount": 1, "supplier": 1}
-    ).to_list(10000)
+        {**scope, "date": period.datetime_filter()}, {"_id": 0, "total_amount": 1, "supplier": 1}
+    ).to_list(ALL_ROWS)
 
     by_name: Dict[str, float] = defaultdict(float)
     for inv in invoices:
@@ -2427,8 +2452,8 @@ async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: 
 
     if visibility["off_book_expenses"]:
         expenses = await db.expenses.find(
-            {**scope, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0, "amount": 1, "description": 1}
-        ).to_list(10000)
+            {**scope, "date": period.text_filter()}, {"_id": 0, "amount": 1, "description": 1}
+        ).to_list(ALL_ROWS)
         by_desc: Dict[str, float] = defaultdict(float)
         for exp in expenses:
             by_desc[exp.get("description") or "—"] += exp.get("amount", 0)
@@ -2444,8 +2469,8 @@ async def _business_digest_receivables(scope: dict) -> dict:
     Same aggregation as GET /receivables/summary, kept in sync by hand
     since that endpoint lives in routers/receivables.py (star-imported
     from here, not the other way around)."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    unpaid = await db.receivables.find({**scope, "is_paid": False}, {"_id": 0, "amount": 1, "due_date": 1}).to_list(10000)
+    now_str = today_local().isoformat()
+    unpaid = await db.receivables.find({**scope, "is_paid": False}, {"_id": 0, "amount": 1, "due_date": 1}).to_list(ALL_ROWS)
     total_owed = sum(r.get("amount", 0) for r in unpaid)
     overdue = [r for r in unpaid if r.get("due_date") and r["due_date"] < now_str]
     total_overdue = sum(r.get("amount", 0) for r in overdue)
@@ -2456,64 +2481,33 @@ async def _business_digest_receivables(scope: dict) -> dict:
         "overdue_count": len(overdue),
     }
 
-async def _business_digest_vat_due(scope: dict, start_date: str, end_date: str) -> float:
-    """VAT owed to NAP for this period (sales VAT minus purchase VAT) -
-    same math as GET /statistics/summary's vat_to_pay. Role-invariant:
-    neither pocket_money nor off-book expenses feed into VAT, so this
-    needs no extra permission gate beyond the whole endpoint's own
-    view_statistics - a question like 'колко ДДС да платя?' had no field
-    to answer from at all before this."""
-    inv_start = datetime.fromisoformat(f"{start_date}T00:00:00+00:00")
-    inv_end = datetime.fromisoformat(f"{end_date}T23:59:59+00:00")
-    invoices = await db.invoices.find(
-        {**scope, "date": {"$gte": inv_start, "$lte": inv_end}}, {"_id": 0, "vat_amount": 1}
-    ).to_list(10000)
-    revenues = await db.daily_revenue.find(
-        {**scope, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0, "fiscal_revenue": 1, "vat_rate_percent": 1}
-    ).to_list(10000)
-    total_invoice_vat = sum(i.get("vat_amount", 0) for i in invoices)
-    fiscal_vat = sum(
-        r.get("fiscal_revenue", 0) * r.get("vat_rate_percent", 20.0) / (100 + r.get("vat_rate_percent", 20.0))
-        for r in revenues
-        if r.get("vat_rate_percent", 20.0) > 0
-    )
-    return round(fiscal_vat - total_invoice_vat, 2)
+async def _business_digest_vat_due(
+    company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str
+) -> float:
+    """VAT owed to NAP for this period (sales VAT minus purchase VAT) - the
+    same period_totals as /statistics/summary's vat_to_pay. Role-invariant:
+    neither pocket_money nor off-book expenses feed into VAT, so this needs
+    no extra permission gate beyond the whole endpoint's own
+    view_statistics."""
+    totals = await period_totals(company_id, scope, user_id, Period.parse(start_date, end_date))
+    return round(totals["fiscal_vat"] - totals["invoice_vat"], 2)
 
-async def _business_digest_roi(company_id: Optional[str], scope: dict, now: datetime, visibility: dict) -> dict:
-    """Current month's ROI snapshot - same math as GET /roi/analysis,
-    duplicated here rather than called directly since that endpoint takes
-    a Request for its own rate limiter (ask_my_numbers already has its
-    own, separate one). Gated by view_personal_investments at the call
-    site, same as the real endpoint; profit/roi_percent/investment_covered
-    are independently null-able by view_profit within that, also matching
-    the real endpoint's own redaction."""
-    target_month, target_year = now.month, now.year
-    period_start = f"{target_year}-{target_month:02d}-01"
-    period_end = f"{target_year + 1}-01-01" if target_month == 12 else f"{target_year}-{target_month + 1:02d}-01"
-
+async def _business_digest_roi(company_id: Optional[str], scope: dict, user_id: str, visibility: dict) -> dict:
+    """The current month's ROI snapshot for the chat digest: personal money
+    put in this month against the month's profit - profit read through
+    period_totals like everywhere else (payroll and depreciation
+    included). Gated by view_personal_investments at the call site, same
+    as the real endpoint; profit/roi_percent/investment_covered are
+    independently null-able by view_profit within that."""
+    month = Period.current_month()
     personal_expenses = await db.personal_expenses.find({
-        "company_id": company_id, "period_month": target_month, "period_year": target_year
-    }, {"_id": 0, "amount": 1}).to_list(1000) if company_id else []
+        "company_id": company_id, "period_month": month.start.month, "period_year": month.start.year
+    }, {"_id": 0, "amount": 1}).to_list(ALL_ROWS) if company_id else []
     total_personal = sum(e.get("amount", 0) for e in personal_expenses)
 
-    revenues = await db.daily_revenue.find({
-        **scope, "date": {"$gte": period_start, "$lt": period_end}
-    }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
-    effective_pocket_money = sum(r.get("pocket_money", 0) for r in revenues) if visibility["pocket_money"] else 0
-    total_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues) + effective_pocket_money
-
-    invoices = await db.invoices.find({
-        **scope, "date": {
-            "$gte": datetime.fromisoformat(period_start + "T00:00:00+00:00"),
-            "$lt": datetime.fromisoformat(period_end + "T00:00:00+00:00"),
-        }
-    }, {"_id": 0, "total_amount": 1}).to_list(1000)
-    expenses = await db.expenses.find({
-        **scope, "date": {"$gte": period_start, "$lt": period_end}
-    }, {"_id": 0, "amount": 1}).to_list(1000)
-    effective_off_book_expense = sum(e.get("amount", 0) for e in expenses) if visibility["off_book_expenses"] else 0
-    total_expense = sum(i.get("total_amount", 0) for i in invoices) + effective_off_book_expense
-    total_profit = total_revenue - total_expense
+    totals = await period_totals(company_id, scope, user_id, month)
+    total_income, total_expense = period_income_expense(totals, visibility)
+    total_profit = total_income - total_expense
     roi_percent = (total_profit / total_personal * 100) if total_personal > 0 else (0 if total_profit <= 0 else 100)
 
     return {
@@ -2525,7 +2519,7 @@ async def _business_digest_roi(company_id: Optional[str], scope: dict, now: date
 
 async def _business_digest_assets(scope: dict) -> dict:
     """Same aggregation as GET /assets/summary."""
-    assets = await db.assets.find(scope, {"_id": 0}).to_list(1000)
+    assets = await db.assets.find(scope, {"_id": 0}).to_list(ALL_ROWS)
     enriched = [enrich_asset_with_depreciation(a) for a in assets]
     active = [a for a in enriched if a["status"] != "disposed"]
     return {
@@ -2562,7 +2556,7 @@ async def _business_digest_schedule(company_id: Optional[str], start_date: str, 
     ).to_list(1000)
     unpaid = round(max(total_pay - sum(p.get("amount", 0) for p in payments), 0), 2)
 
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_str = today_local().isoformat()
     on_leave = await db.employee_leave.find(
         {"company_id": company_id, "start_date": {"$lte": today_str}, "end_date": {"$gte": today_str}},
         {"_id": 0, "employee_name": 1},
@@ -2659,11 +2653,14 @@ async def split_overdue_invoices(scope: dict) -> tuple:
     unpaid = await db.invoices.find(
         {**scope, "payment_method": "bank_transfer", "is_paid": False},
         {"_id": 0, "id": 1, "supplier": 1, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1},
-    ).to_list(1000)
-    now_ts = datetime.now(timezone.utc)
+    ).to_list(ALL_ROWS)
+    # Overdue once the due day has passed, on the business's calendar - the
+    # same rule as /statistics/summary and the invoice list's filter.
+    today = today_local()
     overdue = [
         inv for inv in unpaid
-        if isinstance(inv.get("payment_due_date"), datetime) and _as_utc(inv["payment_due_date"]) < now_ts
+        if isinstance(inv.get("payment_due_date"), datetime)
+        and (due_day := business_day(inv["payment_due_date"])) is not None and due_day < today
     ]
     latest = await _latest_invoice_date_by_supplier(scope, {inv.get("supplier") or "" for inv in overdue} - {""})
     likely_paid = [
@@ -2768,7 +2765,7 @@ async def _signal_scan_credits(company_id, scope, current_user, visibility) -> O
 async def _signal_budget(company_id, scope, current_user, visibility) -> Optional[dict]:
     if not company_id or "manage_budget" not in set(current_user.permissions or []):
         return None
-    status = await compute_budget_status(company_id, datetime.now(timezone.utc).strftime("%Y-%m"))
+    status = await compute_budget_status(company_id, today_local().strftime("%Y-%m"))
     if not status:
         return None
     if status["is_exceeded"]:
@@ -3083,7 +3080,7 @@ async def _signal_team_on_leave(company_id, scope, current_user, visibility) -> 
     not an alert about anything going wrong."""
     if not company_id or "manage_budget" not in set(current_user.permissions or []):
         return None
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local().isoformat()
     entries = await db.employee_leave.find(
         {"company_id": company_id, "start_date": {"$lte": today}, "end_date": {"$gte": today}},
         {"_id": 0, "employee_name": 1},
@@ -3699,44 +3696,20 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
     if not budget:
         return None
 
-    # Calculate current expenses. Bounded at both ends - an unbounded $gte
-    # alone would also pull in any future-dated invoice/expense (a
-    # pre-scheduled invoice, a typo'd date) into THIS month's budget check.
+    # The month's spend, read through period_totals like Home and every
+    # other module - every invoice and off-book expense of the month's
+    # days, plus its payroll and depreciation (real, recurring costs a
+    # budget cap must not ignore).
     year, mon = int(month[:4]), int(month[5:7])
-    month_start_str = f"{month}-01"
-    month_start = datetime.fromisoformat(f"{month_start_str}T00:00:00+00:00")
-    if mon == 12:
-        month_end_date = datetime(year + 1, 1, 1, tzinfo=timezone.utc) - timedelta(days=1)
-    else:
-        month_end_date = datetime(year, mon + 1, 1, tzinfo=timezone.utc) - timedelta(days=1)
-    month_end_str = month_end_date.strftime("%Y-%m-%d")
-    month_end = datetime.fromisoformat(f"{month_end_str}T00:00:00+00:00")
     scope = await company_data_scope(company_id)
-
-    invoices = await db.invoices.find(
-        {**scope, "date": {"$gte": month_start, "$lte": month_end}},
-        {"total_amount": 1}
-    ).to_list(10000)
-
-    expenses = await db.expenses.find(
-        {**scope, "date": {"$gte": month_start_str, "$lte": month_end_str}},
-        {"amount": 1}
-    ).to_list(10000)
-
-    # Payroll and depreciation are real, recurring costs of running the
-    # business - a budget cap that only tracked invoices and off-book
-    # expenses would silently ignore the two costs guaranteed to happen
-    # every month, and understate how close the company actually is to its
-    # limit. Same helpers and period bounds as /statistics/summary.
-    # user_id is unused by these helpers whenever company_id is set (see
-    # simple_scope_query) - safe to pass a placeholder here.
-    total_payroll_cost = await get_payroll_cost_for_period(company_id, "", month_start_str, month_end_str)
-    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, "", month_start_str, month_end_str)
-
-    total_spent = sum(inv.get("total_amount", 0) for inv in invoices)
-    total_spent += sum(exp.get("amount", 0) for exp in expenses)
-    total_spent += total_payroll_cost
-    total_spent += total_depreciation_expense
+    # user_id is unused by the payroll/depreciation helpers whenever
+    # company_id is set (see simple_scope_query) - a placeholder is safe.
+    totals = await period_totals(company_id, scope, "", Period.month(year, mon))
+    total_payroll_cost = totals["payroll_cost"]
+    total_depreciation_expense = totals["depreciation_cost"]
+    total_spent = (
+        totals["invoice_total"] + totals["off_book_expenses"] + total_payroll_cost + total_depreciation_expense
+    )
 
     limit = budget.get("expense_limit", 0)
     threshold = budget.get("alert_threshold", 80)
@@ -3750,8 +3723,8 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
         "month": month,
         "expense_limit": limit,
         "total_spent": round(total_spent, 2),
-        "total_invoice_amount": round(sum(inv.get("total_amount", 0) for inv in invoices), 2),
-        "total_non_invoice_expenses": round(sum(exp.get("amount", 0) for exp in expenses), 2),
+        "total_invoice_amount": round(totals["invoice_total"], 2),
+        "total_non_invoice_expenses": round(totals["off_book_expenses"], 2),
         "total_payroll_cost": round(total_payroll_cost, 2),
         "total_depreciation_expense": round(total_depreciation_expense, 2),
         "remaining": round(max(0, limit - total_spent), 2),
@@ -3973,28 +3946,30 @@ PAYROLL_IMPORT_SYSTEM_PROMPT = """Ти си експертен AI асистен
 
 
 
-async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, start_date: Optional[str], end_date: Optional[str]) -> float:
-    """Сумира total_employer_cost на всички ведомостни записи, чийто месец
-    попада в зададения период - използвано в /statistics/summary и в
-    прогнозата за разходи, за да включат реалния разход за персонал.
-    Пропуска записи с counted_in_expenses=False - собственикът/
-    счетоводителят може изрично да изключи конкретна ведомост от общите
-    разходи (напр. дублиран или все още невярен запис), без да я трие."""
+async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, start_date: Any, end_date: Any) -> float:
+    """Employer cost (total_employer_cost) of the payroll entries for the
+    period - used by period_totals, so by /statistics/summary, the budget,
+    the chat and the forecast. A payroll entry is the cost of its whole
+    month, so a period gets the share of it that its days cover: a full
+    month all of it, a week 7/30 of a 30-day month, a range over two
+    months its share of each - never the whole month in the week of the
+    1st and nothing in the others. Bounds are days ("YYYY-MM-DD" or date);
+    None for an open end. Entries with counted_in_expenses=False are left
+    out - the owner/accountant can exclude one (a duplicate, a wrong
+    import) without deleting it."""
+    period = Period.parse(start_date, end_date, default=Period(OPEN_START, OPEN_END))
     query = simple_scope_query(company_id, user_id)
     entries = await db.payroll_entries.find(
         query, {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1, "counted_in_expenses": 1}
-    ).to_list(10000)
+    ).to_list(ALL_ROWS)
 
     total = 0.0
     for e in entries:
         if e.get("counted_in_expenses") is False:
             continue
-        period_date = f"{e['period_year']}-{e['period_month']:02d}-01"
-        if start_date and period_date < start_date[:10]:
-            continue
-        if end_date and period_date > end_date[:10]:
-            continue
-        total += e.get("total_employer_cost", 0)
+        share = period.month_share(int(e["period_year"]), int(e["period_month"]))
+        if share:
+            total += (e.get("total_employer_cost") or 0) * share
     return total
 
 # ===================== OFFICIAL HOLIDAYS / РАБОТА НА ПРАЗНИЦИ И ОТПУСКИ =====================
@@ -4453,7 +4428,7 @@ def get_asset_accumulated_depreciation(asset: dict, as_of_year: int, as_of_month
     return round(min(accumulated, asset["acquisition_value"]), 2)
 
 def enrich_asset_with_depreciation(asset: dict) -> dict:
-    now = datetime.now(timezone.utc)
+    now = today_local()
     accumulated = get_asset_accumulated_depreciation(asset, now.year, now.month)
     net_book_value = round(asset["acquisition_value"] - accumulated, 2)
     asset["monthly_depreciation"] = round(compute_asset_monthly_depreciation(asset["acquisition_value"], asset["annual_depreciation_rate_percent"]), 2)
@@ -4481,16 +4456,20 @@ async def next_asset_inventory_number(company_id: Optional[str], user_id: str) -
 
 
 
-async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: str, start_date: Optional[str], end_date: Optional[str]) -> float:
-    """Сумира амортизацията за всички активи, чиито месечни начисления
-    попадат в зададения период - използвано в /statistics/summary и в
-    прогнозата за разходи, аналогично на get_payroll_cost_for_period."""
+async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: str, start_date: Any, end_date: Any) -> float:
+    """Depreciation of every asset for the period - each month's charge by
+    the share of its days the period covers, like payroll above. Months run
+    from the asset's first depreciation month to its disposal, or to the
+    current month."""
+    period = Period.parse(start_date, end_date, default=Period(OPEN_START, OPEN_END))
     query = simple_scope_query(company_id, user_id)
-    assets = await db.assets.find(query, {"_id": 0}).to_list(10000)
+    assets = await db.assets.find(query, {"_id": 0}).to_list(ALL_ROWS)
     if not assets:
         return 0.0
 
-    now = datetime.now(timezone.utc)
+    today = today_local()
+    first_month = (period.start.year, period.start.month)
+    last_month = (period.end.year, period.end.month)
     total = 0.0
     for asset in assets:
         start_y, start_m = get_asset_depreciation_start_ym(asset["in_service_date"])
@@ -4498,17 +4477,11 @@ async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: s
             dd = datetime.fromisoformat(asset["disposal_date"][:10])
             end_y, end_m = dd.year, dd.month
         else:
-            end_y, end_m = now.year, now.month
+            end_y, end_m = today.year, today.month
 
-        y, m = start_y, start_m
-        while (y, m) <= (end_y, end_m):
-            month_key = f"{y}-{m:02d}-01"
-            if start_date and month_key < start_date[:10]:
-                y, m = _ym_add(y, m, 1)
-                continue
-            if end_date and month_key > end_date[:10]:
-                break
-            total += get_asset_depreciation_for_month(asset, y, m)
+        y, m = max((start_y, start_m), first_month)
+        while (y, m) <= min((end_y, end_m), last_month):
+            total += get_asset_depreciation_for_month(asset, y, m) * period.month_share(y, m)
             y, m = _ym_add(y, m, 1)
 
     return round(total, 2)
@@ -4711,7 +4684,7 @@ async def _budget_alert_tick():
 
     Exposed as its own tick function (called from the loop below) so a test
     can call it directly without sleeping."""
-    current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    current_month = today_local().strftime("%Y-%m")
     pending = await db.budgets.find(
         {
             "month": current_month,
@@ -4789,8 +4762,10 @@ async def _notification_settings_tick():
     compliance determination, consistent with the app never talking to NAP
     directly."""
     now = datetime.now(timezone.utc)
-    today_str = now.strftime("%Y-%m-%d")
-    year_ago_str = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+    # Days on the business's own calendar; `now` stays the sent-at stamp.
+    today = today_local()
+    today_str = today.isoformat()
+    year_ago_str = (today - timedelta(days=365)).isoformat()
 
     settings_docs = await db.notification_settings.find(
         {"$or": [{"vat_threshold_enabled": True}, {"periodic_enabled": True}]},
@@ -4830,7 +4805,7 @@ async def _notification_settings_tick():
         periodic_dates = settings.get("periodic_dates") or []
         if (
             settings.get("periodic_enabled")
-            and now.day in periodic_dates
+            and today.day in periodic_dates
             and settings.get("periodic_last_sent_date") != today_str
         ):
             await push_service.send_to_user(
@@ -5058,6 +5033,50 @@ async def create_indexes():
         logger.error(f"Error creating indexes: {e}")
 
 
+async def migrate_invoice_dates_to_business_days() -> dict:
+    """Invoice dates used to be kept as whatever moment the device sent: a
+    phone sends the picked day with the time of day it was picked at, the
+    web sends local midnight - the evening before, in UTC. Each module then
+    guessed the day its own way, and invoices from the first or last day of
+    a month went missing from one screen or moved to the previous month on
+    another. This puts every stored invoice date, due date and price-history
+    date onto its business day once (services/business_calendar: the day
+    the moment falls on in Bulgaria, which is the day that was picked
+    whichever device picked it). The original invoice values are kept in
+    data_migration_backups; price-history rows are derived from invoices
+    and need none."""
+    marker = "invoice_business_days_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    changed_invoices = 0
+    async for invoice in db.invoices.find({}, {"_id": 1, "date": 1, "payment_due_date": 1}):
+        update = {}
+        for field in ("date", "payment_due_date"):
+            value = invoice.get(field)
+            if value in (None, "") or is_stored_day(value):
+                continue
+            try:
+                update[field] = stored_day(value)
+            except (TypeError, ValueError):
+                logger.warning(f"Invoice {invoice['_id']}: unreadable {field} {value!r} left as it is")
+        if update:
+            await db.data_migration_backups.insert_one({
+                "migration": marker, "collection": "invoices", "doc_id": invoice["_id"],
+                "original": {field: invoice.get(field) for field in update},
+            })
+            await db.invoices.update_one({"_id": invoice["_id"]}, {"$set": update})
+            changed_invoices += 1
+    changed_rows = 0
+    async for row in db.item_price_history.find({}, {"_id": 1, "invoice_date": 1}):
+        value = row.get("invoice_date")
+        if isinstance(value, datetime) and not is_stored_day(value):
+            await db.item_price_history.update_one({"_id": row["_id"]}, {"$set": {"invoice_date": stored_day(value)}})
+            changed_rows += 1
+    result = {"invoices": changed_invoices, "price_rows": changed_rows}
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), **result})
+    return result
+
+
 async def run_data_migrations():
     """One-time data repairs, each guarded by its own marker in
     `data_migrations` so a restart never re-runs them. A failure is logged
@@ -5070,6 +5089,12 @@ async def run_data_migrations():
             logger.info(f"Price data cleanup: {result}")
     except Exception:
         logger.exception("Price data cleanup failed")
+    try:
+        result = await migrate_invoice_dates_to_business_days()
+        if result and not result.get("skipped"):
+            logger.info(f"Invoice dates moved onto business days: {result}")
+    except Exception:
+        logger.exception("Invoice business-day migration failed")
 
 # ===================== HEALTH CHECK =====================
 
@@ -5172,6 +5197,9 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The invoice list's whole-filter count and sums travel in headers; a
+    # browser on another origin may only read them when they are exposed.
+    expose_headers=["X-Total-Count", "X-Total-Amount", "X-Total-Vat"],
 )
 
 @app.middleware("http")

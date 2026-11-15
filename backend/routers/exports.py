@@ -106,34 +106,32 @@ async def export_vat_ledger_excel(
     as the accountant's source data for filing, not a byte-exact copy of
     NRA's own file layout."""
     require_permission(current_user, "export_data")
-    now = datetime.now(timezone.utc)
     # end_date must be the LAST day of the month, not the 1st of the next
     # one - both queries below treat it as an inclusive boundary (through
     # 23:59:59 / plain $lte), so a tax ledger meant for "this month" would
     # otherwise also pull in the 1st of next month's purchases and sales,
     # double-counting that day across two consecutive VAT filings.
     if not start_date and not end_date:
-        start_date = now.replace(day=1).strftime("%Y-%m-%d")
-        if now.month == 12:
-            last_day = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
-        end_date = last_day.strftime("%Y-%m-%d")
+        current_month = Period.current_month()
+        start_date, end_date = current_month.start_text, current_month.end_text
     elif not start_date or not end_date:
         raise HTTPException(status_code=400, detail="Трябва да зададете и start_date, и end_date (или нито едно от двете за текущия месец)")
 
     company_id, scope = await get_company_scope(current_user)
 
+    # The period's business days - the same invoices Home and every other
+    # module count for it (services/business_calendar), all of them.
+    try:
+        period = Period.parse(start_date, end_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Невалиден период")
     inv_query = dict(scope)
-    inv_query["date"] = {
-        "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
-        "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
-    }
-    purchases = await server.db.invoices.find(inv_query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", 1).to_list(10000)
+    inv_query["date"] = period.datetime_filter()
+    purchases = await server.db.invoices.find(inv_query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", 1).to_list(ALL_ROWS)
 
     rev_query = dict(scope)
-    rev_query["date"] = {"$gte": start_date, "$lte": end_date}
-    sales = await server.db.daily_revenue.find(rev_query, {"_id": 0}).sort("date", 1).to_list(10000)
+    rev_query["date"] = period.text_filter()
+    sales = await server.db.daily_revenue.find(rev_query, {"_id": 0}).sort("date", 1).to_list(ALL_ROWS)
 
     # Same redaction get_summary/get_chart_data apply to pocket_money - a
     # raw export must never show a viewer a field the aggregated views
@@ -189,10 +187,10 @@ async def export_employee_compliance_excel(
     (Чл. 262 КТ extra-pay entitlement) and employee leave for a period, so
     the accountant can attach it to the required company/personnel documents."""
     require_permission(current_user, "export_data")
-    now = datetime.now(timezone.utc)
     if not start_date and not end_date:
-        start_date = now.replace(month=1, day=1).strftime("%Y-%m-%d")
-        end_date = now.strftime("%Y-%m-%d")
+        today = today_local()
+        start_date = today.replace(month=1, day=1).isoformat()
+        end_date = today.isoformat()
 
     company_id, scope = await get_company_scope(current_user)
 
@@ -251,14 +249,13 @@ async def export_invoices_excel(
     require_permission(current_user, "export_data")
     company_id, query = await get_company_scope(current_user)
 
-    if start_date:
-        query["date"] = {"$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00")}
-    if end_date:
-        if "date" not in query:
-            query["date"] = {}
-        query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    if start_date or end_date:
+        try:
+            query["date"] = Period.parse(start_date, end_date).datetime_filter()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Невалиден период")
     
-    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(10000)
+    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(ALL_ROWS)
     
     # Get company name
     company_name = ""
@@ -300,14 +297,13 @@ async def export_invoices_pdf(
     require_permission(current_user, "export_data")
     company_id, query = await get_company_scope(current_user)
 
-    if start_date:
-        query["date"] = {"$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00")}
-    if end_date:
-        if "date" not in query:
-            query["date"] = {}
-        query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    if start_date or end_date:
+        try:
+            query["date"] = Period.parse(start_date, end_date).datetime_filter()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Невалиден период")
     
-    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(10000)
+    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(ALL_ROWS)
     
     company_name = ""
     if company_id:

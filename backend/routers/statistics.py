@@ -44,89 +44,46 @@ async def get_summary(
     current_month_only: bool = True,  # Default to current month
     current_user: User = Depends(get_current_user)
 ):
-    # If no dates provided and current_month_only is True, use current month
-    if not start_date and not end_date and current_month_only:
-        now = datetime.now(timezone.utc)
-        start_date = now.replace(day=1).strftime("%Y-%m-%d")
-        # Last day of the current month - NOT the first day of the next one.
-        # Every query built from date_query/end_date below treats end_date as
-        # an INCLUSIVE boundary ($lte, or the payroll/depreciation helper's
-        # "not later than end_date"), so passing the 1st of next month here
-        # would let a record dated exactly on the 1st (revenue, expense,
-        # invoice, or a payroll/depreciation entry someone entered early)
-        # leak into THIS month's summary as well as its own month's.
-        if now.month == 12:
-            last_day = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
-        end_date = last_day.strftime("%Y-%m-%d")
-    
-    date_query = {}
-    
-    if start_date:
-        date_query["$gte"] = start_date
-    if end_date:
-        date_query["$lte"] = end_date
-    
+    # The period's whole business days (services/business_calendar): the
+    # current month on the business's own calendar when no dates are given,
+    # everything when current_month_only is off.
+    try:
+        period = Period.parse(
+            start_date, end_date,
+            default=Period.current_month() if current_month_only else Period(OPEN_START, OPEN_END),
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Невалиден период")
+
     company_id, scope = await get_company_scope(current_user)
-
-    # Get invoices
-    inv_query = dict(scope)
-    if start_date or end_date:
-        inv_query["date"] = {}
-        if start_date:
-            inv_query["date"]["$gte"] = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-        if end_date:
-            inv_query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-
-    invoices = await server.db.invoices.find(inv_query, {"_id": 0, "total_amount": 1, "vat_amount": 1}).to_list(1000)
+    # Every total of the period, read the one way the budget, the chat, the
+    # ROI card and the forecast read it too (server.period_totals).
+    totals = await period_totals(company_id, scope, current_user.user_id, period)
 
     # Outstanding payables (what's currently owed to suppliers) - always
     # company-wide, never scoped to the period filter above: an invoice from
     # two months ago that's still unpaid is still owed today, so it would be
     # misleading to only surface it while browsing that particular month.
     unpaid_query = {**scope, "payment_method": "bank_transfer", "is_paid": False}
-    unpaid_invoices = await server.db.invoices.find(unpaid_query, {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1}).to_list(1000)
-    now_ts = datetime.now(timezone.utc)
-    # Mongo drivers hand back naive UTC datetimes by default (no tz_aware
-    # flag set on the client), which can't be compared directly to an
-    # aware datetime.now(timezone.utc) - same fix as the session-expiry
-    # check above.
+    unpaid_invoices = await server.db.invoices.find(
+        unpaid_query, {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1}
+    ).to_list(ALL_ROWS)
+    today = today_local()
+
     def _is_overdue(inv):
-        due = inv.get("payment_due_date")
-        if not due:
-            return False
-        if due.tzinfo is None:
-            due = due.replace(tzinfo=timezone.utc)
-        return due < now_ts
+        # Overdue once the due day has passed, on the business's calendar.
+        due_day = business_day(inv.get("payment_due_date"))
+        return due_day is not None and due_day < today
     overdue_invoices = [inv for inv in unpaid_invoices if _is_overdue(inv)]
 
-    # Get daily revenues
-    rev_query = dict(scope)
-    if date_query:
-        rev_query["date"] = date_query
-    revenues = await server.db.daily_revenue.find(rev_query, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1, "card_revenue": 1, "vat_rate_percent": 1}).to_list(1000)
-
-    # Get expenses
-    exp_query = dict(scope)
-    if date_query:
-        exp_query["date"] = date_query
-    expenses = await server.db.expenses.find(exp_query, {"_id": 0, "amount": 1}).to_list(1000)
-
-    # Get payroll cost (real employer cost: gross + employer contributions +
-    # benefits), for the same period
-    total_payroll_cost = await get_payroll_cost_for_period(company_id, current_user.user_id, start_date, end_date)
-
-    # Get depreciation expense (ДМА) for the same period
-    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, current_user.user_id, start_date, end_date)
-
-    # Calculate totals
     visibility = get_financial_visibility(current_user)
-    total_invoice_amount = sum(inv.get("total_amount", 0) for inv in invoices)
-    total_invoice_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
-    total_fiscal_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues)
-    total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues)
-    total_expenses = sum(e.get("amount", 0) for e in expenses)
+    total_invoice_amount = totals["invoice_total"]
+    total_invoice_vat = totals["invoice_vat"]
+    total_fiscal_revenue = totals["fiscal_revenue"]
+    total_pocket_money = totals["pocket_money"]
+    total_expenses = totals["off_book_expenses"]
+    total_payroll_cost = totals["payroll_cost"]
+    total_depreciation_expense = totals["depreciation_cost"]
 
     # Every aggregate below folds in the RAW pocket-money/off-book-expense
     # totals only when this viewer may see them - otherwise the "effective"
@@ -135,12 +92,11 @@ async def get_summary(
     # picture for exactly the data this viewer's access includes, not the
     # real numbers with one line item merely blanked in the UI.
     effective_pocket_money = total_pocket_money if visibility["pocket_money"] else 0
-    effective_off_book_expenses = total_expenses if visibility["off_book_expenses"] else 0
 
     # Card portion of the fiscalized revenue; everything else (the rest of
     # fiscal_revenue plus all of pocket_money, which is cash by definition)
     # counts as cash.
-    total_card_revenue = sum(r.get("card_revenue", 0) for r in revenues)
+    total_card_revenue = totals["card_revenue"]
     total_cash_revenue = total_fiscal_revenue - total_card_revenue + effective_pocket_money
 
     # The outstanding balance, not the invoice's full amount - a partially
@@ -149,28 +105,18 @@ async def get_summary(
     total_unpaid_amount = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in unpaid_invoices)
     total_overdue_amount = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in overdue_invoices)
 
-    # ДДС от фискализиран оборот - изчислено по действителната ставка на
-    # всеки запис (20% стандартна, 9% намалена, 0% и т.н.), а не с фиксирано
-    # предположение за 20% - важно за хотели/ресторанти/хлебарници и др.
-    # Нито джобчето, нито разходите "в канала" влизат в ДДС, така че тази
-    # сметка е еднаква за всеки зрител независимо от финансовата видимост.
-    fiscal_vat = sum(
-        r.get("fiscal_revenue", 0) * r.get("vat_rate_percent", 20.0) / (100 + r.get("vat_rate_percent", 20.0))
-        for r in revenues
-        if r.get("vat_rate_percent", 20.0) > 0
-    )
+    # ДДС от фискализиран оборот - по действителната ставка на всеки запис
+    # (20% стандартна, 9% намалена, 0% и т.н.). Нито джобчето, нито
+    # разходите "в канала" влизат в ДДС, така че тази сметка е еднаква за
+    # всеки зрител независимо от финансовата видимост.
+    fiscal_vat = totals["fiscal_vat"]
 
     # Общ ДДС за плащане = ДДС от продажби - ДДС от покупки (фактури)
     vat_to_pay = fiscal_vat - total_invoice_vat
 
-    # Общ приход/разход - единствената формула, споделена с
-    # _compute_month_profit (server.py), за да не се разминат двете при
-    # бъдеща промяна в едната.
-    total_income, total_expense = _profit_formula(
-        fiscal_revenue=total_fiscal_revenue, pocket_money=effective_pocket_money,
-        invoice_total=total_invoice_amount, off_book_expenses=effective_off_book_expenses,
-        payroll_cost=total_payroll_cost, depreciation_cost=total_depreciation_expense,
-    )
+    # Общ приход/разход - единствената формула (_profit_formula), през
+    # period_income_expense с видимостта на този зрител.
+    total_income, total_expense = period_income_expense(totals, visibility)
 
     # Печалбата е независимо скриваема от съставните ѝ части - тя влиза или
     # излиза от отговора само по view_profit, макар вече да е изчислена
@@ -204,7 +150,7 @@ async def get_summary(
         "total_income": _redact(round(total_income, 2)),
         "total_expense": _redact(round(total_expense, 2)),
         "profit": _redact(profit),
-        "invoice_count": _redact(len(invoices)),
+        "invoice_count": _redact(totals["invoice_count"]),
         "total_cash_revenue": _redact(round(total_cash_revenue, 2)),
         "total_card_revenue": _redact(round(total_card_revenue, 2)),
         "total_unpaid_amount": _redact(round(total_unpaid_amount, 2)),
@@ -212,6 +158,10 @@ async def get_summary(
         "total_overdue_amount": _redact(round(total_overdue_amount, 2)),
         "overdue_invoice_count": _redact(len(overdue_invoices)),
         "financial_visibility": visibility,
+        # The exact days these totals cover, and on how many of them
+        # revenue was entered - what "the period" means, stated, not implied.
+        "period": {"start_date": period.start_text, "end_date": period.end_text, "days": period.days},
+        "revenue_day_count": len(totals["revenue_days"]),
     }
 
 @router.get("/statistics/chart-data")
@@ -225,29 +175,26 @@ async def get_chart_data(
     # get_supplier_statistics below, so a direct call can't bypass the tab
     # being hidden.
     require_permission(current_user, "view_statistics")
-    now = datetime.now(timezone.utc)
-    
-    if period == "week":
-        start = now - timedelta(days=7)
-    elif period == "month":
-        start = now - timedelta(days=30)
-    else:
-        start = now - timedelta(days=365)
-    
-    start_str = start.strftime("%Y-%m-%d")
+    # Business days up to today on the business's own calendar, every
+    # record in them (no first-1000 slice).
+    today = today_local()
+    lookback = {"week": 7, "month": 30}.get(period, 365)
+    window = Period(today - timedelta(days=lookback), today)
 
     company_id, scope = await get_company_scope(current_user)
     closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
 
     # Get data
-    inv_query = {**scope, "date": {"$gte": start}}
-    invoices = await server.db.invoices.find(inv_query, {"_id": 0, "date": 1, "total_amount": 1, "vat_amount": 1}).to_list(1000)
-
-    rev_query = {**scope, "date": {"$gte": start_str}}
-    revenues = await server.db.daily_revenue.find(rev_query, {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1}).to_list(1000)
-
-    exp_query = {**scope, "date": {"$gte": start_str}}
-    expenses = await server.db.expenses.find(exp_query, {"_id": 0, "date": 1, "amount": 1}).to_list(1000)
+    invoices = await server.db.invoices.find(
+        {**scope, "date": window.datetime_filter()}, {"_id": 0, "date": 1, "total_amount": 1, "vat_amount": 1}
+    ).to_list(ALL_ROWS)
+    revenues = await server.db.daily_revenue.find(
+        {**scope, "date": window.text_filter()},
+        {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1},
+    ).to_list(ALL_ROWS)
+    expenses = await server.db.expenses.find(
+        {**scope, "date": window.text_filter()}, {"_id": 0, "date": 1, "amount": 1}
+    ).to_list(ALL_ROWS)
 
     # Same cascade as get_summary: a hidden field's contribution is zeroed
     # out of the daily bars, not just omitted from a separate total, so the
@@ -260,7 +207,10 @@ async def get_chart_data(
     daily_data: Dict[str, Any] = defaultdict(lambda: {"income": 0, "expense": 0, "vat": 0})
 
     for inv in invoices:
-        date_str = inv["date"].strftime("%Y-%m-%d") if isinstance(inv["date"], datetime) else inv["date"][:10]
+        inv_day = business_day(inv["date"])
+        if inv_day is None:
+            continue
+        date_str = inv_day.isoformat()
         daily_data[date_str]["expense"] += inv.get("total_amount", 0)
         daily_data[date_str]["vat"] -= inv.get("vat_amount", 0)  # ДДС кредит
 
@@ -282,11 +232,8 @@ async def get_chart_data(
     # slow day with nothing entered) previously wouldn't appear in the chart
     # at all, silently shortening it. Touching daily_data[date_str] here
     # materializes it as a real 0/0/0 entry via the defaultdict.
-    d = start.date()
-    end_date = now.date()
-    while d <= end_date:
-        daily_data[d.strftime("%Y-%m-%d")]
-        d += timedelta(days=1)
+    for day in window.iter_days():
+        daily_data[day.isoformat()]
 
     # Convert to list sorted by date
     chart_data = []
@@ -325,21 +272,15 @@ async def _daily_revenue_by_weekday(company_id: str, lookback_days: int = WEEKDA
     weak day."""
     from collections import defaultdict
 
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(days=lookback_days)
-    start_str = start.strftime("%Y-%m-%d")
+    today = today_local()
+    start_day = today - timedelta(days=lookback_days)
 
-    # daily_revenue is keyed by user_id, not company_id - same resolution
-    # ForecastService uses.
-    company_users = await server.db.users.find(
-        {"company_id": company_id}, {"_id": 0, "user_id": 1}
-    ).to_list(1000)
-    user_ids = [u["user_id"] for u in company_users]
-
+    # The whole company's revenue - the same records /statistics/summary
+    # counts (company_data_scope), not just its current members' own.
     revenues = await server.db.daily_revenue.find(
-        {"user_id": {"$in": user_ids}, "date": {"$gte": start_str}},
+        {**await company_data_scope(company_id), "date": {"$gte": start_day.isoformat(), "$lt": today.isoformat()}},
         {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1},
-    ).to_list(10000)
+    ).to_list(ALL_ROWS)
     revenue_by_date: Dict[str, float] = defaultdict(float)
     for r in revenues:
         date_str = r.get("date")
@@ -349,8 +290,7 @@ async def _daily_revenue_by_weekday(company_id: str, lookback_days: int = WEEKDA
     closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
 
     buckets: Dict[int, List[float]] = defaultdict(list)
-    d = start.date()
-    today = now.date()
+    d = start_day
     while d < today:
         date_str = d.strftime("%Y-%m-%d")
         if date_str in revenue_by_date and not is_date_closed(date_str, closed_weekdays, exceptions_map):
@@ -370,15 +310,11 @@ async def _missing_revenue_days(company_id: str) -> List[str]:
     most of its open days. Counted only from the first day it logged
     anything in the last four weeks, so a company that just started isn't
     told about the days before it did."""
-    today = datetime.now(timezone.utc).date()
+    today = today_local()
     window_start = today - timedelta(days=MISSING_REVENUE_COVERAGE_DAYS)
-    company_users = await server.db.users.find(
-        {"company_id": company_id}, {"_id": 0, "user_id": 1}
-    ).to_list(1000)
-    user_ids = [u["user_id"] for u in company_users]
     logged = {
         d for d in await server.db.daily_revenue.distinct(
-            "date", {"user_id": {"$in": user_ids}, "date": {"$gte": window_start.isoformat(), "$lt": today.isoformat()}}
+            "date", {**await company_data_scope(company_id), "date": {"$gte": window_start.isoformat(), "$lt": today.isoformat()}}
         ) if isinstance(d, str)
     }
     if not logged:
@@ -462,9 +398,9 @@ async def _weekday_labor_efficiency(company_id: str, lookback_days: int = WEEKDA
         if len(vals) >= MIN_WEEKS_FOR_WEEKDAY_PATTERN
     }
 
-    now = datetime.now(timezone.utc)
-    start_str = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
-    end_str = now.strftime("%Y-%m-%d")
+    today = today_local()
+    start_str = (today - timedelta(days=lookback_days)).isoformat()
+    end_str = today.isoformat()
     shifts = await server.db.work_shifts.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
     occurrences = await _resolve_occurrences(shifts, company_id, start_str, end_str) if shifts else []
 
@@ -577,16 +513,14 @@ async def get_supplier_statistics(
     # concentration). Defaulting to the current month here used to hide
     # every supplier with no invoices yet this month, making the whole tab
     # read as empty for any account between scans.
-    now = datetime.now(timezone.utc)
 
     # Build query for current period
     _, query = await get_company_scope(current_user)
     if start_date or end_date:
-        query["date"] = {}
-        if start_date:
-            query["date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-        if end_date:
-            query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+        try:
+            query["date"] = Period.parse(start_date, end_date).datetime_filter()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Невалиден период")
 
     # Get all invoices for the period
     invoices = await server.db.invoices.find(query, {
@@ -596,7 +530,7 @@ async def get_supplier_statistics(
         "vat_amount": 1,
         "amount_without_vat": 1,
         "date": 1
-    }).to_list(10000)
+    }).to_list(ALL_ROWS)
     
     # Group by supplier with detailed data
     supplier_data: Dict[str, Any] = defaultdict(lambda: {
@@ -621,9 +555,9 @@ async def get_supplier_statistics(
             supplier_data[supplier]["dates"].append(date_val)
             supplier_data[supplier]["amounts"].append(amount)
     
-    # Calculate inactivity threshold (30 days)
+    # Active = a delivery in the last 30 days, counted in business days.
     inactivity_days = 30
-    inactive_threshold = now - timedelta(days=inactivity_days)
+    today = today_local()
     
     # Build comprehensive supplier list
     suppliers_list = []
@@ -644,8 +578,9 @@ async def get_supplier_statistics(
             first_delivery = first_delivery.replace(tzinfo=timezone.utc)
         
         # Determine status
-        is_active = last_delivery and last_delivery > inactive_threshold if last_delivery else False
-        days_inactive = (now - last_delivery).days if last_delivery else 999
+        last_day = business_day(last_delivery)
+        days_inactive = (today - last_day).days if last_day else 999
+        is_active = last_day is not None and days_inactive <= inactivity_days
         
         # Calculate average
         avg = data["total_amount"] / data["invoice_count"] if data["invoice_count"] > 0 else 0
@@ -749,7 +684,7 @@ async def get_detailed_supplier_stats(
     _, query = await get_company_scope(current_user)
     query["supplier"] = {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}
 
-    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", 1).to_list(10000)
+    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", 1).to_list(ALL_ROWS)
     
     if not invoices:
         return {
@@ -758,7 +693,7 @@ async def get_detailed_supplier_stats(
             "invoice_count": 0
         }
     
-    now = datetime.now(timezone.utc)
+    today = today_local()
     
     # Basic stats
     total_amount = sum(inv.get("total_amount", 0) for inv in invoices)
@@ -778,13 +713,9 @@ async def get_detailed_supplier_stats(
     first_delivery = min(dates) if dates else None
     last_delivery = max(dates) if dates else None
     
-    # Ensure timezone consistency for date calculations
-    if last_delivery:
-        if last_delivery.tzinfo is None:
-            last_delivery = last_delivery.replace(tzinfo=timezone.utc)
-        days_inactive = (now - last_delivery).days
-    else:
-        days_inactive = 999
+    # Days since the last delivery, counted in business days.
+    last_day = business_day(last_delivery)
+    days_inactive = (today - last_day).days if last_day else 999
     
     is_active = days_inactive <= 30
     
@@ -881,12 +812,13 @@ async def compare_suppliers(
     if len(supplier_names) < 2 or len(supplier_names) > 5:
         raise HTTPException(status_code=400, detail="Изберете между 2 и 5 доставчика за сравнение")
     
-    # Build date query
+    # The same business days as every other module (services/business_calendar).
     date_query = {}
-    if start_date:
-        date_query["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-    if end_date:
-        date_query["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    if start_date or end_date:
+        try:
+            date_query = Period.parse(start_date, end_date).datetime_filter()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Невалиден период")
     
     comparison = []
     _, base_scope = await get_company_scope(current_user)
@@ -896,7 +828,7 @@ async def compare_suppliers(
         if date_query:
             query["date"] = date_query
         
-        invoices = await server.db.invoices.find(query, {"_id": 0, "total_amount": 1, "date": 1}).to_list(10000)
+        invoices = await server.db.invoices.find(query, {"_id": 0, "total_amount": 1, "date": 1}).to_list(ALL_ROWS)
         
         total = sum(inv.get("total_amount", 0) for inv in invoices)
         count = len(invoices)
@@ -935,13 +867,12 @@ async def get_single_supplier_stats(
     query["supplier"] = {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}
 
     if start_date or end_date:
-        query["date"] = {}
-        if start_date:
-            query["date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-        if end_date:
-            query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+        try:
+            query["date"] = Period.parse(start_date, end_date).datetime_filter()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Невалиден период")
     
-    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(1000)
+    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(ALL_ROWS)
     
     if not invoices:
         return {

@@ -22,6 +22,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, ChipTabs, CountUp, SkeletonRow } from '../src/components';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { COLORS } from '../src/theme/colors';
+import { toApiDate } from '../src/utils/periodRange';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -326,11 +327,11 @@ export default function PersonalExpensesHistoryScreen() {
         category: walletCategory,
         description: walletDescription.trim(),
         amount: parsedAmount,
-        date: walletDate.toISOString().slice(0, 10),
+        date: toApiDate(walletDate),
         is_recurring: walletIsRecurring,
-        next_due_date: walletIsRecurring ? walletNextDueDate.toISOString().slice(0, 10) : undefined,
+        next_due_date: walletIsRecurring ? toApiDate(walletNextDueDate) : undefined,
         recurring_until: walletIsRecurring && walletHasRecurringUntil
-          ? walletRecurringUntil.toISOString().slice(0, 10)
+          ? toApiDate(walletRecurringUntil)
           : null,
         notes: walletNotes.trim() || undefined,
       };
@@ -913,7 +914,7 @@ export default function PersonalExpensesHistoryScreen() {
 
                   <Text style={styles.inputLabel}>{t('personal.period')}</Text>
                   <TouchableOpacity style={styles.input} onPress={() => setShowWalletDatePicker(true)}>
-                    <Text style={{ color: 'white' }}>{walletDate.toISOString().slice(0, 10)}</Text>
+                    <Text style={{ color: 'white' }}>{toApiDate(walletDate)}</Text>
                   </TouchableOpacity>
                   <DateTimePickerModal
                     isVisible={showWalletDatePicker}
@@ -940,7 +941,7 @@ export default function PersonalExpensesHistoryScreen() {
                     <View>
                       <Text style={styles.inputLabel}>{t('wallet.nextDueDate')}</Text>
                       <TouchableOpacity style={styles.input} onPress={() => setShowWalletDueDatePicker(true)}>
-                        <Text style={{ color: 'white' }}>{walletNextDueDate.toISOString().slice(0, 10)}</Text>
+                        <Text style={{ color: 'white' }}>{toApiDate(walletNextDueDate)}</Text>
                       </TouchableOpacity>
                       <DateTimePickerModal
                         isVisible={showWalletDueDatePicker}
@@ -968,7 +969,7 @@ export default function PersonalExpensesHistoryScreen() {
                         <View>
                           <Text style={styles.inputLabel}>{t('wallet.recurringUntil')}</Text>
                           <TouchableOpacity style={styles.input} onPress={() => setShowWalletRecurringUntilPicker(true)}>
-                            <Text style={{ color: 'white' }}>{walletRecurringUntil.toISOString().slice(0, 10)}</Text>
+                            <Text style={{ color: 'white' }}>{toApiDate(walletRecurringUntil)}</Text>
                           </TouchableOpacity>
                           <DateTimePickerModal
                             isVisible={showWalletRecurringUntilPicker}

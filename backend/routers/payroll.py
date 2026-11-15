@@ -248,7 +248,7 @@ async def get_payroll_entries(
     if month:
         query["period_month"] = month
 
-    entries = await server.db.payroll_entries.find(query, {"_id": 0, "image_base64": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(1000)
+    entries = await server.db.payroll_entries.find(query, {"_id": 0, "image_base64": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(ALL_ROWS)
     return entries
 
 @router.put("/payroll/{entry_id}/counted-in-expenses")

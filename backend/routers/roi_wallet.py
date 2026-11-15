@@ -129,10 +129,10 @@ async def _roi_month_data(
         {"_id": 0, "date": 1, "supplier": 1, "total_amount": 1},
     ).to_list(ROI_MAX_ROWS)
     for inv in invoices:
-        date_val = inv.get("date")
-        month = data.get(date_val.strftime("%Y-%m")) if isinstance(date_val, datetime) else None
-        if month is not None:
-            month["invoices"].append((date_val.day, inv.get("supplier") or "—", inv.get("total_amount", 0)))
+        inv_day = business_day(inv.get("date")) if isinstance(inv.get("date"), datetime) else None
+        month = data.get(inv_day.strftime("%Y-%m")) if inv_day else None
+        if month is not None and inv_day is not None:
+            month["invoices"].append((inv_day.day, inv.get("supplier") or "—", inv.get("total_amount", 0)))
     if visibility["off_book_expenses"]:
         expenses = await server.db.expenses.find(
             {**scope, "date": {"$gte": first_start, "$lt": last_end}}, {"_id": 0, "date": 1, "amount": 1},
@@ -228,7 +228,7 @@ async def _price_increase_action(company_id: str, is_en: bool) -> Optional[Dict[
         {"company_id": company_id, "direction": "increase", "status": {"$ne": "dismissed"},
          "kind": {"$ne": "pack_suspect"}, "created_at": {"$gte": since}},
         {"_id": 0, "item_name": 1, "supplier": 1, "change_percent": 1, "monthly_impact": 1, "created_at": 1},
-    ).to_list(1000)
+    ).to_list(ALL_ROWS)
     latest: Dict[tuple, dict] = {}
     for alert in sorted(alerts, key=lambda a: _as_utc(a["created_at"]) if isinstance(a.get("created_at"), datetime) else since):
         latest[(alert.get("item_name"), alert.get("supplier"))] = alert
@@ -304,7 +304,7 @@ async def _missing_revenue_action(company_id: Optional[str], scope: dict, year: 
     """Open days of the month (until yesterday) with no revenue entered, for
     a company that enters most days - unknown days make profit look worse
     than it is."""
-    today = datetime.now(timezone.utc).date()
+    today = today_local()
     start = date_type(year, month, 1)
     ny, nm = _ym_add(year, month, 1)
     end = min(date_type(ny, nm, 1), today)
@@ -342,7 +342,7 @@ async def build_roi_analysis(
     is_en = language == "en"
     company_id, scope = await get_company_scope(current_user)
     visibility = get_financial_visibility(current_user)
-    now = datetime.now(timezone.utc)
+    now = now_local()
     # The payback window, which also holds the baseline months before the target.
     months = _roi_months(year, month, max(ROI_WINDOW_MONTHS, ROI_BASELINE_MONTHS + 1))
     raw = await _roi_month_data(company_id, scope, current_user.user_id, visibility, months)
@@ -458,7 +458,7 @@ async def get_roi_analysis(
     помръднало печалбата и какво може да се направи. Изисква
     view_personal_investments; без AI извикване (вж. /roi/advice)."""
     require_permission(current_user, "view_personal_investments")
-    now = datetime.now(timezone.utc)
+    now = now_local()
     target_month = month or now.month
     target_year = year or now.year
     period_start, period_end = _month_range(target_year, target_month)
@@ -506,7 +506,7 @@ async def get_roi_trend(
     months = max(1, min(months, 60))
     company_id, scope = await get_company_scope(current_user)
     visibility = get_financial_visibility(current_user)
-    now = datetime.now(timezone.utc)
+    now = now_local()
     window = _roi_months(now.year, now.month, months)
     raw = await _roi_month_data(company_id, scope, current_user.user_id, visibility, window)
 
@@ -573,7 +573,7 @@ async def get_roi_advice(
     and set of facts, so it is asked for once until the numbers change;
     generate=false only returns advice already kept for these facts."""
     require_permission(current_user, "view_personal_investments")
-    now = datetime.now(timezone.utc)
+    now = now_local()
     target_month = month or now.month
     target_year = year or now.year
     language = "en" if language == "en" else "bg"
@@ -672,7 +672,7 @@ async def get_personal_wallet_entries(
         if end_date:
             query["date"]["$lte"] = end_date
 
-    entries = await server.db.personal_wallet_entries.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    entries = await server.db.personal_wallet_entries.find(query, {"_id": 0}).sort("date", -1).to_list(ALL_ROWS)
     return {"entries": entries}
 
 @router.put("/personal-wallet/entries/{entry_id}")
@@ -754,7 +754,7 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
     if not company_id:
         raise HTTPException(status_code=400, detail="Няма свързана фирма")
 
-    now = datetime.now(timezone.utc)
+    now = now_local()
     start_date, end_date = _month_bounds(now)
     if now.month == 1:
         prev_month_dt = now.replace(year=now.year - 1, month=12, day=1)
@@ -764,10 +764,10 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
 
     entries = await server.db.personal_wallet_entries.find(
         {"company_id": company_id, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
-    ).to_list(2000)
+    ).to_list(ALL_ROWS)
     prev_entries = await server.db.personal_wallet_entries.find(
         {"company_id": company_id, "date": {"$gte": prev_start, "$lte": prev_end}}, {"_id": 0, "category": 1, "amount": 1}
-    ).to_list(2000)
+    ).to_list(ALL_ROWS)
 
     total_spent = sum(e.get("amount", 0) for e in entries)
     category_totals: dict = {}

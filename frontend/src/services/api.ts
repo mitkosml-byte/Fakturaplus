@@ -435,7 +435,7 @@ class ApiService {
     payment_status?: 'paid' | 'unpaid' | 'partial' | 'overdue';
     limit?: number;
     offset?: number;
-  }): Promise<{ invoices: Invoice[]; totalCount: number }> {
+  }): Promise<{ invoices: Invoice[]; totalCount: number; totalAmount: number | null; totalVat: number | null }> {
     const queryParams = new URLSearchParams();
     if (params?.supplier) queryParams.set('supplier', params.supplier);
     if (params?.invoice_number) queryParams.set('invoice_number', params.invoice_number);
@@ -463,7 +463,12 @@ class ApiService {
     const invoices: Invoice[] = await response.json();
     const totalHeader = response.headers.get('X-Total-Count');
     const totalCount = totalHeader ? parseInt(totalHeader, 10) : invoices.length;
-    return { invoices, totalCount };
+    // Sums of every invoice matching the filter, not only this page.
+    const amountHeader = response.headers.get('X-Total-Amount');
+    const vatHeader = response.headers.get('X-Total-Vat');
+    const totalAmount = amountHeader != null ? parseFloat(amountHeader) : null;
+    const totalVat = vatHeader != null ? parseFloat(vatHeader) : null;
+    return { invoices, totalCount, totalAmount, totalVat };
   }
 
   async createInvoice(

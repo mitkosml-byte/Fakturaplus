@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
 import { ModalBlurBackdrop } from './ModalBlurBackdrop';
+import { toApiMonth } from '../utils/periodRange';
 
 // The loud counterpart to Home's passive wallet teaser - surfaces once per
 // calendar month, only when personal withdrawals have actually crossed the
@@ -45,7 +46,7 @@ export function WalletAlertPopup() {
     })();
   }, []);
 
-  const currentMonthKey = () => new Date().toISOString().slice(0, 7);
+  const currentMonthKey = () => toApiMonth(new Date());
 
   const checkAlert = useCallback(async () => {
     if (!isAuthenticated || !hasPermission('view_personal_wallet') || !storageLoaded) return;

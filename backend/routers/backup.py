@@ -31,6 +31,7 @@ from server import (
     _team_channel_id,
 )
 import server
+from services.business_calendar import stored_day
 from routers.price_tracking import rebuild_invoice_price_history
 
 router = APIRouter(prefix="/api")
@@ -49,7 +50,7 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
     company_id, scope = await get_company_scope(current_user)
 
     # Събиране на фактури
-    invoices = await server.db.invoices.find(scope, {"_id": 0}).to_list(10000)
+    invoices = await server.db.invoices.find(scope, {"_id": 0}).to_list(ALL_ROWS)
 
     # Конвертиране на datetime обекти
     for inv in invoices:
@@ -59,7 +60,7 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
             inv["created_at"] = inv["created_at"].isoformat()
 
     # Събиране на дневни обороти
-    revenues = await server.db.daily_revenue.find(scope, {"_id": 0}).to_list(10000)
+    revenues = await server.db.daily_revenue.find(scope, {"_id": 0}).to_list(ALL_ROWS)
 
     for rev in revenues:
         if isinstance(rev.get("date"), datetime):
@@ -68,7 +69,7 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
             rev["created_at"] = rev["created_at"].isoformat()
 
     # Събиране на разходи
-    expenses = await server.db.expenses.find(scope, {"_id": 0}).to_list(10000)
+    expenses = await server.db.expenses.find(scope, {"_id": 0}).to_list(ALL_ROWS)
 
     for exp in expenses:
         if isinstance(exp.get("date"), datetime):
@@ -175,7 +176,12 @@ async def restore_backup(request: Request, backup_data: BackupRestoreRequest, cu
             doc = invoice.model_dump()
             doc["user_id"] = current_user.user_id
             doc["company_id"] = company_id
-            doc["date"] = datetime.fromisoformat(doc["date"].replace("Z", "+00:00"))
+            # Kept as its business day, like every invoice saved today
+            # (services/business_calendar) - a backup from before that
+            # change restores onto the same day it showed.
+            doc["date"] = stored_day(doc["date"])
+            if doc.get("payment_due_date"):
+                doc["payment_due_date"] = stored_day(doc["payment_due_date"])
             doc["created_at"] = (
                 datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
                 if doc.get("created_at") else datetime.now(timezone.utc)

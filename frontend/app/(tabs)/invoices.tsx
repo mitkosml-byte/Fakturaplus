@@ -33,6 +33,7 @@ import { InvoiceDetailModal } from '../../src/components/invoices/InvoiceDetailM
 import { COLORS } from '../../src/theme/colors';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
 import { DURATION, EASING } from '../../src/theme/motion';
+import { toApiDate } from '../../src/utils/periodRange';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -52,26 +53,26 @@ function getPeriodRange(
   switch (preset) {
     case 'thisMonth':
       return {
-        start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
-        end: now.toISOString(),
+        start: toApiDate(new Date(now.getFullYear(), now.getMonth(), 1)),
+        end: toApiDate(now),
       };
     case 'lastMonth':
       return {
-        start: new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString(),
-        end: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString(),
+        start: toApiDate(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+        end: toApiDate(new Date(now.getFullYear(), now.getMonth(), 0)),
       };
     case 'last3Months':
       return {
-        start: new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString(),
-        end: now.toISOString(),
+        start: toApiDate(new Date(now.getFullYear(), now.getMonth() - 2, 1)),
+        end: toApiDate(now),
       };
     case 'thisYear':
       return {
-        start: new Date(now.getFullYear(), 0, 1).toISOString(),
-        end: now.toISOString(),
+        start: toApiDate(new Date(now.getFullYear(), 0, 1)),
+        end: toApiDate(now),
       };
     case 'custom':
-      return { start: customStart.toISOString(), end: customEnd.toISOString() };
+      return { start: toApiDate(customStart), end: toApiDate(customEnd) };
     default:
       return {};
   }
@@ -90,6 +91,9 @@ export default function InvoicesScreen() {
   // below tell the user some invoices aren't shown instead of silently
   // looking like a complete, if short, list.
   const [invoicesTotalCount, setInvoicesTotalCount] = useState<number | null>(null);
+  // Sums of every invoice the filter matches (from the server), so the
+  // header totals cover the whole period even past the first page.
+  const [serverTotals, setServerTotals] = useState<{ amount: number; vat: number } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
@@ -187,7 +191,7 @@ export default function InvoicesScreen() {
   const loadInvoices = useCallback(async () => {
     try {
       const { start, end } = getPeriodRange(periodPreset, customStartDate, customEndDate);
-      const { invoices: data, totalCount } = await api.getInvoicesPage({
+      const { invoices: data, totalCount, totalAmount: allAmount, totalVat: allVat } = await api.getInvoicesPage({
         ...(searchQuery ? { search: searchQuery } : {}),
         ...(start ? { start_date: start } : {}),
         ...(end ? { end_date: end } : {}),
@@ -196,6 +200,7 @@ export default function InvoicesScreen() {
       });
       setInvoices(data);
       setInvoicesTotalCount(totalCount > data.length ? totalCount : null);
+      setServerTotals(allAmount != null && allVat != null ? { amount: allAmount, vat: allVat } : null);
     } catch (error) {
       console.error('Error loading invoices:', error);
     } finally {
@@ -357,7 +362,7 @@ export default function InvoicesScreen() {
         supplier,
         supplier_eik: editSupplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
-        date: editDate.toISOString(),
+        date: toApiDate(editDate),
         amount_without_vat: withoutVat,
         vat_amount: vat,
         total_amount: withoutVat + vat,
@@ -547,8 +552,15 @@ export default function InvoicesScreen() {
     [invoices, showOnlyEikIssues, hasEikIssue]
   );
 
-  const totalAmount = visibleInvoices.reduce((sum, inv) => sum + inv.total_amount, 0);
-  const totalVat = visibleInvoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
+  // Whole-filter sums from the server unless the list is narrowed on the
+  // device (the ЕИК check), where only the shown invoices count.
+  const useServerTotals = serverTotals !== null && !showOnlyEikIssues;
+  const totalAmount = useServerTotals
+    ? serverTotals.amount
+    : visibleInvoices.reduce((sum, inv) => sum + inv.total_amount, 0);
+  const totalVat = useServerTotals
+    ? serverTotals.vat
+    : visibleInvoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
 
   const sections = useMemo(() => {
     const groups = new Map<string, { title: string; data: Invoice[]; totalAmount: number; totalVat: number }>();

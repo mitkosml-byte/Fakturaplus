@@ -68,12 +68,13 @@ async def build_business_chat_digest(current_user: User) -> dict:
     company_id, scope = await get_company_scope(current_user)
     visibility = get_financial_visibility(current_user)
 
-    now = datetime.now(timezone.utc)
-    this_month_start = now.replace(day=1).strftime("%Y-%m-%d")
-    this_month_end = now.strftime("%Y-%m-%d")
-    last_month_last_day = now.replace(day=1) - timedelta(days=1)
-    last_month_start = last_month_last_day.replace(day=1).strftime("%Y-%m-%d")
-    last_month_end = last_month_last_day.strftime("%Y-%m-%d")
+    # This month so far and the whole previous month, on the business's
+    # own calendar (services/business_calendar), like every other module.
+    today = today_local()
+    this_month_start = today.replace(day=1).isoformat()
+    this_month_end = today.isoformat()
+    previous_month = Period.month_of(today.replace(day=1) - timedelta(days=1))
+    last_month_start, last_month_end = previous_month.start_text, previous_month.end_text
 
     this_month = await _business_digest_period(company_id, scope, current_user.user_id, this_month_start, this_month_end, visibility)
     last_month = await _business_digest_period(company_id, scope, current_user.user_id, last_month_start, last_month_end, visibility)
@@ -85,16 +86,12 @@ async def build_business_chat_digest(current_user: User) -> dict:
     unpaid_invoices = await server.db.invoices.find(
         {**scope, "payment_method": "bank_transfer", "is_paid": False},
         {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1},
-    ).to_list(1000)
-    now_ts = datetime.now(timezone.utc)
+    ).to_list(ALL_ROWS)
 
     def _is_overdue(inv):
-        due = inv.get("payment_due_date")
-        if not due:
-            return False
-        if due.tzinfo is None:
-            due = due.replace(tzinfo=timezone.utc)
-        return due < now_ts
+        # Overdue once the due day has passed, on the business's calendar.
+        due_day = business_day(inv.get("payment_due_date"))
+        return due_day is not None and due_day < today
 
     unpaid = {
         "count": len(unpaid_invoices),
@@ -104,7 +101,7 @@ async def build_business_chat_digest(current_user: User) -> dict:
 
     budget = None
     if company_id and "manage_budget" in set(current_user.permissions or []):
-        budget_status = await compute_budget_status(company_id, now.strftime("%Y-%m"))
+        budget_status = await compute_budget_status(company_id, today.strftime("%Y-%m"))
         if budget_status:
             budget = {
                 "expense_limit": budget_status["expense_limit"],
@@ -121,7 +118,9 @@ async def build_business_chat_digest(current_user: User) -> dict:
         receivables = await _business_digest_receivables(scope)
 
     # VAT due this period - role-invariant (see _business_digest_vat_due).
-    vat_due_this_month = await _business_digest_vat_due(scope, this_month_start, this_month_end)
+    vat_due_this_month = await _business_digest_vat_due(
+        company_id, scope, current_user.user_id, this_month_start, this_month_end
+    )
 
     # Next-month forecast - reuses the real, already-visibility-correct
     # endpoints rather than calling ForecastService a second time here.
@@ -150,7 +149,7 @@ async def build_business_chat_digest(current_user: User) -> dict:
     # same permission the real /roi/analysis endpoint requires.
     roi = None
     if "view_personal_investments" in perms:
-        roi = await _business_digest_roi(company_id, scope, now, visibility)
+        roi = await _business_digest_roi(company_id, scope, current_user.user_id, visibility)
 
     # Fixed assets - gated by manage_budget, same as /assets/summary.
     assets = None
@@ -274,7 +273,7 @@ async def ask_my_numbers(
     # screen around a Bulgarian answer - is exactly what was reported).
     response_language = "английски (English)" if query.language == "en" else "български"
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = today_local().isoformat()
     system_prompt = (
         "Ти си асистент на малък бизнес във Фактура+ и отговаряш САМО въз основа на реалните данни на тази "
         f"фирма: резюмето (JSON) в съобщението и инструментите, с които търсиш в данните й. Днес е {today}. "

@@ -22,6 +22,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, PressableScale, CountUp, Skeleton, SkeletonRow, AnimatedEmptyIcon } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
+import { toApiMonth } from '../src/utils/periodRange';
 
 export default function BudgetScreen() {
   const { t } = useTranslation();
@@ -94,7 +95,7 @@ export default function BudgetScreen() {
 
     setSavingBudget(true);
     try {
-      const currentMonth = new Date().toISOString().slice(0, 7);
+      const currentMonth = toApiMonth(new Date());
       await api.createBudget({
         month: currentMonth,
         expense_limit: parseFloat(budgetLimit),

@@ -89,7 +89,7 @@ async def get_assets(status: Optional[str] = None, current_user: User = Depends(
     # this very list (Module 1 audit finding).
     _, scope = await get_company_scope(current_user)
 
-    assets = await server.db.assets.find(scope, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    assets = await server.db.assets.find(scope, {"_id": 0}).sort("created_at", -1).to_list(ALL_ROWS)
     enriched = [enrich_asset_with_depreciation(a) for a in assets]
     if status:
         enriched = [a for a in enriched if a["status"] == status]
@@ -100,7 +100,7 @@ async def get_assets_summary(current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
     _, scope = await get_company_scope(current_user)
 
-    assets = await server.db.assets.find(scope, {"_id": 0}).to_list(1000)
+    assets = await server.db.assets.find(scope, {"_id": 0}).to_list(ALL_ROWS)
     enriched = [enrich_asset_with_depreciation(a) for a in assets]
 
     active = [a for a in enriched if a["status"] != "disposed"]

@@ -373,7 +373,7 @@ export default function StatsScreen() {
     if (preset === 'month') start.setMonth(start.getMonth() - 1);
     else if (preset === 'quarter') start.setMonth(start.getMonth() - 3);
     else start.setFullYear(start.getFullYear() - 1);
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const fmt = toApiDate;
     return { start_date: fmt(start), end_date: fmt(end) };
   };
 

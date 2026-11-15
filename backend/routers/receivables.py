@@ -48,7 +48,7 @@ async def get_customers(search: Optional[str] = None, current_user: User = Depen
     _, query = await get_company_scope(current_user)
     if search:
         query["name"] = {"$regex": re.escape(search), "$options": "i"}
-    customers = await server.db.customers.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    customers = await server.db.customers.find(query, {"_id": 0}).sort("name", 1).to_list(ALL_ROWS)
     return [Customer(**c) for c in customers]
 
 @router.put("/customers/{customer_id}", response_model=Customer)
@@ -89,7 +89,7 @@ async def get_receivables(
 ):
     require_permission(current_user, "add_revenue")
     _, query = await get_company_scope(current_user)
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now_str = today_local().isoformat()
     if status == "paid":
         query["is_paid"] = True
     elif status == "unpaid":
@@ -100,15 +100,15 @@ async def get_receivables(
     # Unlike invoices' period filter, overdue/unpaid receivables are
     # always shown regardless of when they were created - a receivable
     # from two months ago that's still unpaid is still owed today.
-    receivables = await server.db.receivables.find(query, {"_id": 0}).sort("due_date", 1).to_list(1000)
+    receivables = await server.db.receivables.find(query, {"_id": 0}).sort("due_date", 1).to_list(ALL_ROWS)
     return [Receivable(**r) for r in receivables]
 
 @router.get("/receivables/summary")
 async def get_receivables_summary(current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     _, query = await get_company_scope(current_user)
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    unpaid = await server.db.receivables.find({**query, "is_paid": False}, {"_id": 0, "amount": 1, "due_date": 1}).to_list(10000)
+    now_str = today_local().isoformat()
+    unpaid = await server.db.receivables.find({**query, "is_paid": False}, {"_id": 0, "amount": 1, "due_date": 1}).to_list(ALL_ROWS)
     total_owed = sum(r.get("amount", 0) for r in unpaid)
     overdue = [r for r in unpaid if r.get("due_date") and r["due_date"] < now_str]
     total_overdue = sum(r.get("amount", 0) for r in overdue)
@@ -149,7 +149,7 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
     require_permission(current_user, "add_revenue")
     company_id, _ = await get_company_scope(current_user)
     total_amount = round(sum(item.quantity * item.unit_price for item in payload.items), 2)
-    issue_date = payload.issue_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    issue_date = payload.issue_date or today_local().isoformat()
 
     document = BillingDocument(
         user_id=current_user.user_id, company_id=company_id, total_amount=total_amount,
@@ -176,7 +176,7 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
 async def get_billing_documents(current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     _, query = await get_company_scope(current_user)
-    docs = await server.db.billing_documents.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    docs = await server.db.billing_documents.find(query, {"_id": 0}).sort("created_at", -1).to_list(ALL_ROWS)
     return [BillingDocument(**d) for d in docs]
 
 @router.get("/billing-documents/{document_id}", response_model=BillingDocument)

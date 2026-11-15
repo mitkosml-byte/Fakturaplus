@@ -454,7 +454,7 @@ async def list_schedule_payments(
     else:
         query["user_id"] = current_user.user_id
 
-    payments = await server.db.schedule_payments.find(query, {"_id": 0}).sort("period_start", 1).to_list(1000)
+    payments = await server.db.schedule_payments.find(query, {"_id": 0}).sort("period_start", 1).to_list(ALL_ROWS)
     return {"payments": payments}
 
 

@@ -141,11 +141,11 @@ def test_a_month_logged_on_a_few_days_is_unknown_not_a_weak_month():
 
     async def _run():
         await _seed_revenue(user, lambda y, m, i: 10000.0, skip_days_in=half_logged)
-        user_ids = [user.user_id]
         now = datetime.now(timezone.utc)
         end = fs._month_start(now.year, now.month)
         start = fs._month_start(*months[0])
-        _, entered = await server.forecast_service._revenue_monthly_totals(user_ids, start, end, True)
+        scope = await server.forecast_service._company_scope(company_id)
+        _, entered = await server.forecast_service._revenue_monthly_totals(scope, start, end, True)
         return await server.forecast_service._known_revenue_months(company_id, entered, fs._month_key(*months[0]), end)
 
     known = asyncio.run(_run())

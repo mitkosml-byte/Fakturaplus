@@ -97,7 +97,7 @@ async def get_budget_status(current_user: User = Depends(get_current_user)):
     if not company_id:
         return {"has_budget": False}
 
-    current_month = datetime.now().strftime("%Y-%m")
+    current_month = today_local().strftime("%Y-%m")
     status = await compute_budget_status(company_id, current_month)
     return status if status else {"has_budget": False}
 

@@ -94,9 +94,18 @@ export function formatPeriodLabel(state: PeriodState, bounds: PeriodBounds, loca
   }
 }
 
-// yyyy-MM-dd, the wire format every date-range backend endpoint expects.
+// yyyy-MM-dd, the wire format every date-range backend endpoint expects -
+// the day as the device shows it. Never d.toISOString().slice(0, 10): that
+// is the UTC day, which in Bulgaria is the day before for anything picked
+// between midnight and 02:00/03:00 (and for every date picked on the web,
+// which arrives as local midnight).
 export function toApiDate(d: Date): string {
   return format(d, 'yyyy-MM-dd');
+}
+
+// yyyy-MM, the month as the device shows it (same reason as toApiDate).
+export function toApiMonth(d: Date): string {
+  return format(d, 'yyyy-MM');
 }
 
 export { addDays };

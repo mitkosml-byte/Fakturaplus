@@ -46,8 +46,21 @@ from routers.price_tracking import (
 )
 
 from services.invoice_check import check_invoice_draft
+from services.business_calendar import Period, day_start_utc, stored_day, today_local
 
 router = APIRouter(prefix="/api")
+
+
+def _day_or_400(value, what: str) -> datetime:
+    """A submitted invoice or due date as its stored business day - a clear
+    400 for text that is no date at all, instead of a server error."""
+    try:
+        day = stored_day(value)
+    except (TypeError, ValueError):
+        day = None
+    if day is None:
+        raise HTTPException(status_code=400, detail=f"Невалидна {what}")
+    return day
 
 @router.post("/invoices", response_model=Invoice)
 async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
@@ -96,7 +109,10 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
             )
     
     invoice_dict = invoice.model_dump()
-    invoice_date = datetime.fromisoformat(invoice_dict["date"].replace("Z", "+00:00"))
+    # The business day the invoice is dated, kept as 00:00 UTC of it
+    # (services/business_calendar) - whatever device or time of day it was
+    # picked at, every module then reads it as the same day.
+    invoice_date = _day_or_400(invoice_dict["date"], "дата на фактурата")
 
     # Suggest a VAT treatment when the caller didn't set one, based on the
     # VAT-to-base ratio - saves the common case (standard 20%) a manual pick,
@@ -125,7 +141,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         paid_at = invoice_date
     elif invoice_dict.get("payment_method") == "bank_transfer":
         if invoice_dict.get("payment_due_date"):
-            payment_due_date = datetime.fromisoformat(invoice_dict["payment_due_date"].replace("Z", "+00:00"))
+            payment_due_date = _day_or_400(invoice_dict["payment_due_date"], "дата на падеж")
         else:
             payment_due_date = invoice_date + timedelta(days=14)
 
@@ -320,13 +336,14 @@ async def get_invoices(
     if search:
         pattern = {"$regex": re.escape(search), "$options": "i"}
         query["$or"] = [{"supplier": pattern}, {"invoice_number": pattern}]
-    if start_date:
-        query["date"] = {"$gte": datetime.fromisoformat(start_date.replace("Z", "+00:00"))}
-    if end_date:
-        if "date" in query:
-            query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-        else:
-            query["date"] = {"$lte": datetime.fromisoformat(end_date.replace("Z", "+00:00"))}
+    if start_date or end_date:
+        # Whole business days, whatever form the bounds came in (a day, or
+        # a device's local midnight sent as a UTC moment) - the same days
+        # Home, Statistics and every other module count for this period.
+        try:
+            query["date"] = Period.parse(start_date, end_date).datetime_filter()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Невалиден период")
     if payment_status == "paid":
         query["is_paid"] = True
     elif payment_status == "unpaid":
@@ -340,7 +357,9 @@ async def get_invoices(
     elif payment_status == "overdue":
         query["is_paid"] = False
         query["payment_method"] = "bank_transfer"
-        query["payment_due_date"] = {"$lt": datetime.now(timezone.utc)}
+        # Overdue = the due day has passed: due before today, on the
+        # business's own calendar.
+        query["payment_due_date"] = {"$lt": day_start_utc(today_local())}
 
     # Previously a hardcoded .to_list(1000) with no way to go further -
     # once a company passed 1,000 matching invoices, the oldest ones became
@@ -352,6 +371,15 @@ async def get_invoices(
     clamped_offset = max(0, offset)
     total_count = await server.db.invoices.count_documents(query)
     response.headers["X-Total-Count"] = str(total_count)
+    # The sums of every matching invoice, not just the page sent back - so
+    # the list's totals for a period are the period's totals, however many
+    # invoices it holds.
+    sums = await server.db.invoices.aggregate([
+        {"$match": query},
+        {"$group": {"_id": None, "amount": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"}}},
+    ]).to_list(ALL_ROWS)
+    response.headers["X-Total-Amount"] = f"{float(sums[0].get('amount') or 0) if sums else 0.0:.2f}"
+    response.headers["X-Total-Vat"] = f"{float(sums[0].get('vat') or 0) if sums else 0.0:.2f}"
     invoices = await server.db.invoices.find(
         query, {"_id": 0, "image_base64": 0, "image_base64s": 0}
     ).sort("date", -1).skip(clamped_offset).limit(clamped_limit).to_list(clamped_limit)
@@ -367,7 +395,7 @@ async def get_reverse_charge_protocols(current_user: User = Depends(get_current_
     _, query = await get_company_scope(current_user)
     query["vat_treatment"] = VatTreatment.REVERSE_CHARGE
 
-    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(1000)
+    invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(ALL_ROWS)
     return [Invoice(**inv) for inv in invoices]
 
 @router.get("/invoices/{invoice_id}", response_model=Invoice)
@@ -384,9 +412,9 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     require_permission(current_user, "manage_invoices")
     update_data = {k: v for k, v in invoice_update.model_dump().items() if v is not None}
     if "date" in update_data:
-        update_data["date"] = datetime.fromisoformat(update_data["date"].replace("Z", "+00:00"))
+        update_data["date"] = _day_or_400(update_data["date"], "дата на фактурата")
     if "payment_due_date" in update_data:
-        update_data["payment_due_date"] = datetime.fromisoformat(update_data["payment_due_date"].replace("Z", "+00:00"))
+        update_data["payment_due_date"] = _day_or_400(update_data["payment_due_date"], "дата на падеж")
 
     company_id, scope = await get_company_scope(current_user)
     existing = await server.db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
@@ -591,6 +619,12 @@ async def restore_audit_entry(log_id: str, current_user: User = Depends(get_curr
     if await server.db.invoices.find_one({"id": snapshot["id"]}, {"_id": 1}):
         raise HTTPException(status_code=400, detail="Вече съществува фактура с това ID")
 
+    snapshot = dict(snapshot)
+    # A snapshot taken before invoice dates were kept as business days
+    # comes back as one, like every invoice saved today.
+    for field in ("date", "payment_due_date"):
+        if snapshot.get(field):
+            snapshot[field] = stored_day(snapshot[field])
     await server.db.invoices.insert_one(dict(snapshot))
     await rebuild_invoice_price_history(company_id, snapshot)
     await server.db.audit_logs.update_one({"id": log_id}, {"$set": {"details.restored": True}})

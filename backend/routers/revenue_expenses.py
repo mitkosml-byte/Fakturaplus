@@ -79,7 +79,7 @@ async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User =
 @router.get("/daily-revenue/today")
 async def get_today_revenue(current_user: User = Depends(get_current_user)):
     """Get today's revenue totals for the whole company"""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local().isoformat()
     _, scope = await get_company_scope(current_user)
     existing = await server.db.daily_revenue.find_one({**scope, "date": today}, {"_id": 0})
     # Same visibility rule as /statistics/summary and /statistics/chart-data -
@@ -141,7 +141,7 @@ async def get_daily_revenues(
             query["date"] = {"$lte": end_date}
 
     can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
-    revenues = await server.db.daily_revenue.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    revenues = await server.db.daily_revenue.find(query, {"_id": 0}).sort("date", -1).to_list(ALL_ROWS)
     if not can_see_pocket_money:
         for r in revenues:
             r["pocket_money"] = 0
@@ -176,7 +176,7 @@ async def get_expenses(
         else:
             query["date"] = {"$lte": end_date}
 
-    expenses = await server.db.expenses.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    expenses = await server.db.expenses.find(query, {"_id": 0}).sort("date", -1).to_list(ALL_ROWS)
     return [NonInvoiceExpense(**e) for e in expenses]
 
 @router.put("/expenses/{expense_id}", response_model=NonInvoiceExpense)
@@ -259,7 +259,7 @@ async def get_personal_expenses(
     if category:
         query["category"] = category
     
-    expenses = await server.db.personal_expenses.find(query, {"_id": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(1000)
+    expenses = await server.db.personal_expenses.find(query, {"_id": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(ALL_ROWS)
     return {"personal_expenses": expenses}
 
 @router.delete("/personal-expenses/{expense_id}")

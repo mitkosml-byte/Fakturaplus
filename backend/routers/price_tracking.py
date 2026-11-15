@@ -625,7 +625,7 @@ async def get_item_price_history(
     if supplier:
         query["supplier"] = {"$regex": f"^{re.escape(unquote(supplier))}$", "$options": "i"}
     
-    history = await server.db.item_price_history.find(query, {"_id": 0}).sort("invoice_date", 1).to_list(1000)
+    history = await server.db.item_price_history.find(query, {"_id": 0}).sort("invoice_date", 1).to_list(ALL_ROWS)
     
     if not history:
         return {"history": [], "statistics": {}}
@@ -713,14 +713,14 @@ async def get_item_statistics(
     # Build date query
     query = {"company_id": company_id}
     if start_date or end_date:
-        query["invoice_date"] = {}
-        if start_date:
-            query["invoice_date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-        if end_date:
-            query["invoice_date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+        # The same business days as every other module (services/business_calendar).
+        try:
+            query["invoice_date"] = Period.parse(start_date, end_date).datetime_filter()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Невалиден период")
     
     # Get all price history records
-    history = await server.db.item_price_history.find(query, {"_id": 0}).to_list(10000)
+    history = await server.db.item_price_history.find(query, {"_id": 0}).to_list(ALL_ROWS)
     
     if not history:
         return {
@@ -875,12 +875,9 @@ async def get_price_inflation(
 
     query = {
         "company_id": company_id,
-        "invoice_date": {
-            "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
-            "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
-        },
+        "invoice_date": Period.parse(start_date, end_date).datetime_filter(),
     }
-    history = await server.db.item_price_history.find(query, {"_id": 0}).sort("invoice_date", 1).to_list(10000)
+    history = await server.db.item_price_history.find(query, {"_id": 0}).sort("invoice_date", 1).to_list(ALL_ROWS)
     if not history:
         return empty_response
 
@@ -1106,23 +1103,17 @@ async def _revenue_trend_ratio(company_id: str, window_days: int) -> float:
     gap) could otherwise send a recommendation to zero or multiply it
     absurdly, and falls back to a neutral 1.0 (no adjustment) whenever
     either half has no revenue data at all to compare."""
-    now = datetime.now(timezone.utc)
+    today = today_local()
     half = max(window_days // 2, 3)
-    recent_start = (now - timedelta(days=half)).strftime("%Y-%m-%d")
-    earlier_start = (now - timedelta(days=half * 2)).strftime("%Y-%m-%d")
+    recent_start = (today - timedelta(days=half)).isoformat()
+    earlier_start = (today - timedelta(days=half * 2)).isoformat()
 
-    # daily_revenue is keyed by user_id, not company_id - same resolution
-    # ForecastService uses.
-    company_users = await server.db.users.find(
-        {"company_id": company_id}, {"_id": 0, "user_id": 1}
-    ).to_list(1000)
-    user_ids = [u["user_id"] for u in company_users]
-
-    today_str = now.strftime("%Y-%m-%d")
+    # The whole company's revenue - the same records /statistics/summary
+    # counts (company_data_scope), on the business's own calendar.
     revenues = await server.db.daily_revenue.find(
-        {"user_id": {"$in": user_ids}, "date": {"$gte": earlier_start, "$lt": today_str}},
+        {**await company_data_scope(company_id), "date": {"$gte": earlier_start, "$lt": today.isoformat()}},
         {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1},
-    ).to_list(10000)
+    ).to_list(ALL_ROWS)
 
     recent_total = 0.0
     earlier_total = 0.0
@@ -1645,11 +1636,11 @@ async def get_merged_item_statistics(
     # Build date query
     query = {"company_id": company_id}
     if start_date or end_date:
-        query["invoice_date"] = {}
-        if start_date:
-            query["invoice_date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-        if end_date:
-            query["invoice_date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+        # The same business days as every other module (services/business_calendar).
+        try:
+            query["invoice_date"] = Period.parse(start_date, end_date).datetime_filter()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Невалиден период")
 
     # Get all price history records
     history = await server.db.item_price_history.find(

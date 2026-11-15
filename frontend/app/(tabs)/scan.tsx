@@ -28,6 +28,7 @@ import { detectPackMultiple, formatEur, priceAlertMeaning } from '../../src/util
 import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
+import { toApiDate } from '../../src/utils/periodRange';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -455,7 +456,12 @@ export default function ScanScreen() {
       let foundDate = false;
       if (result.invoice_date) {
         try {
-          const parsedDate = new Date(result.invoice_date);
+          // A plain "yyyy-MM-dd" is that day on this device's calendar -
+          // new Date() would read it as UTC midnight, the day before
+          // anywhere west of Greenwich.
+          const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(result.invoice_date)
+            ? parse(result.invoice_date, 'yyyy-MM-dd', new Date())
+            : new Date(result.invoice_date);
           if (!isNaN(parsedDate.getTime())) {
             setInvoiceDate(parsedDate);
             foundDate = true;
@@ -558,12 +564,12 @@ export default function ScanScreen() {
         vat_amount: parseFloat(vatAmount) || 0,
         total_amount: parseFloat(totalAmount) || 0,
         vat_treatment: vatTreatment || undefined,
-        date: invoiceDate.toISOString(),
+        date: toApiDate(invoiceDate),
         image_base64s: capturedImages.length > 0 ? capturedImages : undefined,
         notes: notes || undefined,
         items: itemsPayload.length > 0 ? itemsPayload : undefined,
         payment_method: paymentMethod || undefined,
-        payment_due_date: paymentMethod === 'bank_transfer' && paymentDueDate ? paymentDueDate.toISOString() : undefined,
+        payment_due_date: paymentMethod === 'bank_transfer' && paymentDueDate ? toApiDate(paymentDueDate) : undefined,
       });
       Haptics.success();
       if (saved.protocol_number) {
