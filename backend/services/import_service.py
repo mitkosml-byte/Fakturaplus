@@ -327,18 +327,19 @@ def _parse_daily_revenue_row(row: List[Any], table: ParsedTable, _ctx: Dict[str,
     if errors:
         return None, errors, []
 
-    pocket_money = _parse_float(_get(row, table, "Джобче")) or 0
-    card_revenue = _parse_float(_get(row, table, "От тях - платено с карта", "Платено с карта")) or 0
+    # An empty cell leaves what the day already holds - a till export
+    # with no "Джобче" column never wipes out pocket money entered by hand.
+    data = {"date": date_val, "fiscal_revenue": fiscal_revenue}
+    pocket_money = _parse_float(_get(row, table, "Джобче"))
+    card_revenue = _parse_float(_get(row, table, "От тях - платено с карта", "Платено с карта"))
     vat_rate = _parse_float(_get(row, table, "ДДС ставка %", "ДДС ставка"))
-
-    data = {
-        "date": date_val,
-        "fiscal_revenue": fiscal_revenue,
-        "pocket_money": pocket_money,
-        "card_revenue": card_revenue,
-        "vat_rate_percent": vat_rate if vat_rate is not None else 20.0,
-    }
-    warnings = ["ще замести вече въведен оборот за тази дата, ако има такъв"]
+    if pocket_money is not None:
+        data["pocket_money"] = pocket_money
+    if card_revenue is not None:
+        data["card_revenue"] = card_revenue
+    if vat_rate is not None:
+        data["vat_rate_percent"] = vat_rate
+    warnings = ["заменя въведените за тази дата стойности; празните клетки не променят записаното"]
     return data, [], warnings
 
 
@@ -468,7 +469,7 @@ ENTITY_TEMPLATES = {
         "label": "Дневен оборот (назад във времето)",
         "headers": ["Дата*", "Фискализиран оборот*", "Джобче", "От тях - платено с карта", "ДДС ставка %"],
         "example": ["01.09.2026", "450.00", "20.00", "150.00", "20"],
-        "notes": "Ако вече има въведен оборот за дадена дата, той се ЗАМЕСТВА с новите стойности, не се сумира с тях.",
+        "notes": "Ако вече има въведен оборот за дадена дата, попълнените клетки го ЗАМЕСТВАТ (не се сумират), а празните не го променят.",
     },
     "expenses": {
         "label": "Разходи \"в канала\" (без фактура)",

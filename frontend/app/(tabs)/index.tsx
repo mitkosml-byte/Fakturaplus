@@ -520,6 +520,8 @@ export default function HomeScreen() {
     setRevenueDate(getDefaultActionDate());
   };
 
+  const canSeePocketMoney = hasPermission('view_pocket_money');
+
   const handleAddRevenue = async () => {
     if (!fiscalRevenue && !pocketMoney) {
       Alert.alert(t('common.error'), t('msg.enterAtLeastOne'));
@@ -532,7 +534,9 @@ export default function HomeScreen() {
       await api.createDailyRevenue({
         date: format(revenueDate, 'yyyy-MM-dd'),
         fiscal_revenue: parseFloat(fiscalRevenue) || 0,
-        pocket_money: parseFloat(pocketMoney) || 0,
+        // Only someone who sees pocket money sets it - for anyone else the
+        // field is hidden and the day keeps what it holds.
+        ...(canSeePocketMoney ? { pocket_money: parseFloat(pocketMoney) || 0 } : {}),
         card_revenue: parseFloat(cardRevenue) || 0,
         vat_rate_percent: revenueVatRate,
       });
@@ -1214,6 +1218,7 @@ export default function HomeScreen() {
         onChangeVatRate={setRevenueVatRate}
         pocketMoney={pocketMoney}
         onChangePocketMoney={setPocketMoney}
+        showPocketMoney={canSeePocketMoney}
         isSubmitting={isSubmittingForm}
         onSubmit={handleAddRevenue}
       />

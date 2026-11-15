@@ -31,50 +31,93 @@ from server import (
     _team_channel_id,
 )
 import server
+from pymongo.errors import DuplicateKeyError
 
 router = APIRouter(prefix="/api")
 
+def _revenue_day(value: str) -> str:
+    """A submitted revenue date as "YYYY-MM-DD" - 400 when it is no date."""
+    try:
+        day = business_day(value)
+    except (TypeError, ValueError):
+        day = None
+    if day is None:
+        raise HTTPException(status_code=400, detail="Невалидна дата")
+    return day.isoformat()
+
+
+def _revenue_for_viewer(doc: dict, current_user: User) -> DailyRevenue:
+    """A day's record as this person may see it - pocket money stays hidden
+    from whoever may not see it, in a reply to their own save too."""
+    doc = dict(doc)
+    if not get_financial_visibility(current_user)["pocket_money"]:
+        doc["pocket_money"] = 0
+    return DailyRevenue(**doc)
+
+
+async def _save_revenue_day(company_id: Optional[str], scope: dict, current_user: User, day: str,
+                            changes: Dict[str, Any], increments: Optional[Dict[str, float]] = None) -> dict:
+    """Sets (and adds to) one day's revenue - one record per company and
+    day, whoever typed it: the day already there is updated, otherwise it
+    is created, with the database's own one-day-one-record rule catching
+    two saves of the same new day at the same moment."""
+    existing = await server.db.daily_revenue.find_one({**scope, "date": day}, {"_id": 0})
+    if existing is None:
+        doc = DailyRevenue(
+            user_id=current_user.user_id, company_id=company_id, date=day,
+            fiscal_revenue=0, pocket_money=0, card_revenue=0, vat_rate_percent=20.0,
+        ).model_dump()
+        doc.update(changes)
+        for field, amount in (increments or {}).items():
+            doc[field] = round(doc.get(field, 0) + amount, 2)
+        try:
+            await server.db.daily_revenue.insert_one(dict(doc))
+            return doc
+        except DuplicateKeyError:
+            # Someone saved the same day a moment earlier - update theirs.
+            existing = await server.db.daily_revenue.find_one({**scope, "date": day}, {"_id": 0})
+            if existing is None:
+                raise
+    update: Dict[str, Any] = {}
+    if changes:
+        update["$set"] = changes
+    if increments:
+        update["$inc"] = increments
+    if update:
+        await server.db.daily_revenue.update_one({"id": existing["id"]}, update)
+    saved = await server.db.daily_revenue.find_one({"id": existing["id"]}, {"_id": 0})
+    saved.setdefault("company_id", company_id)
+    return saved
+
+
 @router.post("/daily-revenue", response_model=DailyRevenue)
 async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User = Depends(get_current_user)):
-    """Записва оборота за деня - ЗАМЕСТВА предишната стойност, не я
-    добавя към нея (фронтендът зарежда текущите стойности в полетата
-    при отваряне, точно за да могат да се коригират директно)."""
+    """Записва оборота за деня - заменя въведените стойности, не ги
+    добавя към записаните (фронтендът зарежда текущите стойности в
+    полетата при отваряне, точно за да могат да се коригират директно).
+    Поле, което не е подадено, остава както е; джобчето не се пипа от
+    човек, който няма право да го вижда - той вижда 0 и иначе би го
+    изтрил с всяко запазване."""
     require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
+    changes = {k: v for k, v in revenue.model_dump(exclude={"date"}).items() if v is not None}
+    if not get_financial_visibility(current_user)["pocket_money"]:
+        changes.pop("pocket_money", None)
+    saved = await _save_revenue_day(company_id, scope, current_user, _revenue_day(revenue.date), changes)
+    return _revenue_for_viewer(saved, current_user)
 
-    # Check if ANY teammate already logged revenue for this date - the
-    # fiscal till total for a given day belongs to the whole company, not
-    # to whoever happened to type it in.
-    existing = await server.db.daily_revenue.find_one({**scope, "date": revenue.date}, {"_id": 0})
 
-    if existing:
-        await server.db.daily_revenue.update_one(
-            {"id": existing["id"]},
-            {"$set": {
-                "fiscal_revenue": revenue.fiscal_revenue,
-                "pocket_money": revenue.pocket_money,
-                "card_revenue": revenue.card_revenue,
-                "vat_rate_percent": revenue.vat_rate_percent,
-            }}
-        )
-        existing["fiscal_revenue"] = revenue.fiscal_revenue
-        existing["pocket_money"] = revenue.pocket_money
-        existing["card_revenue"] = revenue.card_revenue
-        existing["vat_rate_percent"] = revenue.vat_rate_percent
-        existing.setdefault("company_id", company_id)
-        return DailyRevenue(**existing)
-
-    revenue_obj = DailyRevenue(
-        user_id=current_user.user_id,
-        company_id=company_id,
-        date=revenue.date,
-        fiscal_revenue=revenue.fiscal_revenue,
-        pocket_money=revenue.pocket_money,
-        card_revenue=revenue.card_revenue,
-        vat_rate_percent=revenue.vat_rate_percent
+@router.post("/daily-revenue/add-pocket", response_model=DailyRevenue)
+async def add_pocket_money(payload: PocketMoneyAdd, current_user: User = Depends(get_current_user)):
+    """Adds an amount to a day's pocket money (a paid bill logged as
+    revenue) - added to what the day holds, never replacing it, so it is
+    safe for someone who may not see pocket money too."""
+    require_permission(current_user, "add_revenue")
+    company_id, scope = await get_company_scope(current_user)
+    saved = await _save_revenue_day(
+        company_id, scope, current_user, _revenue_day(payload.date), {}, {"pocket_money": round(payload.amount, 2)},
     )
-    await server.db.daily_revenue.insert_one(revenue_obj.model_dump())
-    return revenue_obj
+    return _revenue_for_viewer(saved, current_user)
 
 @router.get("/daily-revenue/today")
 async def get_today_revenue(current_user: User = Depends(get_current_user)):

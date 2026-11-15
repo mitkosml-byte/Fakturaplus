@@ -519,10 +519,21 @@ class ApiService {
     return this.fetch(`/daily-revenue${query ? `?${query}` : ''}`);
   }
 
-  async createDailyRevenue(revenue: { date: string; fiscal_revenue: number; pocket_money: number; card_revenue?: number; vat_rate_percent?: number }): Promise<DailyRevenue> {
+  // A field left out keeps what the day already holds (pocket money for
+  // someone who may not see it, an empty import cell).
+  async createDailyRevenue(revenue: { date: string; fiscal_revenue?: number; pocket_money?: number; card_revenue?: number; vat_rate_percent?: number }): Promise<DailyRevenue> {
     return this.fetch('/daily-revenue', {
       method: 'POST',
       body: JSON.stringify(revenue),
+    });
+  }
+
+  // Adds to a day's pocket money (never replaces it) - a paid bill logged
+  // as revenue.
+  async addPocketMoney(payload: { date: string; amount: number }): Promise<DailyRevenue> {
+    return this.fetch('/daily-revenue/add-pocket', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 

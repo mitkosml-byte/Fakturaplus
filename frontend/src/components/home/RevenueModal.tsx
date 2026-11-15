@@ -31,6 +31,9 @@ type Props = {
   onChangeVatRate: (rate: number) => void;
   pocketMoney: string;
   onChangePocketMoney: (value: string) => void;
+  // Hidden for someone who may not see pocket money - they would only see
+  // 0 there, and the day keeps what it holds.
+  showPocketMoney: boolean;
   isSubmitting: boolean;
   onSubmit: () => void;
   onCopyYesterday: () => void;
@@ -40,7 +43,7 @@ type Props = {
 export function RevenueModal({
   visible, onClose, date, onChangeDate, isDatePickerVisible, onOpenDatePicker, onCloseDatePicker,
   dateLocale, language, ocrAdditionNote, fiscalRevenue, onChangeFiscalRevenue, cardRevenue,
-  onChangeCardRevenue, vatRate, onChangeVatRate, pocketMoney, onChangePocketMoney, isSubmitting, onSubmit,
+  onChangeCardRevenue, vatRate, onChangeVatRate, pocketMoney, onChangePocketMoney, showPocketMoney, isSubmitting, onSubmit,
   onCopyYesterday, copyingYesterday,
 }: Props) {
   const { t } = useTranslation();
@@ -153,18 +156,20 @@ export function RevenueModal({
             <Text style={styles.inputHint}>{t('home.vatRateHint')}</Text>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>{t('home.pocketLabel')} (€)</Text>
-            <TextInput
-              style={styles.input}
-              value={pocketMoney}
-              onChangeText={onChangePocketMoney}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={COLORS.textMuted}
-            />
-            <Text style={styles.inputHint}>{t('home.excludesVAT')}</Text>
-          </View>
+          {showPocketMoney && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>{t('home.pocketLabel')} (€)</Text>
+              <TextInput
+                style={styles.input}
+                value={pocketMoney}
+                onChangeText={onChangePocketMoney}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor={COLORS.textMuted}
+              />
+              <Text style={styles.inputHint}>{t('home.excludesVAT')}</Text>
+            </View>
+          )}
 
           <PressableScale style={styles.submitButton} onPress={onSubmit} disabled={isSubmitting}>
             {isSubmitting ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('home.save')}</Text>}

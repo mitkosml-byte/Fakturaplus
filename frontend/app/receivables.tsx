@@ -156,15 +156,9 @@ export default function ReceivablesScreen() {
   // easy-to-forget trip to "Дневен оборот".
   const handleLogAsRevenue = async (r: Receivable) => {
     try {
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
-      const existing = await api.getRevenueByDate(todayStr);
-      await api.createDailyRevenue({
-        date: todayStr,
-        fiscal_revenue: existing.fiscal_revenue,
-        pocket_money: existing.pocket_money + r.amount,
-        card_revenue: existing.card_revenue,
-        vat_rate_percent: existing.vat_rate_percent,
-      });
+      // Added on the server to what the day holds - never a read-then-
+      // write that would replace pocket money this person may not see.
+      await api.addPocketMoney({ date: format(new Date(), 'yyyy-MM-dd'), amount: r.amount });
       Haptics.success();
       Toast.success(t('receivables.logAsRevenueSuccess'));
     } catch (error: any) {

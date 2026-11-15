@@ -526,11 +526,22 @@ class DailyRevenue(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class DailyRevenueCreate(BaseModel):
+    """A day's revenue as entered. A field left out (None) keeps what the
+    day already holds - an Excel row with an empty "Джобче" cell, or a
+    teammate who may not see pocket money, never wipes it out. A new day
+    starts from 0 (20% VAT)."""
     date: str
-    fiscal_revenue: float = Field(default=0, ge=0)
-    pocket_money: float = Field(default=0, ge=0)
-    card_revenue: float = Field(default=0, ge=0)
-    vat_rate_percent: float = Field(default=20.0, ge=0, le=100)
+    fiscal_revenue: Optional[float] = Field(default=None, ge=0)
+    pocket_money: Optional[float] = Field(default=None, ge=0)
+    card_revenue: Optional[float] = Field(default=None, ge=0)
+    vat_rate_percent: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class PocketMoneyAdd(BaseModel):
+    """Money added to a day's pocket money - added to what is there,
+    never replacing it (a paid bill logged as revenue)."""
+    date: str
+    amount: float = Field(gt=0)
 
 class NonInvoiceExpense(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
