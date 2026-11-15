@@ -2970,6 +2970,90 @@ export const translations: Translations = {
     bg: 'Върни',
     en: 'Undo',
   },
+  'scanCheck.allGood': {
+    bg: 'Сборът на редовете ({sum} €) съвпада с данъчната основа.',
+    en: 'The lines add up to the tax base ({sum} €).',
+  },
+  'scanCheck.headerMismatch': {
+    bg: 'Основа + ДДС = {expected} €, а сумата за плащане е {total} €. Провери сумите горе.',
+    en: 'Base + VAT = {expected} €, but the total is {total} €. Check the amounts above.',
+  },
+  'scanCheck.linesMismatch': {
+    bg: 'Редовете дават {sum} €, а данъчната основа е {base} € (разлика {diff} €).',
+    en: 'The lines add up to {sum} €, the tax base is {base} € (difference {diff} €).',
+  },
+  'scanCheck.causeLineValues': {
+    bg: 'Стойностите на редовете съвпадат с основата, но при {n} реда количество × цена дава друго – вероятно отстъпка по ред. За точни цени запиши цената след отстъпката.',
+    en: 'The line values match the base, but on {n} lines quantity × price does not - most likely a per-line discount. For accurate prices, keep the price after the discount.',
+  },
+  'scanCheck.causeLineValuesOne': {
+    bg: 'При „{name}“ количество × цена не съвпада със стойността на реда – вероятно е разчетена грешно цифра.',
+    en: 'On "{name}" quantity × price does not match the line value - most likely a misread digit.',
+  },
+  'scanCheck.fixLinePrices': {
+    bg: 'Цена след отстъпката ({n} реда)',
+    en: 'Price after discount ({n} lines)',
+  },
+  'scanCheck.causeVatIncluded': {
+    bg: 'Цените на редовете изглеждат с ДДС: сборът им съвпада със сумата за плащане. Историята на цените пази цени без ДДС.',
+    en: 'The line prices look VAT-inclusive: they add up to the total. Price history keeps prices without VAT.',
+  },
+  'scanCheck.fixVatIncluded': {
+    bg: 'Махни ДДС от цените',
+    en: 'Remove VAT from the prices',
+  },
+  'scanCheck.causeDuplicate': {
+    bg: 'Редът „{name}“ изглежда разчетен два пъти – без него сборът съвпада.',
+    en: '"{name}" looks read twice - without it the lines add up.',
+  },
+  'scanCheck.removeDuplicate': {
+    bg: 'Махни повторения ред',
+    en: 'Remove the repeated line',
+  },
+  'scanCheck.causeDecimal': {
+    bg: 'При „{name}“ вероятно е сбъркана десетичната запетая: с цена {price} € сборът съвпада.',
+    en: 'On "{name}" the decimal point is likely misplaced: at {price} € the lines add up.',
+  },
+  'scanCheck.causeMissing': {
+    bg: 'Липсват {diff} € – вероятно пропуснат ред. Добави го или провери снимката.',
+    en: '{diff} € is missing - most likely a skipped line. Add it or check the photo.',
+  },
+  'scanCheck.addMissingLine': {
+    bg: 'Добави ред',
+    en: 'Add a line',
+  },
+  'scanCheck.causeExtra': {
+    bg: 'Редовете са с {diff} € над основата – провери за двоен ред или обща отстъпка, която не е въведена като ред.',
+    en: 'The lines are {diff} € over the base - check for a line read twice or an overall discount not entered as a line.',
+  },
+  'scanCheck.lineValueMismatch': {
+    bg: 'Количество × цена = {computed} €, а стойността на реда е {printed} €.',
+    en: 'Quantity × price = {computed} €, but the line value is {printed} €.',
+  },
+  'scanCheck.setPrice': {
+    bg: 'Цена {price} €',
+    en: 'Price {price} €',
+  },
+  'scanCheck.setQuantity': {
+    bg: 'Количество {qty}',
+    en: 'Quantity {qty}',
+  },
+  'scanCheck.confirmTitle': {
+    bg: 'Сумите не съвпадат',
+    en: 'The amounts do not add up',
+  },
+  'scanCheck.confirmBody': {
+    bg: 'Запази все пак?',
+    en: 'Save anyway?',
+  },
+  'scanCheck.review': {
+    bg: 'Провери',
+    en: 'Review',
+  },
+  'scanCheck.saveAnyway': {
+    bg: 'Запази все пак',
+    en: 'Save anyway',
+  },
   'scan.priceHintChange': {
     bg: '{percent}% спрямо обичайните {old} €',
     en: '{percent}% vs the usual {old} €',

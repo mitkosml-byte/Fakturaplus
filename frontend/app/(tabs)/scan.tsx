@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,7 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
-import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint } from '../../src/types';
+import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint, InvoiceDraftCheck, InvoiceDraftFix } from '../../src/types';
 import { detectPackMultiple, formatEur, priceAlertMeaning } from '../../src/utils/priceAlert';
 import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
@@ -38,13 +38,24 @@ interface EditableItem {
   unit_price: string;
   // As recognized, before any correction - what a pack re-read is measured
   // against when the invoice is saved (that is how the app learns it).
-  ocr?: { quantity: number; unit_price: number };
+  // total_price = the line's value as printed, which the amounts check
+  // holds quantity x price against.
+  ocr?: { quantity: number; unit_price: number; total_price?: number };
   // A pack size learned from an earlier correction that the app applied
   // automatically; `undone` once the owner put the line back.
   packRule?: { multiple: number; undone: boolean };
 }
 
 const emptyItem = (): EditableItem => ({ name: '', quantity: '1', unit: 'бр.', unit_price: '' });
+
+// A typed amount as a number ("12,50" or "12.50"); 0 when empty.
+const toNumber = (value: string | number | null | undefined): number => {
+  const n = parseFloat(String(value ?? '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+};
+
+// How long after the last edit the amounts are checked again.
+const DRAFT_CHECK_DELAY_MS = 500;
 
 export default function ScanScreen() {
   const { t, dateLocale } = useTranslation();
@@ -77,6 +88,18 @@ export default function ScanScreen() {
   // `items` (its name alone isn't a stable key - two rows can share a
   // name before the user's edited them apart).
   const [itemPriceHints, setItemPriceHints] = useState<Record<number, ItemPriceHint>>({});
+  // Do the amounts add up (POST /invoices/draft-check)? Asked again after
+  // every edit; `draftCheckFresh` is false from an edit until the answer
+  // for it arrives - meanwhile the old answer shows dimmed, without its
+  // fix buttons (a second tap must not apply a fix twice) or line notes
+  // (their positions may have moved).
+  const [draftCheck, setDraftCheck] = useState<InvoiceDraftCheck | null>(null);
+  const [draftCheckFresh, setDraftCheckFresh] = useState(false);
+  const draftCheckSeq = useRef(0);
+  const draftLineFlags = useMemo(
+    () => Object.fromEntries((draftCheck?.line_flags || []).map((flag) => [flag.index, flag])),
+    [draftCheck],
+  );
 
   // Form fields (editable after OCR)
   const [supplier, setSupplier] = useState('');
@@ -265,6 +288,38 @@ export default function ScanScreen() {
     }
   };
 
+  // Best-effort like the price hints: no answer just shows nothing.
+  useEffect(() => {
+    if (scanMode !== 'purchase' || items.length === 0) {
+      setDraftCheck(null);
+      return;
+    }
+    setDraftCheckFresh(false);
+    const seq = ++draftCheckSeq.current;
+    const handle = setTimeout(async () => {
+      try {
+        const result = await api.checkInvoiceDraft({
+          amount_without_vat: toNumber(amountWithoutVat),
+          vat_amount: toNumber(vatAmount),
+          total_amount: toNumber(totalAmount),
+          items: items.map((item) => ({
+            name: item.name,
+            quantity: toNumber(item.quantity) || 1,
+            unit_price: toNumber(item.unit_price),
+            printed_total: item.ocr?.total_price ?? null,
+          })),
+        });
+        if (seq === draftCheckSeq.current) {
+          setDraftCheck(result);
+          setDraftCheckFresh(true);
+        }
+      } catch {
+        if (seq === draftCheckSeq.current) setDraftCheck(null);
+      }
+    }, DRAFT_CHECK_DELAY_MS);
+    return () => clearTimeout(handle);
+  }, [items, amountWithoutVat, vatAmount, totalAmount, scanMode]);
+
   // Best-effort: a failed check just leaves the lines without hints,
   // never blocks the scan.
   const loadItemPriceHints = async (
@@ -388,7 +443,7 @@ export default function ScanScreen() {
           quantity: String(item.quantity),
           unit: item.unit || 'бр.',
           unit_price: String(item.unit_price),
-          ocr: { quantity: item.quantity || 1, unit_price: item.unit_price },
+          ocr: { quantity: item.quantity || 1, unit_price: item.unit_price, total_price: item.total_price },
         })));
         setItemPriceHints({});
         loadItemPriceHints(result.items, result.supplier);
@@ -450,9 +505,20 @@ export default function ScanScreen() {
     }
   };
 
-  const handleSaveInvoice = async () => {
+  const handleSaveInvoice = async (confirmed: boolean = false) => {
     if (!supplier || !invoiceNumber || !totalAmount) {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
+      return;
+    }
+
+    // Amounts that do not add up are asked about once more before they
+    // reach the data - saving anyway stays the owner's call.
+    const problems = draftProblems();
+    if (problems.length > 0 && confirmed !== true) {
+      Alert.alert(t('scanCheck.confirmTitle'), `${problems.join('\n')}\n\n${t('scanCheck.confirmBody')}`, [
+        { text: t('scanCheck.review'), style: 'cancel' },
+        { text: t('scanCheck.saveAnyway'), onPress: () => { handleSaveInvoice(true); } },
+      ]);
       return;
     }
 
@@ -536,6 +602,149 @@ export default function ScanScreen() {
     resetForm();
   };
 
+  const money = (value: number) => Math.abs(value).toFixed(2);
+  const lineName = (index: number | null) => (index != null && items[index]?.name.trim()) || '?';
+
+  const headerProblemText = (header: NonNullable<InvoiceDraftCheck['header']>) =>
+    t('scanCheck.headerMismatch')
+      .replace('{expected}', money(header.expected_total))
+      .replace('{total}', money(header.total_amount));
+
+  const linesProblemText = (lines: NonNullable<InvoiceDraftCheck['lines']>) =>
+    t('scanCheck.linesMismatch')
+      .replace('{sum}', money(lines.sum))
+      .replace('{base}', money(lines.base))
+      .replace('{diff}', money(lines.difference));
+
+  // What does not add up, one sentence each (purchase invoices only).
+  const draftProblems = (): string[] => {
+    if (scanMode !== 'purchase' || !draftCheck) return [];
+    const problems: string[] = [];
+    if (draftCheck.header) problems.push(headerProblemText(draftCheck.header));
+    if (draftCheck.lines && !draftCheck.lines.ok) problems.push(linesProblemText(draftCheck.lines));
+    return problems;
+  };
+
+  const draftCauseText = (lines: NonNullable<InvoiceDraftCheck['lines']>): string | null => {
+    switch (lines.cause) {
+      case 'line_values':
+        return lines.index != null
+          ? t('scanCheck.causeLineValuesOne').replace('{name}', lineName(lines.index))
+          : t('scanCheck.causeLineValues').replace('{n}', String(lines.fixes.length));
+      case 'vat_included':
+        return t('scanCheck.causeVatIncluded');
+      case 'duplicate_line':
+        return t('scanCheck.causeDuplicate').replace('{name}', lineName(lines.remove_index));
+      case 'decimal_slip':
+        return t('scanCheck.causeDecimal')
+          .replace('{name}', lineName(lines.index))
+          .replace('{price}', String(lines.fixes[0]?.unit_price ?? ''));
+      case 'missing_line':
+        return t('scanCheck.causeMissing').replace('{diff}', money(lines.difference));
+      case 'extra':
+        return t('scanCheck.causeExtra').replace('{diff}', money(lines.difference));
+      default:
+        return null;
+    }
+  };
+
+  // A fix keeps a line's printed value in step when it agreed with the line
+  // before (prices read with VAT, a decimal point misplaced in the value
+  // too); otherwise the printed value is what the fix was taken from.
+  const withUnitPrice = (item: EditableItem, unitPrice: number): EditableItem => {
+    const quantity = toNumber(item.quantity) || 1;
+    const printed = item.ocr?.total_price;
+    const before = quantity * toNumber(item.unit_price);
+    const agreed = printed != null && Math.abs(before - printed) <= Math.max(0.02, 0.005 * Math.abs(printed));
+    return {
+      ...item,
+      unit_price: String(unitPrice),
+      ocr: item.ocr && agreed ? { ...item.ocr, total_price: Math.round(quantity * unitPrice * 100) / 100 } : item.ocr,
+    };
+  };
+
+  const applyDraftFixes = (fixes: InvoiceDraftFix[]) => {
+    const byIndex = new Map(fixes.map((fix) => [fix.index, fix.unit_price]));
+    setItems((prev) => prev.map((item, i) => {
+      const unitPrice = byIndex.get(i);
+      return unitPrice == null ? item : withUnitPrice(item, unitPrice);
+    }));
+    // An edited line's price hint no longer applies, as with any edit.
+    setItemPriceHints((prev) => {
+      const next = { ...prev };
+      byIndex.forEach((_, i) => { delete next[i]; });
+      return next;
+    });
+  };
+
+  const renderDraftCheck = (check: InvoiceDraftCheck) => {
+    const lines = check.lines;
+    const problem = !!check.header || (!!lines && !lines.ok);
+    const fixButton = (label: string, onPress: () => void) => (
+      <TouchableOpacity style={styles.packFixButton} onPress={onPress}>
+        <Ionicons name="construct-outline" size={14} color={COLORS.warning} />
+        <Text style={styles.packFixButtonText}>{label}</Text>
+      </TouchableOpacity>
+    );
+    let action: React.ReactNode = null;
+    if (lines && !lines.ok && draftCheckFresh) {
+      if (lines.cause === 'line_values' && lines.fixes.length > 1) {
+        action = fixButton(t('scanCheck.fixLinePrices').replace('{n}', String(lines.fixes.length)), () => applyDraftFixes(lines.fixes));
+      } else if (lines.cause === 'line_values' && lines.fixes.length === 1) {
+        // One line off: its price or its quantity was misread - offer both
+        // readings that give the printed value, as on the line itself.
+        const flag = draftLineFlags[lines.fixes[0].index];
+        const index = lines.fixes[0].index;
+        action = (
+          <View style={styles.lineFixRow}>
+            {fixButton(t('scanCheck.setPrice').replace('{price}', String(lines.fixes[0].unit_price)), () => applyDraftFixes(lines.fixes))}
+            {flag?.quantity != null && fixButton(
+              t('scanCheck.setQuantity').replace('{qty}', String(flag.quantity)),
+              () => updateItem(index, { quantity: String(flag.quantity) }),
+            )}
+          </View>
+        );
+      } else if (lines.cause === 'decimal_slip' && lines.fixes.length === 1) {
+        action = fixButton(t('scanCheck.setPrice').replace('{price}', String(lines.fixes[0].unit_price)), () => applyDraftFixes(lines.fixes));
+      } else if (lines.cause === 'vat_included') {
+        action = fixButton(t('scanCheck.fixVatIncluded'), () => applyDraftFixes(lines.fixes));
+      } else if (lines.cause === 'duplicate_line' && lines.remove_index != null) {
+        const index = lines.remove_index;
+        action = fixButton(t('scanCheck.removeDuplicate'), () => removeItem(index));
+      } else if (lines.cause === 'missing_line') {
+        action = fixButton(t('scanCheck.addMissingLine'), addItem);
+      }
+    }
+    const cause = lines && !lines.ok && draftCheckFresh ? draftCauseText(lines) : null;
+    return (
+      <View style={[styles.checkCard, problem ? styles.checkCardWarn : styles.checkCardOk, !draftCheckFresh && styles.checkCardStale]}>
+        {check.header && (
+          <View style={styles.checkRow}>
+            <Ionicons name="alert-circle" size={16} color={COLORS.warning} />
+            <Text style={[styles.checkText, styles.checkTitle]}>{headerProblemText(check.header)}</Text>
+          </View>
+        )}
+        {lines && (lines.ok ? (
+          <View style={styles.checkRow}>
+            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
+            <Text style={[styles.checkText, { color: COLORS.success }]}>
+              {t('scanCheck.allGood').replace('{sum}', money(lines.sum))}
+            </Text>
+          </View>
+        ) : (
+          <View style={check.header ? styles.checkSpaced : undefined}>
+            <View style={styles.checkRow}>
+              <Ionicons name="alert-circle" size={16} color={COLORS.warning} />
+              <Text style={[styles.checkText, styles.checkTitle]}>{linesProblemText(lines)}</Text>
+            </View>
+            {cause && <Text style={styles.checkCause}>{cause}</Text>}
+            {action && <View style={styles.checkActions}>{action}</View>}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   const updateItem = (index: number, patch: Partial<EditableItem>) => {
     setItems(prev => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
     // A hint judged the line as recognized - once edited, it no longer applies.
@@ -579,6 +788,7 @@ export default function ScanScreen() {
     setNotes('');
     setItems([]);
     setItemPriceHints({});
+    setDraftCheck(null);
     setInvoiceDate(new Date());
     setDateFoundByOcr(null);
     setPaymentMethod('');
@@ -1045,6 +1255,8 @@ export default function ScanScreen() {
                       </TouchableOpacity>
                     </View>
 
+                    {draftCheck && (draftCheck.header || draftCheck.lines) && renderDraftCheck(draftCheck)}
+
                     {items.length === 0 ? (
                       <Text style={styles.itemsEmptyHint}>
                         {t('scan.noProductsRecognized')}
@@ -1134,6 +1346,40 @@ export default function ScanScreen() {
                               </Text>
                             );
                           })()}
+                          {draftCheckFresh && draftLineFlags[index] && (() => {
+                            const flag = draftLineFlags[index];
+                            return (
+                              <View>
+                                <Text style={[styles.itemPriceNote, { color: COLORS.warning }]}>
+                                  {t('scanCheck.lineValueMismatch')
+                                    .replace('{computed}', money(flag.computed))
+                                    .replace('{printed}', money(flag.printed))}
+                                </Text>
+                                <View style={styles.lineFixRow}>
+                                  {flag.unit_price != null && (
+                                    <TouchableOpacity
+                                      style={styles.packFixButton}
+                                      onPress={() => applyDraftFixes([{ index, unit_price: flag.unit_price as number }])}
+                                    >
+                                      <Text style={styles.packFixButtonText}>
+                                        {t('scanCheck.setPrice').replace('{price}', String(flag.unit_price))}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
+                                  {flag.quantity != null && (
+                                    <TouchableOpacity
+                                      style={styles.packFixButton}
+                                      onPress={() => updateItem(index, { quantity: String(flag.quantity) })}
+                                    >
+                                      <Text style={styles.packFixButtonText}>
+                                        {t('scanCheck.setQuantity').replace('{qty}', String(flag.quantity))}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                              </View>
+                            );
+                          })()}
                         </View>
                       ))
                     )}
@@ -1156,7 +1402,7 @@ export default function ScanScreen() {
 
                   <PressableScale
                     style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-                    onPress={scanMode === 'sales' ? handleAddToRevenue : handleSaveInvoice}
+                    onPress={scanMode === 'sales' ? handleAddToRevenue : () => handleSaveInvoice()}
                     disabled={isSaving}
                   >
                     {isSaving ? (
@@ -1692,8 +1938,61 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.warning,
   },
+  // Do the amounts add up?
+  checkCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+  },
+  checkCardWarn: {
+    borderColor: COLORS.warning,
+  },
+  checkCardOk: {
+    borderColor: COLORS.success,
+  },
+  checkCardStale: {
+    opacity: 0.55,
+  },
+  checkSpaced: {
+    marginTop: 8,
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  checkText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: COLORS.textSecondary,
+  },
+  checkTitle: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  checkCause: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: COLORS.textSecondary,
+    marginTop: 6,
+    marginLeft: 22,
+  },
+  checkActions: {
+    marginLeft: 22,
+  },
+  lineFixRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   itemSmallInput: {
     flex: 1,
+    // Without it a web text input keeps its built-in width and the row
+    // runs off the screen (price and delete out of view).
+    minWidth: 0,
     paddingVertical: 10,
     paddingHorizontal: 10,
     fontSize: 14,

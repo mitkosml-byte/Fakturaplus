@@ -608,6 +608,48 @@ export interface ItemPriceHint {
   unit: string | null;
 }
 
+// Scan review, before saving (POST /invoices/draft-check): do the amounts
+// add up, and which line is most likely wrong if not. Indexes point into
+// the request's items.
+export interface InvoiceDraftFix {
+  index: number;
+  unit_price: number;
+}
+
+export type InvoiceDraftCause =
+  | 'ok'
+  | 'line_values'
+  | 'vat_included'
+  | 'duplicate_line'
+  | 'decimal_slip'
+  | 'missing_line'
+  | 'extra';
+
+export interface InvoiceDraftCheck {
+  header: { expected_total: number; total_amount: number; difference: number } | null;
+  lines: {
+    sum: number;
+    base: number;
+    difference: number;
+    ok: boolean;
+    cause: InvoiceDraftCause | null;
+    fixes: InvoiceDraftFix[];
+    remove_index: number | null;
+    index: number | null;
+    factor: number | null;
+  } | null;
+  // quantity x price differs from the line's printed value; the price and
+  // (when plausible) the quantity that would match it.
+  line_flags: {
+    index: number;
+    kind: 'line_value_mismatch';
+    computed: number;
+    printed: number;
+    unit_price?: number;
+    quantity?: number;
+  }[];
+}
+
 export interface PriceAlertMute {
   id: string;
   item_name: string;

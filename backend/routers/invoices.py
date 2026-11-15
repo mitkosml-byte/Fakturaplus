@@ -45,6 +45,8 @@ from routers.price_tracking import (
     resync_invoice_line,
 )
 
+from services.invoice_check import check_invoice_draft
+
 router = APIRouter(prefix="/api")
 
 @router.post("/invoices", response_model=Invoice)
@@ -259,6 +261,36 @@ async def mark_invoices_paid(body: MarkInvoicesPaidRequest, current_user: User =
             },
         )
     return {"updated": len(invoices)}
+
+
+class DraftCheckLine(BaseModel):
+    name: str = Field(default="", max_length=300)
+    quantity: float = 0
+    unit_price: float = 0
+    # The line's value as printed on the invoice (recognized lines only).
+    printed_total: Optional[float] = None
+
+
+class DraftCheckRequest(BaseModel):
+    amount_without_vat: float = 0
+    vat_amount: float = 0
+    total_amount: float = 0
+    items: List[DraftCheckLine] = Field(default_factory=list, max_length=500)
+
+
+@router.post("/invoices/draft-check")
+@limiter.limit("120/minute")
+async def check_invoice_draft_endpoint(
+    request: Request, body: DraftCheckRequest, current_user: User = Depends(get_current_user),
+):
+    """Scan review, before saving: do the amounts add up, and which line is
+    most likely wrong if not (see services/invoice_check.py). Reads nothing
+    stored - cheap enough to run again after every edit."""
+    require_permission(current_user, "manage_invoices")
+    return check_invoice_draft(
+        body.amount_without_vat, body.vat_amount, body.total_amount,
+        [item.model_dump() for item in body.items],
+    )
 
 
 @router.get("/invoices", response_model=List[Invoice])
