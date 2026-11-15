@@ -1498,7 +1498,81 @@ def build_variant_to_canonical(mappings: List[dict]) -> tuple:
                 variant_to_canonical[variant.lower()] = canonical
     return variant_to_canonical, canonical_display
 
-async def normalize_supplier_name(supplier: str, company_id: Optional[str] = None) -> tuple[str, bool]:
+def eik_key(value: Optional[str]) -> str:
+    """An EIK / VAT number as its digits only ("BG 123456789" -> "123456789")."""
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def invoice_number_key(value: Optional[str]) -> str:
+    """How two invoice numbers are compared: without spaces, case-blind,
+    and a purely numeric one without its leading zeros - "0000001234" read
+    off one copy and "1234" typed from another are the same invoice."""
+    key = re.sub(r"\s+", "", str(value or "")).upper()
+    if key.isdigit():
+        return key.lstrip("0") or "0"
+    return key
+
+
+async def _supplier_names(company_id: str) -> Dict[str, Dict[str, Any]]:
+    """Every supplier name the company's invoices use, with the EIKs seen
+    under it and how many invoices carry it."""
+    rows = await db.invoices.aggregate([
+        {"$match": {"company_id": company_id}},
+        {"$group": {"_id": {"s": "$supplier", "e": "$supplier_eik"}, "n": {"$sum": 1}}},
+    ]).to_list(ALL_ROWS)
+    names: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        name = (row.get("_id") or {}).get("s")
+        if not name:
+            continue
+        entry = names.setdefault(name, {"eiks": set(), "count": 0})
+        eik = eik_key((row.get("_id") or {}).get("e"))
+        if eik:
+            entry["eiks"].add(eik)
+        entry["count"] += row.get("n", 0)
+    return names
+
+
+async def find_duplicate_invoice(
+    scope: dict, supplier: str, supplier_eik: Optional[str], invoice_number: str,
+    document_type: Optional[str] = None, exclude_id: Optional[str] = None,
+) -> Optional[dict]:
+    """The company's own invoice this one would duplicate: the same
+    document number from the same supplier - the same EIK when both have
+    one (a different EIK is a different business, whatever the name), else
+    the same name. Judged over everything the company holds, not only what
+    its current members entered."""
+    number = invoice_number_key(invoice_number)
+    if not number:
+        return None
+    eik = eik_key(supplier_eik)
+    name_key = _compare_key(supplier or "")
+    who = [{"supplier": {"$regex": f"^{re.escape((supplier or '').strip())}$", "$options": "i"}}]
+    if eik:
+        who.append({"supplier_eik": {"$regex": re.escape(eik)}})
+    candidates = await db.invoices.find(
+        {"$and": [scope, {"$or": who}]},
+        {"_id": 0, "id": 1, "supplier": 1, "supplier_eik": 1, "invoice_number": 1, "user_id": 1, "date": 1, "document_type": 1},
+    ).to_list(ALL_ROWS)
+    kind = document_type or "invoice"
+    for inv in candidates:
+        if inv.get("id") == exclude_id or (inv.get("document_type") or "invoice") != kind:
+            continue
+        if invoice_number_key(inv.get("invoice_number")) != number:
+            continue
+        other_eik = eik_key(inv.get("supplier_eik"))
+        if eik and other_eik:
+            if eik == other_eik:
+                return inv
+            continue
+        if _compare_key(inv.get("supplier") or "") == name_key:
+            return inv
+    return None
+
+
+async def normalize_supplier_name(
+    supplier: str, company_id: Optional[str] = None, supplier_eik: Optional[str] = None,
+) -> tuple[str, bool]:
     """Нормализира име на доставчик/контрагент и го съпоставя с вече познати
     доставчици на фирмата, независимо от препинателни знаци, интервали и
     регистър на буквите (главни/малки)."""
@@ -1525,21 +1599,45 @@ async def normalize_supplier_name(supplier: str, company_id: Optional[str] = Non
 
     supplier_key = _compare_key(normalized)
 
+    # Форматиране - първа буква главна
+    formatted_words = []
+    for word in normalized.split():
+        if word in ['ЕООД', 'ООД', 'АД', 'ЕАД', 'ЕТ', 'СД', 'КД', 'КДА', 'LIDL', 'BILLA', 'KAUFLAND']:
+            formatted_words.append(word)
+        else:
+            formatted_words.append(word.capitalize())
+    formatted = ' '.join(formatted_words)
+
+    eik = eik_key(supplier_eik)
     # Ако има company_id, търсим съществуващ подобен доставчик
     if company_id and supplier_key:
-        existing_suppliers = await db.invoices.distinct("supplier", {"company_id": company_id})
+        known = await _supplier_names(company_id)
+
+        # The same EIK is the same supplier, whatever it was called.
+        if eik:
+            same_eik = [name for name, info in known.items() if eik in info["eiks"]]
+            if same_eik:
+                return max(same_eik, key=lambda name: known[name]["count"]), True
 
         best_match = None
         best_score = 0.0
 
-        for existing in existing_suppliers:
+        for existing, info in known.items():
             existing_key = _compare_key(existing)
             if not existing_key:
                 continue
+            # A name only ever seen with OTHER EIKs is another business -
+            # never merged into it (before, two companies with similar
+            # names became one supplier in every statistic).
+            other_business = bool(eik and info["eiks"] and eik not in info["eiks"])
 
             # Точно съвпадение с игнориране на пунктуация/регистър
             if existing_key == supplier_key:
+                if other_business:
+                    return f"{formatted} (ЕИК {eik})", False
                 return existing, True
+            if other_business:
+                continue
 
             # По-кратко име, съдържащо се изцяло в по-дългото (напр. "ИВАНОВ"
             # в "ИВАНОВ ЕООД"), почти винаги е същият контрагент, изписан
@@ -1557,16 +1655,7 @@ async def normalize_supplier_name(supplier: str, company_id: Optional[str] = Non
         if best_match and best_score >= 0.82:
             return best_match, True
 
-    # Форматиране - първа буква главна
-    words = normalized.split()
-    formatted_words = []
-    for word in words:
-        if word in ['ЕООД', 'ООД', 'АД', 'ЕАД', 'ЕТ', 'СД', 'КД', 'КДА', 'LIDL', 'BILLA', 'KAUFLAND']:
-            formatted_words.append(word)
-        else:
-            formatted_words.append(word.capitalize())
-
-    return ' '.join(formatted_words), False
+    return formatted, False
 
 async def normalize_item_name(item_name: str, company_id: Optional[str] = None) -> tuple[str, bool]:
     """Нормализира име на продукт/артикул и го обединява с вече записан
@@ -1781,8 +1870,9 @@ async def correct_ocr_data(
     # 1. Корекция на доставчик
     if data.get("supplier"):
         normalized_supplier, was_matched = await normalize_supplier_name(
-            data["supplier"], 
-            company_id
+            data["supplier"],
+            company_id,
+            data.get("supplier_eik"),
         )
         if normalized_supplier != data["supplier"]:
             corrected["supplier"] = normalized_supplier
@@ -4723,16 +4813,19 @@ class FeedbackCreate(BaseModel):
 
 
 
-async def _calendar_reminder_tick():
+async def _calendar_reminder_tick(now: Optional[datetime] = None):
     """One pass over due-and-unsent calendar reminders. Split out from the
     loop below so a test can call it directly without sleeping."""
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     candidates = await db.calendar_events.find(
         {"reminder_minutes_before": {"$ne": None}, "reminder_sent": {"$ne": True}}, {"_id": 0}
     ).to_list(500)
     for ev in candidates:
         try:
-            event_dt = datetime.fromisoformat(f"{ev['event_date']}T{ev.get('event_time') or '09:00'}:00").replace(tzinfo=timezone.utc)
+            # The time someone types for an event is the business's local
+            # time - before, it was read as UTC and a 10:00 reminder came
+            # two or three hours late.
+            event_dt = datetime.fromisoformat(f"{ev['event_date']}T{ev.get('event_time') or '09:00'}:00").replace(tzinfo=BUSINESS_TZ)
         except ValueError:
             continue
         remind_at = event_dt - timedelta(minutes=ev["reminder_minutes_before"])

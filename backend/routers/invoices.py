@@ -65,49 +65,26 @@ def _day_or_400(value, what: str) -> datetime:
 @router.post("/invoices", response_model=Invoice)
 async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_invoices")
-    # Get user's company_id
-    company_id, _ = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
 
     # Merge with an already-known counterparty regardless of punctuation or
-    # letter case, so this also applies to manually-typed/edited invoices,
-    # not just ones that came straight out of OCR.
-    normalized_supplier, _ = await normalize_supplier_name(invoice.supplier, company_id)
+    # letter case - by EIK first - so this also applies to manually
+    # typed/edited invoices, not just ones that came straight out of OCR.
+    normalized_supplier, _ = await normalize_supplier_name(invoice.supplier, company_id, invoice.supplier_eik)
     invoice.supplier = normalized_supplier
 
-    # Check for duplicate invoice
-    if company_id:
-        # If user has a company, check across all company users
-        company_users = await server.db.users.find({"company_id": company_id}, {"user_id": 1}).to_list(1000)
-        company_user_ids = [u["user_id"] for u in company_users]
-        
-        existing_invoice = await server.db.invoices.find_one({
-            "user_id": {"$in": company_user_ids},
-            "invoice_number": invoice.invoice_number,
-            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"}
-        }, {"_id": 0, "id": 1, "date": 1, "user_id": 1})
-        
-        if existing_invoice:
-            # Find who added the duplicate
-            added_by_user = await server.db.users.find_one({"user_id": existing_invoice["user_id"]}, {"name": 1})
-            added_by_name = added_by_user.get("name", "друг потребител") if added_by_user else "друг потребител"
-            raise HTTPException(
-                status_code=409,
-                detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече е добавена от {added_by_name}!"
-            )
-    else:
-        # No company - check only for current user
-        existing_invoice = await server.db.invoices.find_one({
-            "user_id": current_user.user_id,
-            "invoice_number": invoice.invoice_number,
-            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"}
-        }, {"_id": 0, "id": 1, "date": 1})
-        
-        if existing_invoice:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече съществува в системата!"
-            )
-    
+    duplicate = await find_duplicate_invoice(
+        scope, invoice.supplier, invoice.supplier_eik, invoice.invoice_number,
+        getattr(invoice, "document_type", None),
+    )
+    if duplicate:
+        added_by_user = await server.db.users.find_one({"user_id": duplicate.get("user_id")}, {"_id": 0, "name": 1})
+        added_by = f" от {added_by_user['name']}" if added_by_user and added_by_user.get("name") else ""
+        raise HTTPException(
+            status_code=409,
+            detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече е добавена{added_by}!",
+        )
+
     invoice_dict = invoice.model_dump()
     # The business day the invoice is dated, kept as 00:00 UTC of it
     # (services/business_calendar) - whatever device or time of day it was
@@ -420,6 +397,27 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     existing = await server.db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+
+    # A corrected supplier or number must not turn it into a copy of
+    # another invoice the company already holds.
+    if {"supplier", "supplier_eik", "invoice_number"} & set(update_data):
+        if "supplier" in update_data:
+            update_data["supplier"], _ = await normalize_supplier_name(
+                update_data["supplier"], company_id, update_data.get("supplier_eik", existing.get("supplier_eik")),
+            )
+        duplicate = await find_duplicate_invoice(
+            scope,
+            update_data.get("supplier", existing.get("supplier", "")),
+            update_data.get("supplier_eik", existing.get("supplier_eik")),
+            update_data.get("invoice_number", existing.get("invoice_number", "")),
+            existing.get("document_type"),
+            exclude_id=invoice_id,
+        )
+        if duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Вече има фактура с номер {update_data.get('invoice_number', existing.get('invoice_number'))} от този доставчик",
+            )
 
     # Same auto-paid/due-date rules as on create, so switching an invoice's
     # payment method later behaves the same as picking it up front.

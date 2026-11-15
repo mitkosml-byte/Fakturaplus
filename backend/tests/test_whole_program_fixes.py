@@ -364,3 +364,59 @@ def test_z4_schedule_pay_leaves_out_days_of_leave(client):
         "user_id": worker_id, "period_start": "2026-12-01", "period_end": "2026-12-31",
     }).json()
     assert (paid["total_hours"], paid["amount"]) == (32, 320)
+
+
+def test_c6_a_calendar_reminder_follows_the_business_clock(monkeypatch):
+    sent = _capture_pushes(monkeypatch)
+    company_id, owner_id, _ = _company()
+    event_id = f"ev-{uuid.uuid4().hex[:8]}"
+    asyncio.run(server.db.calendar_events.insert_one({
+        "id": event_id, "company_id": company_id, "creator_id": owner_id, "creator_name": "Собственик",
+        "title": "Доставка", "event_date": "2026-11-20", "event_time": "10:00", "visibility": "private",
+        "reminder_minutes_before": 30, "reminder_sent": False,
+    }))
+    mine = lambda: [p for p in sent if p["data"].get("event_id") == event_id]  # noqa: E731
+    # 09:20 in Sofia: not yet (it is 07:20 UTC - the old reading of 10:00
+    # as UTC would wait until 09:30 UTC, two hours late).
+    asyncio.run(server._calendar_reminder_tick(now=_local(date(2026, 11, 20), 9, 20)))
+    assert mine() == []
+    asyncio.run(server._calendar_reminder_tick(now=_local(date(2026, 11, 20), 9, 31)))
+    assert len(mine()) == 1
+
+
+def test_f1_a1_duplicates_by_company_and_eik(client):
+    company_id, owner_id, owner = _company()
+
+    def invoice(number, supplier, eik=None, day="2026-11-02"):
+        return {"supplier": supplier, "supplier_eik": eik, "invoice_number": number, "date": day,
+                "amount_without_vat": 100, "vat_amount": 20, "total_amount": 120, "payment_method": "cash"}
+
+    first = client.post("/api/invoices", headers=owner, json=invoice("0000001234", "Зора Трейд ЕООД", "BG111111111"))
+    assert first.status_code == 200, first.text
+    # The same invoice typed again without the leading zeros.
+    again = client.post("/api/invoices", headers=owner, json=invoice("1234", "Зора Трейд ЕООД", "111111111"))
+    assert again.status_code == 409
+    # Under another spelling of the name - the same EIK is the same supplier.
+    renamed = client.post("/api/invoices", headers=owner, json=invoice("1234", "ЗОРА ТРЕЙД", "111111111"))
+    assert renamed.status_code == 409
+    other_number = client.post("/api/invoices", headers=owner, json=invoice("1235", "Zora trade", "111111111"))
+    assert other_number.status_code == 200 and other_number.json()["supplier"] == "Зора Трейд ЕООД"
+
+    # The same name and number from ANOTHER business (another EIK) is not a
+    # duplicate, and stays a supplier of its own.
+    namesake = client.post("/api/invoices", headers=owner, json=invoice("1234", "Зора Трейд ЕООД", "222222222"))
+    assert namesake.status_code == 200, namesake.text
+    assert namesake.json()["supplier"] != "Зора Трейд ЕООД" and "222222222" in namesake.json()["supplier"]
+
+    # Someone who has since left the company entered it: still a duplicate.
+    leaver_id, leaver = _user(company_id, "manager", sorted(server.ROLE_PERMISSIONS["manager"]), "Напуснал")
+    assert client.post("/api/invoices", headers=leaver, json=invoice("77", "Бета ООД")).status_code == 200
+    asyncio.run(server.db.users.update_one({"user_id": leaver_id}, {"$set": {"company_id": None}}))
+    assert client.post("/api/invoices", headers=owner, json=invoice("077", "Бета ООД")).status_code == 409
+
+    # An edit cannot turn one invoice into a copy of another.
+    second = client.post("/api/invoices", headers=owner, json=invoice("5000", "Бета ООД")).json()
+    clash = client.put(f"/api/invoices/{second['id']}", headers=owner, json={"invoice_number": "77"})
+    assert clash.status_code == 409
+    fine = client.put(f"/api/invoices/{second['id']}", headers=owner, json={"invoice_number": "5001"})
+    assert fine.status_code == 200
