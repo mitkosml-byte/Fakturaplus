@@ -3832,6 +3832,30 @@ export const translations: Translations = {
     bg: 'Няма данни за анализ',
     en: 'No data for analysis',
   },
+  'roi.analysisTitle': {
+    bg: 'Какво ти връща бизнесът',
+    en: 'What the business gives back',
+  },
+  'roi.whatMoved': {
+    bg: 'Какво помръдна печалбата',
+    en: 'What moved profit',
+  },
+  'roi.whatToDo': {
+    bg: 'Какво можеш да направиш',
+    en: 'What you can do',
+  },
+  'roi.aiAdvice': {
+    bg: 'Съвет от AI',
+    en: 'AI advice',
+  },
+  'roi.askAdvice': {
+    bg: 'Поискай съвет от AI',
+    en: 'Ask AI for advice',
+  },
+  'roi.askAdviceHint': {
+    bg: 'По тези числа – пази се, докато данните не се променят.',
+    en: 'From these numbers - kept until the data changes.',
+  },
   
   // Units
   'units.pieces': {

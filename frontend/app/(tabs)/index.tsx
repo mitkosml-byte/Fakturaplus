@@ -18,7 +18,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
-import { Summary, DailyRevenue, NonInvoiceExpense } from '../../src/types';
+import { Summary, DailyRevenue, NonInvoiceExpense, RoiAdviceResponse } from '../../src/types';
 import { format, subDays } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
@@ -93,6 +93,10 @@ export default function HomeScreen() {
   
   // ROI state (owner only)
   const [roiData, setRoiData] = useState<any>(null);
+  // AI advice on the ROI numbers: shown when already kept for these numbers,
+  // otherwise asked for with a tap (it costs a model call, so never on its own).
+  const [roiAdvice, setRoiAdvice] = useState<RoiAdviceResponse | null>(null);
+  const [roiAdviceLoading, setRoiAdviceLoading] = useState(false);
   const [loadingRoi, setLoadingRoi] = useState(false);
   
   // Personal expense form
@@ -403,12 +407,13 @@ export default function HomeScreen() {
     setLoadingRoi(true);
     try {
       const periodStart = getPeriodBounds(periodState).start;
-      const data = await api.getROIAnalysis({
-        month: periodStart.getMonth() + 1,
-        year: periodStart.getFullYear(),
-        language,
-      });
+      const roiPeriod = { month: periodStart.getMonth() + 1, year: periodStart.getFullYear(), language };
+      const data = await api.getROIAnalysis(roiPeriod);
       setRoiData(data);
+      setRoiAdvice(null);
+      if (data.analysis?.payback) {
+        api.getRoiAdvice({ ...roiPeriod, generate: false }).then(setRoiAdvice).catch(() => setRoiAdvice(null));
+      }
     } catch (error) {
       console.error('Error loading ROI:', error);
       setRoiData(null);
@@ -416,6 +421,20 @@ export default function HomeScreen() {
       setLoadingRoi(false);
     }
   }, [canViewPersonalInvestments, periodState, language]);
+
+  const askRoiAdvice = async () => {
+    const periodStart = getPeriodBounds(periodState).start;
+    setRoiAdviceLoading(true);
+    try {
+      setRoiAdvice(await api.getRoiAdvice({
+        month: periodStart.getMonth() + 1, year: periodStart.getFullYear(), language, generate: true,
+      }));
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error?.message || '');
+    } finally {
+      setRoiAdviceLoading(false);
+    }
+  };
 
   // authLoading in the deps list: same auth-readiness race as loadData
   // above - see its comment. useFocusEffect re-runs its effect whenever
@@ -1052,8 +1071,84 @@ export default function HomeScreen() {
                   </View>
                 )}
 
-                {/* AI Insights */}
-                {roiData.ai_insights && roiData.ai_insights.length > 0 && (
+                {/* What the business gives back: payback over the last months,
+                    what moved profit, what can be done (each opening its place),
+                    and AI advice on those numbers when asked for. */}
+                {roiData.analysis ? (
+                  <View style={styles.aiInsights}>
+                    <Text style={styles.aiInsightsTitle}>{t('roi.analysisTitle')}</Text>
+                    {roiData.analysis.payback && (
+                      <Text style={styles.roiPaybackText}>{roiData.analysis.payback.text}</Text>
+                    )}
+                    {roiData.analysis.month && (
+                      <Text style={styles.aiInsightText}>{roiData.analysis.month.text}</Text>
+                    )}
+                    {roiData.analysis.movers.length > 0 && (
+                      <>
+                        <Text style={styles.roiSubTitle}>{t('roi.whatMoved')}</Text>
+                        {roiData.analysis.movers.map((mover: any) => (
+                          <View key={`${mover.kind}-${mover.label}`} style={styles.roiLine}>
+                            <Ionicons
+                              name={mover.profit_effect >= 0 ? 'arrow-up-circle' : 'arrow-down-circle'}
+                              size={16}
+                              color={mover.profit_effect >= 0 ? COLORS.success : COLORS.danger}
+                            />
+                            <Text style={[styles.aiInsightText, styles.roiLineText]}>{mover.text}</Text>
+                          </View>
+                        ))}
+                      </>
+                    )}
+                    {roiData.analysis.actions.length > 0 && (
+                      <>
+                        <Text style={styles.roiSubTitle}>{t('roi.whatToDo')}</Text>
+                        {roiData.analysis.actions.map((action: any) => (
+                          <TouchableOpacity
+                            key={action.kind}
+                            style={styles.roiAction}
+                            onPress={() => router.push(action.route as any)}
+                          >
+                            <Ionicons name="bulb-outline" size={16} color={COLORS.warning} />
+                            <Text style={[styles.aiInsightText, styles.roiLineText]}>{action.text}</Text>
+                            <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+                          </TouchableOpacity>
+                        ))}
+                      </>
+                    )}
+                    {roiData.analysis.notes.map((note: string) => (
+                      <Text key={note} style={styles.roiNote}>{note}</Text>
+                    ))}
+                    {roiAdvice?.available && (roiAdvice.advice ? (
+                      <View style={styles.roiAdviceBox}>
+                        <View style={styles.roiLine}>
+                          <Ionicons name="sparkles" size={14} color={COLORS.primary} />
+                          <Text style={styles.roiAdviceTitle}>{t('roi.aiAdvice')}</Text>
+                        </View>
+                        <Text style={styles.roiAdviceHeadline}>{roiAdvice.advice.headline}</Text>
+                        {roiAdvice.advice.points.map((point) => (
+                          <Text key={point} style={styles.aiInsightText}>• {point}</Text>
+                        ))}
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.roiAdviceButton}
+                        onPress={askRoiAdvice}
+                        disabled={roiAdviceLoading}
+                      >
+                        {roiAdviceLoading ? (
+                          <ActivityIndicator size="small" color={COLORS.primary} />
+                        ) : (
+                          <>
+                            <Ionicons name="sparkles" size={16} color={COLORS.primary} />
+                            <View style={{ flexShrink: 1 }}>
+                              <Text style={styles.roiAdviceButtonText}>{t('roi.askAdvice')}</Text>
+                              <Text style={styles.roiNote}>{t('roi.askAdviceHint')}</Text>
+                            </View>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : roiData.ai_insights && roiData.ai_insights.length > 0 && (
                   <View style={styles.aiInsights}>
                     <Text style={styles.aiInsightsTitle}>{t('roi.aiInsights')}</Text>
                     {roiData.ai_insights.map((insight: string, index: number) => (
@@ -1580,6 +1675,76 @@ const styles = StyleSheet.create({
     color: COLORS.textSubtle,
     lineHeight: 20,
     marginBottom: 6,
+  },
+  roiPaybackText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+    lineHeight: 21,
+    marginBottom: 8,
+  },
+  roiSubTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  roiLine: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  roiLineText: {
+    flex: 1,
+  },
+  roiAction: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingVertical: 2,
+  },
+  roiNote: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  roiAdviceBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: `${COLORS.primary}1A`,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}40`,
+  },
+  roiAdviceTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  roiAdviceHeadline: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'white',
+    lineHeight: 19,
+    marginTop: 6,
+    marginBottom: 6,
+  },
+  roiAdviceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}66`,
+  },
+  roiAdviceButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
   noRoiData: {
     alignItems: 'center',

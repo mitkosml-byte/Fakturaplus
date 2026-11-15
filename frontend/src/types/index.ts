@@ -610,6 +610,43 @@ export interface ItemPriceHint {
   unit: string | null;
 }
 
+// The ROI card ("Лични вложения", GET /roi/analysis): does the business pay
+// back what the owner put in, what moved profit, what can be done - each
+// part with its own plain-language line.
+export interface RoiMover {
+  kind: 'revenue' | 'supplier' | 'off_book';
+  label: string;
+  current: number;
+  usual: number;
+  delta: number;
+  // + helps profit, - hurts it (a supplier's rise is a negative effect)
+  profit_effect: number;
+  text: string;
+}
+
+export interface RoiAction {
+  kind: 'price_increases' | 'cheaper_supplier' | 'missing_revenue';
+  monthly_eur: number | null;
+  route: string;
+  text: string;
+}
+
+export interface RoiAnalysisDetail {
+  payback: { invested: number; profit: number; coverage: number; months: number; text: string } | null;
+  month: { personal: number; profit: number; partial: boolean; through_day: number | null; text: string } | null;
+  movers: RoiMover[];
+  actions: RoiAction[];
+  notes: string[];
+  profit_visible: boolean;
+}
+
+// AI advice on the ROI facts (GET /roi/advice) - kept until the numbers change.
+export interface RoiAdviceResponse {
+  available: boolean;
+  advice: { headline: string; points: string[] } | null;
+  cached?: boolean;
+}
+
 // Scan review, before saving (POST /invoices/draft-check): do the amounts
 // add up, and which line is most likely wrong if not. Indexes point into
 // the request's items.

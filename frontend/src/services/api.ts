@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
-PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck } from '../types';
+PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse } from '../types';
 import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -1222,11 +1222,12 @@ class ApiService {
     period: { month: number; year: number };
     total_personal_investment: number;
     total_revenue: number;
-    total_profit: number;
-    roi_percent: number;
-    is_profitable: boolean;
-    investment_covered: boolean;
+    total_profit: number | null;
+    roi_percent: number | null;
+    is_profitable: boolean | null;
+    investment_covered: boolean | null;
     ai_insights: string[];
+    analysis: RoiAnalysisDetail | null;
   }> {
     const queryParams = new URLSearchParams();
     if (params?.month) queryParams.set('month', params.month.toString());
@@ -1234,6 +1235,17 @@ class ApiService {
     queryParams.set('language', params?.language || 'bg');
     const query = queryParams.toString();
     return this.fetch(`/roi/analysis${query ? `?${query}` : ''}`);
+  }
+
+  // generate=false only returns advice already kept for the current numbers.
+  async getRoiAdvice(params: { month: number; year: number; language: 'bg' | 'en'; generate: boolean }): Promise<RoiAdviceResponse> {
+    const query = new URLSearchParams({
+      month: String(params.month),
+      year: String(params.year),
+      language: params.language,
+      generate: String(params.generate),
+    });
+    return this.fetch(`/roi/advice?${query.toString()}`);
   }
 
   async getROITrend(months: number = 6): Promise<{ trend: any[]; months: number }> {
