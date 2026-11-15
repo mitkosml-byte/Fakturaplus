@@ -4559,13 +4559,22 @@ export const translations: Translations = {
   'users.reject': { bg: 'Отхвърли', en: 'Reject' },
 
   'notifications.title': { bg: 'Известия за ДДС', en: 'VAT notifications' },
-  'notifications.thresholdTitle': { bg: 'Известие при надхвърляне', en: 'Threshold alert' },
-  'notifications.thresholdSubtitle': { bg: 'Известие когато ДДС надхвърли сума', en: 'Alert when VAT exceeds an amount' },
-  'notifications.thresholdAmountLabel': { bg: 'Сума на ДДС (€)', en: 'VAT amount (€)' },
-  'notifications.thresholdAmountPlaceholder': { bg: 'Напр. 5000', en: 'e.g. 5000' },
-  'notifications.thresholdHint': { bg: 'Известие когато ДДС за плащане надхвърли тази сума', en: 'Notifies you when the VAT due exceeds this amount' },
   'notifications.periodicTitle': { bg: 'Периодични известия', en: 'Periodic reminders' },
-  'notifications.periodicSubtitle': { bg: 'Напомняне на избрани дати', en: 'Reminders on chosen dates' },
+  'notifications.periodicSubtitle': { bg: 'Какво чака действие – на избрани дати от месеца', en: 'What waits for action – on chosen days of the month' },
+  'notifications.periodicHint': {
+    bg: 'Идва в {{time}}, в часа на сутрешния преглед, и тогава замества него. Ден след края на по-къс месец (напр. 31-во) идва в последния му ден.',
+    en: 'Arrives at {{time}}, the morning review hour, and replaces it that day. A day past a shorter month\'s end (e.g. the 31st) arrives on its last day.',
+  },
+  'notifications.dailyTitle': { bg: 'Сутрешен преглед', en: 'Morning review' },
+  'notifications.dailySubtitle': {
+    bg: 'Веднъж на ден, само ако нещо важно чака – само с това, което ти имаш право да виждаш',
+    en: 'Once a day, only when something important waits – only with what you are allowed to see',
+  },
+  'notifications.dailyHourLabel': { bg: 'В колко часа', en: 'At what time' },
+  'notifications.dailyHourHint': {
+    bg: 'Часът е по календара на бизнеса. След 21:00 не се изпраща нищо – пропусната сутрин не идва през нощта.',
+    en: 'The time follows the business calendar. Nothing is sent after 21:00 – a missed morning never arrives at night.',
+  },
   'notifications.selectDatesLabel': { bg: 'Изберете дати от месеца', en: 'Choose dates of the month' },
   'notifications.selectedDatesLabel': { bg: 'Избрани', en: 'Selected' },
   'notifications.pushInfo': { bg: 'Известията се изпращат като push нотификации. Уверете се, че сте ги разрешили.', en: 'Notifications are sent as push notifications. Make sure you have allowed them.' },

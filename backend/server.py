@@ -9,7 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ValidationError
-from typing import List, Optional, Dict, Any, Literal
+from typing import Annotated, List, Optional, Dict, Any, Literal
 from enum import Enum
 import uuid
 from datetime import datetime, timezone, timedelta, date
@@ -155,10 +155,9 @@ async def lifespan(app: FastAPI):
     # defining each of these, well before the ASGI server ever fires this
     # event), in the same order the old @app.on_event("startup") handlers
     # below used to register in.
-    await start_proactive_digest_loop()
+    await start_morning_push_loop()
     await start_calendar_reminder_loop()
     await start_budget_alert_loop()
-    await start_notification_settings_loop()
     await start_scan_credit_depletion_loop()
     await create_indexes()
     await run_data_migrations()
@@ -665,26 +664,37 @@ class ROIAnalysis(BaseModel):
     investment_covered: bool
     ai_insights: List[str]
 
+# The morning push - the top of the daily review - goes out once a day
+# per person, at the hour they choose on the business's own calendar.
+# Never at night: from DAILY_PUSH_QUIET_FROM the day is skipped, so a
+# morning the server slept through is not delivered at midnight.
+DAILY_PUSH_DEFAULT_HOUR = 8
+DAILY_PUSH_EARLIEST_HOUR = 5
+DAILY_PUSH_LATEST_HOUR = 20
+DAILY_PUSH_QUIET_FROM = 21
+
 class NotificationSettings(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
-    vat_threshold_enabled: bool = False
-    vat_threshold_amount: float = 0
+    # The daily review as a push: only when something in it is worth an
+    # interruption (PROACTIVE_PUSH_WORTHY_PRIORITY), at daily_push_hour.
+    daily_push_enabled: bool = True
+    daily_push_hour: int = DAILY_PUSH_DEFAULT_HOUR
+    # A reminder on chosen days of the month, sent at the same morning
+    # hour, always (it says what waits, or that nothing does). A day past
+    # a short month's end (31 in April, 30 in February) falls on its last day.
     periodic_enabled: bool = False
     periodic_dates: List[int] = []  # Days of month (1-31)
-    # Dedup state for the background checks below - never set by the
-    # client, only by _notification_settings_tick (and reset by
-    # update_notification_settings when the threshold itself changes).
-    vat_threshold_sent_at: Optional[datetime] = None
+    # Dedup state - never set by the client, only by _morning_push_tick.
     periodic_last_sent_date: Optional[str] = None  # "YYYY-MM-DD"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class NotificationSettingsUpdate(BaseModel):
-    vat_threshold_enabled: Optional[bool] = None
-    vat_threshold_amount: Optional[float] = None
+    daily_push_enabled: Optional[bool] = None
+    daily_push_hour: Optional[int] = Field(default=None, ge=DAILY_PUSH_EARLIEST_HOUR, le=DAILY_PUSH_LATEST_HOUR)
     periodic_enabled: Optional[bool] = None
-    periodic_dates: Optional[List[int]] = None
+    periodic_dates: Optional[List[Annotated[int, Field(ge=1, le=31)]]] = Field(default=None, max_length=31)
 
 class OCRItemResult(BaseModel):
     name: str
@@ -2750,7 +2760,13 @@ async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -
     """Unpaid supplier invoices, split three ways: really overdue (money at
     risk, critical), overdue but most likely already paid (a question with a
     one-tap "mark paid" - before, they were a permanent red alarm for any
-    owner who pays by bank and doesn't tick invoices off), and not yet due."""
+    owner who pays by bank and doesn't tick invoices off), and not yet due.
+
+    Only for someone who may see invoices (manage_invoices) or the
+    company's figures (view_statistics) - before, anyone in the company got
+    the amounts owed, on Home and in the morning push."""
+    if not {"manage_invoices", "view_statistics"} & set(current_user.permissions or []):
+        return []
     unpaid, overdue, likely_paid = await split_overdue_invoices(scope)
     if not unpaid:
         return []
@@ -3367,83 +3383,132 @@ async def get_proactive_signals(current_user: User) -> List[dict]:
     return signals
 
 
-# At most once per company per this cooldown, regardless of how many
-# signals are push-worthy or how often the hourly tick below runs -
-# mirrors the existing loops' "check often, fire rarely" dedup pattern,
-# via a dedicated state doc rather than a per-signal flag, since this
-# push is about the ranked TOP signal across all of them, not any single one.
-PROACTIVE_DIGEST_COOLDOWN = timedelta(hours=20)
+def _push_hour(prefs: dict) -> int:
+    hour = prefs.get("daily_push_hour")
+    if isinstance(hour, int) and DAILY_PUSH_EARLIEST_HOUR <= hour <= DAILY_PUSH_LATEST_HOUR:
+        return hour
+    return DAILY_PUSH_DEFAULT_HOUR
 
-async def _proactive_digest_tick():
-    """Once-daily ranked digest push: for every company, recomputes the
-    same ranked signals GET /proactive/signals returns (using the owner's
-    own permissions - the most-privileged view available, so a signal
-    gated on manage_budget/add_revenue etc. is still considered) and,
-    only if the single highest-ranked signal clears
-    PROACTIVE_PUSH_WORTHY_PRIORITY, sends ONE push naming it plus how many
-    other things are also waiting. Recipients are everyone with
-    view_statistics, same selection as the existing price-alert push."""
-    owners = await db.users.find(
-        {"role": "owner", "company_id": {"$ne": None}}, {"_id": 0}
-    ).to_list(10000)
-    now = datetime.now(timezone.utc)
+def periodic_day_is_today(days: List[int], today: date) -> bool:
+    """Whether a reminder on these days of the month falls on today. A day
+    past this month's end (31 in April, 29-31 in February) falls on the
+    month's last day - before, such a reminder silently skipped the month."""
+    last = days_in_month(today.year, today.month)
+    return any(min(d, last) == today.day for d in days if isinstance(d, int) and d >= 1)
 
-    for owner_doc in owners:
-        company_id = owner_doc.get("company_id")
-        if not company_id:
+def review_summary_text(signals: List[dict]) -> str:
+    """The daily review in one line: what waits (top three), or that nothing does."""
+    if not signals:
+        return "Всичко е наред – в Дневния преглед няма нищо, което чака действие."
+    top = [s["title"] for s in signals[:3]]
+    body = "Чака те: " + "; ".join(top) + "."
+    if len(signals) > len(top):
+        body += f" И още {len(signals) - len(top)} в Дневния преглед."
+    return body
+
+async def _morning_push_tick(now: Optional[datetime] = None):
+    """The morning push: once per person per day, at the hour they chose on
+    the business's own calendar (DAILY_PUSH_DEFAULT_HOUR unless changed),
+    never from DAILY_PUSH_QUIET_FROM on.
+
+    Each person gets THEIR OWN daily review: the signals are computed with
+    that person's own permissions (get_proactive_signals), so a manager is
+    never sent the owner's personal-wallet warning and someone who may not
+    see invoice amounts never finds them on a lock screen. Before, the
+    owner's view was computed once per company and the same text went to
+    everyone with view_statistics, ~20 hours after the previous one - so it
+    drifted through the day and into the night.
+
+    The review is pushed only when its top signal clears
+    PROACTIVE_PUSH_WORTHY_PRIORITY. On a day the person picked for a
+    periodic reminder, that reminder (the top three, or that nothing waits)
+    is the morning push instead of a second one. Only people with a device
+    registered for pushes are looked at - there is no one else to tell."""
+    now = now or datetime.now(timezone.utc)
+    local_now = now.astimezone(BUSINESS_TZ)
+    if local_now.hour >= DAILY_PUSH_QUIET_FROM:
+        return
+    today = local_now.date()
+    today_str = today.isoformat()
+
+    user_ids = sorted(set(await db.push_subscriptions.distinct("user_id")))
+    if not user_ids:
+        return
+    prefs_by_user = {
+        doc["user_id"]: doc for doc in await db.notification_settings.find(
+            {"user_id": {"$in": user_ids}}, {"_id": 0}
+        ).to_list(ALL_ROWS)
+    }
+    state_by_user = {
+        doc["user_id"]: doc for doc in await db.daily_push_state.find(
+            {"user_id": {"$in": user_ids}}, {"_id": 0}
+        ).to_list(ALL_ROWS)
+    }
+
+    for user_id in user_ids:
+        prefs = prefs_by_user.get(user_id) or {}
+        if local_now.hour < _push_hour(prefs):
             continue
-
-        state = await db.proactive_digest_state.find_one({"company_id": company_id}, {"_id": 0, "last_sent_at": 1})
-        if state and state.get("last_sent_at"):
-            last_sent_at = state["last_sent_at"]
-            if last_sent_at.tzinfo is None:
-                last_sent_at = last_sent_at.replace(tzinfo=timezone.utc)
-            if now - last_sent_at < PROACTIVE_DIGEST_COOLDOWN:
-                continue
-
-        try:
-            owner_user = User(**sanitize_user(dict(owner_doc)))
-        except Exception:
-            logger.exception(f"Proactive digest: could not construct owner user for company {company_id}")
-            continue
-
-        signals = await get_proactive_signals(owner_user)
-        if not signals or signals[0]["priority"] < PROACTIVE_PUSH_WORTHY_PRIORITY:
-            continue
-
-        top = signals[0]
-        others = len(signals) - 1
-        body = top["detail"] if others <= 0 else f"{top['detail']} (+{others} друго изискващо внимание)"
-
-        recipients = await db.users.find(
-            {"company_id": company_id, "permissions": "view_statistics"}, {"_id": 0, "user_id": 1}
-        ).to_list(100)
-        recipient_ids = [r["user_id"] for r in recipients]
-        if not recipient_ids:
-            continue
-
-        await push_service.send_to_users(
-            db, recipient_ids, title=f"Днешен преглед: {top['title']}", body=body,
-            data={"type": "proactive_digest", "signal_key": top["key"]},
+        periodic_due = bool(
+            prefs.get("periodic_enabled")
+            and periodic_day_is_today(prefs.get("periodic_dates") or [], today)
+            and prefs.get("periodic_last_sent_date") != today_str
         )
-        await db.proactive_digest_state.update_one(
-            {"company_id": company_id},
-            {"$set": {"company_id": company_id, "last_sent_at": now, "last_signal_key": top["key"]}},
+        review_due = (
+            prefs.get("daily_push_enabled", True) is not False
+            and (state_by_user.get(user_id) or {}).get("last_day") != today_str
+        )
+        if not (periodic_due or review_due):
+            continue
+
+        user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+        if not user_doc:
+            continue
+        try:
+            signals = await get_proactive_signals(User(**sanitize_user(dict(user_doc))))
+        except Exception:
+            logger.exception(f"Morning push: signals failed for {user_id}")
+            continue
+
+        sent_key = None
+        if periodic_due:
+            await push_service.send_to_user(
+                db, user_id, title="Периодично напомняне", body=review_summary_text(signals),
+                data={"type": "periodic_reminder", "route": "/(tabs)"},
+            )
+            await db.notification_settings.update_one(
+                {"user_id": user_id}, {"$set": {"periodic_last_sent_date": today_str}},
+            )
+            sent_key = "periodic_reminder"
+        elif signals and signals[0]["priority"] >= PROACTIVE_PUSH_WORTHY_PRIORITY:
+            top = signals[0]
+            others = len(signals) - 1
+            body = top["detail"] if others <= 0 else f"{top['detail']} (+{others} друго изискващо внимание)"
+            await push_service.send_to_user(
+                db, user_id, title=f"Днешен преглед: {top['title']}", body=body,
+                data={"type": "proactive_digest", "signal_key": top["key"], "route": top.get("route") or "/(tabs)"},
+            )
+            sent_key = top["key"]
+        # Looked at once a day either way: a quiet morning is not
+        # recomputed every hour until something becomes push-worthy.
+        await db.daily_push_state.update_one(
+            {"user_id": user_id},
+            {"$set": {"user_id": user_id, "last_day": today_str, "checked_at": now, "sent": sent_key}},
             upsert=True,
         )
 
-async def _proactive_digest_loop():
+async def _morning_push_loop():
     while True:
         try:
-            await _proactive_digest_tick()
+            await _morning_push_tick()
         except Exception as e:
-            logger.error(f"Proactive digest loop error: {e}")
-        # Hourly check, daily send (PROACTIVE_DIGEST_COOLDOWN) - same
-        # reasoning as the budget/notification-settings loops above.
-        await asyncio.sleep(3600)
+            logger.error(f"Morning push loop error: {e}")
+        # Every 10 minutes: a push is due within minutes of the chosen
+        # hour, and a person already looked at today costs one lookup.
+        await asyncio.sleep(600)
 
-async def start_proactive_digest_loop():
-    asyncio.create_task(_proactive_digest_loop())
+async def start_morning_push_loop():
+    asyncio.create_task(_morning_push_loop())
 
 
 
@@ -4813,77 +4878,6 @@ async def _budget_alert_loop():
 async def start_budget_alert_loop():
     asyncio.create_task(_budget_alert_loop())
 
-async def _notification_settings_tick():
-    """One pass over NotificationSettings with either check enabled: a
-    VAT-threshold crossing (an approximate trailing-12-month revenue figure
-    against the user's own threshold) or a periodic reminder on today's
-    date. Mirrors _budget_alert_tick's push-and-dedupe pattern above -
-    these two toggles existed in the UI and database with nothing reading
-    them until now (Module 7 audit finding).
-
-    The VAT-threshold figure is a rough approximation (trailing 365 days
-    from today, not a precise any-12-consecutive-months legal calculation)
-    and is explicitly worded as such - this is a heads-up nudge, never a
-    compliance determination, consistent with the app never talking to NAP
-    directly."""
-    now = datetime.now(timezone.utc)
-    # Days on the business's own calendar; `now` stays the sent-at stamp.
-    today = today_local()
-    today_str = today.isoformat()
-    year_ago_str = (today - timedelta(days=365)).isoformat()
-
-    settings_docs = await db.notification_settings.find(
-        {"$or": [{"vat_threshold_enabled": True}, {"periodic_enabled": True}]},
-        {"_id": 0},
-    ).to_list(1000)
-
-    for settings in settings_docs:
-        user_id = settings["user_id"]
-
-        if (
-            settings.get("vat_threshold_enabled")
-            and settings.get("vat_threshold_amount", 0) > 0
-            and not settings.get("vat_threshold_sent_at")
-        ):
-            revenues = await db.daily_revenue.find(
-                {"user_id": user_id, "date": {"$gte": year_ago_str}},
-                {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1},
-            ).to_list(10000)
-            trailing_12mo_revenue = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
-
-            if trailing_12mo_revenue >= settings["vat_threshold_amount"]:
-                await push_service.send_to_user(
-                    db, user_id,
-                    title="ДДС прагът е надхвърлен",
-                    body=(
-                        f"Оборотът ти за последните 12 месеца е ориентировъчно {trailing_12mo_revenue:.2f} € - "
-                        f"над зададения праг от {settings['vat_threshold_amount']:.2f} €. "
-                        f"Това е насочващо изчисление, провери точния праг с НАП или счетоводител."
-                    ),
-                    data={"type": "vat_threshold"},
-                )
-                await db.notification_settings.update_one(
-                    {"user_id": user_id},
-                    {"$set": {"vat_threshold_sent_at": now}},
-                )
-
-        periodic_dates = settings.get("periodic_dates") or []
-        if (
-            settings.get("periodic_enabled")
-            and today.day in periodic_dates
-            and settings.get("periodic_last_sent_date") != today_str
-        ):
-            await push_service.send_to_user(
-                db, user_id,
-                title="Периодично напомняне",
-                body=await periodic_reminder_body(user_id),
-                data={"type": "periodic_reminder", "route": "/(tabs)"},
-            )
-            await db.notification_settings.update_one(
-                {"user_id": user_id},
-                {"$set": {"periodic_last_sent_date": today_str}},
-            )
-
 PERIODIC_REMINDER_FALLBACK = "Отвори Дневния преглед във Фактура+ и виж какво чака действие."
 
 
@@ -4898,27 +4892,8 @@ async def periodic_reminder_body(user_id: str) -> str:
     except Exception:
         logger.exception(f"Periodic reminder: signals failed for {user_id}")
         return PERIODIC_REMINDER_FALLBACK
-    if not signals:
-        return "Всичко е наред – в Дневния преглед няма нищо, което чака действие."
-    top = [s["title"] for s in signals[:3]]
-    body = "Чака те: " + "; ".join(top) + "."
-    if len(signals) > len(top):
-        body += f" И още {len(signals) - len(top)} в Дневния преглед."
-    return body
+    return review_summary_text(signals)
 
-
-async def _notification_settings_loop():
-    while True:
-        try:
-            await _notification_settings_tick()
-        except Exception as e:
-            logger.error(f"Notification settings loop error: {e}")
-        # Hourly is plenty - a day-granularity date check and a slow-moving
-        # revenue threshold, same reasoning as the budget loop above.
-        await asyncio.sleep(3600)
-
-async def start_notification_settings_loop():
-    asyncio.create_task(_notification_settings_loop())
 
 async def _scan_credit_depletion_tick():
     """Module 5 audit finding: the scan-credit ledger can already predict
@@ -5037,8 +5012,8 @@ async def create_indexes():
         await db.receivables.create_index([("company_id", 1), ("is_paid", 1), ("due_date", 1)])
         await db.billing_documents.create_index([("company_id", 1), ("created_at", -1)])
 
-        # Proactive engine digest push dedup (one state doc per company)
-        await db.proactive_digest_state.create_index([("company_id", 1)], unique=True)
+        # The morning push: one state doc per person (when it was last looked at)
+        await db.daily_push_state.create_index([("user_id", 1)], unique=True)
         # What each viewer snoozed/dismissed on Home (read on every Home load)
         await db.signal_states.create_index([("user_id", 1), ("until", 1)])
         await db.signal_states.create_index([("user_id", 1), ("key", 1), ("fingerprint", 1)], unique=True)

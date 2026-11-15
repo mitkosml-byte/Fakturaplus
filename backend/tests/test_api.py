@@ -651,7 +651,7 @@ def test_notifications_and_company(client):
     r = client.get("/api/notifications/settings", headers=owner)
     assert r.status_code == 200
 
-    r = client.put("/api/notifications/settings", headers=owner, json={"vat_threshold_enabled": True, "vat_threshold_amount": 100})
+    r = client.put("/api/notifications/settings", headers=owner, json={"daily_push_enabled": True, "daily_push_hour": 9})
     assert r.status_code == 200
 
     r = client.get("/api/company", headers=owner)

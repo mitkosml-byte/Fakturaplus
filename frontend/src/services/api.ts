@@ -652,8 +652,8 @@ class ApiService {
   }
 
   async updateNotificationSettings(settings: {
-    vat_threshold_enabled?: boolean;
-    vat_threshold_amount?: number;
+    daily_push_enabled?: boolean;
+    daily_push_hour?: number;
     periodic_enabled?: boolean;
     periodic_dates?: number[];
   }): Promise<NotificationSettings> {

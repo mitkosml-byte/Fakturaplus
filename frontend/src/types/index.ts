@@ -465,8 +465,8 @@ export interface ChartDataPoint {
 export interface NotificationSettings {
   id: string;
   user_id: string;
-  vat_threshold_enabled: boolean;
-  vat_threshold_amount: number;
+  daily_push_enabled: boolean;
+  daily_push_hour: number;
   periodic_enabled: boolean;
   periodic_dates: number[];
   created_at: string;

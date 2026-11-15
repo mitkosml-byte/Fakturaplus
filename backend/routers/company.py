@@ -414,14 +414,9 @@ async def update_notification_settings(
     update_data = {k: v for k, v in settings_update.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc)
 
+    if "periodic_dates" in update_data:
+        update_data["periodic_dates"] = sorted(set(update_data["periodic_dates"]))
     existing = await server.db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
-
-    # A raised/changed threshold deserves a fresh evaluation, not silence
-    # until the OLD threshold's single already-sent alert would have fired
-    # again under a completely different number - same convention as
-    # budgets' alert_sent/exceeded_sent reset in create_budget.
-    if existing and "vat_threshold_amount" in update_data and update_data["vat_threshold_amount"] != existing.get("vat_threshold_amount"):
-        update_data["vat_threshold_sent_at"] = None
 
     if not existing:
         # Create new settings
