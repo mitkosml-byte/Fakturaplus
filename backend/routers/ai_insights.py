@@ -49,8 +49,12 @@ import server
 from routers.price_tracking import get_price_alerts, get_reorder_nudges, get_merged_item_statistics
 from routers.forecast import get_revenue_forecast, get_expense_forecast
 from routers.roi_wallet import get_personal_wallet_summary
+from routers.chat_tools import ChatDataTools, build_chat_tools
 
 router = APIRouter(prefix="/api")
+
+# Model calls one question may use for look-ups before it must answer.
+ASK_MAX_MODEL_CALLS = 6
 
 async def build_business_chat_digest(current_user: User) -> dict:
     """Everything ask_my_numbers grounds its answer in - split out from the
@@ -255,7 +259,7 @@ async def ask_my_numbers(
         raise HTTPException(status_code=503, detail="AI функцията не е конфигурирана на сървъра.")
 
     digest = await build_business_chat_digest(current_user)
-    company_id, _ = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
 
     # The app's own UI can be in Bulgarian or English (Профил/Profile ->
     # language switch, or the Home screen's own quick toggle) - the
@@ -264,33 +268,28 @@ async def ask_my_numbers(
     # screen around a Bulgarian answer - is exactly what was reported).
     response_language = "английски (English)" if query.language == "en" else "български"
 
+    today = datetime.now(timezone.utc).date().isoformat()
     system_prompt = (
-        "Ти си асистент на малък бизнес във Фактура+, който отговаря САМО въз основа на подадените му по-долу "
-        "реални данни за тази фирма (JSON) и предходния разговор. Никога не отговаряй с измислени или закръглени "
-        "наизуст числа - цитирай само числата от JSON-а. Полетата, които са null (budget, receivables, roi, assets, "
-        "payroll, schedule, personal_wallet), означават, че този потребител няма права да ги вижда - кажи му го ясно вместо да твърдиш, че "
-        "данните липсват изобщо. Ако въпросът иска нещо извън тези данни (НАП, данъчни декларации, конкуренти, "
-        "обща информация извън тази фирма, или нещо, за което просто няма поле в JSON-а), кажи ясно, че не "
-        "разполагаш с тази информация, вместо да гадаеш. forecast.*.trend == 'insufficient_data' означава, че "
-        "фирмата няма достатъчно история (под 4 месеца) за истинска прогноза - next_month_predicted е просто "
-        "средното от наличните месеци, не истинска тенденция; кажи го изрично, вместо да звучиш по-сигурен, "
-        "отколкото данните позволяват. item_purchases показва точните закупени количества по артикул (name, "
-        "quantity, unit, purchases_count - брой отделни покупки, total_spent - общо платено в €) за ЦЯЛАТА "
-        "история на фирмата (не само текущия месец) - до 10 артикула с най-голям общ разход, с обединени еднакви "
-        "продукти от различни фактури/доставчици. Ако въпрос пита за количество на конкретен артикул ('колко питки съм поръчал'), "
-        "търси го именно тук по name (включително частично/сходно съвпадение на името), а не в reorder_nudges - "
-        "последното съдържа само закъснели поръчки за преповтарящи се артикули, не пълна картина на покупките. "
-        "item_purchases НЕ е разделено по месец - ако въпросът пита конкретно за определен период ('миналия "
-        "месец', 'през март'), кажи ясно, че разполагаш само с общо количество за цялата история, не разбито по "
-        "период, вместо да гадаеш каква част е от съответния период. Ако артикулът не фигурира в списъка, той "
-        "просто не е сред топ 10 по разход - кажи го ясно, вместо да твърдиш, че изобщо няма данни за "
-        "покупки. Предходните съобщения по-долу са същият разговор - при последващ въпрос "
-        "('сравни с него', 'ами миналата седмица') използвай контекста им, но винаги смятай с актуалните данни от "
-        "ПОСЛЕДНИЯ JSON, не с число, спомена в по-ранен твой отговор. Отговаряй кратко (до 4 изречения), ВИНАГИ на "
-        f"{response_language} независимо от езика на въпроса или на по-ранни съобщения в разговора, сумите винаги "
-        "в евро (€). Профитът (profit) може да е null вътре в този JSON дори когато "
-        "самият обект не е null - това означава, че този потребител няма права да вижда печалбата конкретно; в "
-        "такъв случай кажи, че печалбата не е видима за него, вместо да я извеждаш или предполагаш."
+        "Ти си асистент на малък бизнес във Фактура+ и отговаряш САМО въз основа на реалните данни на тази "
+        f"фирма: резюмето (JSON) в съобщението и инструментите, с които търсиш в данните й. Днес е {today}. "
+        "Първо провери дали резюмето вече съдържа отговора. Ако въпросът е за конкретен артикул, доставчик, "
+        "ден, седмица, месец, година или сравнение, които ги няма в резюмето, използвай инструментите - никога "
+        "не отговаряй, че няма данни, преди да си потърсил с подходящия инструмент. Периоди като 'миналия "
+        "месец', 'през март', 'миналата седмица' превръщай в точни дати спрямо днешната. item_purchases в "
+        "резюмето са само 10-те артикула с най-голям разход за цялата история; за всеки друг артикул или период "
+        "ползвай инструмента item_purchases. Когато инструментът върне няколко сходни артикула, ползвай тези, "
+        "които отговарят на въпроса, кажи кои си ползвал и никога не събирай различни мерни единици. Ден без "
+        "въведен оборот е неизвестен, а не нулев - ако в периода има невъведени дни, кажи го. Цитирай само числа "
+        "от данните - никога измислени или закръглени наизуст. Полетата, които са null (budget, receivables, "
+        "roi, assets, payroll, schedule, personal_wallet), както и profit: null, означават, че този потребител "
+        "няма права да ги вижда - кажи му го ясно, вместо да твърдиш, че данните липсват изобщо. Ако въпросът е "
+        "извън данните на фирмата (НАП, данъчни декларации, конкуренти, обща информация), кажи ясно, че не "
+        "разполагаш с такава информация, вместо да гадаеш. forecast.*.trend == 'insufficient_data' означава "
+        "под 4 месеца история - next_month_predicted е просто средното, не истинска тенденция; кажи го изрично. "
+        "Предходните съобщения са същият разговор - при последващ въпрос ('сравни с него', 'ами миналата "
+        "седмица') ползвай контекста им, но смятай с актуалните данни, не с число от по-ранен твой отговор. "
+        f"Отговаряй кратко (до 4 изречения), ВИНАГИ на {response_language} независимо от езика на въпроса или "
+        "на по-ранни съобщения, сумите в евро (€)."
     )
 
     # The client resends this chat's prior turns on every call since the
@@ -306,17 +305,44 @@ async def ask_my_numbers(
     ]
     prompt = f"Данни за фирмата (JSON, актуални към момента):\n{json.dumps(digest, ensure_ascii=False)}\n\nВъпрос: {question}"
 
+    # The model answers from the digest when it can and looks up anything
+    # else itself (an item, a supplier, any period) through these tools -
+    # all scoped to this company and to what this viewer may see. The SDK's
+    # tool runner runs the loop; each model call is logged for cost.
+    tools = build_chat_tools(ChatDataTools(current_user, company_id, scope, get_financial_visibility(current_user)))
     try:
-        response = await anthropic_client.messages.create(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
+        runner = server.anthropic_client.beta.messages.tool_runner(  # type: ignore[union-attr, call-overload]  # client is non-None whenever AI_FEATURES_ENABLED (checked above); the params are plain dicts the SDK's TypedDict overloads can't match
             model="claude-opus-5-5",
-            max_tokens=500,
+            max_tokens=4000,
+            max_iterations=ASK_MAX_MODEL_CALLS,
             system=system_prompt,
+            tools=tools,
             messages=[*history_messages, {"role": "user", "content": prompt}],  # type: ignore[list-item]  # plain dicts matching MessageParam's shape; the SDK's union is stricter than a dict literal can satisfy
+            output_config={"effort": "medium"},
+            cache_control={"type": "ephemeral"},
+            # A policy decline is retried on another model inside the same call.
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
         )
-        await log_ai_usage(company_id, "ask_my_numbers", response)
-        answer = next((b.text for b in response.content if b.type == "text"), "").strip()  # type: ignore[union-attr]  # b.type == "text" guards this at runtime; mypy cannot narrow a discriminated union inside a generator expression
-        if not answer:
+        final = None
+        async for message in runner:
+            await log_ai_usage(company_id, "ask_my_numbers", message)
+            final = message
+        if final is None:
             raise RuntimeError("empty AI response")
+        if final.stop_reason == "refusal":
+            raise HTTPException(status_code=422, detail="AI асистентът не може да отговори на този въпрос.")
+        answer = "\n".join(b.text for b in final.content if b.type == "text").strip()
+        if not answer:
+            # Still looking things up when the call budget ran out.
+            answer = (
+                "Не успях да събера отговора с позволения брой търсения - попитай по-конкретно "
+                "(артикул, доставчик или период)." if query.language != "en" else
+                "I couldn't put the answer together within the allowed number of look-ups - "
+                "please ask more specifically (an item, a supplier or a period)."
+            )
+    except HTTPException:
+        raise
     except Exception as e:
         raise ai_exception_to_http(e, "Ask-my-numbers error")
 
