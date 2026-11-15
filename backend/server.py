@@ -378,6 +378,11 @@ class InvoiceItemCreate(BaseModel):
     unit_price: float
     total_price: Optional[float] = None  # Ако не е подадено, се изчислява
     vat_amount: Optional[float] = None
+    # Scan review only, never stored on the line: the owner re-read this
+    # line as k pieces per invoice unit (learned for the supplier + item),
+    # or undid such a correction the app applied (forgotten).
+    pack_multiple_applied: Optional[int] = Field(default=None, ge=2, le=100)
+    pack_rule_rejected: Optional[bool] = None
 
 class InvoiceItemUpdate(BaseModel):
     """Corrects one already-saved line item (e.g. OCR read "1 бр." for what
@@ -4915,6 +4920,7 @@ async def create_indexes():
         await db.signal_states.create_index([("user_id", 1), ("until", 1)])
         await db.signal_states.create_index([("user_id", 1), ("key", 1), ("fingerprint", 1)], unique=True)
         await db.item_preferences.create_index([("company_id", 1), ("item_key", 1)], unique=True)
+        await db.item_pack_rules.create_index([("company_id", 1), ("item_key", 1), ("supplier_key", 1)], unique=True)
 
         # Users indexes
         await db.users.create_index([("email", 1)], unique=True, sparse=True)

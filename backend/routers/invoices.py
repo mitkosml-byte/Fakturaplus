@@ -32,6 +32,10 @@ from server import (
 )
 import server
 from routers.price_tracking import (
+    detect_pack_multiple,
+    forget_pack_rule,
+    get_pack_rule,
+    learn_pack_rule,
     evaluate_price_change,
     get_price_alert_settings_dict,
     price_history_row,
@@ -138,11 +142,19 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     history_rows = []
     price_alerts = []
 
+    pack_lessons: List[tuple] = []
     if invoice.items:
         items_list = []
         alert_settings = await get_price_alert_settings_dict(company_id) if company_id else None
         for item in invoice.items:
             item_dict = item.model_dump()
+            # Scan-review signals, not part of the stored line.
+            applied = item_dict.pop("pack_multiple_applied", None)
+            rejected = item_dict.pop("pack_rule_rejected", None)
+            if applied:
+                pack_lessons.append(("learn", item_dict["name"], applied))
+            elif rejected:
+                pack_lessons.append(("forget", item_dict["name"], None))
             # Calculate total_price if not provided
             if item_dict.get("total_price") is None:
                 item_dict["total_price"] = item_dict["quantity"] * item_dict["unit_price"]
@@ -192,6 +204,13 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         # Keep raw-material grouping fresh automatically, without the user
         # having to trigger it - throttled inside the task itself.
         background_tasks.add_task(maybe_schedule_ai_item_merge, company_id)
+
+    if company_id:
+        for lesson, item_name, multiple in pack_lessons:
+            if lesson == "learn":
+                await learn_pack_rule(company_id, invoice.supplier, item_name, multiple, "scan")
+            else:
+                await forget_pack_rule(company_id, invoice.supplier, item_name)
 
     await audit_service.log_action(
         user_id=current_user.user_id,
@@ -443,6 +462,20 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
                     company_id, invoice_id, header["supplier"], header["invoice_number"], header["date"],
                     old_item, merged,
                 )
+                # A pack re-read as pieces is remembered for this supplier
+                # and item; the same correction undone is forgotten.
+                learned = detect_pack_multiple(
+                    old_item.get("quantity"), old_item.get("unit_price"), merged["quantity"], merged["unit_price"]
+                )
+                undone = detect_pack_multiple(
+                    merged["quantity"], merged["unit_price"], old_item.get("quantity"), old_item.get("unit_price")
+                )
+                if learned:
+                    await learn_pack_rule(company_id, header["supplier"], merged["name"], learned, "invoice_edit")
+                elif undone:
+                    item_key, _ = await normalize_item_name(merged["name"], company_id)
+                    if await get_pack_rule(company_id, header["supplier"], item_key) == undone:
+                        await forget_pack_rule(company_id, header["supplier"], merged["name"])
         update_data["items"] = merged_items
 
     # Existence was already confirmed above via `existing` - modified_count

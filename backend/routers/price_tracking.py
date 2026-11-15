@@ -32,6 +32,7 @@ _eik_check_digit,
     _ym_diff,
     _team_channel_id,
 )
+import math
 import server
 
 router = APIRouter(prefix="/api")
@@ -117,6 +118,20 @@ def _typical_monthly_quantity(same_unit_records: List[dict], row: dict) -> float
     return total * 30 / span_days
 
 
+async def _same_unit_history(company_id: str, row: dict) -> List[dict]:
+    """Earlier purchases of this item from this supplier in the same unit,
+    newest first, excluding the row's own invoice."""
+    supplier_filter = {"$regex": f"^{re.escape(row['supplier'])}$", "$options": "i"}
+    unit_key = normalize_unit(row["unit"])
+    earlier = await server.db.item_price_history.find(
+        {"company_id": company_id, "supplier": supplier_filter, "item_name": row["item_name"],
+         "invoice_id": {"$ne": row["invoice_id"]}},
+        {"_id": 0, "unit_price": 1, "quantity": 1, "unit": 1, "invoice_date": 1},
+        sort=[("invoice_date", -1)],
+    ).to_list(500)
+    return [r for r in earlier if normalize_unit(r.get("unit")) == unit_key and r.get("unit_price", 0) > 0]
+
+
 async def evaluate_price_change(company_id: str, row: dict, settings: dict, dedupe: bool = True) -> Optional[dict]:
     """The alert one new price-history row deserves, if any, judged against
     this company's own earlier purchases of the same item from the same
@@ -137,14 +152,7 @@ async def evaluate_price_change(company_id: str, row: dict, settings: dict, dedu
     ):
         return None
 
-    unit_key = normalize_unit(row["unit"])
-    earlier = await server.db.item_price_history.find(
-        {"company_id": company_id, "supplier": supplier_filter, "item_name": row["item_name"],
-         "invoice_id": {"$ne": row["invoice_id"]}},
-        {"_id": 0, "unit_price": 1, "quantity": 1, "unit": 1, "invoice_date": 1},
-        sort=[("invoice_date", -1)],
-    ).to_list(500)
-    same_unit = [r for r in earlier if normalize_unit(r.get("unit")) == unit_key and r.get("unit_price", 0) > 0]
+    same_unit = await _same_unit_history(company_id, row)
     if not same_unit:
         return None
 
@@ -183,6 +191,61 @@ async def evaluate_price_change(company_id: str, row: dict, settings: dict, dedu
     if already_alerted:
         return None
     return {**alert, "kind": "price_change", "monthly_impact": monthly_impact}
+
+
+# ===================== LEARNED PACK SIZES =====================
+# "Айран от Метро = стек от 6": when the owner corrects a line from N packs
+# to N x k pieces - in scan review or by editing a saved invoice - the app
+# remembers k for that item from that supplier, and the next scan that
+# prices it as a pack gets the same correction applied, visibly and with
+# undo. An undone correction is forgotten. Generic: any item, any supplier.
+
+PACK_RULE_MAX = 100
+
+
+def _supplier_key(supplier: str) -> str:
+    return (supplier or "").strip().lower()
+
+
+def detect_pack_multiple(old_qty: Any, old_price: Any, new_qty: Any, new_price: Any) -> Optional[int]:
+    """k when (new_qty, new_price) == (old_qty x k, old_price / k) for a whole
+    k >= 2: the same line re-read as k times as many pieces at 1/k the price."""
+    values = (old_qty, old_price, new_qty, new_price)
+    if not all(isinstance(v, (int, float)) and v > 0 for v in values):
+        return None
+    k = round(new_qty / old_qty)
+    if k < 2 or k > PACK_RULE_MAX:
+        return None
+    if abs(new_qty - old_qty * k) > 0.01 * new_qty or abs(new_price * k - old_price) > 0.02 * old_price:
+        return None
+    return k
+
+
+async def learn_pack_rule(company_id: str, supplier: str, item_name: str, multiple: int, source: str) -> None:
+    item_key, _ = await normalize_item_name(item_name, company_id)
+    now = datetime.now(timezone.utc)
+    await server.db.item_pack_rules.update_one(
+        {"company_id": company_id, "item_key": item_key, "supplier_key": _supplier_key(supplier)},
+        {"$set": {"company_id": company_id, "item_key": item_key, "supplier_key": _supplier_key(supplier),
+                  "supplier": supplier, "multiple": multiple, "source": source, "updated_at": now},
+         "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+
+
+async def forget_pack_rule(company_id: str, supplier: str, item_name: str) -> None:
+    item_key, _ = await normalize_item_name(item_name, company_id)
+    await server.db.item_pack_rules.delete_one(
+        {"company_id": company_id, "item_key": item_key, "supplier_key": _supplier_key(supplier)}
+    )
+
+
+async def get_pack_rule(company_id: str, supplier: str, item_key: str) -> Optional[int]:
+    rule = await server.db.item_pack_rules.find_one(
+        {"company_id": company_id, "item_key": item_key, "supplier_key": _supplier_key(supplier)},
+        {"_id": 0, "multiple": 1},
+    )
+    return rule.get("multiple") if rule else None
 
 
 async def purge_invoice_price_data(company_id: str, invoice_id: str) -> None:
@@ -357,6 +420,21 @@ async def check_item_prices(request: Request, body: PriceCheckRequest, current_u
         row = await price_history_row(company_id, supplier, "__preview__", "", now, line.model_dump())
         if not row:
             continue
+        # A pack size learned from an earlier correction is applied when the
+        # price looks like that pack (closer to k x the usual price than to
+        # the usual price), or when there is no usual price to compare with.
+        learned = await get_pack_rule(company_id, supplier, row["item_name"])
+        if learned and row["unit_price"] > 0:
+            same_unit = await _same_unit_history(company_id, row)
+            baseline = statistics.median(r["unit_price"] for r in same_unit[:PRICE_BASELINE_PURCHASES]) if same_unit else None
+            ratio = row["unit_price"] / baseline if baseline else None
+            if ratio is None or abs(math.log(ratio / learned)) < abs(math.log(ratio)):
+                hints.append({
+                    "index": index, "kind": "pack_rule", "pack_multiple": learned, "auto_apply": True,
+                    "old_price": round(baseline, 4) if baseline else None, "new_price": row["unit_price"],
+                    "change_percent": None, "direction": "increase", "monthly_impact": None, "unit": row["unit"],
+                })
+                continue
         result = await evaluate_price_change(company_id, row, settings, dedupe=False)
         if result:
             hints.append({

@@ -24,7 +24,7 @@ import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
 import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint } from '../../src/types';
-import { formatEur, priceAlertMeaning } from '../../src/utils/priceAlert';
+import { detectPackMultiple, formatEur, priceAlertMeaning } from '../../src/utils/priceAlert';
 import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
@@ -36,6 +36,12 @@ interface EditableItem {
   quantity: string;
   unit: string;
   unit_price: string;
+  // As recognized, before any correction - what a pack re-read is measured
+  // against when the invoice is saved (that is how the app learns it).
+  ocr?: { quantity: number; unit_price: number };
+  // A pack size learned from an earlier correction that the app applied
+  // automatically; `undone` once the owner put the line back.
+  packRule?: { multiple: number; undone: boolean };
 }
 
 const emptyItem = (): EditableItem => ({ name: '', quantity: '1', unit: 'бр.', unit_price: '' });
@@ -274,10 +280,32 @@ export default function ScanScreen() {
         unit_price: item.unit_price,
       })));
       const byIndex: Record<number, ItemPriceHint> = {};
+      const learned: Record<number, number> = {};
       hints.forEach((hint) => {
-        byIndex[hint.index] = hint;
+        if (hint.kind === 'pack_rule' && hint.auto_apply && hint.pack_multiple) {
+          learned[hint.index] = hint.pack_multiple;
+        } else {
+          byIndex[hint.index] = hint;
+        }
       });
       setItemPriceHints(byIndex);
+      // A pack size the owner corrected before is applied straight away -
+      // only to lines still exactly as recognized, and with an undo.
+      if (Object.keys(learned).length > 0) {
+        setItems((prev) => prev.map((item, i) => {
+          const k = learned[i];
+          if (!k || !item.ocr) return item;
+          if (parseFloat(item.quantity) !== item.ocr.quantity || parseFloat(item.unit_price) !== item.ocr.unit_price) {
+            return item;
+          }
+          return {
+            ...item,
+            quantity: String(Math.round(item.ocr.quantity * k * 1000) / 1000),
+            unit_price: String(Math.round((item.ocr.unit_price / k) * 10000) / 10000),
+            packRule: { multiple: k, undone: false },
+          };
+        }));
+      }
     } catch {
       // no hints
     }
@@ -299,6 +327,30 @@ export default function ScanScreen() {
       quantity: Math.round((split ? qty * k : qty / k) * 1000) / 1000,
       unitPrice: Math.round((split ? price / k : price * k) * 10000) / 10000,
     };
+  };
+
+  // The remembered-pack note shows only while the line still holds the
+  // values the app put there - an edit by hand makes it the owner's own.
+  const packRuleActive = (item: EditableItem): boolean => {
+    if (!item.packRule || item.packRule.undone || !item.ocr) return false;
+    const k = item.packRule.multiple;
+    return parseFloat(item.quantity) === Math.round(item.ocr.quantity * k * 1000) / 1000
+      && parseFloat(item.unit_price) === Math.round((item.ocr.unit_price / k) * 10000) / 10000;
+  };
+
+  // Puts a line the app converted with a remembered pack size back the way
+  // it was recognized; saving it like that forgets that pack size.
+  const undoPackRule = (index: number) => {
+    setItems(prev => prev.map((item, i) => (
+      i === index && item.ocr && item.packRule
+        ? {
+          ...item,
+          quantity: String(item.ocr.quantity),
+          unit_price: String(item.ocr.unit_price),
+          packRule: { ...item.packRule, undone: true },
+        }
+        : item
+    )));
   };
 
   const applyPackFix = (index: number) => {
@@ -336,6 +388,7 @@ export default function ScanScreen() {
           quantity: String(item.quantity),
           unit: item.unit || 'бр.',
           unit_price: String(item.unit_price),
+          ocr: { quantity: item.quantity || 1, unit_price: item.unit_price },
         })));
         setItemPriceHints({});
         loadItemPriceHints(result.items, result.supplier);
@@ -405,15 +458,29 @@ export default function ScanScreen() {
 
     const itemsPayload: InvoiceItemCreate[] = items
       .filter(item => item.name.trim() && item.unit_price)
-      .map(item => ({
-        name: item.name.trim(),
-        quantity: parseFloat(item.quantity) || 1,
-        unit: item.unit.trim() || 'бр.',
+      .map(item => {
+        const quantity = parseFloat(item.quantity) || 1;
         // A negative unit_price is kept as-is, not clamped to 0 - a
         // discount/rebate line ("отстъпка") printed as its own row on the
         // invoice is a real, common pattern the backend accepts on purpose.
-        unit_price: parseFloat(item.unit_price) || 0,
-      }));
+        const unitPrice = parseFloat(item.unit_price) || 0;
+        // A pack re-read as pieces (by the fix button, by hand or by a
+        // remembered pack size) is learned for this supplier and item; a
+        // remembered pack size put back to the recognized line is forgotten.
+        const packMultiple = item.ocr
+          ? detectPackMultiple(item.ocr.quantity, item.ocr.unit_price, quantity, unitPrice)
+          : null;
+        const putBack = !!item.packRule && !!item.ocr
+          && quantity === item.ocr.quantity && unitPrice === item.ocr.unit_price;
+        return {
+          name: item.name.trim(),
+          quantity,
+          unit: item.unit.trim() || 'бр.',
+          unit_price: unitPrice,
+          ...(packMultiple ? { pack_multiple_applied: packMultiple } : {}),
+          ...(!packMultiple && putBack ? { pack_rule_rejected: true } : {}),
+        };
+      });
 
     setIsSaving(true);
     try {
@@ -1020,6 +1087,17 @@ export default function ScanScreen() {
                               <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
                             </TouchableOpacity>
                           </View>
+                          {item.packRule && packRuleActive(item) && (
+                            <View style={styles.packRuleRow}>
+                              <Ionicons name="cube" size={13} color={COLORS.success} />
+                              <Text style={[styles.itemPriceNote, styles.packRuleText]}>
+                                {t('scan.packRuleApplied').replace(/\{k\}/g, String(item.packRule.multiple))}
+                              </Text>
+                              <TouchableOpacity onPress={() => undoPackRule(index)}>
+                                <Text style={styles.packRuleUndo}>{t('scan.packRuleUndo')}</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
                           {itemPriceHints[index] && (() => {
                             const hint = itemPriceHints[index];
                             if (hint.kind === 'pack_suspect') {
@@ -1043,6 +1121,7 @@ export default function ScanScreen() {
                                 </View>
                               );
                             }
+                            if (hint.change_percent == null || hint.old_price == null) return null;
                             const up = hint.change_percent > 0;
                             const meaning = priceAlertMeaning(hint, t);
                             return (
@@ -1578,6 +1657,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     marginTop: 6,
+  },
+  packRuleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  packRuleText: {
+    marginTop: 0,
+    flexShrink: 1,
+    color: COLORS.success,
+  },
+  packRuleUndo: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.primary,
   },
   packFixButton: {
     flexDirection: 'row',

@@ -348,3 +348,65 @@ def test_seasonal_pause_does_not_hide_a_regular_item():
     # 36 purchases x 20 kg over 35 cycles of 5 days (the pause counted as one
     # cycle) = 20.6 -> 21 kg; averaged over the 150-day pause it was ~11.
     assert items["филе капка"]["recommended_quantity"] == 21
+
+
+def test_pack_size_is_learned_from_a_correction_and_applied_at_the_next_scan(client):
+    """"Айран от Метро = стек от 6": fixing a saved line from 2 x 4.20 to
+    12 x 0.70 is remembered; the next scan priced as a pack gets the same
+    correction offered for automatic use, a per-piece price does not, and
+    an undone correction in scan review is forgotten."""
+    company_id, user = _owner()
+    token = uuid.uuid4().hex
+
+    async def _setup():
+        await _register(user)
+        await server.db.user_sessions.insert_one({
+            "user_id": user.user_id, "session_token": token,
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=1), "created_at": datetime.now(timezone.utc),
+        })
+        for n, days in enumerate((40, 30, 20)):
+            await _invoice(user, f"L{n}", days, [{"name": "Айран 250мл", "quantity": 60, "unit_price": 0.70}])
+        pack, _ = await _invoice(user, "L3", 10, [{"name": "Айран 250мл", "quantity": 2, "unit_price": 4.20}])
+        await update_invoice(
+            pack.id,
+            server.InvoiceUpdate(items=[server.InvoiceItemUpdate(id=pack.items[0]["id"], quantity=12, unit_price=0.70)]),
+            current_user=user,
+        )
+        return await server.db.item_pack_rules.find_one({"company_id": company_id}, {"_id": 0})
+
+    rule = asyncio.run(_setup())
+    assert rule["multiple"] == 6 and rule["source"] == "invoice_edit" and rule["supplier_key"] == "метро"
+
+    headers = {"Authorization": f"Bearer {token}"}
+    r = client.post("/api/items/price-check", headers=headers, json={"supplier": "Метро", "items": [
+        {"name": "Айран 250мл", "quantity": 3, "unit": "бр.", "unit_price": 4.50},
+        {"name": "Айран 250мл", "quantity": 18, "unit": "бр.", "unit_price": 0.72},
+    ]})
+    assert r.status_code == 200, r.text
+    hints = {h["index"]: h for h in r.json()["hints"]}
+    assert hints[0]["kind"] == "pack_rule" and hints[0]["pack_multiple"] == 6 and hints[0]["auto_apply"] is True
+    assert 1 not in hints or hints[1]["kind"] != "pack_rule"
+
+    async def _scan_saves():
+        # Kept in review: learned (again) from the scan itself...
+        saved, _ = await _invoice(user, "L4", 2, [
+            {"name": "Айран 250мл", "quantity": 18, "unit_price": 0.70, "pack_multiple_applied": 6}])
+        kept = await server.db.item_pack_rules.count_documents({"company_id": company_id})
+        stored = await server.db.invoices.find_one({"id": saved.id}, {"_id": 0, "items": 1})
+        # ...undone in review: forgotten.
+        await _invoice(user, "L5", 1, [
+            {"name": "Айран 250мл", "quantity": 3, "unit_price": 4.20, "pack_rule_rejected": True}])
+        left = await server.db.item_pack_rules.count_documents({"company_id": company_id})
+        return kept, stored, left
+
+    kept, stored, left = asyncio.run(_scan_saves())
+    assert kept == 1 and left == 0
+    assert "pack_multiple_applied" not in stored["items"][0] and "pack_rule_rejected" not in stored["items"][0]
+
+
+def test_detect_pack_multiple():
+    from routers.price_tracking import detect_pack_multiple
+    assert detect_pack_multiple(2, 4.20, 12, 0.70) == 6
+    assert detect_pack_multiple(1, 10.0, 24, 0.4167) == 24
+    assert detect_pack_multiple(2, 4.20, 12, 0.80) is None  # total changed: not the same line re-read
+    assert detect_pack_multiple(10, 1.0, 10, 1.0) is None

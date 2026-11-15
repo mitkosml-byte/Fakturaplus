@@ -6,11 +6,23 @@
 type Translate = (key: string) => string;
 
 export interface PriceMeaningInput {
-  kind?: 'price_change' | 'pack_suspect' | null;
+  kind?: 'price_change' | 'pack_suspect' | 'pack_rule' | null;
   direction?: 'increase' | 'decrease' | null;
-  old_price: number;
+  old_price: number | null;
   pack_multiple?: number | null;
   monthly_impact?: number | null;
+}
+
+// k when (newQty, newPrice) is (oldQty x k, oldPrice / k) for a whole k >= 2:
+// the same line re-read as k times as many pieces at 1/k the price. Same
+// rule as the backend's detect_pack_multiple.
+export function detectPackMultiple(oldQty: number, oldPrice: number, newQty: number, newPrice: number): number | null {
+  if (![oldQty, oldPrice, newQty, newPrice].every((v) => Number.isFinite(v) && v > 0)) return null;
+  const k = Math.round(newQty / oldQty);
+  if (k < 2 || k > 100) return null;
+  if (Math.abs(newQty - oldQty * k) > 0.01 * newQty) return null;
+  if (Math.abs(newPrice * k - oldPrice) > 0.02 * oldPrice) return null;
+  return k;
 }
 
 export function formatEur(value: number): string {
@@ -26,7 +38,7 @@ export function priceAlertMeaning(alert: PriceMeaningInput, t: Translate): strin
   if (isPackSuspect(alert)) {
     return t(alert.direction === 'decrease' ? 'priceAlert.packQuestionDown' : 'priceAlert.packQuestionUp')
       .replace(/\{k\}/g, String(alert.pack_multiple))
-      .replace('{old}', formatEur(alert.old_price));
+      .replace('{old}', formatEur(alert.old_price ?? 0));
   }
   if (alert.monthly_impact) {
     const sign = alert.monthly_impact > 0 ? '+' : '−';

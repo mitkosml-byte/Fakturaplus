@@ -2946,6 +2946,14 @@ export const translations: Translations = {
     bg: 'Да, по {k} в стек: {qty} × {price} €',
     en: 'Yes, {k} per pack: {qty} × {price} €',
   },
+  'scan.packRuleApplied': {
+    bg: 'Записах го като стек от {k} – както при предишната ти поправка',
+    en: 'Entered as a pack of {k} – like your earlier correction',
+  },
+  'scan.packRuleUndo': {
+    bg: 'Върни',
+    en: 'Undo',
+  },
   'scan.priceHintChange': {
     bg: '{percent}% спрямо обичайните {old} €',
     en: '{percent}% vs the usual {old} €',

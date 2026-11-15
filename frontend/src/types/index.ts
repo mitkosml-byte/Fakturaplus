@@ -547,6 +547,11 @@ export interface InvoiceItemCreate {
   unit_price: number;
   total_price?: number;
   vat_amount?: number;
+  // Scan review only (never stored on the line): this line was re-read as
+  // k pieces per invoice unit - remembered for the supplier + item - or a
+  // remembered pack size the app applied was undone (forgotten).
+  pack_multiple_applied?: number;
+  pack_rule_rejected?: boolean;
 }
 
 // Corrects one already-saved line item on an existing invoice (e.g. OCR
@@ -590,10 +595,13 @@ export interface PriceAlert {
 // (POST /items/price-check) - index points into the request's items.
 export interface ItemPriceHint {
   index: number;
-  kind: 'price_change' | 'pack_suspect';
-  old_price: number;
+  // pack_rule: a pack size learned from an earlier correction, applied
+  // automatically in scan review (with undo)
+  kind: 'price_change' | 'pack_suspect' | 'pack_rule';
+  auto_apply?: boolean;
+  old_price: number | null;
   new_price: number;
-  change_percent: number;
+  change_percent: number | null;
   direction: 'increase' | 'decrease';
   pack_multiple: number | null;
   monthly_impact: number | null;
