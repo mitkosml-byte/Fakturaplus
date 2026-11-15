@@ -23,8 +23,25 @@ type Props = {
   onChangeRangeDays: (days: number) => void;
 };
 
+// The next month read from the same month last year (the company's own
+// months follow a yearly rhythm - see the backend's year-back reading).
+const isYearBack = (forecast: any) => forecast?.method === 'year_back';
+// Only the average is known: under 4 months of history, and not read from
+// last year either.
+const isAverageOnly = (forecast: any) => forecast?.trend === 'insufficient_data' && !isYearBack(forecast);
+
 export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDays, onChangeRangeDays }: Props) {
   const { t } = useTranslation();
+
+  // Against the same months last year for a yearly-rhythm forecast - a
+  // turn its rhythm explains is not a trend - else the window's trend.
+  const trendLine = (forecast: any) => {
+    if (isYearBack(forecast) && forecast.vs_last_year_percent != null) {
+      return `${forecast.vs_last_year_percent > 0 ? '+' : ''}${forecast.vs_last_year_percent}% ${t('stats.vsLastYear')}`;
+    }
+    const icon = forecast.trend === 'increasing' ? '📈' : forecast.trend === 'decreasing' ? '📉' : '➖';
+    return `${icon} ${forecast.trend_percent > 0 ? '+' : ''}${forecast.trend_percent}%`;
+  };
 
   return (
     <View style={styles.forecastSection}>
@@ -58,7 +75,7 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
       <View style={styles.forecastRow}>
         {revenueForecast?.forecast?.[0] && (
           <View style={styles.forecastCard}>
-            {revenueForecast.trend === 'insufficient_data' ? (
+            {isAverageOnly(revenueForecast) ? (
               <>
                 <Ionicons name="hourglass-outline" size={20} color={COLORS.textMuted} />
                 <Text style={styles.forecastLabel}>{t('stats.forecastAverageOnly')} · {t('stats.forecastRevenue')}</Text>
@@ -73,17 +90,14 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
                 <Text style={[styles.forecastValue, { color: COLORS.success }]}>
                   {revenueForecast.forecast[0].predicted_amount.toFixed(0)} €
                 </Text>
-                <Text style={styles.forecastTrend}>
-                  {revenueForecast.trend === 'increasing' ? '📈' : revenueForecast.trend === 'decreasing' ? '📉' : '➖'}
-                  {' '}{revenueForecast.trend_percent > 0 ? '+' : ''}{revenueForecast.trend_percent}%
-                </Text>
+                <Text style={styles.forecastTrend}>{trendLine(revenueForecast)}</Text>
               </>
             )}
           </View>
         )}
         {expenseForecast?.forecast?.[0] && (
           <View style={styles.forecastCard}>
-            {expenseForecast.trend === 'insufficient_data' ? (
+            {isAverageOnly(expenseForecast) ? (
               <>
                 <Ionicons name="hourglass-outline" size={20} color={COLORS.textMuted} />
                 <Text style={styles.forecastLabel}>{t('stats.forecastAverageOnly')} · {t('stats.forecastExpense')}</Text>
@@ -98,17 +112,23 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
                 <Text style={[styles.forecastValue, { color: COLORS.danger }]}>
                   {expenseForecast.forecast[0].predicted_amount.toFixed(0)} €
                 </Text>
-                <Text style={styles.forecastTrend}>
-                  {expenseForecast.trend === 'increasing' ? '📈' : expenseForecast.trend === 'decreasing' ? '📉' : '➖'}
-                  {' '}{expenseForecast.trend_percent > 0 ? '+' : ''}{expenseForecast.trend_percent}%
-                </Text>
+                <Text style={styles.forecastTrend}>{trendLine(expenseForecast)}</Text>
               </>
             )}
           </View>
         )}
       </View>
 
-      {(revenueForecast?.trend === 'insufficient_data' || expenseForecast?.trend === 'insufficient_data') && (
+      {(isYearBack(revenueForecast) || isYearBack(expenseForecast)) && (
+        <Text style={[styles.forecastHint, styles.forecastNote]}>
+          {t(
+            isYearBack(revenueForecast) && isYearBack(expenseForecast) ? 'stats.forecastYearBackBoth'
+              : isYearBack(revenueForecast) ? 'stats.forecastYearBackRevenue'
+              : 'stats.forecastYearBackExpense'
+          )}
+        </Text>
+      )}
+      {(isAverageOnly(revenueForecast) || isAverageOnly(expenseForecast)) && (
         <Text style={styles.forecastHint}>{t('stats.forecastInsufficientData')}</Text>
       )}
     </View>
@@ -162,6 +182,10 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: -4,
     marginBottom: 12,
+  },
+  forecastNote: {
+    marginTop: 12,
+    marginBottom: 0,
   },
   forecastRow: {
     flexDirection: 'row',

@@ -1,7 +1,8 @@
 """AI Forecasting service for expense/revenue predictions"""
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from collections import defaultdict
+import calendar
 import statistics
 
 # Below this many months of history, a trend computed any way at all is
@@ -17,6 +18,27 @@ MIN_MONTHS_FOR_TREND = 4
 # knob (lookback_days) regardless of which preset or custom range it came
 # from.
 LOOKBACK_DAYS_DEFAULT = 180  # unchanged default (6 months) when nothing is specified
+
+# Year-back reading. Some businesses run on a yearly rhythm - a strong
+# summer, a quiet January, an insurance bill every March - and a straight
+# trend line through the last months reads such a turn as growth or a
+# fall. The year-back reading predicts a month from the same month last
+# year, scaled by how this year has been running against last year. It is
+# used only when the company's OWN history shows it works: scored on its
+# most recent months, it must have been clearly more accurate than the
+# trend line. Nothing about any trade or season is assumed.
+SEASONAL_HISTORY_MONTHS = 36
+SEASONAL_MAX_SCORED_MONTHS = 12  # a whole yearly cycle, turns included
+SEASONAL_MIN_SCORED_MONTHS = 3
+SEASONAL_WIN_RATIO = 0.75  # its error at most 3/4 of the trend line's...
+SEASONAL_MIN_ERROR_GAIN = 0.05  # ...and at least 5 points lower
+SEASONAL_LEVEL_MONTHS = 3  # recent months that set this year's level against last year's
+SEASONAL_TREND_WINDOW = 6  # months the trend line is fitted on when scored (the default window)
+SEASONAL_MIN_MARGIN = 0.05
+# A month counts as known revenue when revenue was entered on at least this
+# share of its open days (days not marked closed) - a month logged for a
+# week says nothing about how the month went.
+REVENUE_MONTH_MIN_COVERAGE = 0.6
 
 
 def _ym_add(year: int, month: int, delta: int) -> tuple:
@@ -97,6 +119,104 @@ def _drop_partial_first_month(monthly_totals: Dict[str, float], first_activity: 
         del monthly_totals[key]
 
 
+def _month_key(year: int, month: int) -> str:
+    return f"{year}-{month:02d}"
+
+
+def _theil_sen_at(points: List[tuple], x: float) -> float:
+    """Median-of-slopes line through (x, y) points, read at x."""
+    slopes = [
+        (y2 - y1) / (x2 - x1)
+        for i, (x1, y1) in enumerate(points) for (x2, y2) in points[i + 1:] if x2 != x1
+    ]
+    slope = statistics.median(slopes) if slopes else 0.0
+    intercept = statistics.median(py - slope * px for px, py in points)
+    return intercept + slope * x
+
+
+def _level_ratio(series: Dict[str, float], year: int, month: int) -> Optional[float]:
+    """How this year runs against last year just before (year, month): the
+    known months among the SEASONAL_LEVEL_MONTHS before it, over the same
+    months a year earlier."""
+    now_sum = before_sum = 0.0
+    for back in range(1, SEASONAL_LEVEL_MONTHS + 1):
+        current = series.get(_month_key(*_ym_add(year, month, -back)))
+        year_before = series.get(_month_key(*_ym_add(year, month, -back - 12)))
+        if current is None or year_before is None:
+            continue
+        now_sum += current
+        before_sum += year_before
+    if before_sum <= 0:
+        return None
+    return now_sum / before_sum
+
+
+def _year_back_prediction(series: Dict[str, float], year: int, month: int, level: Optional[float]) -> Optional[float]:
+    same_month_last_year = series.get(_month_key(*_ym_add(year, month, -12)))
+    if same_month_last_year is None or level is None:
+        return None
+    return max(0.0, same_month_last_year * level)
+
+
+def _trend_prediction(series: Dict[str, float], year: int, month: int) -> Optional[float]:
+    """What the trend line through the SEASONAL_TREND_WINDOW months before
+    (year, month) said about it - the reading the year-back one is scored
+    against (a flat average below MIN_MONTHS_FOR_TREND, like _build_forecast)."""
+    points = [
+        (float(-back), series[key])
+        for back in range(SEASONAL_TREND_WINDOW, 0, -1)
+        if (key := _month_key(*_ym_add(year, month, -back))) in series
+    ]
+    if len(points) < 2:
+        return None
+    if len(points) < MIN_MONTHS_FOR_TREND:
+        return statistics.mean(p[1] for p in points)
+    return max(0.0, _theil_sen_at(points, 0.0))
+
+
+def _year_back_analysis(series: Dict[str, float], now: datetime) -> Optional[Dict[str, Any]]:
+    """Scores the year-back reading against the trend line on the company's
+    last SEASONAL_MAX_SCORED_MONTHS known months (each predicted only from
+    the months before it). None when too few months can be scored - under
+    about 16 months of history - so nothing is claimed either way."""
+    scored = []
+    for back in range(1, SEASONAL_MAX_SCORED_MONTHS + 1):
+        year, month = _ym_add(now.year, now.month, -back)
+        actual = series.get(_month_key(year, month))
+        if actual is None:
+            continue
+        year_back = _year_back_prediction(series, year, month, _level_ratio(series, year, month))
+        trend = _trend_prediction(series, year, month)
+        if year_back is None or trend is None:
+            continue
+        scored.append((actual, year_back, trend))
+    if len(scored) < SEASONAL_MIN_SCORED_MONTHS:
+        return None
+    total = sum(actual for actual, _, _ in scored)
+    if total <= 0:
+        return None
+    year_back_error = sum(abs(predicted - actual) for actual, predicted, _ in scored) / total
+    trend_error = sum(abs(predicted - actual) for actual, _, predicted in scored) / total
+    level = _level_ratio(series, now.year, now.month)
+    last_12 = [
+        series[key] for back in range(1, 13)
+        if (key := _month_key(*_ym_add(now.year, now.month, -back))) in series
+    ]
+    return {
+        "confirmed": (
+            level is not None
+            and year_back_error <= trend_error * SEASONAL_WIN_RATIO
+            and trend_error - year_back_error >= SEASONAL_MIN_ERROR_GAIN
+        ),
+        "error": round(year_back_error, 3),
+        "trend_error": round(trend_error, 3),
+        "months_scored": len(scored),
+        "level_ratio": round(level, 3) if level is not None else None,
+        "last_12_months_average": round(statistics.mean(last_12), 2) if last_12 else None,
+        "series": series,
+    }
+
+
 def _robust_trend(amounts: List[float]) -> tuple:
     """Theil-Sen slope (the median of every pairwise slope between two
     points) over the whole window, one point per month, instead of a
@@ -133,7 +253,7 @@ def _robust_trend(amounts: List[float]) -> tuple:
 
 
 def _build_forecast(
-    historical: List[Dict], months_ahead: int
+    historical: List[Dict], months_ahead: int, year_back: Optional[Dict[str, Any]] = None
 ) -> Dict:
     """Shared forecast/confidence logic for both expense and revenue
     forecasts - the only thing that differs between them is how
@@ -150,6 +270,9 @@ def _build_forecast(
             "avg_monthly": 0,
             "trend": "stable",
             "confidence": 0,
+            "method": "average",
+            "vs_last_year_percent": None,
+            "year_back": None,
         }
 
     amounts = [h["amount"] for h in historical]
@@ -188,6 +311,28 @@ def _build_forecast(
                 "upper_bound": round(predicted + std_dev, 2),
             })
 
+    method = "average" if len(amounts) < MIN_MONTHS_FOR_TREND else "trend"
+    year_back_info = None
+    if year_back:
+        year_back_info = {k: v for k, v in year_back.items() if k != "series"}
+        if year_back["confirmed"]:
+            # This company's months follow last year's: each target month is
+            # last year's same month at this year's level, within the error
+            # the reading actually had on recent months.
+            margin = max(year_back["error"], SEASONAL_MIN_MARGIN)
+            for entry, (ty, tm) in zip(forecast, targets):
+                predicted_year_back = _year_back_prediction(year_back["series"], ty, tm, year_back["level_ratio"])
+                if predicted_year_back is None:
+                    continue
+                entry.update({
+                    "predicted_amount": round(predicted_year_back, 2),
+                    "lower_bound": round(predicted_year_back * (1 - margin), 2),
+                    "upper_bound": round(predicted_year_back * (1 + margin), 2),
+                    "basis": "year_back",
+                    "same_month_last_year": round(year_back["series"][_month_key(*_ym_add(ty, tm, -12))], 2),
+                })
+                method = "year_back"
+
     return {
         "historical": historical,
         "forecast": forecast,
@@ -197,6 +342,14 @@ def _build_forecast(
         "confidence": round(confidence, 2),
         "months_of_history": len(amounts),
         "min_months_for_trend": MIN_MONTHS_FOR_TREND,
+        # "year_back" when at least the next month is read from last year's
+        # same month (see _year_back_analysis), "trend" or "average" otherwise.
+        "method": method,
+        "vs_last_year_percent": (
+            round((year_back["level_ratio"] - 1) * 100, 1)
+            if method == "year_back" and year_back and year_back["level_ratio"] is not None else None
+        ),
+        "year_back": year_back_info,
     }
 
 
@@ -216,51 +369,34 @@ class ForecastService:
                 return None
         return None
 
-    async def get_expense_forecast(
-        self,
-        company_id: str,
-        months_ahead: int = 3,
-        include_off_book_expenses: bool = True,
-        lookback_days: Optional[int] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-    ) -> Dict:
-        """Predict future expenses based on historical data.
-
-        include_off_book_expenses=False excludes db.expenses ("в канала")
-        from the monthly totals, for a caller whose viewer lacks
-        view_off_book_expenses - otherwise the forecast's avg_monthly/trend
-        would leak that data through an aggregate even though no raw record
-        is ever returned.
-
-        lookback_days (a preset like 30/90/180/365) or an explicit
-        start_date/end_date (a custom range) controls how far back the
-        history window reaches - previously hardcoded to 180 days with no
-        way to change it, which made the forecast's own trend maths
-        actively misleading for a company under 6 months old (see the
-        Module 4 audit finding this replaced)."""
-        window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
-        window_start_str = window_start.strftime("%Y-%m-%d")
-        window_end_str = window_end.strftime("%Y-%m-%d")
-
+    async def _company_user_ids(self, company_id: str) -> List[str]:
         # expenses/daily_revenue are keyed by user_id, not company_id, so
         # resolve the company's member user_ids to include everyone's entries
         company_users = await self.db.users.find(
             {"company_id": company_id}, {"_id": 0, "user_id": 1}
         ).to_list(1000)
-        user_ids = [u["user_id"] for u in company_users]
+        return [u["user_id"] for u in company_users]
+
+    async def _expense_monthly_totals(
+        self, company_id: str, user_ids: List[str], window_start: datetime, window_end: datetime,
+        include_off_book_expenses: bool,
+    ) -> tuple:
+        """(monthly expense totals in [window_start, window_end), the date of
+        the company's first recorded expense)."""
+        window_start_str = window_start.strftime("%Y-%m-%d")
+        window_end_str = window_end.strftime("%Y-%m-%d")
 
         # Get invoice expenses
         invoices = await self.db.invoices.find(
             {"company_id": company_id, "date": {"$gte": window_start, "$lt": window_end}},
             {"_id": 0, "date": 1, "total_amount": 1}
-        ).to_list(10000)
+        ).to_list(None)
 
         # Get non-invoice expenses (date is stored as a "YYYY-MM-DD" string)
         expenses = await self.db.expenses.find(
             {"user_id": {"$in": user_ids}, "date": {"$gte": window_start_str, "$lt": window_end_str}},
             {"_id": 0, "date": 1, "amount": 1}
-        ).to_list(10000) if include_off_book_expenses else []
+        ).to_list(None) if include_off_book_expenses else []
 
         # Payroll cost (gross + employer contributions + benefits) - usually
         # the most stable, predictable expense a business has
@@ -310,11 +446,127 @@ class ForecastService:
                 await self._first_record_date(self.db.expenses, {"user_id": {"$in": user_ids}}),
             ) if d
         ]
-        _drop_partial_first_month(monthly_totals, min((d.replace(tzinfo=None) for d in firsts), default=None))
+        return dict(monthly_totals), min((d.replace(tzinfo=None) for d in firsts), default=None)
+
+    async def _revenue_monthly_totals(
+        self, user_ids: List[str], window_start: datetime, window_end: datetime, include_pocket_money: bool,
+    ) -> tuple:
+        """(monthly revenue totals in [window_start, window_end), {month: the
+        dates revenue was entered on})."""
+        revenues = await self.db.daily_revenue.find(
+            {
+                "user_id": {"$in": user_ids},
+                "date": {"$gte": window_start.strftime("%Y-%m-%d"), "$lt": window_end.strftime("%Y-%m-%d")},
+            },
+            {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1}
+        ).to_list(None)
+
+        # Aggregate by month (date is stored as a "YYYY-MM-DD" string)
+        monthly_totals: Dict[str, float] = defaultdict(float)
+        entered_days: Dict[str, set] = defaultdict(set)
+
+        for rev in revenues:
+            date_str = rev.get("date")
+            if isinstance(date_str, str) and len(date_str) >= 7:
+                month_key = date_str[:7]
+                monthly_totals[month_key] += float(rev.get("fiscal_revenue", 0))
+                if include_pocket_money:
+                    monthly_totals[month_key] += float(rev.get("pocket_money", 0))
+                entered_days[month_key].add(date_str[:10])
+        return dict(monthly_totals), entered_days
+
+    async def _known_revenue_months(
+        self, company_id: str, entered_days: Dict[str, set], first_month: str, end: datetime,
+    ) -> set:
+        """Months whose revenue is known: entered on at least
+        REVENUE_MONTH_MIN_COVERAGE of the open days (a day is closed by the
+        weekly pattern or a dated exception, as everywhere else). A month
+        closed throughout is known too - as nothing."""
+        company = await self.db.companies.find_one({"id": company_id}, {"_id": 0, "closed_weekdays": 1})
+        closed_weekdays = set((company or {}).get("closed_weekdays") or [])
+        exceptions = {
+            e["date"]: e["closed"] for e in await self.db.closed_date_exceptions.find(
+                {"company_id": company_id}, {"_id": 0, "date": 1, "closed": 1}
+            ).to_list(5000)
+        }
+        known = set()
+        y, m = (int(part) for part in first_month.split("-"))
+        while (y, m) < (end.year, end.month):
+            month_key = _month_key(y, m)
+            open_days = set()
+            for day in range(1, calendar.monthrange(y, m)[1] + 1):
+                date_str = f"{month_key}-{day:02d}"
+                closed = exceptions[date_str] if date_str in exceptions else datetime(y, m, day).weekday() in closed_weekdays
+                if not closed:
+                    open_days.add(date_str)
+            entered = entered_days.get(month_key, set())
+            if not open_days or len(entered & open_days) >= REVENUE_MONTH_MIN_COVERAGE * len(open_days):
+                known.add(month_key)
+            y, m = _ym_add(y, m, 1)
+        return known
+
+    async def _year_back(self, company_id: str, kind: str, include_hidden: bool) -> Optional[Dict[str, Any]]:
+        """_year_back_analysis over the company's last SEASONAL_HISTORY_MONTHS
+        whole months, whatever window the forecast itself was asked for:
+        months the company had not started yet, a partial first month and
+        (for revenue) months logged on too few days are left out as unknown."""
+        now = datetime.now(timezone.utc)
+        end = _month_start(now.year, now.month)
+        start = _month_start(*_ym_add(now.year, now.month, -SEASONAL_HISTORY_MONTHS))
+        user_ids = await self._company_user_ids(company_id)
+        if kind == "revenue":
+            totals, entered_days = await self._revenue_monthly_totals(user_ids, start, end, include_hidden)
+            first = await self._first_record_date(self.db.daily_revenue, {"user_id": {"$in": user_ids}})
+            if first:
+                first = first.replace(tzinfo=None)
+        else:
+            totals, first = await self._expense_monthly_totals(company_id, user_ids, start, end, include_hidden)
+        if not first or not totals:
+            return None
+        first_month = max(first.strftime("%Y-%m"), start.strftime("%Y-%m"))
+        series = {k: v for k, v in totals.items() if k >= first_month}
+        if kind == "revenue":
+            known = await self._known_revenue_months(company_id, entered_days, first_month, end)
+            series = {k: series.get(k, 0.0) for k in known}
+        _drop_partial_first_month(series, first)
+        return _year_back_analysis(series, now)
+
+    async def get_expense_forecast(
+        self,
+        company_id: str,
+        months_ahead: int = 3,
+        include_off_book_expenses: bool = True,
+        lookback_days: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict:
+        """Predict future expenses based on historical data.
+
+        include_off_book_expenses=False excludes db.expenses ("в канала")
+        from the monthly totals, for a caller whose viewer lacks
+        view_off_book_expenses - otherwise the forecast's avg_monthly/trend
+        would leak that data through an aggregate even though no raw record
+        is ever returned.
+
+        lookback_days (a preset like 30/90/180/365) or an explicit
+        start_date/end_date (a custom range) controls how far back the
+        history window reaches - previously hardcoded to 180 days with no
+        way to change it, which made the forecast's own trend maths
+        actively misleading for a company under 6 months old (see the
+        Module 4 audit finding this replaced). When the company's own
+        history shows a yearly rhythm, the months ahead are read from last
+        year instead (see _year_back_analysis)."""
+        window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
+        user_ids = await self._company_user_ids(company_id)
+        monthly_totals, first = await self._expense_monthly_totals(
+            company_id, user_ids, window_start, window_end, include_off_book_expenses
+        )
+        _drop_partial_first_month(monthly_totals, first)
 
         sorted_months = sorted(monthly_totals.keys())
         historical = [{"month": mk, "amount": monthly_totals[mk]} for mk in sorted_months]
-        return _build_forecast(historical, months_ahead)
+        year_back = await self._year_back(company_id, "expense", include_off_book_expenses)
+        return _build_forecast(historical, months_ahead, year_back)
 
     async def get_revenue_forecast(
         self,
@@ -339,30 +591,8 @@ class ForecastService:
         the real turnover with no indication why. False for a viewer
         without view_pocket_money, matching get_summary's own redaction."""
         window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
-        window_start_str = window_start.strftime("%Y-%m-%d")
-        window_end_str = window_end.strftime("%Y-%m-%d")
-
-        # daily_revenue is keyed by user_id, not company_id
-        company_users = await self.db.users.find(
-            {"company_id": company_id}, {"_id": 0, "user_id": 1}
-        ).to_list(1000)
-        user_ids = [u["user_id"] for u in company_users]
-
-        revenues = await self.db.daily_revenue.find(
-            {"user_id": {"$in": user_ids}, "date": {"$gte": window_start_str, "$lt": window_end_str}},
-            {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1}
-        ).to_list(10000)
-
-        # Aggregate by month (date is stored as a "YYYY-MM-DD" string)
-        monthly_totals: Dict[str, float] = defaultdict(float)
-
-        for rev in revenues:
-            date_str = rev.get("date")
-            if isinstance(date_str, str) and len(date_str) >= 7:
-                month_key = date_str[:7]
-                monthly_totals[month_key] += float(rev.get("fiscal_revenue", 0))
-                if include_pocket_money:
-                    monthly_totals[month_key] += float(rev.get("pocket_money", 0))
+        user_ids = await self._company_user_ids(company_id)
+        monthly_totals, _ = await self._revenue_monthly_totals(user_ids, window_start, window_end, include_pocket_money)
 
         _drop_partial_first_month(
             monthly_totals, await self._first_record_date(self.db.daily_revenue, {"user_id": {"$in": user_ids}})
@@ -370,4 +600,5 @@ class ForecastService:
 
         sorted_months = sorted(monthly_totals.keys())
         historical = [{"month": mk, "amount": monthly_totals[mk]} for mk in sorted_months]
-        return _build_forecast(historical, months_ahead)
+        year_back = await self._year_back(company_id, "revenue", include_pocket_money)
+        return _build_forecast(historical, months_ahead, year_back)

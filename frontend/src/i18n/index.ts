@@ -2652,6 +2652,22 @@ export const translations: Translations = {
     bg: 'Средно на месец',
     en: 'Monthly average',
   },
+  'stats.vsLastYear': {
+    bg: 'спрямо миналата година',
+    en: 'vs last year',
+  },
+  'stats.forecastYearBackRevenue': {
+    bg: 'Оборотът ти по месеци следва миналогодишния, затова прогнозата за него е по същия месец миналата година, при сегашното ти ниво спрямо миналата година.',
+    en: "Your monthly revenue follows last year's, so its forecast uses the same month last year at your current level against last year.",
+  },
+  'stats.forecastYearBackExpense': {
+    bg: 'Разходите ти по месеци следват миналогодишните, затова прогнозата за тях е по същия месец миналата година, при сегашното ти ниво спрямо миналата година.',
+    en: "Your monthly expenses follow last year's, so their forecast uses the same month last year at your current level against last year.",
+  },
+  'stats.forecastYearBackBoth': {
+    bg: 'Оборотът и разходите ти по месеци следват миналогодишните, затова прогнозата е по същия месец миналата година, при сегашното ти ниво спрямо миналата година.',
+    en: "Your monthly revenue and expenses follow last year's, so the forecast uses the same month last year at your current level against last year.",
+  },
   'stats.forecastRevenue': {
     bg: 'Очакван оборот',
     en: 'Expected revenue',

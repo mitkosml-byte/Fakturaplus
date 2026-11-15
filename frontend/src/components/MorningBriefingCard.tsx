@@ -39,7 +39,8 @@ const SEVERITY_COLOR: Record<ProactiveSignal['severity'], string> = {
 // Pure observations - nothing to "do", so "dismiss" reads as "Hide" there
 // and as "Done" on everything else.
 const INSIGHT_KEYS = new Set([
-  'weak_weekday', 'staffing_mismatch', 'forecast_revenue', 'forecast_expense', 'team_on_leave', 'personal_wallet',
+  'weak_weekday', 'staffing_mismatch', 'forecast_revenue', 'forecast_expense', 'year_back_revenue', 'year_back_expense',
+  'team_on_leave', 'personal_wallet',
 ]);
 
 function actionLabelKey(signal: ProactiveSignal, action: ProactiveSignalAction): string {

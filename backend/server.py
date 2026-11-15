@@ -3071,11 +3071,34 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> List[d
     })
     return signals
 
-async def _signal_forecast(company_id, scope, current_user, visibility) -> Optional[dict]:
-    if not company_id or "view_statistics" not in set(current_user.permissions or []):
-        return None
-    revenue_forecast = await forecast_service.get_revenue_forecast(company_id, months_ahead=1)
-    if (
+# A heads-up before a month that last year was far from the company's
+# usual month, shown from this day of the month before - only when the
+# company's own history shows its months follow last year's (see
+# forecast_service._year_back_analysis), never from assumptions about a
+# trade or a season.
+YEAR_BACK_NOTICE_FROM_DAY = 15
+YEAR_BACK_NOTICE_MIN_DEVIATION = 0.25
+# Below / above last year's same months by this much is worth a warning
+# (the yearly-rhythm counterpart of the trend warning).
+YEAR_BACK_WARNING_PERCENT = 15
+
+
+def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Optional[dict]:
+    """Revenue falling or expenses rising. For a company whose months
+    follow last year's, measured against the same months last year - a
+    turn its yearly rhythm explains is not a fall or a rise."""
+    month = f"{datetime.now(timezone.utc):%Y-%m}"
+    if revenue_forecast.get("method") == "year_back":
+        vs_last_year = revenue_forecast.get("vs_last_year_percent")
+        if vs_last_year is not None and vs_last_year <= -YEAR_BACK_WARNING_PERCENT:
+            return {
+                "key": "forecast_revenue", "severity": "warning", "priority": 60,
+                "title": "Оборотът е под миналогодишния",
+                "detail": f"През последните месеци оборотът ти е с около {abs(vs_last_year):.0f}% по-нисък от същите месеци миналата година.",
+                "route": "/(tabs)/stats",
+                "fingerprint": f"below_last_year|{month}",
+            }
+    elif (
         revenue_forecast["trend"] == "decreasing"
         and revenue_forecast["confidence"] >= 0.5
         and abs(revenue_forecast["trend_percent"]) >= 15
@@ -3085,12 +3108,19 @@ async def _signal_forecast(company_id, scope, current_user, visibility) -> Optio
             "title": "Оборотът показва низходяща тенденция",
             "detail": f"Оборотът ти намалява с около {abs(revenue_forecast['trend_percent']):.0f}% спрямо предходния период.",
             "route": "/(tabs)/stats",
-            "fingerprint": f"decreasing|{datetime.now(timezone.utc):%Y-%m}",
+            "fingerprint": f"decreasing|{month}",
         }
-    expense_forecast = await forecast_service.get_expense_forecast(
-        company_id, months_ahead=1, include_off_book_expenses=visibility["off_book_expenses"]
-    )
-    if (
+    if expense_forecast.get("method") == "year_back":
+        vs_last_year = expense_forecast.get("vs_last_year_percent")
+        if vs_last_year is not None and vs_last_year >= YEAR_BACK_WARNING_PERCENT:
+            return {
+                "key": "forecast_expense", "severity": "warning", "priority": 58,
+                "title": "Разходите са над миналогодишните",
+                "detail": f"През последните месеци разходите ти са с около {vs_last_year:.0f}% по-високи от същите месеци миналата година.",
+                "route": "/(tabs)/stats",
+                "fingerprint": f"above_last_year|{month}",
+            }
+    elif (
         expense_forecast["trend"] == "increasing"
         and expense_forecast["confidence"] >= 0.5
         and abs(expense_forecast["trend_percent"]) >= 15
@@ -3100,9 +3130,68 @@ async def _signal_forecast(company_id, scope, current_user, visibility) -> Optio
             "title": "Разходите показват възходяща тенденция",
             "detail": f"Разходите ти нарастват с около {abs(expense_forecast['trend_percent']):.0f}% спрямо предходния период.",
             "route": "/(tabs)/stats",
-            "fingerprint": f"increasing|{datetime.now(timezone.utc):%Y-%m}",
+            "fingerprint": f"increasing|{month}",
         }
     return None
+
+
+def _year_back_notice(kind: str, forecast: dict) -> Optional[dict]:
+    """Next month, read from last year: a heads-up when last year's same
+    month was far above (or, for revenue, below) the company's average
+    month - with the forecast for it, so it can be planned for."""
+    next_month = (forecast.get("forecast") or [None])[0]
+    year_back = forecast.get("year_back") or {}
+    if not next_month or next_month.get("basis") != "year_back":
+        return None
+    last_year, average = next_month.get("same_month_last_year"), year_back.get("last_12_months_average")
+    if last_year is None or not average:
+        return None
+    deviation = last_year / average - 1
+    if abs(deviation) < YEAR_BACK_NOTICE_MIN_DEVIATION or (kind == "expense" and deviation < 0):
+        return None
+    month_name = _MONTHS_BG_GENITIVE[int(next_month["month"][5:7]) - 1]
+    percent = round(abs(deviation) * 100)
+    forecast_text = f"Прогнозата за {month_name}: около {_eur(next_month['predicted_amount'])} €."
+    if kind == "revenue" and deviation > 0:
+        title = "Предстои по-силен месец"
+        detail = (f"Миналата година през {month_name} оборотът беше с {percent}% над средния ти месец. "
+                  f"{forecast_text} Планирай навреме покупките и работата.")
+    elif kind == "revenue":
+        title = "Предстои по-слаб месец"
+        detail = (f"Миналата година през {month_name} оборотът беше с {percent}% под средния ти месец. "
+                  f"{forecast_text} Планирай навреме плащанията и паричния поток.")
+    else:
+        title = "Предстои месец с повече разходи"
+        detail = (f"Миналата година през {month_name} разходите бяха с {percent}% над средния ти месец. "
+                  f"{forecast_text} Провери навреме какво предстои за плащане.")
+    return {
+        "key": f"year_back_{kind}", "severity": "info", "priority": 42 if kind == "revenue" else 40,
+        "title": title, "detail": detail, "route": "/(tabs)/stats",
+        "fingerprint": next_month["month"],
+    }
+
+
+async def _signal_forecast(company_id, scope, current_user, visibility) -> List[dict]:
+    if not company_id or "view_statistics" not in set(current_user.permissions or []):
+        return []
+    # Each viewer's forecast leaves out what they may not see, the same as
+    # the forecast card's own endpoints.
+    revenue_forecast = await forecast_service.get_revenue_forecast(
+        company_id, months_ahead=1, include_pocket_money=visibility["pocket_money"]
+    )
+    expense_forecast = await forecast_service.get_expense_forecast(
+        company_id, months_ahead=1, include_off_book_expenses=visibility["off_book_expenses"]
+    )
+    signals: List[dict] = []
+    trend_signal = _forecast_trend_signal(revenue_forecast, expense_forecast)
+    if trend_signal:
+        signals.append(trend_signal)
+    if datetime.now(timezone.utc).day >= YEAR_BACK_NOTICE_FROM_DAY:
+        for kind, forecast in (("revenue", revenue_forecast), ("expense", expense_forecast)):
+            notice = _year_back_notice(kind, forecast)
+            if notice:
+                signals.append(notice)
+    return signals
 
 async def _signal_schedule_unpaid(company_id, scope, current_user, visibility) -> Optional[dict]:
     """Work Schedule's hours*rate estimate for this month, minus whatever's

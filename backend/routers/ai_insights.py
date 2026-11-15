@@ -132,6 +132,11 @@ async def build_business_chat_digest(current_user: User) -> dict:
             "next_month_predicted": next_month["predicted_amount"],
             "trend": raw["trend"],  # "increasing" | "decreasing" | "stable" | "insufficient_data"
             "months_of_history": raw.get("months_of_history", 0),
+            # "year_back": next month read from the same month last year (the
+            # company's own months follow a yearly rhythm), "trend" / "average".
+            "method": raw.get("method"),
+            "same_month_last_year": next_month.get("same_month_last_year"),
+            "vs_last_year_percent": raw.get("vs_last_year_percent"),
         }
     revenue_forecast_raw = await get_revenue_forecast(months_ahead=1, current_user=current_user)
     expense_forecast_raw = await get_expense_forecast(months_ahead=1, current_user=current_user)
@@ -286,6 +291,9 @@ async def ask_my_numbers(
         "извън данните на фирмата (НАП, данъчни декларации, конкуренти, обща информация), кажи ясно, че не "
         "разполагаш с такава информация, вместо да гадаеш. forecast.*.trend == 'insufficient_data' означава "
         "под 4 месеца история - next_month_predicted е просто средното, не истинска тенденция; кажи го изрично. "
+        "forecast.*.method == 'year_back' означава, че месеците на тази фирма следват миналогодишните: прогнозата "
+        "е същият месец миналата година (same_month_last_year) при сегашното ниво спрямо миналата година "
+        "(vs_last_year_percent) - тогава сравнявай с миналата година, а trend не е спад или ръст. "
         "Предходните съобщения са същият разговор - при последващ въпрос ('сравни с него', 'ами миналата "
         "седмица') ползвай контекста им, но смятай с актуалните данни, не с число от по-ранен твой отговор. "
         f"Отговаряй кратко (до 4 изречения), ВИНАГИ на {response_language} независимо от езика на въпроса или "
