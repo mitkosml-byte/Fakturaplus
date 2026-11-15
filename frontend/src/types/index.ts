@@ -214,6 +214,8 @@ export interface ProactiveSignal {
   item_key?: string;
   // invoices_likely_paid only: the invoices "mark paid" applies to
   invoice_ids?: string[];
+  // First shown to this viewer within the last day (or back after a while away)
+  is_new?: boolean;
 }
 
 // "Ask your own numbers" chat (Module 4 Finding #3)

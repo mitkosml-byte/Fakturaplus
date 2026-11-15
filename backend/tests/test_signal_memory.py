@@ -170,3 +170,76 @@ def test_no_longer_bought_lasts_only_until_the_item_is_bought_again():
     stopped, rebought = asyncio.run(_run())
     assert "филе капка" not in stopped
     assert "филе капка" in rebought
+
+
+def test_new_since_yesterday_and_new_again_after_being_away():
+    """The Home card marks what this viewer has not seen before: a signal is
+    new on the first day it shows, not on the next, and new again when it
+    comes back after a while away - a new overdue invoice is a new situation
+    even though the signal is the same."""
+    from routers.ai_insights import list_proactive_signals
+
+    company_id, user = _new_company(["view_statistics", "manage_invoices"])
+    now = datetime.now(timezone.utc)
+
+    def _overdue(inv_id, days_ago):
+        date = now - timedelta(days=days_ago)
+        return {
+            "id": inv_id, "company_id": company_id, "user_id": user.user_id, "supplier": "Доставчик",
+            "invoice_number": inv_id, "date": date, "total_amount": 120.0, "amount_without_vat": 100.0,
+            "vat_amount": 20.0, "payment_method": "bank_transfer", "is_paid": False, "paid_amount": 0.0,
+            "payment_due_date": date + timedelta(days=7),
+        }
+
+    async def _age(first_hours, last_hours):
+        await server.db.signal_seen.update_many({"user_id": user.user_id}, {"$set": {
+            "first_seen_at": now - timedelta(hours=first_hours), "last_seen_at": now - timedelta(hours=last_hours),
+        }})
+
+    async def _overdue_signal():
+        return _by_key((await list_proactive_signals(current_user=user))["signals"])["unpaid_invoices"]
+
+    async def _run():
+        await _register(user)
+        await server.db.invoices.insert_one(_overdue("inv-1", 30))
+        first = await _overdue_signal()
+        await _age(first_hours=30, last_hours=2)          # seen yesterday and since
+        next_day = await _overdue_signal()
+        await server.db.invoices.insert_one(_overdue("inv-2", 20))
+        another_overdue = await _overdue_signal()
+        await _age(first_hours=30, last_hours=2)
+        settled = await _overdue_signal()
+        await _age(first_hours=24 * 10, last_hours=24 * 3)  # away for three days
+        back = await _overdue_signal()
+        return first, next_day, another_overdue, settled, back
+
+    first, next_day, another_overdue, settled, back = asyncio.run(_run())
+    assert first["is_new"] is True and "situation" not in first
+    assert next_day["is_new"] is False
+    assert another_overdue["is_new"] is True
+    assert settled["is_new"] is False
+    assert back["is_new"] is True
+
+
+def test_periodic_reminder_says_what_waits():
+    """On a chosen day the reminder names what waits in the daily review,
+    instead of only saying that today is one of the chosen days."""
+    company_id, user = _new_company(["view_statistics", "manage_invoices"])
+    calm_company, calm_user = _new_company(["view_statistics", "manage_invoices"])
+    now = datetime.now(timezone.utc)
+
+    async def _run():
+        await _register(user)
+        await _register(calm_user)
+        date = now - timedelta(days=30)
+        await server.db.invoices.insert_one({
+            "id": f"inv-{uuid.uuid4().hex[:6]}", "company_id": company_id, "user_id": user.user_id,
+            "supplier": "Доставчик", "invoice_number": "1", "date": date, "total_amount": 120.0,
+            "amount_without_vat": 100.0, "vat_amount": 20.0, "payment_method": "bank_transfer",
+            "is_paid": False, "paid_amount": 0.0, "payment_due_date": date + timedelta(days=7),
+        })
+        return await server.periodic_reminder_body(user.user_id), await server.periodic_reminder_body(calm_user.user_id)
+
+    busy, calm = asyncio.run(_run())
+    assert busy.startswith("Чака те: ") and "Просрочени фактури към доставчици" in busy
+    assert calm.startswith("Всичко е наред")

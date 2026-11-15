@@ -2837,6 +2837,12 @@ async def split_overdue_invoices(scope: dict) -> tuple:
 def _owed(invoices: List[dict]) -> float:
     return sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in invoices)
 
+# Where a Home signal leads: the exact tab of Statistics its card is on
+# (prices, reorder and weekday cards live under Items, the forecast under
+# Overview), not just the screen.
+STATS_ITEMS_ROUTE = "/(tabs)/stats?tab=items"
+STATS_OVERVIEW_ROUTE = "/(tabs)/stats?tab=overview"
+
 async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -> List[dict]:
     """Unpaid supplier invoices, split three ways: really overdue (money at
     risk, critical), overdue but most likely already paid (a question with a
@@ -2852,6 +2858,7 @@ async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -
             "title": "Просрочени фактури към доставчици",
             "detail": f"{len(overdue)} от {len(unpaid)} неплатени фактури са просрочени - общо {_owed(overdue):.2f} €.",
             "route": "/(tabs)/invoices?paymentFilter=overdue",
+            "fingerprint": "overdue|" + ",".join(sorted(inv["id"] for inv in overdue)),
         })
     if likely_paid:
         suppliers = sorted({inv.get("supplier") or "" for inv in likely_paid} - {""})
@@ -2874,7 +2881,8 @@ async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -
             "key": "unpaid_invoices", "severity": "warning", "priority": 45,
             "title": "Неплатени фактури към доставчици",
             "detail": f"{len(unpaid)} неплатени фактури на обща стойност {_owed(unpaid):.2f} €.",
-            "route": "/(tabs)/invoices",
+            "route": "/(tabs)/invoices?paymentFilter=unpaid",
+            "fingerprint": "unpaid|" + ",".join(sorted(inv["id"] for inv in unpaid)),
         })
     return signals
 
@@ -2994,7 +3002,7 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
             "priority": min(75, round(45 + min(30, monthly_total / 20))),
             "title": f"Доставките поскъпват с ≈ {_eur(monthly_total)} € на месец",
             "detail": detail,
-            "route": "/(tabs)/stats",
+            "route": STATS_ITEMS_ROUTE,
             "fingerprint": fingerprint,
         }
     if packs:
@@ -3002,7 +3010,7 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
             "key": "price_alerts", "severity": "info", "priority": 48,
             "title": "Провери опаковка във фактура",
             "detail": pack_note[0].upper() + pack_note[1:] if pack_note else "",
-            "route": "/(tabs)/stats",
+            "route": STATS_ITEMS_ROUTE,
             "fingerprint": fingerprint,
         }
     # Only falls or alerts from before money impact was measured
@@ -3010,7 +3018,7 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
         "key": "price_alerts", "severity": "info", "priority": 40,
         "title": "Промени в цените на доставчици",
         "detail": f"{len(changes)} непрочетени известия за промяна в цените.",
-        "route": "/(tabs)/stats",
+        "route": STATS_ITEMS_ROUTE,
         "fingerprint": fingerprint,
     }
 
@@ -3033,7 +3041,7 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> List[d
                 f"Поръчваше го на всеки {item['median_days_between']} дни, а последната покупка беше "
                 f"преди {item['days_since_last']} дни. Ако вече не го купуваш, спирам напомнянията за него."
             ),
-            "route": "/(tabs)/stats",
+            "route": STATS_ITEMS_ROUTE,
             "fingerprint": f"{item['item_key']}|{item['last_purchase_date']}",
             "actions": ["still_buying", "discontinue"],
             "item_key": item["item_key"],
@@ -3064,7 +3072,7 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> List[d
         "key": "reorder", "severity": "info", "priority": priority,
         "title": "Време е за нова поръчка",
         "detail": f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни{value_note} - вече мина {top['days_since_last']}.{quantity_note}",
-        "route": "/(tabs)/stats",
+        "route": STATS_ITEMS_ROUTE,
         # Done = until it is bought again (the day count in the text
         # changes daily, so the text itself can't identify it)
         "fingerprint": f"{top['item_key']}|{top['last_purchase_date']}",
@@ -3095,7 +3103,7 @@ def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Op
                 "key": "forecast_revenue", "severity": "warning", "priority": 60,
                 "title": "Оборотът е под миналогодишния",
                 "detail": f"През последните месеци оборотът ти е с около {abs(vs_last_year):.0f}% по-нисък от същите месеци миналата година.",
-                "route": "/(tabs)/stats",
+                "route": STATS_OVERVIEW_ROUTE,
                 "fingerprint": f"below_last_year|{month}",
             }
     elif (
@@ -3107,7 +3115,7 @@ def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Op
             "key": "forecast_revenue", "severity": "warning", "priority": 60,
             "title": "Оборотът показва низходяща тенденция",
             "detail": f"Оборотът ти намалява с около {abs(revenue_forecast['trend_percent']):.0f}% спрямо предходния период.",
-            "route": "/(tabs)/stats",
+            "route": STATS_OVERVIEW_ROUTE,
             "fingerprint": f"decreasing|{month}",
         }
     if expense_forecast.get("method") == "year_back":
@@ -3117,7 +3125,7 @@ def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Op
                 "key": "forecast_expense", "severity": "warning", "priority": 58,
                 "title": "Разходите са над миналогодишните",
                 "detail": f"През последните месеци разходите ти са с около {vs_last_year:.0f}% по-високи от същите месеци миналата година.",
-                "route": "/(tabs)/stats",
+                "route": STATS_OVERVIEW_ROUTE,
                 "fingerprint": f"above_last_year|{month}",
             }
     elif (
@@ -3129,7 +3137,7 @@ def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Op
             "key": "forecast_expense", "severity": "warning", "priority": 58,
             "title": "Разходите показват възходяща тенденция",
             "detail": f"Разходите ти нарастват с около {abs(expense_forecast['trend_percent']):.0f}% спрямо предходния период.",
-            "route": "/(tabs)/stats",
+            "route": STATS_OVERVIEW_ROUTE,
             "fingerprint": f"increasing|{month}",
         }
     return None
@@ -3166,7 +3174,7 @@ def _year_back_notice(kind: str, forecast: dict) -> Optional[dict]:
                   f"{forecast_text} Провери навреме какво предстои за плащане.")
     return {
         "key": f"year_back_{kind}", "severity": "info", "priority": 42 if kind == "revenue" else 40,
-        "title": title, "detail": detail, "route": "/(tabs)/stats",
+        "title": title, "detail": detail, "route": STATS_OVERVIEW_ROUTE,
         "fingerprint": next_month["month"],
     }
 
@@ -3301,7 +3309,7 @@ async def _signal_weak_weekday(company_id, scope, current_user, visibility) -> O
             f"с {suggestion['percent_below_average']}% под обичайния ти ден "
             f"({suggestion['overall_avg_revenue']:.0f} €). Струва ли си пълен работен ден?"
         ),
-        "route": "/(tabs)/stats",
+        "route": STATS_ITEMS_ROUTE,
     }
 
 async def _signal_staffing_mismatch(company_id, scope, current_user, visibility) -> Optional[dict]:
@@ -3331,7 +3339,7 @@ async def _signal_staffing_mismatch(company_id, scope, current_user, visibility)
             f"Обмисли да преместиш ~{suggestion['suggested_hours_to_move']} часа от "
             f"{over_name} към {under_name}."
         ),
-        "route": "/(tabs)/stats",
+        "route": STATS_ITEMS_ROUTE,
     }
 
 _MONTHS_BG_GENITIVE = [
@@ -3432,8 +3440,15 @@ async def get_proactive_signals(current_user: User) -> List[dict]:
             logger.exception(f"Proactive engine: {builder.__name__} failed")
 
     for s in signals:
+        explicit = bool(s.get("fingerprint"))
         s["fingerprint"] = signal_fingerprint(s)
         s.setdefault("actions", ["snooze"] if s["key"] in SNOOZE_ONLY_SIGNALS else ["snooze", "dismiss"])
+        # What "new" is judged on (see routers/ai_insights.mark_new_signals):
+        # the builder's own fingerprint names a situation (a new price
+        # alert, another missing day, another overdue invoice); a text-only
+        # one changes with daily counters, so there the signal and its
+        # severity are the situation (a budget going from 80% to over).
+        s["situation"] = s["fingerprint"] if explicit else f"{s['key']}|{s['severity']}"
 
     states = await db.signal_states.find(
         {"user_id": current_user.user_id, "until": {"$gt": datetime.now(timezone.utc)}},
@@ -4979,14 +4994,37 @@ async def _notification_settings_tick():
         ):
             await push_service.send_to_user(
                 db, user_id,
-                title="Напомняне",
-                body="Днес е една от датите, на които си поискал периодично напомняне от Фактура+.",
-                data={"type": "periodic_reminder"},
+                title="Периодично напомняне",
+                body=await periodic_reminder_body(user_id),
+                data={"type": "periodic_reminder", "route": "/(tabs)"},
             )
             await db.notification_settings.update_one(
                 {"user_id": user_id},
                 {"$set": {"periodic_last_sent_date": today_str}},
             )
+
+PERIODIC_REMINDER_FALLBACK = "Отвори Дневния преглед във Фактура+ и виж какво чака действие."
+
+
+async def periodic_reminder_body(user_id: str) -> str:
+    """What waits for this user today - the top of Home's daily review -
+    instead of a reminder that only said today was one of the chosen days."""
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user_doc:
+        return PERIODIC_REMINDER_FALLBACK
+    try:
+        signals = await get_proactive_signals(User(**sanitize_user(dict(user_doc))))
+    except Exception:
+        logger.exception(f"Periodic reminder: signals failed for {user_id}")
+        return PERIODIC_REMINDER_FALLBACK
+    if not signals:
+        return "Всичко е наред – в Дневния преглед няма нищо, което чака действие."
+    top = [s["title"] for s in signals[:3]]
+    body = "Чака те: " + "; ".join(top) + "."
+    if len(signals) > len(top):
+        body += f" И още {len(signals) - len(top)} в Дневния преглед."
+    return body
+
 
 async def _notification_settings_loop():
     while True:
@@ -5126,6 +5164,8 @@ async def create_indexes():
         await db.item_preferences.create_index([("company_id", 1), ("item_key", 1)], unique=True)
         await db.item_pack_rules.create_index([("company_id", 1), ("item_key", 1), ("supplier_key", 1)], unique=True)
         await db.item_distinctions.create_index([("company_id", 1), ("a", 1), ("b", 1)], unique=True)
+        await db.signal_seen.create_index([("user_id", 1), ("situation", 1)], unique=True)
+        await db.signal_seen.create_index("last_seen_at", expireAfterSeconds=90 * 24 * 3600)
 
         # Users indexes
         await db.users.create_index([("email", 1)], unique=True, sparse=True)

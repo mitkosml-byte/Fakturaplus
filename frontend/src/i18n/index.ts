@@ -208,6 +208,74 @@ export const translations: Translations = {
     bg: 'Нищо спешно днес - всичко изглежда наред.',
     en: 'Nothing urgent today - everything looks fine.',
   },
+  'briefing.new': {
+    bg: 'Ново',
+    en: 'New',
+  },
+  'briefing.newCount': {
+    bg: '{n} нови от вчера',
+    en: '{n} new since yesterday',
+  },
+  'briefing.showMore': {
+    bg: 'Покажи още {n}',
+    en: 'Show {n} more',
+  },
+  'briefing.showLess': {
+    bg: 'Покажи по-малко',
+    en: 'Show less',
+  },
+  'briefing.cta.unpaid_invoices': {
+    bg: 'Виж фактурите',
+    en: 'View invoices',
+  },
+  'briefing.cta.receivables': {
+    bg: 'Виж вземанията',
+    en: 'View receivables',
+  },
+  'briefing.cta.scan_credits': {
+    bg: 'Добави сканирания',
+    en: 'Add scans',
+  },
+  'briefing.cta.budget': {
+    bg: 'Виж бюджета',
+    en: 'View budget',
+  },
+  'briefing.cta.price_alerts': {
+    bg: 'Виж цените',
+    en: 'View prices',
+  },
+  'briefing.cta.reorder': {
+    bg: 'Виж какво да поръчаш',
+    en: 'See what to order',
+  },
+  'briefing.cta.forecast': {
+    bg: 'Виж прогнозата',
+    en: 'View forecast',
+  },
+  'briefing.cta.schedule_unpaid': {
+    bg: 'Плати часовете',
+    en: 'Pay the hours',
+  },
+  'briefing.cta.team_on_leave': {
+    bg: 'Виж графика',
+    en: 'View schedule',
+  },
+  'briefing.cta.personal_wallet': {
+    bg: 'Виж личните разходи',
+    en: 'View personal spending',
+  },
+  'briefing.cta.weak_weekday': {
+    bg: 'Виж оборота по дни',
+    en: 'View revenue by weekday',
+  },
+  'briefing.cta.staffing_mismatch': {
+    bg: 'Виж часовете спрямо оборота',
+    en: 'View hours vs revenue',
+  },
+  'briefing.cta.missing_revenue': {
+    bg: 'Въведи оборота',
+    en: 'Enter revenue',
+  },
   'briefing.snooze': {
     bg: 'Отложи 3 дни',
     en: 'Snooze 3 days',

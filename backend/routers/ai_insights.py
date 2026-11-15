@@ -9,6 +9,7 @@ explicitly imports every underscore-prefixed helper in server.py, since
 from fastapi import APIRouter
 from server import *
 from server import (
+    _as_utc,
 _eik_check_digit,
     _compare_key,
     _similarity,
@@ -356,9 +357,45 @@ async def ask_my_numbers(
 
     return BusinessChatResponse(answer=answer, digest=digest)
 
+# A Home signal is "new" for a day after this viewer first saw it, and new
+# again when it comes back after being away for longer than a day and a half.
+SIGNAL_NEW_FOR = timedelta(hours=24)
+SIGNAL_GONE_AFTER = timedelta(hours=36)
+
+
+async def mark_new_signals(user_id: str, signals: List[dict]) -> None:
+    """Sets `is_new` on each signal from when this viewer first saw its
+    situation (see get_proactive_signals' `situation`), and records that
+    they saw it now. Only the Home card calls this - the daily push and the
+    periodic reminder read signals without counting them as seen."""
+    now = datetime.now(timezone.utc)
+    situations = [s.pop("situation", None) or f"{s['key']}|{s['severity']}" for s in signals]
+    seen = {
+        doc["situation"]: doc for doc in await server.db.signal_seen.find(
+            {"user_id": user_id, "situation": {"$in": sorted(set(situations))}}, {"_id": 0},
+        ).to_list(1000)
+    }
+    first_seen: Dict[str, datetime] = {}
+    for signal, situation in zip(signals, situations):
+        if situation not in first_seen:
+            doc = seen.get(situation)
+            first = _as_utc(doc["first_seen_at"]) if doc else now
+            if doc and now - _as_utc(doc["last_seen_at"]) > SIGNAL_GONE_AFTER:
+                first = now
+            first_seen[situation] = first
+            await server.db.signal_seen.update_one(
+                {"user_id": user_id, "situation": situation},
+                {"$set": {"first_seen_at": first, "last_seen_at": now}},
+                upsert=True,
+            )
+        signal["is_new"] = now - first_seen[situation] < SIGNAL_NEW_FOR
+
+
 @router.get("/proactive/signals")
 async def list_proactive_signals(current_user: User = Depends(get_current_user)):
-    return {"signals": await get_proactive_signals(current_user)}
+    signals = await get_proactive_signals(current_user)
+    await mark_new_signals(current_user.user_id, signals)
+    return {"signals": signals}
 
 
 class SignalStateUpdate(BaseModel):

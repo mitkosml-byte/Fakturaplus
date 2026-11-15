@@ -43,6 +43,33 @@ const INSIGHT_KEYS = new Set([
   'team_on_leave', 'personal_wallet',
 ]);
 
+// The review shows the few most important things first; the rest wait
+// behind "show more".
+const VISIBLE_SIGNALS = 3;
+
+// The one thing to do about each kind of signal - its button opens the
+// exact place (the signal's own route: the right tab, filter or day).
+// Signals answered by an action itself (mark paid, still buying / stopped
+// buying) have none: their action buttons are the thing to do.
+const CTA_LABEL: Record<string, string> = {
+  unpaid_invoices: 'briefing.cta.unpaid_invoices',
+  receivables: 'briefing.cta.receivables',
+  scan_credits: 'briefing.cta.scan_credits',
+  budget: 'briefing.cta.budget',
+  price_alerts: 'briefing.cta.price_alerts',
+  reorder: 'briefing.cta.reorder',
+  forecast_revenue: 'briefing.cta.forecast',
+  forecast_expense: 'briefing.cta.forecast',
+  year_back_revenue: 'briefing.cta.forecast',
+  year_back_expense: 'briefing.cta.forecast',
+  schedule_unpaid: 'briefing.cta.schedule_unpaid',
+  team_on_leave: 'briefing.cta.team_on_leave',
+  personal_wallet: 'briefing.cta.personal_wallet',
+  weak_weekday: 'briefing.cta.weak_weekday',
+  staffing_mismatch: 'briefing.cta.staffing_mismatch',
+  missing_revenue: 'briefing.cta.missing_revenue',
+};
+
 function actionLabelKey(signal: ProactiveSignal, action: ProactiveSignalAction): string {
   switch (action) {
     case 'snooze':
@@ -64,6 +91,7 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
 
   const [loading, setLoading] = useState(true);
   const [signals, setSignals] = useState<ProactiveSignal[]>([]);
+  const [expanded, setExpanded] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -140,11 +168,20 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
     );
   }
 
+  const visible = expanded ? signals : signals.slice(0, VISIBLE_SIGNALS);
+  const hiddenCount = signals.length - visible.length;
+  const newCount = signals.filter((signal) => signal.is_new).length;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Ionicons name="sunny" size={20} color={COLORS.primary} />
         <Text style={styles.title}>{t('briefing.title')}</Text>
+        {newCount > 0 && (
+          <View style={styles.newCountPill}>
+            <Text style={styles.newCountText}>{t('briefing.newCount').replace('{n}', String(newCount))}</Text>
+          </View>
+        )}
       </View>
 
       {signals.length === 0 ? (
@@ -153,7 +190,7 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
           <Text style={styles.allClearText}>{t('briefing.allClear')}</Text>
         </View>
       ) : (
-        signals.map((signal) => (
+        visible.map((signal) => (
           <View key={`${signal.key}-${signal.fingerprint}`} style={styles.row}>
             <TouchableOpacity style={styles.rowMain} onPress={() => router.push(signal.route as any)}>
               <View style={[styles.rowIcon, { backgroundColor: `${SEVERITY_COLOR[signal.severity]}26` }]}>
@@ -166,14 +203,32 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
                     genuine critical/warning alert, making a minor restocking
                     hint LOOK as urgent as overdue invoices or depleted scan
                     credits. Only critical/warning get the bold treatment. */}
-                <Text style={signal.severity === 'info' ? styles.rowTitleSoft : styles.rowTitle}>{signal.title}</Text>
+                <View style={styles.titleRow}>
+                  <Text style={[signal.severity === 'info' ? styles.rowTitleSoft : styles.rowTitle, styles.titleText]}>
+                    {signal.title}
+                  </Text>
+                  {signal.is_new && (
+                    <View style={styles.newPill}>
+                      <Text style={styles.newPillText}>{t('briefing.new')}</Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.rowDetail}>{signal.detail}</Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
             </TouchableOpacity>
-            {(signal.actions || []).length > 0 && (
+            {(!!CTA_LABEL[signal.key] || (signal.actions || []).length > 0) && (
               <View style={styles.actionsRow}>
-                {signal.actions.map((action) => (
+                {CTA_LABEL[signal.key] && (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.actionBtnPrimary]}
+                    onPress={() => router.push(signal.route as any)}
+                  >
+                    <Text style={[styles.actionText, styles.actionTextPrimary]}>{t(CTA_LABEL[signal.key])}</Text>
+                    <Ionicons name="arrow-forward" size={12} color="white" />
+                  </TouchableOpacity>
+                )}
+                {(signal.actions || []).map((action) => (
                   <TouchableOpacity
                     key={action}
                     style={[styles.actionBtn, (action === 'discontinue' || action === 'mark_paid') && styles.actionBtnStrong]}
@@ -188,6 +243,15 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
             )}
           </View>
         ))
+      )}
+
+      {signals.length > VISIBLE_SIGNALS && (
+        <TouchableOpacity style={styles.moreBtn} onPress={() => setExpanded((value) => !value)}>
+          <Text style={styles.moreText}>
+            {expanded ? t('briefing.showLess') : t('briefing.showMore').replace('{n}', String(hiddenCount))}
+          </Text>
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={COLORS.primary} />
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -251,6 +315,63 @@ const styles = StyleSheet.create({
   },
   actionBtnStrong: {
     borderColor: COLORS.primary,
+  },
+  actionBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  actionTextPrimary: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  titleText: {
+    flexShrink: 1,
+  },
+  newPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 8,
+    backgroundColor: `${COLORS.primary}33`,
+  },
+  newPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  newCountPill: {
+    marginLeft: 'auto',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: `${COLORS.primary}26`,
+  },
+  newCountText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  moreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingTop: 10,
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  moreText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
   actionText: {
     fontSize: 11,

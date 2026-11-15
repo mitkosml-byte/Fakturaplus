@@ -69,7 +69,7 @@ export default function StatsScreen() {
   const chartAreaWidth = Math.min(windowWidth, 980) - 80;
   const chartWidth = chartAreaWidth;
   const pieChartRadius = chartAreaWidth / 3;
-  const params = useLocalSearchParams<{ period?: string }>();
+  const params = useLocalSearchParams<{ period?: string; tab?: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
@@ -98,6 +98,14 @@ export default function StatsScreen() {
       setPeriod(params.period);
     }
   }, [params.period]);
+
+  // ...and Home's daily review straight into the tab a signal's card is on
+  // (prices and reorder under Items, the forecast under Overview).
+  useEffect(() => {
+    if (params.tab === 'overview' || params.tab === 'suppliers' || params.tab === 'items') {
+      setActiveTab(params.tab);
+    }
+  }, [params.tab]);
 
   // The income/expense charts below show a fixed 7-day window instead of
   // cramming a whole month/year of bars into one view - 0 is the most
