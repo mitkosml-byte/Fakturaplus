@@ -4005,6 +4005,11 @@ export const translations: Translations = {
     bg: 'Лимит',
     en: 'Limit',
   },
+  'budget.soFarNote': {
+    bg: 'Похарченото е до {date} – с дела от заплатите и амортизацията за изминалите дни.',
+    en: 'Spent is through {date} – with the share of payroll and depreciation for the days so far.',
+  },
+  'budget.expectedMonthEnd': { bg: 'Към края на месеца: ~{amount} €', en: 'By month end: ~{amount} €' },
   'budget.exceeded': {
     bg: 'Бюджетът е надхвърлен!',
     en: 'Budget exceeded!',

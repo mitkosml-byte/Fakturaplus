@@ -2360,6 +2360,18 @@ def _profit_formula(
     total_expense = invoice_total + off_book_expenses + payroll_cost + depreciation_cost
     return total_income, total_expense
 
+def counted_period(period: Period) -> Period:
+    """The days of a period that count now: a period still running counts
+    through today ("so far" - its revenue and invoices up to today, and the
+    share of the month's payroll and depreciation for the days gone by),
+    any other period as a whole. The one rule Home's summary, the budget,
+    the personal wallet, ROI and the chat read the current month by -
+    before, only Home did, and the rest set a whole month of salaries
+    against half a month of revenue."""
+    today = today_local()
+    return (period.through(today) if period.contains(today) else None) or period
+
+
 async def period_totals(company_id: Optional[str], scope: dict, user_id: str, period: Period) -> Dict[str, Any]:
     """Every money total of one period, read the one way all modules share:
     the period's whole business days (services/business_calendar), every
@@ -2484,7 +2496,7 @@ async def _compute_month_profit(company_id: Optional[str], scope: dict, user_id:
     off-book expenses: whoever reaches these endpoints already holds a
     personal-wallet permission, which implies the owner trusts them with
     exactly this level of financial detail."""
-    totals = await period_totals(company_id, scope, user_id, Period.parse(start_date, end_date))
+    totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
     total_income, total_expense = period_income_expense(totals)
     return total_income - total_expense
 
@@ -2590,7 +2602,7 @@ async def _business_digest_period(
     """One period's totals for the chat digest - period_totals with the same
     visibility redaction as /statistics/summary, so the chat and Home give
     the same figures for the same period."""
-    totals = await period_totals(company_id, scope, user_id, Period.parse(start_date, end_date))
+    totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
     total_income, total_expense = period_income_expense(totals, visibility)
     return {
         "revenue": round(total_income, 2),
@@ -2654,7 +2666,7 @@ async def _business_digest_vat_due(
     neither pocket_money nor off-book expenses feed into VAT, so this needs
     no extra permission gate beyond the whole endpoint's own
     view_statistics."""
-    totals = await period_totals(company_id, scope, user_id, Period.parse(start_date, end_date))
+    totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
     return round(totals["fiscal_vat"] - totals["invoice_vat"], 2)
 
 async def _business_digest_roi(company_id: Optional[str], scope: dict, user_id: str, visibility: dict) -> dict:
@@ -2670,7 +2682,7 @@ async def _business_digest_roi(company_id: Optional[str], scope: dict, user_id: 
     }, {"_id": 0, "amount": 1}).to_list(ALL_ROWS) if company_id else []
     total_personal = sum(e.get("amount", 0) for e in personal_expenses)
 
-    totals = await period_totals(company_id, scope, user_id, month)
+    totals = await period_totals(company_id, scope, user_id, counted_period(month))
     total_income, total_expense = period_income_expense(totals, visibility)
     total_profit = total_income - total_expense
     roi_percent = (total_profit / total_personal * 100) if total_personal > 0 else (0 if total_profit <= 0 else 100)
@@ -3881,14 +3893,18 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
     # budget cap must not ignore).
     year, mon = int(month[:4]), int(month[5:7])
     scope = await company_data_scope(company_id)
-    # user_id is unused by the payroll/depreciation helpers whenever
-    # company_id is set (see simple_scope_query) - a placeholder is safe.
-    totals = await period_totals(company_id, scope, "", Period.month(year, mon))
+    whole = Period.month(year, mon)
+    # A month still running counts through today, like Home (counted_period):
+    # the invoices and off-book expenses so far, and the days gone by of
+    # the month's payroll and depreciation - not a whole month of salaries
+    # on its first day. user_id is unused by the payroll/depreciation
+    # helpers whenever company_id is set - a placeholder is safe.
+    counted = counted_period(whole)
+    totals = await period_totals(company_id, scope, "", counted)
     total_payroll_cost = totals["payroll_cost"]
     total_depreciation_expense = totals["depreciation_cost"]
-    total_spent = (
-        totals["invoice_total"] + totals["off_book_expenses"] + total_payroll_cost + total_depreciation_expense
-    )
+    variable_so_far = totals["invoice_total"] + totals["off_book_expenses"]
+    total_spent = variable_so_far + total_payroll_cost + total_depreciation_expense
 
     limit = budget.get("expense_limit", 0)
     threshold = budget.get("alert_threshold", 80)
@@ -3897,7 +3913,21 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
     is_alert = percent_used >= threshold
     is_exceeded = percent_used >= 100
 
+    # Where the month is heading: purchases at their pace so far, plus the
+    # month's whole payroll and depreciation (fixed, not a pace).
+    expected_month_end = None
+    if counted.days < whole.days:
+        fixed_whole_month = (
+            await get_payroll_cost_for_period(company_id, "", whole.start, whole.end)
+            + await get_depreciation_cost_for_period(company_id, "", whole.start, whole.end)
+        )
+        expected_month_end = round(variable_so_far / counted.days * whole.days + fixed_whole_month, 2)
+
     return {
+        "is_running": counted.days < whole.days,
+        "counted_through": counted.end.isoformat(),
+        "expected_month_end": expected_month_end,
+        "expected_percent": round(expected_month_end / limit * 100, 1) if expected_month_end is not None and limit > 0 else None,
         "has_budget": True,
         "month": month,
         "expense_limit": limit,

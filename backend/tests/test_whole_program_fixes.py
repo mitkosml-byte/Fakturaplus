@@ -420,3 +420,39 @@ def test_f1_a1_duplicates_by_company_and_eik(client):
     assert clash.status_code == 409
     fine = client.put(f"/api/invoices/{second['id']}", headers=owner, json={"invoice_number": "5001"})
     assert fine.status_code == 200
+
+
+def test_p2_c4_the_running_month_is_counted_through_today_everywhere(client):
+    from routers.roi_wallet import _roi_month_data, _month_totals
+    company_id, owner_id, owner = _company()
+    today = today_local()
+    month = Period.month(today.year, today.month)
+    share = (today - month.start).days + 1
+    share /= month.days
+
+    employee = client.post("/api/employees", headers=owner, json={"name": "Мария", "base_salary": 1500}).json()
+    assert client.post("/api/payroll", headers=owner, json={
+        "employee_id": employee["id"], "period_month": today.month, "period_year": today.year,
+    }).status_code == 200
+    payroll_month = asyncio.run(server.db.payroll_entries.find_one({"employee_id": employee["id"]}, {"_id": 0}))["total_employer_cost"]
+    client.post("/api/daily-revenue", headers=owner, json={"date": today.isoformat(), "fiscal_revenue": 1000})
+    client.post("/api/budget", headers=owner, json={"month": f"{today:%Y-%m}", "expense_limit": 100000, "alert_threshold": 80})
+
+    home = client.get(f"/api/statistics/summary?start_date={month.start_text}&end_date={month.end_text}", headers=owner).json()
+    home_profit = home["total_income"] - home["total_expense"]
+
+    scope = asyncio.run(server.company_data_scope(company_id))
+    wallet_profit = asyncio.run(server._compute_month_profit(company_id, scope, owner_id, month.start_text, month.end_text))
+    visibility = {"statistics": True, "pocket_money": True, "off_book_expenses": True, "profit": True, "personal_investments": True}
+    chat = asyncio.run(server._business_digest_period(company_id, scope, owner_id, month.start_text, month.end_text, visibility))
+    roi_raw = asyncio.run(_roi_month_data(company_id, scope, owner_id, visibility, [(today.year, today.month)]))
+    roi = _month_totals(roi_raw[f"{today:%Y-%m}"], visibility)
+    budget = asyncio.run(server.compute_budget_status(company_id, f"{today:%Y-%m}"))
+
+    assert round(wallet_profit, 2) == round(home_profit, 2)
+    assert chat["profit"] == round(home_profit, 2)
+    assert round(roi["profit"], 2) == round(home_profit, 2)
+    assert round(budget["total_payroll_cost"], 2) == round(payroll_month * share, 2)
+    if share < 1:
+        # Where the month is heading carries the WHOLE month's salary.
+        assert budget["is_running"] and budget["expected_month_end"] >= round(payroll_month, 2)

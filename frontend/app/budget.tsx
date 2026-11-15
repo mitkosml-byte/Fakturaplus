@@ -23,9 +23,10 @@ import { AccessDenied, ScreenEnter, PressableScale, CountUp, Skeleton, SkeletonR
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
 import { toApiMonth } from '../src/utils/periodRange';
+import { format, parseISO } from 'date-fns';
 
 export default function BudgetScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
   const router = useRouter();
   const [budgetStatus, setBudgetStatus] = useState<any>(null);
@@ -280,6 +281,20 @@ export default function BudgetScreen() {
                   </View>
                 </View>
                 
+                {budgetStatus.is_running && budgetStatus.expected_month_end != null && (
+                  <View style={styles.projectionRow}>
+                    <Ionicons name="trending-up-outline" size={16} color={COLORS.textMuted} />
+                    <Text style={styles.projectionText}>
+                      {t('budget.soFarNote').replace('{date}', format(parseISO(budgetStatus.counted_through), 'd MMM', { locale: dateLocale }))}
+                      {' '}
+                      <Text style={{ color: (budgetStatus.expected_percent ?? 0) >= 100 ? COLORS.danger : COLORS.textSecondary, fontWeight: '600' }}>
+                        {t('budget.expectedMonthEnd').replace('{amount}', budgetStatus.expected_month_end.toFixed(2))}
+                        {budgetStatus.expected_percent != null ? ` (${budgetStatus.expected_percent.toFixed(0)}%)` : ''}
+                      </Text>
+                    </Text>
+                  </View>
+                )}
+
                 {budgetStatus.is_exceeded && (
                   <View style={styles.alertBanner}>
                     <Ionicons name="warning" size={20} color={COLORS.danger} />
@@ -564,6 +579,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: 'white',
+  },
+  projectionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: 12,
+  },
+  projectionText: {
+    flex: 1,
+    fontSize: 12,
+    color: COLORS.textMuted,
+    lineHeight: 18,
   },
   alertBanner: {
     flexDirection: 'row',

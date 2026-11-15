@@ -143,10 +143,12 @@ async def _roi_month_data(
             if month is not None:
                 month["off_book"].append((int(date_str[8:10]), exp.get("amount", 0)))
     for month in data.values():
-        start, next_start = _month_range(month["year"], month["month"])
-        last_day = (datetime.fromisoformat(next_start) - timedelta(days=1)).strftime("%Y-%m-%d")
-        month["payroll"] = await get_payroll_cost_for_period(company_id, user_id, start, last_day)
-        month["depreciation"] = await get_depreciation_cost_for_period(company_id, user_id, start, last_day)
+        # The month still running counts through today (counted_period):
+        # its days so far, and that share of its payroll and depreciation.
+        counted = counted_period(Period.month(month["year"], month["month"]))
+        month["counted_through"] = counted.end.day if counted.days < Period.month(month["year"], month["month"]).days else None
+        month["payroll"] = await get_payroll_cost_for_period(company_id, user_id, counted.start_text, counted.end_text)
+        month["depreciation"] = await get_depreciation_cost_for_period(company_id, user_id, counted.start_text, counted.end_text)
     return data
 
 
@@ -156,8 +158,10 @@ def _month_totals(month: Dict[str, Any], visibility: dict, through_day: Optional
     viewer may not see counted as zero. through_day limits the daily
     figures to days 1..through_day (payroll and depreciation, monthly, then
     stay out: the comparison is about the days themselves)."""
+    limit = through_day if through_day is not None else month.get("counted_through")
+
     def upto(day: int) -> bool:
-        return through_day is None or day <= through_day
+        return limit is None or day <= limit
 
     fiscal = sum(v for d, v in month["fiscal_by_day"].items() if upto(d))
     pocket = sum(v for d, v in month["pocket_by_day"].items() if upto(d)) if visibility["pocket_money"] else 0.0

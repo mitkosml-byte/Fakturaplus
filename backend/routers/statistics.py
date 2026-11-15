@@ -63,7 +63,7 @@ async def get_summary(
     # are the first half's, not half a month of revenue against a whole
     # month of salaries.
     today = today_local()
-    counted = (period.through(today) if period.contains(today) else None) or period
+    counted = counted_period(period)
     # Every total of the period, read the one way the budget, the chat, the
     # ROI card and the forecast read it too (server.period_totals).
     totals = await period_totals(company_id, scope, current_user.user_id, counted)
