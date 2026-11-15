@@ -450,6 +450,8 @@ async def _weekday_labor_efficiency(company_id: str, lookback_days: int = WEEKDA
     hours_sum_by_wd: Dict[int, float] = defaultdict(float)
     weeks_seen_by_wd: Dict[int, set] = defaultdict(set)
     for o in occurrences:
+        if not o.get("payable", True):
+            continue  # on leave that day: no labour hours worked
         d = datetime.strptime(o["date"], "%Y-%m-%d")
         wd = d.weekday()
         hours_sum_by_wd[wd] += o["hours"]

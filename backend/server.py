@@ -2620,11 +2620,10 @@ async def _business_digest_schedule(company_id: Optional[str], start_date: str, 
         return {"total_hours": 0, "estimated_pay": 0, "unpaid_amount": 0, "on_leave_today": []}
     # Deferred import - routers/schedule.py itself does `from server import
     # *`, so a top-level import here would cycle; safe by request time.
-    from routers.schedule import _resolve_occurrences
+    from routers.schedule import _resolve_occurrences, payable_totals
     shifts = await db.work_shifts.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
     occurrences = await _resolve_occurrences(shifts, company_id, start_date, end_date) if shifts else []
-    total_hours = round(sum(o["hours"] for o in occurrences), 2)
-    total_pay = round(sum(o["hours"] * (o["hourly_rate"] or 0) for o in occurrences), 2)
+    total_hours, total_pay, _ = payable_totals(occurrences)
     payments = await db.schedule_payments.find(
         {"company_id": company_id, "period_start": {"$lte": end_date}, "period_end": {"$gte": start_date}},
         {"_id": 0, "amount": 1},
@@ -3132,13 +3131,13 @@ async def _signal_schedule_unpaid(company_id, scope, current_user, visibility) -
     # *`, so importing it at server.py's own module level would cycle -
     # safe here because every router is already fully loaded by the time
     # any request (and so this function) actually runs.
-    from routers.schedule import _resolve_occurrences
+    from routers.schedule import _resolve_occurrences, payable_totals
     month_start, month_end = _month_bounds(datetime.now(timezone.utc))
     shifts = await db.work_shifts.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
     if not shifts:
         return None
     occurrences = await _resolve_occurrences(shifts, company_id, month_start, month_end)
-    total_pay = sum(o["hours"] * (o["hourly_rate"] or 0) for o in occurrences)
+    _, total_pay, _ = payable_totals(occurrences)
     if total_pay <= 0:
         return None
     payments = await db.schedule_payments.find(
@@ -3546,46 +3545,6 @@ class BackupMetadata(BaseModel):
     revenue_count: int
     expense_count: int
 
-# Restore-only input models: validated shapes for what /backup/restore will
-# accept, matching what /backup/create produces. company_id/user_id are
-# deliberately NOT accepted here - they're always overwritten server-side
-# from the caller's own session, so a restore can never inject records
-# into (or spoof ownership from) a different company.
-class RestoreInvoice(BaseModel):
-    id: str
-    supplier: str
-    supplier_eik: Optional[str] = None
-    invoice_number: str
-    amount_without_vat: float
-    vat_amount: float
-    total_amount: float
-    vat_treatment: Optional[str] = None
-    protocol_number: Optional[str] = None
-    date: str
-    image_base64: Optional[str] = None
-    notes: Optional[str] = None
-    items: Optional[List[dict]] = None
-    created_at: Optional[str] = None
-
-class RestoreDailyRevenue(BaseModel):
-    id: str
-    date: str
-    fiscal_revenue: float = 0
-    pocket_money: float = 0
-    vat_rate_percent: float = 20.0
-    created_at: Optional[str] = None
-
-class RestoreExpense(BaseModel):
-    id: str
-    description: str
-    amount: float
-    date: str
-    created_at: Optional[str] = None
-
-class BackupRestoreRequest(BaseModel):
-    invoices: List[RestoreInvoice] = []
-    daily_revenues: List[RestoreDailyRevenue] = []
-    expenses: List[RestoreExpense] = []
 
 
 
@@ -5117,6 +5076,117 @@ async def migrate_invoice_dates_to_business_days() -> dict:
     return result
 
 
+REVENUE_AMOUNT_FIELDS = ("fiscal_revenue", "pocket_money", "card_revenue")
+
+
+def _row_stamp(row: dict) -> datetime:
+    value = row.get("updated_at") or row.get("created_at")
+    return _as_utc(value) if isinstance(value, datetime) else datetime.min.replace(tzinfo=timezone.utc)
+
+
+def merge_revenue_duplicates(rows: List[dict]) -> dict:
+    """One day's revenue from several records of the same day. A figure
+    only one of them holds (or all hold alike) is that figure - copies made
+    by a restore, or the till total in one and pocket money in another; a
+    figure they disagree on is the one entered last. Before, every summary
+    added them all up and the day counted twice."""
+    ordered = sorted(rows, key=_row_stamp)
+    latest = ordered[-1]
+    merged: Dict[str, Any] = {}
+    for f in REVENUE_AMOUNT_FIELDS:
+        values = {round(float(r.get(f) or 0), 2) for r in rows} - {0.0}
+        merged[f] = values.pop() if len(values) == 1 else round(float(latest.get(f) or 0), 2)
+    merged["vat_rate_percent"] = latest.get("vat_rate_percent", 20.0)
+    return merged
+
+
+async def dedupe_revenue_days_and_payroll() -> dict:
+    """One record per business day of revenue and per employee-month of
+    payroll, then unique indexes so it stays that way (a double tap, two
+    devices, a restore or an import used to be able to add a second one,
+    and every total counted both). A member's own record from before
+    joining (no company) that collides with the company's day is merged
+    into it. Every removed record is kept in data_migration_backups."""
+    marker = "dedupe_revenue_payroll_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    merged_days = 0
+    removed_rows = 0
+    member_company = {
+        u["user_id"]: u["company_id"]
+        for u in await db.users.find({"company_id": {"$ne": None}}, {"_id": 0, "user_id": 1, "company_id": 1}).to_list(ALL_ROWS)
+    }
+    groups: Dict[tuple, List[dict]] = {}
+    async for row in db.daily_revenue.find({}, {"_id": 1, "id": 1, "company_id": 1, "user_id": 1, "date": 1,
+                                                 "created_at": 1, "updated_at": 1, "vat_rate_percent": 1,
+                                                 **{f: 1 for f in REVENUE_AMOUNT_FIELDS}}):
+        company = row.get("company_id") or member_company.get(row.get("user_id"))
+        owner = ("company", company) if company else ("user", row.get("user_id"))
+        groups.setdefault((owner, str(row.get("date") or "")[:10]), []).append(row)
+    for (owner, _day), rows in groups.items():
+        if len(rows) < 2:
+            continue
+        # The company's own record survives (else the newest), with the merged figures.
+        keep = max(rows, key=lambda r: (r.get("company_id") is not None, _row_stamp(r)))
+        update = merge_revenue_duplicates(rows)
+        if owner[0] == "company":
+            update["company_id"] = owner[1]
+        for row in rows:
+            if row["_id"] == keep["_id"]:
+                continue
+            await db.data_migration_backups.insert_one({
+                "migration": marker, "collection": "daily_revenue", "doc_id": row["_id"],
+                "original": {k: v for k, v in row.items() if k != "_id"}, "merged_into": keep.get("id"),
+            })
+            await db.daily_revenue.delete_one({"_id": row["_id"]})
+            removed_rows += 1
+        await db.daily_revenue.update_one({"_id": keep["_id"]}, {"$set": update})
+        merged_days += 1
+
+    removed_payroll = 0
+    payroll_groups: Dict[tuple, List[dict]] = {}
+    async for entry in db.payroll_entries.find({"employee_id": {"$type": "string"}},
+                                               {"_id": 1, "company_id": 1, "employee_id": 1, "period_year": 1, "period_month": 1, "created_at": 1}):
+        key = (entry.get("company_id"), entry["employee_id"], entry.get("period_year"), entry.get("period_month"))
+        payroll_groups.setdefault(key, []).append(entry)
+    for entries in payroll_groups.values():
+        if len(entries) < 2:
+            continue
+        ordered = sorted(entries, key=_row_stamp)
+        for entry in ordered[:-1]:
+            full: Dict[str, Any] = dict(await db.payroll_entries.find_one({"_id": entry["_id"]}) or {})
+            full.pop("_id", None)
+            await db.data_migration_backups.insert_one({
+                "migration": marker, "collection": "payroll_entries", "doc_id": entry["_id"], "original": full,
+            })
+            await db.payroll_entries.delete_one({"_id": entry["_id"]})
+            removed_payroll += 1
+
+    result = {"revenue_days_merged": merged_days, "revenue_rows_removed": removed_rows, "payroll_removed": removed_payroll}
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), **result})
+    return result
+
+
+async def ensure_unique_records():
+    """After dedupe_revenue_days_and_payroll: one revenue record per company
+    and day, one payroll record per employee and month."""
+    try:
+        await db.daily_revenue.create_index(
+            [("company_id", 1), ("date", 1)], unique=True, name="one_revenue_day_per_company",
+            partialFilterExpression={"company_id": {"$type": "string"}},
+        )
+    except Exception:
+        logger.exception("Unique revenue-day index could not be created")
+    try:
+        await db.payroll_entries.create_index(
+            [("company_id", 1), ("employee_id", 1), ("period_year", 1), ("period_month", 1)],
+            unique=True, name="one_payroll_per_employee_month",
+            partialFilterExpression={"employee_id": {"$type": "string"}},
+        )
+    except Exception:
+        logger.exception("Unique payroll index could not be created")
+
+
 async def run_data_migrations():
     """One-time data repairs, each guarded by its own marker in
     `data_migrations` so a restart never re-runs them. A failure is logged
@@ -5135,6 +5205,13 @@ async def run_data_migrations():
             logger.info(f"Invoice dates moved onto business days: {result}")
     except Exception:
         logger.exception("Invoice business-day migration failed")
+    try:
+        result = await dedupe_revenue_days_and_payroll()
+        if result and not result.get("skipped"):
+            logger.info(f"Duplicate revenue days / payroll merged: {result}")
+    except Exception:
+        logger.exception("Revenue/payroll dedupe failed")
+    await ensure_unique_records()
 
 # ===================== HEALTH CHECK =====================
 

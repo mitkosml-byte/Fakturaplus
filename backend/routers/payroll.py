@@ -33,6 +33,7 @@ _eik_check_digit,
     _team_channel_id,
 )
 import server
+from pymongo.errors import DuplicateKeyError
 
 router = APIRouter(prefix="/api")
 
@@ -217,7 +218,11 @@ async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = D
         "counted_in_expenses": True,
         **breakdown,
     }
-    await server.db.payroll_entries.insert_one(doc)
+    try:
+        await server.db.payroll_entries.insert_one(doc)
+    except DuplicateKeyError:
+        # Two saves at once: the unique index lets only one through.
+        raise HTTPException(status_code=409, detail="Вече има ведомост за този служител за този месец")
 
     await audit_service.log_action(
         user_id=current_user.user_id,
@@ -483,7 +488,11 @@ async def commit_payroll_import(payload: PayrollImportCommitRequest, current_use
             "additional_insurance": round(employee.get("additional_insurance", 0), 2),
             "total_employer_cost": total_employer_cost,
         }
-        await server.db.payroll_entries.insert_one(doc)
+        try:
+            await server.db.payroll_entries.insert_one(doc)
+        except DuplicateKeyError:
+            skipped.append({"employee_id": entry.employee_id, "message": f"Вече има ведомост за {employee['name']} за {entry.period_month}/{entry.period_year}"})
+            continue
         await audit_service.log_action(
             user_id=current_user.user_id,
             user_name=current_user.name,

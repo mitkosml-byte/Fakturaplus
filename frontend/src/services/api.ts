@@ -749,8 +749,12 @@ class ApiService {
   async restoreBackup(backupData: any): Promise<{
     success: boolean;
     message: string;
-    restored: { invoices: number; revenues: number; expenses: number };
-    skipped?: { invoices: number; revenues: number; expenses: number };
+    restored: { invoices: number; revenues: number; expenses: number; other?: number; total?: number };
+    // Already in the company (same id or same natural key) - not added twice.
+    already_present?: number;
+    // About a team member who is not in this company (their shifts, pay).
+    not_in_team?: number;
+    skipped?: { invoices: number; revenues: number; expenses: number; other?: number; total?: number };
   }> {
     return this.fetch('/backup/restore', {
       method: 'POST',

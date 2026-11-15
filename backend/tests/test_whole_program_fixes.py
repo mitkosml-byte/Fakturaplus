@@ -202,3 +202,165 @@ def test_c5_the_vat_threshold_notice_is_gone(client):
     settings = client.get("/api/notifications/settings", headers=owner).json()
     assert not any(key.startswith("vat_threshold") for key in settings)
     assert settings["daily_push_enabled"] is True and settings["daily_push_hour"] == server.DAILY_PUSH_DEFAULT_HOUR
+
+
+@pytest.fixture
+def no_rate_limit():
+    """The restore endpoint allows 5 calls a minute per address - these
+    tests restore more often than that from the one test client."""
+    server.limiter.reset()
+    server.limiter.enabled = False
+    yield
+    server.limiter.enabled = True
+
+
+def test_i1_i2_a_full_backup_restores_everything_once_and_moves_between_companies(client, no_rate_limit):
+    company_id, owner_id, owner = _company()
+    worker_id, _ = _user(company_id, "staff", [], "Работник")
+
+    customer = client.post("/api/customers", headers=owner, json={"name": "Клиент Едно"}).json()
+    employee = client.post("/api/employees", headers=owner, json={"name": "Мария", "base_salary": 1200}).json()
+    assert client.post("/api/payroll", headers=owner, json={
+        "employee_id": employee["id"], "period_month": 10, "period_year": 2026,
+    }).status_code == 200
+    assert client.post("/api/receivables", headers=owner, json={
+        "customer_id": customer["id"], "customer_name": "Клиент Едно", "description": "Кетъринг",
+        "amount": 250, "due_date": "2026-11-30",
+    }).status_code == 200
+    client.post("/api/daily-revenue", headers=owner, json={"date": "2026-10-05", "fiscal_revenue": 900, "pocket_money": 120})
+    client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": worker_id, "date": "2026-10-06", "start_time": "09:00", "end_time": "15:00", "hourly_rate": 10,
+    })
+
+    backup = client.post("/api/backup/create", headers=owner).json()
+    assert backup["version"] == 2
+    held = {name: len(docs) for name, docs in backup["collections"].items() if docs}
+    for section in ("customers", "employees", "payroll_entries", "receivables", "daily_revenue", "work_shifts"):
+        assert held.get(section), section
+    assert backup["statistics"]["total_records"] >= sum(held.values())
+
+    # Into the same company: everything is already here, nothing doubles.
+    again = client.post("/api/backup/restore", headers=owner, json=backup).json()
+    assert again["restored"]["total"] == 0 and again["already_present"] == sum(held.values())
+
+    # Re-entered by hand under new ids: still recognised by what it is.
+    asyncio.run(server.db.daily_revenue.delete_many({"company_id": company_id}))
+    client.post("/api/daily-revenue", headers=owner, json={"date": "2026-10-05", "fiscal_revenue": 900, "pocket_money": 120})
+    again = client.post("/api/backup/restore", headers=owner, json=backup).json()
+    assert again["restored"]["revenues"] == 0
+    days = asyncio.run(server.db.daily_revenue.count_documents({"company_id": company_id, "date": "2026-10-05"}))
+    assert days == 1
+
+    # Into another company: the records come along with their links kept,
+    # under new ids; the shift of a person who isn't there is left out.
+    other_id, _, other_owner = _company()
+    moved = client.post("/api/backup/restore", headers=other_owner, json=backup).json()
+    assert moved["restored"]["total"] > 0 and moved["not_in_team"] >= 1
+    new_employee = asyncio.run(server.db.employees.find_one({"company_id": other_id, "name": "Мария"}, {"_id": 0}))
+    new_payroll = asyncio.run(server.db.payroll_entries.find_one({"company_id": other_id}, {"_id": 0}))
+    new_customer = asyncio.run(server.db.customers.find_one({"company_id": other_id}, {"_id": 0}))
+    new_receivable = asyncio.run(server.db.receivables.find_one({"company_id": other_id}, {"_id": 0}))
+    assert new_employee["id"] != employee["id"] and new_payroll["employee_id"] == new_employee["id"]
+    assert new_receivable["customer_id"] == new_customer["id"] != customer["id"]
+    assert asyncio.run(server.db.work_shifts.count_documents({"company_id": other_id})) == 0
+    # The records' authors in the other company are its owner, not strangers.
+    assert new_employee["user_id"] != owner_id
+
+    # A file can never smuggle a query operator in.
+    hostile = {"format": "fakturaplus-backup", "version": 2, "collections": {
+        "expenses": [{"id": "x1", "description": {"$gt": ""}, "amount": 5, "date": "2026-10-01"}],
+    }}
+    result = client.post("/api/backup/restore", headers=other_owner, json=hostile).json()
+    assert result["restored"]["total"] == 0 and result["skipped"]["total"] == 1
+
+
+def test_i2_an_old_three_list_backup_still_restores(client, no_rate_limit):
+    _, _, owner = _company()
+    old = {
+        "invoices": [{
+            "id": f"inv-{uuid.uuid4().hex[:8]}", "supplier": "Метро", "invoice_number": "0001", "amount_without_vat": 100,
+            "vat_amount": 20, "total_amount": 120, "date": "2026-09-30T21:00:00+00:00", "created_at": "2026-10-01T08:00:00+00:00",
+        }],
+        "daily_revenues": [{"id": f"rev-{uuid.uuid4().hex[:8]}", "date": "2026-10-01", "fiscal_revenue": 300}],
+        "expenses": [],
+    }
+    result = client.post("/api/backup/restore", headers=owner, json=old).json()
+    assert result["restored"]["invoices"] == 1 and result["restored"]["revenues"] == 1
+    invoices = client.get("/api/invoices", headers=owner).json()
+    # Midnight in Sofia sent as UTC is still the 1st, the day it showed.
+    assert invoices[0]["date"].startswith("2026-10-01")
+    assert client.post("/api/backup/restore", headers=owner, json=old).json()["restored"]["total"] == 0
+
+
+def test_c1_duplicate_revenue_days_and_payroll_merge_into_one(monkeypatch):
+    # Its own database, as it was before the unique indexes existed (the
+    # in-memory test database cannot build a partial index over the other
+    # tests' rows the way MongoDB does).
+    from mongomock_motor import AsyncMongoMockClient
+    monkeypatch.setattr(server, "db", AsyncMongoMockClient()[f"dedupe_{uuid.uuid4().hex[:6]}"])
+    company_id, owner_id = "company_dedupe", "user_dedupe"
+    asyncio.run(server.db.users.insert_one({"user_id": owner_id, "company_id": company_id, "role": "owner"}))
+    early = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    late = datetime(2026, 1, 2, tzinfo=timezone.utc)
+
+    async def seed():
+        rows = [
+            # A copy (restore) and a complementary pocket-money row on the 3rd...
+            {"id": "a", "company_id": company_id, "user_id": owner_id, "date": "2026-01-03", "fiscal_revenue": 500, "pocket_money": 0, "created_at": early},
+            {"id": "b", "company_id": company_id, "user_id": owner_id, "date": "2026-01-03", "fiscal_revenue": 500, "pocket_money": 80, "created_at": late},
+            # ...and two different till totals on the 4th: the later one is right.
+            {"id": "c", "company_id": company_id, "user_id": owner_id, "date": "2026-01-04", "fiscal_revenue": 400, "created_at": early},
+            {"id": "d", "company_id": company_id, "user_id": owner_id, "date": "2026-01-04", "fiscal_revenue": 450, "created_at": late},
+        ]
+        await server.db.daily_revenue.insert_many(rows)
+        await server.db.payroll_entries.insert_many([
+            {"id": "p1", "company_id": company_id, "employee_id": "emp-x", "period_year": 2026, "period_month": 1, "created_at": early},
+            {"id": "p2", "company_id": company_id, "employee_id": "emp-x", "period_year": 2026, "period_month": 1, "created_at": late},
+        ])
+        result = await server.dedupe_revenue_days_and_payroll()
+        await server.ensure_unique_records()
+        return result
+
+    result = asyncio.run(seed())
+    assert (result["revenue_rows_removed"], result["payroll_removed"]) == (2, 1)
+    third = asyncio.run(server.db.daily_revenue.find({"company_id": company_id, "date": "2026-01-03"}, {"_id": 0}).to_list(None))
+    fourth = asyncio.run(server.db.daily_revenue.find({"company_id": company_id, "date": "2026-01-04"}, {"_id": 0}).to_list(None))
+    assert len(third) == 1 and (third[0]["fiscal_revenue"], third[0]["pocket_money"]) == (500, 80)
+    assert len(fourth) == 1 and fourth[0]["fiscal_revenue"] == 450
+    payroll = asyncio.run(server.db.payroll_entries.find({"employee_id": "emp-x"}, {"_id": 0}).to_list(None))
+    assert [p["id"] for p in payroll] == ["p2"]
+    kept_aside = asyncio.run(server.db.data_migration_backups.count_documents({"migration": "dedupe_revenue_payroll_v1"}))
+    assert kept_aside == 3
+
+    # From now on a second record of the same day cannot be stored at all.
+    from pymongo.errors import DuplicateKeyError
+    with pytest.raises(DuplicateKeyError):
+        asyncio.run(server.db.daily_revenue.insert_one(
+            {"id": "e", "company_id": company_id, "user_id": owner_id, "date": "2026-01-03", "fiscal_revenue": 1}))
+
+
+def test_z4_schedule_pay_leaves_out_days_of_leave(client):
+    company_id, owner_id, owner = _company()
+    worker_id, _ = _user(company_id, "staff", [], "Работник")
+    employee = client.post("/api/employees", headers=owner, json={
+        "name": "Работник", "base_salary": 1000, "linked_user_id": worker_id,
+    }).json()
+    # Mon-Fri 8h at 10 €/h, the Wednesday on leave.
+    for day in ("2026-12-07", "2026-12-08", "2026-12-09", "2026-12-10", "2026-12-11"):
+        assert client.post("/api/schedule/shifts", headers=owner, json={
+            "user_id": worker_id, "date": day, "start_time": "09:00", "end_time": "17:00", "hourly_rate": 10,
+        }).status_code == 200
+    assert client.post("/api/employees/leave", headers=owner, json={
+        "employee_id": employee["id"], "leave_type": "paid", "start_date": "2026-12-09", "end_date": "2026-12-09",
+    }).status_code == 200
+
+    summary = client.get(f"/api/schedule/summary?start=2026-12-01&end=2026-12-31&user_id={worker_id}", headers=owner).json()
+    assert (summary["total_hours"], summary["estimated_pay"], summary["leave_days_excluded"]) == (32, 320, 1)
+    occ = client.get(f"/api/schedule/shifts?start=2026-12-01&end=2026-12-31&user_id={worker_id}", headers=owner)
+    flags = {o["date"]: o["payable"] for o in occ.json()["occurrences"]}
+    assert flags["2026-12-09"] is False and flags["2026-12-08"] is True
+
+    paid = client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": worker_id, "period_start": "2026-12-01", "period_end": "2026-12-31",
+    }).json()
+    assert (paid["total_hours"], paid["amount"]) == (32, 320)

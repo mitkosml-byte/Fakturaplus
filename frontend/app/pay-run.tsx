@@ -64,7 +64,9 @@ export default function PayRunScreen() {
       setPendingEmployees(employees.filter((e) => !paidEmployeeIds.has(e.id)));
 
       const totalsByUser: Record<string, { hours: number; pay: number }> = {};
-      occData.occurrences.forEach((o) => {
+      // The same rule the server pays by: a day of the person's leave is
+      // not paid unless a manager recorded the hours actually worked.
+      occData.occurrences.filter((o) => o.payable !== false).forEach((o) => {
         const cur = totalsByUser[o.user_id] || { hours: 0, pay: 0 };
         cur.hours += o.hours;
         cur.pay += o.hours * (o.hourly_rate || 0);

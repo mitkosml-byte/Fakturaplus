@@ -2389,8 +2389,8 @@ export const translations: Translations = {
     en: 'Do you want to restore data from:',
   },
   'backup.restoreWarning': {
-    bg: 'Съществуващи данни няма да бъдат изтрити, само ще се добавят нови.',
-    en: 'Existing data will not be deleted, only new data will be added.',
+    bg: 'Нищо съществуващо няма да бъде изтрито – добавят се само записите, които липсват, и нищо не се дублира.',
+    en: 'Nothing existing is deleted – only missing records are added, and nothing is duplicated.',
   },
   'backup.restoreButton': {
     bg: 'Възстанови',
@@ -2404,6 +2404,9 @@ export const translations: Translations = {
     bg: 'Възстановени записи',
     en: 'Restored records',
   },
+  'backup.otherRecords': { bg: 'Други записи (екип, заплати, график, активи, вземания, настройки)', en: 'Other records (team, payroll, schedule, assets, receivables, settings)' },
+  'backup.alreadyPresent': { bg: 'Вече налични – не са добавени втори път', en: 'Already present – not added twice' },
+  'backup.notInTeam': { bg: 'За хора, които не са в тази фирма – пропуснати', en: 'About people not in this company – skipped' },
   'backup.skippedRecords': {
     bg: 'Пропуснати (вече съществуващи или невалидни) записи',
     en: 'Skipped (already existing or invalid) records',
@@ -4591,6 +4594,10 @@ export const translations: Translations = {
   'schedule.wholeTeam': { bg: 'Целият екип', en: 'Whole team' },
   'schedule.hoursThisMonth': { bg: 'Часове този месец', en: 'Hours this month' },
   'schedule.estimatedPay': { bg: 'Прогнозно възнаграждение', en: 'Estimated pay' },
+  'schedule.leaveDaysExcluded': {
+    bg: '{count} смени са в дни на отпуск и не са включени в часовете и заплащането (освен ако не въведеш корекция с реално отработените часове).',
+    en: '{count} shifts fall on leave days and are not counted in hours or pay (unless you record the hours actually worked).',
+  },
   'schedule.shiftsThisMonth': { bg: 'Смени този месец', en: 'Shifts this month' },
   'schedule.noShifts': { bg: 'Няма планирани смени', en: 'No shifts scheduled' },
   'schedule.newShift': { bg: 'Нова смяна', en: 'New shift' },

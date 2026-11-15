@@ -895,6 +895,9 @@ export interface ShiftOccurrence {
   repeat_pattern: ShiftRepeatPattern;
   repeat_until?: string | null;
   leave_conflict: boolean;
+  // Counted in pay: not a day of the person's leave, unless a manager
+  // recorded the hours actually worked that day (an adjustment).
+  payable: boolean;
   adjusted: boolean;
   adjustment_reason?: string | null;
   adjusted_by_name?: string | null;
@@ -910,6 +913,8 @@ export interface ScheduleSummary {
   total_hours: number;
   estimated_pay: number;
   shift_count: number;
+  // Shifts on a day of the person's leave - not counted in hours or pay.
+  leave_days_excluded?: number;
 }
 
 export interface SchedulePaymentCreate {

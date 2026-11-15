@@ -31,7 +31,9 @@ from server import (
     _team_channel_id,
 )
 import server
-from services.business_calendar import stored_day
+from fastapi import Body
+from services import backup_service
+from services.business_calendar import now_local, stored_day
 from routers.price_tracking import rebuild_invoice_price_history
 
 router = APIRouter(prefix="/api")
@@ -39,86 +41,54 @@ router = APIRouter(prefix="/api")
 @router.post("/backup/create")
 @limiter.limit("5/minute")
 async def create_backup(request: Request, current_user: User = Depends(get_current_user)):
-    """Създава backup на всички данни на ЦЯЛАТА фирма (не само тези,
-    въведени лично от текущия потребител), за да е реален backup на
-    книгите на компанията."""
+    """A full backup of the whole company's records (services/backup_service:
+    every section the business entered, not only invoices, revenue and
+    off-book expenses)."""
     if current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Само титулярят може да прави резервно копие")
 
     import json
 
     company_id, scope = await get_company_scope(current_user)
+    collections = await backup_service.build_backup(server.db, company_id, scope)
 
-    # Събиране на фактури
-    invoices = await server.db.invoices.find(scope, {"_id": 0}).to_list(ALL_ROWS)
-
-    # Конвертиране на datetime обекти
-    for inv in invoices:
-        if isinstance(inv.get("date"), datetime):
-            inv["date"] = inv["date"].isoformat()
-        if isinstance(inv.get("created_at"), datetime):
-            inv["created_at"] = inv["created_at"].isoformat()
-
-    # Събиране на дневни обороти
-    revenues = await server.db.daily_revenue.find(scope, {"_id": 0}).to_list(ALL_ROWS)
-
-    for rev in revenues:
-        if isinstance(rev.get("date"), datetime):
-            rev["date"] = rev["date"].isoformat()
-        if isinstance(rev.get("created_at"), datetime):
-            rev["created_at"] = rev["created_at"].isoformat()
-
-    # Събиране на разходи
-    expenses = await server.db.expenses.find(scope, {"_id": 0}).to_list(ALL_ROWS)
-
-    for exp in expenses:
-        if isinstance(exp.get("date"), datetime):
-            exp["date"] = exp["date"].isoformat()
-        if isinstance(exp.get("created_at"), datetime):
-            exp["created_at"] = exp["created_at"].isoformat()
-    
-    # Събиране на данни за фирма
     company_data = None
     if company_id:
         company_data = await server.db.companies.find_one({"id": company_id}, {"_id": 0})
-        if company_data:
-            if isinstance(company_data.get("created_at"), datetime):
-                company_data["created_at"] = company_data["created_at"].isoformat()
-            if isinstance(company_data.get("updated_at"), datetime):
-                company_data["updated_at"] = company_data["updated_at"].isoformat()
-    
+    counts = {name: len(docs) for name, docs in collections.items()}
+    statistics: Dict[str, Any] = {
+        "invoice_count": counts.get("invoices", 0),
+        "revenue_count": counts.get("daily_revenue", 0),
+        "expense_count": counts.get("expenses", 0),
+        "total_records": sum(counts.values()),
+        "sections": [
+            {"key": s.collection, "label": s.label, "count": counts.get(s.collection, 0)}
+            for s in backup_service.SECTIONS if counts.get(s.collection)
+        ],
+    }
     backup_data = {
+        "format": backup_service.BACKUP_FORMAT,
+        "version": backup_service.BACKUP_VERSION,
         "id": str(uuid.uuid4()),
-        "user_id": current_user.user_id,
-        "user_email": current_user.email,
-        "user_name": current_user.name,
         "company_id": company_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "app_version": "1.0.0",
-        "invoices": invoices,
-        "daily_revenues": revenues,
-        "expenses": expenses,
-        "company": company_data,
-        "statistics": {
-            "invoice_count": len(invoices),
-            "revenue_count": len(revenues),
-            "expense_count": len(expenses)
-        }
+        "company": backup_service.encode(company_data) if company_data else None,
+        "collections": collections,
+        "statistics": statistics,
     }
-    
-    # Записване на metadata за backup
-    backup_json = json.dumps(backup_data, ensure_ascii=False)
+
     metadata = BackupMetadata(
         user_id=current_user.user_id,
-        file_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-        size_bytes=len(backup_json.encode('utf-8')),
-        invoice_count=len(invoices),
-        revenue_count=len(revenues),
-        expense_count=len(expenses)
+        file_name=f"backup_{now_local().strftime('%Y%m%d_%H%M%S')}.json",
+        size_bytes=len(json.dumps(backup_data, ensure_ascii=False).encode('utf-8')),
+        invoice_count=statistics["invoice_count"],
+        revenue_count=statistics["revenue_count"],
+        expense_count=statistics["expense_count"],
     )
-    
-    await server.db.backup_metadata.insert_one(metadata.model_dump())
-    
+    meta_doc = metadata.model_dump()
+    meta_doc["total_records"] = statistics["total_records"]
+    await server.db.backup_metadata.insert_one(meta_doc)
+
     return backup_data
 
 @router.get("/backup/list")
@@ -134,110 +104,83 @@ async def list_backups(current_user: User = Depends(get_current_user)):
     
     return {"backups": backups}
 
+def _restored_invoice_day(doc: dict) -> dict:
+    # Kept as its business day, like every invoice saved today
+    # (services/business_calendar) - a backup from before that change
+    # restores onto the same day it showed.
+    doc["date"] = stored_day(doc["date"])
+    if doc.get("payment_due_date"):
+        doc["payment_due_date"] = stored_day(doc["payment_due_date"])
+    return doc
+
+
+def _restored_plain_day(doc: dict) -> dict:
+    # Revenue and expense days stay "YYYY-MM-DD" text, as when entered.
+    doc["date"] = str(doc["date"])[:10]
+    return doc
+
+
 @router.post("/backup/restore")
 @limiter.limit("5/minute")
-async def restore_backup(request: Request, backup_data: BackupRestoreRequest, current_user: User = Depends(get_current_user)):
-    """Възстановява данни от backup - само Owner, само в собствената му
-    фирма (company_id винаги се презаписва от сесията, никога от подадените
-    данни). Всеки запис се обработва поотделно, за да не провали един
-    невалиден ред цялото възстановяване."""
+async def restore_backup(request: Request, body: Dict[str, Any] = Body(...), current_user: User = Depends(get_current_user)):
+    """Restores a backup into the owner's OWN company only (company_id is
+    always the session's, never the file's). Adds only what the company
+    does not already hold - by id and by each record's natural key - so a
+    second restore of the same file changes nothing. Accepts both the full
+    format (2) and the older invoices/revenue/expenses-only files."""
     if current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Само титулярят може да възстановява резервно копие")
 
-    company_id, _ = await get_company_scope(current_user)
+    if isinstance(body.get("collections"), dict):
+        collections = body["collections"]
+    elif any(isinstance(body.get(k), list) for k in ("invoices", "daily_revenues", "expenses")):
+        collections = backup_service.from_format_1(body)
+    else:
+        raise HTTPException(status_code=400, detail="Файлът не е резервно копие на Фактура+")
 
-    restored_counts = {"invoices": 0, "revenues": 0, "expenses": 0}
-    skipped_counts = {"invoices": 0, "revenues": 0, "expenses": 0}
+    company_id, scope = await get_company_scope(current_user)
+    if company_id:
+        members = await server.db.users.find({"company_id": company_id}, {"_id": 0, "user_id": 1}).to_list(ALL_ROWS)
+        member_ids = {m["user_id"] for m in members} | {current_user.user_id}
+    else:
+        member_ids = {current_user.user_id}
 
-    # One existence-check query per collection instead of one per record -
-    # a backup can hold thousands of rows, and this was previously an
-    # N+1 (a find_one per item) on top of the N inserts already needed.
-    existing_invoice_ids = {
-        d["id"] for d in await server.db.invoices.find(
-            {"id": {"$in": [inv.id for inv in backup_data.invoices]}}, {"id": 1}
-        ).to_list(len(backup_data.invoices) or 1)
-    }
-    existing_revenue_ids = {
-        d["id"] for d in await server.db.daily_revenue.find(
-            {"id": {"$in": [r.id for r in backup_data.daily_revenues]}}, {"id": 1}
-        ).to_list(len(backup_data.daily_revenues) or 1)
-    }
-    existing_expense_ids = {
-        d["id"] for d in await server.db.expenses.find(
-            {"id": {"$in": [e.id for e in backup_data.expenses]}}, {"id": 1}
-        ).to_list(len(backup_data.expenses) or 1)
-    }
+    result = await backup_service.restore(
+        server.db, collections, company_id=company_id, scope=scope,
+        owner_id=current_user.user_id, member_ids=member_ids,
+        prepare={"invoices": _restored_invoice_day, "daily_revenue": _restored_plain_day, "expenses": _restored_plain_day},
+    )
+    if company_id:
+        for invoice in result.restored_invoices:
+            await rebuild_invoice_price_history(company_id, invoice)
 
-    # Възстановяване на фактури
-    for invoice in backup_data.invoices:
-        try:
-            if invoice.id in existing_invoice_ids:
-                continue
-            doc = invoice.model_dump()
-            doc["user_id"] = current_user.user_id
-            doc["company_id"] = company_id
-            # Kept as its business day, like every invoice saved today
-            # (services/business_calendar) - a backup from before that
-            # change restores onto the same day it showed.
-            doc["date"] = stored_day(doc["date"])
-            if doc.get("payment_due_date"):
-                doc["payment_due_date"] = stored_day(doc["payment_due_date"])
-            doc["created_at"] = (
-                datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
-                if doc.get("created_at") else datetime.now(timezone.utc)
-            )
-            await server.db.invoices.insert_one(doc)
-            if company_id:
-                await rebuild_invoice_price_history(company_id, doc)
-            restored_counts["invoices"] += 1
-        except Exception as e:
-            logger.warning(f"Backup restore: skipped invalid invoice {invoice.id}: {e}")
-            skipped_counts["invoices"] += 1
+    def legacy(bucket: Dict[str, int]) -> Dict[str, int]:
+        main = {"invoices": bucket.get("invoices", 0), "revenues": bucket.get("daily_revenue", 0),
+                "expenses": bucket.get("expenses", 0)}
+        total = sum(bucket.values())
+        return {**main, "other": total - sum(main.values()), "total": total}
 
-    # Възстановяване на дневни обороти (date си остава низ "YYYY-MM-DD",
-    # както при нормално създаване - НЕ datetime обект)
-    for revenue in backup_data.daily_revenues:
-        try:
-            if revenue.id in existing_revenue_ids:
-                continue
-            doc = revenue.model_dump()
-            doc["user_id"] = current_user.user_id
-            doc["company_id"] = company_id
-            doc["date"] = doc["date"][:10]
-            doc["created_at"] = (
-                datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
-                if doc.get("created_at") else datetime.now(timezone.utc)
-            )
-            await server.db.daily_revenue.insert_one(doc)
-            restored_counts["revenues"] += 1
-        except Exception as e:
-            logger.warning(f"Backup restore: skipped invalid daily revenue {revenue.id}: {e}")
-            skipped_counts["revenues"] += 1
-
-    # Възстановяване на разходи (date също остава низ)
-    for expense in backup_data.expenses:
-        try:
-            if expense.id in existing_expense_ids:
-                continue
-            doc = expense.model_dump()
-            doc["user_id"] = current_user.user_id
-            doc["company_id"] = company_id
-            doc["date"] = doc["date"][:10]
-            doc["created_at"] = (
-                datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
-                if doc.get("created_at") else datetime.now(timezone.utc)
-            )
-            await server.db.expenses.insert_one(doc)
-            restored_counts["expenses"] += 1
-        except Exception as e:
-            logger.warning(f"Backup restore: skipped invalid expense {expense.id}: {e}")
-            skipped_counts["expenses"] += 1
-    
+    labels = {s.collection: s.label for s in backup_service.SECTIONS}
+    sections = [
+        {"key": name, "label": labels.get(name, name), "restored": result.restored.get(name, 0),
+         "already_present": result.already_present.get(name, 0), "invalid": result.invalid.get(name, 0),
+         "not_in_team": result.not_in_team.get(name, 0)}
+        for name in labels
+        if any(b.get(name) for b in (result.restored, result.already_present, result.invalid, result.not_in_team))
+    ]
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="restore",
+        entity_type="backup", entity_id=str(body.get("id") or ""), company_id=company_id,
+        details={"restored": sum(result.restored.values()), "already_present": sum(result.already_present.values())},
+    )
     return {
         "success": True,
         "message": "Данните са възстановени успешно",
-        "restored": restored_counts,
-        "skipped": skipped_counts
+        "restored": legacy(result.restored),
+        "already_present": sum(result.already_present.values()),
+        "not_in_team": sum(result.not_in_team.values()),
+        "skipped": legacy(result.invalid),
+        "sections": sections,
     }
 
 @router.get("/backup/status")
@@ -246,10 +189,12 @@ async def get_backup_status(current_user: User = Depends(get_current_user)):
     if current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Само титулярят може да вижда статуса на резервните копия")
 
-    last_backup = await server.db.backup_metadata.find_one(
+    # The newest one - find_one alone returned the OLDEST backup as "last".
+    latest = await server.db.backup_metadata.find(
         {"user_id": current_user.user_id},
         {"_id": 0}
-    )
+    ).sort("created_at", -1).limit(1).to_list(1)
+    last_backup = latest[0] if latest else None
     
     if last_backup:
         return {
@@ -259,7 +204,8 @@ async def get_backup_status(current_user: User = Depends(get_current_user)):
             "statistics": {
                 "invoices": last_backup.get("invoice_count", 0),
                 "revenues": last_backup.get("revenue_count", 0),
-                "expenses": last_backup.get("expense_count", 0)
+                "expenses": last_backup.get("expense_count", 0),
+                "total": last_backup.get("total_records"),
             }
         }
     

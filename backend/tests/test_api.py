@@ -938,7 +938,7 @@ def test_backup_restore(client):
     assert r.status_code == 200
 
     r = client.post("/api/backup/create", headers=owner)
-    assert r.status_code == 200 and "invoices" in r.json()
+    assert r.status_code == 200 and "invoices" in r.json()["collections"]
     backup_payload = r.json()
 
     r = client.get("/api/backup/list", headers=owner)
@@ -946,6 +946,8 @@ def test_backup_restore(client):
 
     r = client.post("/api/backup/restore", headers=owner, json=backup_payload)
     assert r.status_code == 200
+    # Everything in it is already here: a restore adds nothing twice.
+    assert r.json()["restored"]["total"] == 0
 
 
 def test_exports(client):
@@ -1781,8 +1783,11 @@ def test_proactive_signals_schedule_and_leave(client):
     # nothing yet marked paid.
     today = server_module.datetime.now(tz.utc)
     month_date = today.strftime("%Y-%m-%d")
+    # The shift is on another day of the month than the leave below: a
+    # day of the person's leave is never paid by the schedule.
+    shift_date = today.replace(day=2 if today.day == 1 else 1).strftime("%Y-%m-%d")
     r = client.post("/api/schedule/shifts", headers=owner, json={
-        "user_id": staff_id, "date": month_date, "start_time": "09:00", "end_time": "17:00", "hourly_rate": 10,
+        "user_id": staff_id, "date": shift_date, "start_time": "09:00", "end_time": "17:00", "hourly_rate": 10,
     })
     assert r.status_code == 200, r.text
 
@@ -2376,7 +2381,7 @@ def test_shift_adjustments(client):
 
     # Scheduled (unadjusted): 4 weeks * 8h * 10 € = 320 €.
     r = client.get(f"/api/schedule/summary?start=2026-11-01&end=2026-11-30&user_id={staff_id}", headers=owner)
-    assert r.json() == {"total_hours": 32, "estimated_pay": 320, "shift_count": 4}
+    assert r.json() == {"total_hours": 32, "estimated_pay": 320, "shift_count": 4, "leave_days_excluded": 0}
 
     # Staff can't correct their own hours - that's management's call.
     r = client.put(f"/api/schedule/shifts/{shift_id}/occurrences/2026-11-09/adjustment", headers=staff, json={
@@ -2403,7 +2408,7 @@ def test_shift_adjustments(client):
 
     # Summary reflects the correction: 3*8 + 6 = 30h, pay = 300 €.
     r = client.get(f"/api/schedule/summary?start=2026-11-01&end=2026-11-30&user_id={staff_id}", headers=owner)
-    assert r.json() == {"total_hours": 30, "estimated_pay": 300, "shift_count": 4}
+    assert r.json() == {"total_hours": 30, "estimated_pay": 300, "shift_count": 4, "leave_days_excluded": 0}
 
     # Staff sees the correction - and why - on their OWN schedule. No secret corrections.
     r = client.get("/api/schedule/shifts?start=2026-11-01&end=2026-11-30", headers=staff)

@@ -675,6 +675,11 @@ export default function WorkScheduleScreen() {
                   </View>
                 </View>
               )}
+              {summary && (summary.leave_days_excluded ?? 0) > 0 && (
+                <Text style={styles.leaveExcludedNote}>
+                  {t('schedule.leaveDaysExcluded').replace('{count}', String(summary.leave_days_excluded))}
+                </Text>
+              )}
 
               {canManage && selectedUserId && summary && summary.estimated_pay > 0 && (
                 schedulePayment ? (
@@ -1262,6 +1267,13 @@ const styles = StyleSheet.create({
   content: { flex: 1, padding: 16 },
   emptyContainer: { alignItems: 'center', paddingVertical: 60 },
   emptyText: { fontSize: 16, color: COLORS.textMuted, marginTop: 16 },
+  leaveExcludedNote: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: -4,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
   summaryCard: {
     flexDirection: 'row',
     backgroundColor: COLORS.surface,

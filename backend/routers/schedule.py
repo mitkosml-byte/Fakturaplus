@@ -90,6 +90,17 @@ async def create_shift(payload: WorkShiftCreate, current_user: User = Depends(ge
     return shift
 
 
+def payable_totals(occurrences: List[dict]) -> tuple:
+    """(hours, pay, leave days left out) - the one rule for what Work
+    Schedule pays, shared by the summary, Mark as Paid, Pay-run, Home's
+    signal and the chat digest. Before, every one of them also paid the
+    planned hours on days the person was on leave."""
+    paid = [o for o in occurrences if o.get("payable", True)]
+    hours = round(sum(o["hours"] for o in paid), 2)
+    pay = round(sum(o["hours"] * (o["hourly_rate"] or 0) for o in paid), 2)
+    return hours, pay, len(occurrences) - len(paid)
+
+
 async def _resolve_occurrences(shifts: List[dict], company_id: Optional[str], start: str, end: str) -> List[dict]:
     user_ids = {s["user_id"] for s in shifts}
     users = await server.db.users.find(
@@ -132,6 +143,10 @@ async def _resolve_occurrences(shifts: List[dict], company_id: Optional[str], st
                 "repeat_pattern": shift.get("repeat_pattern", "none"),
                 "repeat_until": shift.get("repeat_until"),
                 "leave_conflict": conflict is not None,
+                # A day of the person's own leave is not paid by the
+                # schedule - unless a manager recorded what was actually
+                # worked that day, which is authoritative.
+                "payable": conflict is None or adjustment is not None,
                 "adjusted": adjustment is not None,
                 "adjustment_reason": adjustment.get("reason") if adjustment else None,
                 "adjusted_by_name": adjustment.get("adjusted_by_name") if adjustment else None,
@@ -231,7 +246,7 @@ async def get_schedule_summary(
     monthly salary, a different computation entirely)."""
     company_id, scope = await get_company_scope(current_user)
     if not company_id:
-        return {"total_hours": 0, "estimated_pay": 0, "shift_count": 0}
+        return {"total_hours": 0, "estimated_pay": 0, "shift_count": 0, "leave_days_excluded": 0}
 
     target_user_id = current_user.user_id
     if _can_manage_schedule(current_user) and user_id:
@@ -244,9 +259,11 @@ async def get_schedule_summary(
     ).to_list(5000)
     occurrences = await _resolve_occurrences(shifts, company_id, start, end)
 
-    total_hours = round(sum(o["hours"] for o in occurrences), 2)
-    estimated_pay = round(sum(o["hours"] * (o["hourly_rate"] or 0) for o in occurrences), 2)
-    return {"total_hours": total_hours, "estimated_pay": estimated_pay, "shift_count": len(occurrences)}
+    total_hours, estimated_pay, leave_days = payable_totals(occurrences)
+    return {
+        "total_hours": total_hours, "estimated_pay": estimated_pay,
+        "shift_count": len(occurrences) - leave_days, "leave_days_excluded": leave_days,
+    }
 
 
 @router.get("/schedule/leave")
@@ -396,8 +413,7 @@ async def create_schedule_payment(payload: SchedulePaymentCreate, current_user: 
         {"company_id": company_id, "user_id": payload.user_id}, {"_id": 0}
     ).to_list(5000)
     occurrences = await _resolve_occurrences(shifts, company_id, payload.period_start, payload.period_end)
-    total_hours = round(sum(o["hours"] for o in occurrences), 2)
-    amount = round(sum(o["hours"] * (o["hourly_rate"] or 0) for o in occurrences), 2)
+    total_hours, amount, _ = payable_totals(occurrences)
     if total_hours <= 0 or amount <= 0:
         raise HTTPException(status_code=400, detail="Няма отработени часове с положителна сума за този период")
 
