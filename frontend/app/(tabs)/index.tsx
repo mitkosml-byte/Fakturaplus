@@ -24,11 +24,12 @@ import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
-import { PeriodNavigator } from '../../src/components/PeriodNavigator';
+import { PeriodNavigator, PeriodSoFarNote } from '../../src/components/PeriodNavigator';
+import { useSharedPeriod } from '../../src/utils/sharedPeriod';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
 import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard, LockedValue } from '../../src/components';
 import Animated from 'react-native-reanimated';
-import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
+import { PeriodState, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 import { PersonalExpenseModal } from '../../src/components/home/PersonalExpenseModal';
 import { RevenueModal } from '../../src/components/home/RevenueModal';
@@ -50,7 +51,9 @@ export default function HomeScreen() {
   // behavior, but lets the user step back to any past day/week/month/year
   // or a custom range instead of the cards just going silent at zero on the
   // 1st of a new month with no way back to see where last month's data went.
-  const [periodState, setPeriodState] = useState<PeriodState>(DEFAULT_PERIOD_STATE);
+  // The period every report screen shares (src/utils/sharedPeriod) - the
+  // one picked here is the one Statistics, suppliers and items open on.
+  const [periodState, setPeriodState] = useSharedPeriod();
 
   // #17: the ‹ › arrows get a directional slide instead of the numbers
   // just jumping - new data enters from the direction of travel. Only the
@@ -78,12 +81,6 @@ export default function HomeScreen() {
     return bounds.end > now ? now : bounds.end;
   }, [periodState]);
 
-  // Open (non-closed) days within the selected period - drives the average
-  // daily turnover card below instead of the raw day count, so a rest day
-  // (see Профил > Почивни дни) doesn't drag the average down. Defaults to
-  // the day-of-month itself until the real count loads, matching the
-  // previous behavior for that first render.
-  const [openDaysThisMonth, setOpenDaysThisMonth] = useState<number>(new Date().getDate());
   const [refreshing, setRefreshing] = useState(false);
   const [revenueModalVisible, setRevenueModalVisible] = useState(false);
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
@@ -179,14 +176,6 @@ export default function HomeScreen() {
           }
         } catch (error) {
           console.error('Error loading data:', error);
-        }
-      })(),
-      (async () => {
-        try {
-          const openDays = await api.getOpenDaysCount(start_date, end_date);
-          setOpenDaysThisMonth(Math.max(1, openDays.open_days));
-        } catch (error) {
-          console.error('Error loading open-days count:', error);
         }
       })(),
     ]);
@@ -615,7 +604,11 @@ export default function HomeScreen() {
   };
 
   const today = format(new Date(), "d MMMM yyyy 'г.'" , { locale: bg });
-  const avgDailyTurnover = (summary?.total_income || 0) / openDaysThisMonth;
+  // Average per day with revenue entered (backend period pace): a day
+  // nobody entered, a closed day or a day still to come is not a day of the
+  // average. While the period runs, its expected end comes with it.
+  const pace = summary?.pace ?? null;
+  const avgDailyTurnover = pace?.avg_per_revenue_day ?? 0;
 
   // Home is hidden from the tab bar for a viewer without view_statistics
   // (see (tabs)/_layout.tsx's showHomeTab), but hiding a tab alone never
@@ -663,6 +656,7 @@ export default function HomeScreen() {
             <MorningBriefingCard refreshSignal={summary} />
 
             <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
+            <PeriodSoFarNote summary={summary} />
 
             <Animated.View style={periodReveal.style}>
             {/* Summary Cards - skeletons stand in until the first real
@@ -827,10 +821,7 @@ export default function HomeScreen() {
             broken down by period, for deeper business analysis */}
         <TouchableOpacity
           style={styles.avgTurnoverCard}
-          onPress={() => router.push({
-            pathname: '/(tabs)/stats',
-            params: { period: periodState.mode === 'week' || periodState.mode === 'year' ? periodState.mode : 'month' },
-          })}
+          onPress={() => router.push('/(tabs)/stats')}
           activeOpacity={0.8}
         >
           <View style={styles.avgTurnoverHeader}>
@@ -848,8 +839,13 @@ export default function HomeScreen() {
             />
           )}
           <Text style={styles.avgTurnoverSubtitle}>
-            {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysThisMonth))}
+            {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(pace?.revenue_days ?? 0))}
           </Text>
+          {pace?.is_current && pace.expected_income !== null && (
+            <Text style={styles.avgTurnoverSubtitle}>
+              {t('home.expectedPeriodEnd').replace('{amount}', `${pace.expected_income.toFixed(2)} €`)}
+            </Text>
+          )}
         </TouchableOpacity>
 
         {summary?.financial_visibility?.statistics === false && (

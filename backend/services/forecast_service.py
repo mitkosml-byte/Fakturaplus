@@ -5,7 +5,7 @@ from collections import defaultdict
 import calendar
 import statistics
 
-from services.business_calendar import business_day, now_local, today_local
+from services.business_calendar import Period, business_day, day_start_utc, days_in_month, now_local, today_local
 
 # Below this many months of history, a trend computed any way at all is
 # mostly noise dressed up as a number - with 2-3 points, a single unusual
@@ -41,6 +41,17 @@ SEASONAL_MIN_MARGIN = 0.05
 # share of its open days (days not marked closed) - a month logged for a
 # week says nothing about how the month went.
 REVENUE_MONTH_MIN_COVERAGE = 0.6
+# The month in progress joins the history as its expected end once this
+# many of its days have passed - earlier, a pace says too little.
+CURRENT_MONTH_MIN_DAYS = 7
+# ...and its revenue pace needs at least this many days entered.
+CURRENT_MONTH_MIN_ENTERED_DAYS = 3
+# Months are read from their entered days only for a company that enters
+# revenue day by day - entered on at least this share of its open days over
+# the last DAILY_LOGGING_LOOKBACK_DAYS. One that enters a week's or a
+# month's takings at once has no "missing days": its months count as entered.
+DAILY_LOGGING_MIN_COVERAGE = 0.5
+DAILY_LOGGING_LOOKBACK_DAYS = 90
 
 
 def _ym_add(year: int, month: int, delta: int) -> tuple:
@@ -119,6 +130,10 @@ def _drop_partial_first_month(monthly_totals: Dict[str, float], first_activity: 
     key = first_activity.strftime("%Y-%m")
     if key in monthly_totals and len(monthly_totals) > 1:
         del monthly_totals[key]
+
+
+def _ym_parts(key: str) -> tuple:
+    return int(key[:4]), int(key[5:7])
 
 
 def _month_key(year: int, month: int) -> str:
@@ -382,6 +397,168 @@ class ForecastService:
         member_ids = [m["user_id"] for m in members]
         return {"$or": [{"company_id": company_id}, {"user_id": {"$in": member_ids}, "company_id": None}]}
 
+    async def _closed_lookup(self, company_id: str) -> tuple:
+        """(closed weekdays, {date: closed}) - the company's calendar, as
+        server.get_closed_days_lookup reads it."""
+        company = await self.db.companies.find_one({"id": company_id}, {"_id": 0, "closed_weekdays": 1})
+        closed_weekdays = set((company or {}).get("closed_weekdays") or [])
+        exceptions = {
+            e["date"]: e["closed"] for e in await self.db.closed_date_exceptions.find(
+                {"company_id": company_id}, {"_id": 0, "date": 1, "closed": 1}
+            ).to_list(None)
+        }
+        return closed_weekdays, exceptions
+
+    @staticmethod
+    def _is_open(date_str: str, lookup: tuple) -> bool:
+        closed_weekdays, exceptions = lookup
+        if date_str in exceptions:
+            return not exceptions[date_str]
+        return datetime.strptime(date_str, "%Y-%m-%d").weekday() not in closed_weekdays
+
+    async def _revenue_by_day(self, scope: dict, period: Period, include_pocket_money: bool) -> Dict[str, float]:
+        """Revenue of each day entered in the period ("YYYY-MM-DD" -> EUR)."""
+        rows = await self.db.daily_revenue.find(
+            {**scope, "date": period.text_filter()}, {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1},
+        ).to_list(None)
+        by_day: Dict[str, float] = defaultdict(float)
+        for row in rows:
+            if isinstance(row.get("date"), str):
+                by_day[row["date"][:10]] += float(row.get("fiscal_revenue", 0)) + (
+                    float(row.get("pocket_money", 0)) if include_pocket_money else 0.0
+                )
+        return dict(by_day)
+
+    def _estimate_from_entered_days(self, period: Period, by_day: Dict[str, float], lookup: tuple, upto=None) -> Dict[str, Any]:
+        """A period's revenue read from the days that were entered: average of
+        the entered open days x all open days, plus what was entered on
+        closed days. A day nobody entered is unknown, never a zero day.
+        `upto` limits "entered" to days up to it (a month in progress)."""
+        open_days = [d.isoformat() for d in period.iter_days() if self._is_open(d.isoformat(), lookup)]
+        seen = {d: v for d, v in by_day.items() if period.contains(business_day(d)) and (upto is None or d <= upto)}
+        entered_open = [d for d in open_days if d in seen]
+        open_total = sum(seen[d] for d in entered_open)
+        closed_total = sum(v for d, v in seen.items() if d not in set(open_days))
+        estimate = None
+        if entered_open:
+            estimate = open_total / len(entered_open) * len(open_days) + closed_total
+        elif not open_days:
+            estimate = closed_total
+        return {
+            "so_far": round(sum(seen.values()), 2), "estimate": estimate,
+            "entered_days": len(seen), "open_days": len(open_days),
+            "coverage": (len(entered_open) / len(open_days)) if open_days else 1.0,
+        }
+
+    async def _logs_revenue_daily(self, company_id: str, scope: dict) -> bool:
+        """Whether the company enters revenue day by day: entered on at least
+        DAILY_LOGGING_MIN_COVERAGE of its open days in the last
+        DAILY_LOGGING_LOOKBACK_DAYS (counted from its first entry in them)."""
+        today = today_local()
+        window = Period(today - timedelta(days=DAILY_LOGGING_LOOKBACK_DAYS), today - timedelta(days=1))
+        by_day = await self._revenue_by_day(scope, window, True)
+        if not by_day:
+            return False
+        lookup = await self._closed_lookup(company_id)
+        first = business_day(min(by_day))
+        open_days = [d.isoformat() for d in Period(first, window.end).iter_days() if self._is_open(d.isoformat(), lookup)] if first else []
+        return bool(open_days) and sum(1 for d in open_days if d in by_day) / len(open_days) >= DAILY_LOGGING_MIN_COVERAGE
+
+    async def _revenue_month_estimates(
+        self, company_id: str, scope: dict, window_start: datetime, window_end: datetime, include_pocket_money: bool,
+        daily: bool,
+    ) -> Dict[str, float]:
+        """Every whole month in [window_start, window_end) with revenue.
+
+        For a company that enters revenue day by day (`daily`), a month is
+        read from its entered days (_estimate_from_entered_days) and is
+        known only when entered on at least REVENUE_MONTH_MIN_COVERAGE of
+        its open days - one with too few is left out as unknown rather than
+        counted as a weak month. For one that enters takings in lumps, a
+        month is what was entered in it."""
+        if window_end <= window_start:
+            return {}
+        window = Period(window_start.date(), (window_end - timedelta(days=1)).date())
+        by_day = await self._revenue_by_day(scope, window, include_pocket_money)
+        if not by_day:
+            return {}
+        if not daily:
+            totals: Dict[str, float] = defaultdict(float)
+            for day_str, amount in by_day.items():
+                totals[day_str[:7]] += amount
+            return dict(totals)
+        lookup = await self._closed_lookup(company_id)
+        estimates: Dict[str, float] = {}
+        for year, month in window.months():
+            reading = self._estimate_from_entered_days(Period.month(year, month), by_day, lookup)
+            if reading["entered_days"] and reading["estimate"] is not None and reading["coverage"] >= REVENUE_MONTH_MIN_COVERAGE:
+                estimates[_month_key(year, month)] = reading["estimate"]
+        return estimates
+
+    async def _current_month_revenue(
+        self, company_id: str, scope: dict, include_pocket_money: bool, daily: bool,
+    ) -> Dict[str, Any]:
+        """The month in progress: revenue so far (the same records and days as
+        /statistics/summary for it) and - for a company that enters revenue
+        day by day, once enough days are entered - its expected end, average
+        per entered open day x all open days."""
+        today = today_local()
+        month = Period.month_of(today)
+        so_far_period = Period(month.start, today)
+        by_day = await self._revenue_by_day(scope, so_far_period, include_pocket_money)
+        reading = self._estimate_from_entered_days(month, by_day, await self._closed_lookup(company_id), upto=today.isoformat())
+        expected = reading["estimate"] if daily and reading["entered_days"] >= CURRENT_MONTH_MIN_ENTERED_DAYS else None
+        return {
+            "month": _month_key(today.year, today.month), "so_far": reading["so_far"],
+            "expected": round(expected, 2) if expected is not None else None,
+            "days_entered": reading["entered_days"], "open_days": reading["open_days"],
+            "days_elapsed": today.day, "days_in_month": month.days,
+        }
+
+    async def _current_month_expenses(self, company_id: str, scope: dict, include_off_book_expenses: bool) -> Dict[str, Any]:
+        """The month in progress: expenses so far - the same as
+        /statistics/summary counts for it (invoices and off-book expenses to
+        date, plus the elapsed days' share of the month's payroll and
+        depreciation) - and the expected end: the invoices' and off-book
+        pace over the whole month plus the month's payroll and depreciation.
+        Payroll not entered yet for the month is taken from last month's."""
+        today = today_local()
+        month = Period.month_of(today)
+        elapsed, dim = today.day, month.days
+        invoices = await self.db.invoices.find(
+            {**scope, "date": Period(month.start, today).datetime_filter()}, {"_id": 0, "total_amount": 1},
+        ).to_list(None)
+        variable = sum(float(i.get("total_amount", 0)) for i in invoices)
+        if include_off_book_expenses:
+            expenses = await self.db.expenses.find(
+                {**scope, "date": Period(month.start, today).text_filter()}, {"_id": 0, "amount": 1},
+            ).to_list(None)
+            variable += sum(float(e.get("amount", 0)) for e in expenses)
+
+        async def _payroll(year: int, mon: int) -> Optional[float]:
+            entries = await self.db.payroll_entries.find(
+                {"company_id": company_id, "period_year": year, "period_month": mon},
+                {"_id": 0, "total_employer_cost": 1, "counted_in_expenses": 1},
+            ).to_list(None)
+            counted = [float(e.get("total_employer_cost", 0)) for e in entries if e.get("counted_in_expenses") is not False]
+            return sum(counted) if counted else None
+
+        payroll = await _payroll(today.year, today.month)
+        payroll_estimated = payroll is None
+        if payroll is None:
+            previous = Period.month_of(month.start - timedelta(days=1)).start
+            payroll = await _payroll(previous.year, previous.month)
+        assets = await self.db.assets.find({"company_id": company_id}, {"_id": 0}).to_list(None)
+        depreciation = sum(_asset_depreciation_for_month(a, today.year, today.month) for a in assets)
+        entered_fixed = (0.0 if payroll_estimated else (payroll or 0.0)) + depreciation
+        return {
+            "month": _month_key(today.year, today.month),
+            "so_far": round(variable + entered_fixed * elapsed / dim, 2),
+            "expected": round(variable * dim / elapsed + (payroll or 0.0) + depreciation, 2),
+            "days_elapsed": elapsed, "days_in_month": dim,
+            "payroll_from_last_month": payroll_estimated and payroll is not None,
+        }
+
     async def _expense_monthly_totals(
         self, company_id: str, scope: dict, window_start: datetime, window_end: datetime,
         include_off_book_expenses: bool,
@@ -573,8 +750,14 @@ class ForecastService:
 
         sorted_months = sorted(monthly_totals.keys())
         historical = [{"month": mk, "amount": monthly_totals[mk]} for mk in sorted_months]
+        # The month in progress is reported (so far, and its end at the pace
+        # so far) but not fed into the history: invoices come in lumps, and a
+        # mid-month pace of them says too little to move a forecast.
+        current = await self._current_month_expenses(company_id, scope, include_off_book_expenses)
         year_back = await self._year_back(company_id, "expense", include_off_book_expenses)
-        return _build_forecast(historical, months_ahead, year_back)
+        result = _build_forecast(historical, months_ahead, year_back)
+        result["current_month"] = current
+        return result
 
     async def get_revenue_forecast(
         self,
@@ -600,13 +783,28 @@ class ForecastService:
         without view_pocket_money, matching get_summary's own redaction."""
         window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
         scope = await self._company_scope(company_id)
-        monthly_totals, _ = await self._revenue_monthly_totals(scope, window_start, window_end, include_pocket_money)
+        # Each month read from the days it was entered on: a month with a few
+        # days missing counts at its own daily average, one entered on too
+        # few days is unknown - never a weak month.
+        daily = await self._logs_revenue_daily(company_id, scope)
+        monthly_totals = await self._revenue_month_estimates(
+            company_id, scope, window_start, window_end, include_pocket_money, daily
+        )
 
         _drop_partial_first_month(
             monthly_totals, await self._first_record_date(self.db.daily_revenue, scope)
         )
 
         sorted_months = sorted(monthly_totals.keys())
-        historical = [{"month": mk, "amount": monthly_totals[mk]} for mk in sorted_months]
+        historical = [{"month": mk, "amount": round(monthly_totals[mk], 2)} for mk in sorted_months]
+        # The month in progress joins the history as its expected end.
+        current = await self._current_month_revenue(company_id, scope, include_pocket_money, daily)
+        if (
+            current["expected"] is not None and current["days_elapsed"] >= CURRENT_MONTH_MIN_DAYS
+            and window_end >= _month_start(*_ym_parts(current["month"]))
+        ):
+            historical.append({"month": current["month"], "amount": current["expected"], "estimated": True})
         year_back = await self._year_back(company_id, "revenue", include_pocket_money)
-        return _build_forecast(historical, months_ahead, year_back)
+        result = _build_forecast(historical, months_ahead, year_back)
+        result["current_month"] = current
+        return result

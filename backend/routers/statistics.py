@@ -34,6 +34,7 @@ _eik_check_digit,
     _team_channel_id,
 )
 import server
+from services.business_calendar import GROUPS, bucket_label, bucket_of, buckets
 
 router = APIRouter(prefix="/api")
 
@@ -56,9 +57,16 @@ async def get_summary(
         raise HTTPException(status_code=400, detail="Невалиден период")
 
     company_id, scope = await get_company_scope(current_user)
+    # A period still running counts through today - "so far": its revenue
+    # and invoices up to today, and the share of the month's payroll and
+    # depreciation for the days gone by, so a month's figures on the 15th
+    # are the first half's, not half a month of revenue against a whole
+    # month of salaries.
+    today = today_local()
+    counted = (period.through(today) if period.contains(today) else None) or period
     # Every total of the period, read the one way the budget, the chat, the
     # ROI card and the forecast read it too (server.period_totals).
-    totals = await period_totals(company_id, scope, current_user.user_id, period)
+    totals = await period_totals(company_id, scope, current_user.user_id, counted)
 
     # Outstanding payables (what's currently owed to suppliers) - always
     # company-wide, never scoped to the period filter above: an invoice from
@@ -68,7 +76,6 @@ async def get_summary(
     unpaid_invoices = await server.db.invoices.find(
         unpaid_query, {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1}
     ).to_list(ALL_ROWS)
-    today = today_local()
 
     def _is_overdue(inv):
         # Overdue once the due day has passed, on the business's calendar.
@@ -123,6 +130,10 @@ async def get_summary(
     # спрямо ефективните (не суровите) приход/разход по-горе.
     profit = round(total_income - total_expense, 2) if visibility["profit"] else None
 
+    # Average per day with revenue entered, and - while the period runs -
+    # where it is heading (server.period_pace).
+    pace = await period_pace(company_id, period, total_income, totals["revenue_days"])
+
     # "statistics" is the overarching gate - without it, a viewer (e.g. a
     # newly invited staff member with no permissions at all) gets back
     # None for every company-wide aggregate, not just the four individually
@@ -160,94 +171,126 @@ async def get_summary(
         "financial_visibility": visibility,
         # The exact days these totals cover, and on how many of them
         # revenue was entered - what "the period" means, stated, not implied.
-        "period": {"start_date": period.start_text, "end_date": period.end_text, "days": period.days},
+        "period": {
+            "start_date": period.start_text, "end_date": period.end_text, "days": period.days,
+            "through_date": counted.end_text,
+        },
         "revenue_day_count": len(totals["revenue_days"]),
+        "pace": _redact(pace),
     }
+
+# A period longer than this is charted by month, not by day.
+CHART_DAY_BUCKETS_MAX = 62
+
 
 @router.get("/statistics/chart-data")
 async def get_chart_data(
-    period: str = "week",  # week, month, year
+    period: str = "week",  # the current calendar week, month or year when no dates are given
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
+    """Revenue and expenses of a calendar period, by day (by month for a
+    period over two months), only for days that have happened. The same
+    period, records and formula as /statistics/summary: the buckets add up
+    to its totals - expenses include each day's share of the month's
+    payroll and depreciation."""
     # Only the Stats tab calls this, and that tab is already hidden from a
     # viewer without view_statistics (frontend's showStatsTab) - this gate
-    # is the backend-enforced version of the same rule, same precedent as
-    # get_supplier_statistics below, so a direct call can't bypass the tab
-    # being hidden.
+    # is the backend-enforced version of the same rule.
     require_permission(current_user, "view_statistics")
-    # Business days up to today on the business's own calendar, every
-    # record in them (no first-1000 slice).
     today = today_local()
-    lookback = {"week": 7, "month": 30}.get(period, 365)
-    window = Period(today - timedelta(days=lookback), today)
+    if start_date or end_date:
+        try:
+            chosen = Period.parse(start_date, end_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Невалиден период")
+    elif period == "month":
+        chosen = Period.month_of(today)
+    elif period == "year":
+        chosen = Period.year(today.year)
+    else:
+        chosen = Period.week_of(today)
+    shown = chosen.through(today)
+    if shown is None or shown.days > PACE_MAX_DAYS:
+        return []
 
     company_id, scope = await get_company_scope(current_user)
     closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+    # Same cascade as get_summary: a hidden field's contribution is zeroed
+    # out of the bars, not just omitted from a separate total.
+    visibility = get_financial_visibility(current_user)
 
-    # Get data
     invoices = await server.db.invoices.find(
-        {**scope, "date": window.datetime_filter()}, {"_id": 0, "date": 1, "total_amount": 1, "vat_amount": 1}
+        {**scope, "date": shown.datetime_filter()}, {"_id": 0, "date": 1, "total_amount": 1, "vat_amount": 1}
     ).to_list(ALL_ROWS)
     revenues = await server.db.daily_revenue.find(
-        {**scope, "date": window.text_filter()},
+        {**scope, "date": shown.text_filter()},
         {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1},
     ).to_list(ALL_ROWS)
     expenses = await server.db.expenses.find(
-        {**scope, "date": window.text_filter()}, {"_id": 0, "date": 1, "amount": 1}
-    ).to_list(ALL_ROWS)
+        {**scope, "date": shown.text_filter()}, {"_id": 0, "date": 1, "amount": 1}
+    ).to_list(ALL_ROWS) if visibility["off_book_expenses"] else []
+    fixed_by_day = await monthly_costs_by_day(company_id, current_user.user_id, shown)
 
-    # Same cascade as get_summary: a hidden field's contribution is zeroed
-    # out of the daily bars, not just omitted from a separate total, so the
-    # chart itself stays a coherent picture for this viewer.
-    visibility = get_financial_visibility(current_user)
-
-    # Group by date
     from collections import defaultdict
-
-    daily_data: Dict[str, Any] = defaultdict(lambda: {"income": 0, "expense": 0, "vat": 0})
-
+    days: Dict[str, Dict[str, Any]] = {
+        day.isoformat(): {"income": 0.0, "expense": 0.0, "fixed": fixed_by_day.get(day.isoformat(), 0.0), "vat": 0.0,
+                          "has_revenue": False}
+        for day in shown.iter_days()
+    }
     for inv in invoices:
-        inv_day = business_day(inv["date"])
-        if inv_day is None:
-            continue
-        date_str = inv_day.isoformat()
-        daily_data[date_str]["expense"] += inv.get("total_amount", 0)
-        daily_data[date_str]["vat"] -= inv.get("vat_amount", 0)  # ДДС кредит
-
+        inv_day = business_day(inv.get("date"))
+        if inv_day and inv_day.isoformat() in days:
+            days[inv_day.isoformat()]["expense"] += inv.get("total_amount", 0)
+            days[inv_day.isoformat()]["vat"] -= inv.get("vat_amount", 0)  # ДДС кредит
     for rev in revenues:
-        date_str = rev["date"][:10] if isinstance(rev["date"], str) else rev["date"].strftime("%Y-%m-%d")
+        date_str = rev["date"][:10] if isinstance(rev.get("date"), str) else None
+        if date_str not in days:
+            continue
         pocket_money = rev.get("pocket_money", 0) if visibility["pocket_money"] else 0
-        daily_data[date_str]["income"] += rev.get("fiscal_revenue", 0) + pocket_money
+        days[date_str]["income"] += rev.get("fiscal_revenue", 0) + pocket_money
+        days[date_str]["has_revenue"] = True
         rate = rev.get("vat_rate_percent", 20.0)
-        if rate > 0:
-            daily_data[date_str]["vat"] += rev.get("fiscal_revenue", 0) * rate / (100 + rate)  # ДДС от продажби
+        if rate and rate > 0:
+            days[date_str]["vat"] += rev.get("fiscal_revenue", 0) * rate / (100 + rate)  # ДДС от продажби
+    for exp in expenses:
+        date_str = exp["date"][:10] if isinstance(exp.get("date"), str) else None
+        if date_str in days:
+            days[date_str]["expense"] += exp.get("amount", 0)
 
-    if visibility["off_book_expenses"]:
-        for exp in expenses:
-            date_str = exp["date"][:10] if isinstance(exp["date"], str) else exp["date"].strftime("%Y-%m-%d")
-            daily_data[date_str]["expense"] += exp.get("amount", 0)
+    def _point(key: str, label: str, values: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
+        return {
+            "date": key, "label": label,
+            "income": round(values["income"], 2),
+            "expense": round(values["expense"] + values["fixed"], 2),
+            "fixed_costs": round(values["fixed"], 2),
+            "vat": round(values["vat"], 2),
+            **extra,
+        }
 
-    # Zero-fill every calendar day in the window - a day with no invoice/
-    # revenue/expense record at all (a genuine closed day, but also just a
-    # slow day with nothing entered) previously wouldn't appear in the chart
-    # at all, silently shortening it. Touching daily_data[date_str] here
-    # materializes it as a real 0/0/0 entry via the defaultdict.
-    for day in window.iter_days():
-        daily_data[day.isoformat()]
+    if shown.days <= CHART_DAY_BUCKETS_MAX:
+        return [
+            _point(date_str, f"{date_str[8:10]}.{date_str[5:7]}", values,
+                   is_closed=is_date_closed(date_str, closed_weekdays, exceptions_map),
+                   has_revenue=values["has_revenue"], bucket="day")
+            for date_str, values in days.items()
+        ]
 
-    # Convert to list sorted by date
-    chart_data = []
-    for date_str in sorted(daily_data.keys()):
-        chart_data.append({
-            "date": date_str,
-            "label": date_str[5:],  # MM-DD
-            "income": round(daily_data[date_str]["income"], 2),
-            "expense": round(daily_data[date_str]["expense"], 2),
-            "vat": round(daily_data[date_str]["vat"], 2),
-            "is_closed": is_date_closed(date_str, closed_weekdays, exceptions_map),
-        })
-
-    return chart_data
+    months: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {"income": 0.0, "expense": 0.0, "fixed": 0.0, "vat": 0.0, "revenue_days": 0, "open_days": 0}
+    )
+    for date_str, values in days.items():
+        month = months[date_str[:7]]
+        for field in ("income", "expense", "fixed", "vat"):
+            month[field] += values[field]
+        month["revenue_days"] += 1 if values["has_revenue"] else 0
+        month["open_days"] += 0 if is_date_closed(date_str, closed_weekdays, exceptions_map) else 1
+    return [
+        _point(key, f"{key[5:7]}.{key[:4]}", values, is_closed=False, has_revenue=values["revenue_days"] > 0,
+               revenue_days=values["revenue_days"], open_days=values["open_days"], bucket="month")
+        for key, values in sorted(months.items())
+    ]
 
 # Minimum distinct weeks of data required before calling any per-weekday
 # pattern "established" rather than noise - a single unusually quiet
@@ -516,11 +559,14 @@ async def get_supplier_statistics(
 
     # Build query for current period
     _, query = await get_company_scope(current_user)
+    scope = dict(query)
+    period: Optional[Period] = None
     if start_date or end_date:
         try:
-            query["date"] = Period.parse(start_date, end_date).datetime_filter()
+            period = Period.parse(start_date, end_date)
         except ValueError:
             raise HTTPException(status_code=400, detail="Невалиден период")
+        query["date"] = period.datetime_filter()
 
     # Get all invoices for the period
     invoices = await server.db.invoices.find(query, {
@@ -577,10 +623,12 @@ async def get_supplier_statistics(
         if first_delivery and first_delivery.tzinfo is None:
             first_delivery = first_delivery.replace(tzinfo=timezone.utc)
         
-        # Determine status
+        # Determine status. With a chosen period every supplier listed here
+        # was bought from in it; without one, "active" is a delivery in the
+        # last 30 days.
         last_day = business_day(last_delivery)
         days_inactive = (today - last_day).days if last_day else 999
-        is_active = last_day is not None and days_inactive <= inactivity_days
+        is_active = True if period is not None else (last_day is not None and days_inactive <= inactivity_days)
         
         # Calculate average
         avg = data["total_amount"] / data["invoice_count"] if data["invoice_count"] > 0 else 0
@@ -622,8 +670,30 @@ async def get_supplier_statistics(
     # TOP by average invoice
     top_by_avg = sorted(suppliers_list, key=lambda x: x["avg_invoice"], reverse=True)[:10]
     
-    # Inactive suppliers
-    inactive_suppliers = [s for s in suppliers_list if not s["is_active"]]
+    # Inactive suppliers: without a period, those with no delivery in the
+    # last 30 days; with one, those bought from before it but not in it -
+    # how long since their last delivery, counted to the period's end.
+    if period is None:
+        inactive_suppliers = [s for s in suppliers_list if not s["is_active"]]
+    else:
+        reference = min(period.end, today)
+        earlier = await server.db.invoices.aggregate([
+            {"$match": {**scope, "date": {"$lt": day_start_utc(period.start)}}},
+            {"$group": {"_id": "$supplier", "last": {"$max": "$date"}, "first": {"$min": "$date"}}},
+        ]).to_list(ALL_ROWS)
+        bought_in_period = set(supplier_data.keys())
+        inactive_suppliers = []
+        for row in earlier:
+            name = row["_id"] or "Неизвестен"
+            if name in bought_in_period:
+                continue
+            last, first = business_day(row.get("last")), business_day(row.get("first"))
+            inactive_suppliers.append({
+                "supplier": name, "total_amount": 0, "total_vat": 0, "total_net": 0, "invoice_count": 0,
+                "avg_invoice": 0, "first_delivery": first.isoformat() if first else None,
+                "last_delivery": last.isoformat() if last else None, "is_active": False,
+                "days_inactive": (reference - last).days if last else 999, "std_dev": 0, "dependency_percent": 0,
+            })
     inactive_suppliers.sort(key=lambda x: x["days_inactive"], reverse=True)
     
     # High dependency alert (>30%)
@@ -640,9 +710,12 @@ async def get_supplier_statistics(
     
     return {
         "period": {
-            "start_date": start_date,
-            "end_date": end_date
+            "start_date": period.start_text if period else None,
+            "end_date": period.end_text if period else None,
         },
+        # What "active" means here: bought from in the chosen period, or -
+        # with no period - a delivery in the last 30 days.
+        "activity_basis": "period" if period is not None else "last_30_days",
         "executive_summary": {
             "top_3_concentration": round(top_3_concentration, 1),
             "top_5_concentration": round(top_5_concentration, 1),
@@ -668,132 +741,145 @@ async def get_supplier_statistics(
         "all_suppliers": suppliers_list
     }
 
+# A detail series longer than this is drawn one granularity coarser.
+SERIES_MAX_BUCKETS = 400
+
+
+def _invoice_series(invoices: List[dict], span: Optional[Period], group_by: str) -> tuple:
+    """(granularity used, buckets) - an invoice series over the span by day,
+    week, month or year, every bucket present (zero when nothing was bought)
+    and flagged partial when it reaches past the span (a week cut by the
+    period's start, the month still running). Growth compares a complete
+    bucket with the complete one before it, never a half month with a whole
+    one."""
+    group = group_by if group_by in GROUPS else "month"
+    if span is None:
+        return group, []
+    while len(buckets(span, group)) > SERIES_MAX_BUCKETS and group != "year":
+        group = GROUPS[GROUPS.index(group) + 1]
+    amounts: Dict[str, list] = {}
+    for inv in invoices:
+        inv_day = business_day(inv.get("date"))
+        if inv_day is not None and span.contains(inv_day):
+            key = bucket_of(inv_day, group).start_text
+            entry = amounts.setdefault(key, [0.0, 0])
+            entry[0] += inv.get("total_amount", 0)
+            entry[1] += 1
+    series: List[Dict[str, Any]] = []
+    previous: Optional[Dict[str, Any]] = None
+    for bucket in buckets(span, group):
+        amount, count = amounts.get(bucket.start_text, [0.0, 0])
+        partial = bucket.start < span.start or bucket.end > span.end
+        growth = None
+        if previous is not None and not partial and not previous["is_partial"] and previous["amount"] > 0:
+            growth = round((amount - previous["amount"]) / previous["amount"] * 100, 1)
+        point = {
+            "key": bucket.start_text, "label": bucket_label(bucket, group),
+            "start": bucket.start_text, "end": bucket.end_text,
+            "amount": round(amount, 2), "count": count, "is_partial": partial, "growth_percent": growth,
+        }
+        series.append(point)
+        previous = point
+    return group, series
+
+
 @router.get("/statistics/supplier/{supplier_name}/detailed")
 async def get_detailed_supplier_stats(
     supplier_name: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    group_by: str = "month",  # day | week | month | year
     current_user: User = Depends(get_current_user)
 ):
-    """Get detailed statistics for a specific supplier with trends"""
+    """One supplier for a period (all of its history when no dates are
+    given): totals, a series by day, week, month or year with every period
+    present, anomalies and the latest invoices - read on the same business
+    days as every other module."""
     require_permission(current_user, "view_statistics")
-    from collections import defaultdict
     from urllib.parse import unquote
 
     supplier_name = unquote(supplier_name)
+    try:
+        period = Period.parse(start_date, end_date) if (start_date or end_date) else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Невалиден период")
 
-    # Get all invoices for this supplier (no date filter for full history)
-    _, query = await get_company_scope(current_user)
-    query["supplier"] = {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}
-
+    _, scope = await get_company_scope(current_user)
+    supplier_query = {**scope, "supplier": {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}}
+    query = {**supplier_query, **({"date": period.datetime_filter()} if period else {})}
     invoices = await server.db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", 1).to_list(ALL_ROWS)
-    
-    if not invoices:
-        return {
-            "supplier": supplier_name,
-            "found": False,
-            "invoice_count": 0
-        }
-    
     today = today_local()
-    
-    # Basic stats
-    total_amount = sum(inv.get("total_amount", 0) for inv in invoices)
-    total_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
-    total_net = sum(inv.get("amount_without_vat", 0) for inv in invoices)
-    avg_invoice = total_amount / len(invoices) if invoices else 0
-    
-    # Extract dates
-    dates = []
-    amounts = []
-    for inv in invoices:
-        date_val = inv.get("date")
-        if isinstance(date_val, datetime):
-            dates.append(date_val)
-            amounts.append(inv.get("total_amount", 0))
-    
-    first_delivery = min(dates) if dates else None
-    last_delivery = max(dates) if dates else None
-    
-    # Days since the last delivery, counted in business days.
-    last_day = business_day(last_delivery)
-    days_inactive = (today - last_day).days if last_day else 999
-    
+
+    # The last delivery ever, whatever the period - what "active" is about.
+    latest = await server.db.invoices.find(supplier_query, {"_id": 0, "date": 1}).sort("date", -1).limit(1).to_list(1)
+    last_ever = business_day(latest[0].get("date")) if latest else None
+    if not invoices and last_ever is None:
+        return {"supplier": supplier_name, "found": False, "invoice_count": 0}
+
+    days = [business_day(inv.get("date")) for inv in invoices]
+    known_days = [d for d in days if d is not None]
+    first_delivery = min(known_days) if known_days else None
+    last_delivery = max(known_days) if known_days else None
+    days_inactive = (today - last_ever).days if last_ever else 999
     is_active = days_inactive <= 30
-    
-    # Monthly breakdown
-    monthly_data: Dict[str, Any] = defaultdict(lambda: {"amount": 0, "count": 0})
-    for inv in invoices:
-        date_val = inv.get("date")
-        if isinstance(date_val, datetime):
-            month_key = date_val.strftime("%Y-%m")
-            monthly_data[month_key]["amount"] += inv.get("total_amount", 0)
-            monthly_data[month_key]["count"] += 1
-    
-    # Sort monthly data
-    sorted_months = sorted(monthly_data.keys())
-    monthly_trend = []
-    prev_amount = 0
-    for month in sorted_months[-12:]:  # Last 12 months
-        data = monthly_data[month]
-        growth = ((data["amount"] - prev_amount) / prev_amount * 100) if prev_amount > 0 else 0
-        monthly_trend.append({
-            "month": month,
-            "amount": round(data["amount"], 2),
-            "count": data["count"],
-            "growth_percent": round(growth, 1)
-        })
-        prev_amount = data["amount"]
-    
-    # Calculate anomalies
+
+    total_amount = sum(inv.get("total_amount", 0) for inv in invoices)
+    span_start = period.start if period else first_delivery
+    span_end = min(period.end, today) if period else today
+    span = Period(span_start, span_end) if span_start and span_start <= span_end else None
+    group, series = _invoice_series(invoices, span, group_by)
+    _, months = _invoice_series(invoices, span, "month")
+
+    # Unusually large invoices - more than two standard deviations above the mean.
+    amounts = [inv.get("total_amount", 0) for inv in invoices]
+    anomalies = []
     if len(amounts) >= 3:
         mean_amount = sum(amounts) / len(amounts)
-        variance = sum((x - mean_amount) ** 2 for x in amounts) / len(amounts)
-        std_dev = variance ** 0.5
+        std_dev = (sum((x - mean_amount) ** 2 for x in amounts) / len(amounts)) ** 0.5
         threshold = mean_amount + (2 * std_dev)
-        
-        anomalies = []
-        for inv in invoices:
+        for inv, inv_day in zip(invoices, days):
             if inv.get("total_amount", 0) > threshold:
-                date_val = inv.get("date")
-                date_str = date_val.strftime("%Y-%m-%d") if isinstance(date_val, datetime) else str(date_val)[:10]
                 anomalies.append({
-                    "date": date_str,
+                    "date": inv_day.isoformat() if inv_day else None,
                     "amount": inv.get("total_amount", 0),
                     "invoice_number": inv.get("invoice_number"),
-                    "deviation_percent": round((inv.get("total_amount", 0) - mean_amount) / mean_amount * 100, 1)
+                    "deviation_percent": round((inv.get("total_amount", 0) - mean_amount) / mean_amount * 100, 1),
                 })
-    else:
-        anomalies = []
-    
-    # Recent invoices
-    recent_invoices = []
-    for inv in invoices[-10:][::-1]:
-        date_val = inv.get("date")
-        date_str = date_val.strftime("%Y-%m-%d") if isinstance(date_val, datetime) else str(date_val)[:10]
-        recent_invoices.append({
-            "id": inv.get("id"),
-            "invoice_number": inv.get("invoice_number"),
-            "date": date_str,
-            "total_amount": inv.get("total_amount", 0),
-            "vat_amount": inv.get("vat_amount", 0)
-        })
-    
+
+    recent_invoices = [
+        {
+            "id": inv.get("id"), "invoice_number": inv.get("invoice_number"),
+            "date": inv_day.isoformat() if inv_day else None,
+            "total_amount": inv.get("total_amount", 0), "vat_amount": inv.get("vat_amount", 0),
+        }
+        for inv, inv_day in list(zip(invoices, days))[-10:][::-1]
+    ]
+
     return {
         "supplier": supplier_name,
         "found": True,
+        "period": {"start_date": span.start_text, "end_date": span.end_text} if span else None,
         "overview": {
             "total_amount": round(total_amount, 2),
-            "total_vat": round(total_vat, 2),
-            "total_net": round(total_net, 2),
+            "total_vat": round(sum(inv.get("vat_amount", 0) for inv in invoices), 2),
+            "total_net": round(sum(inv.get("amount_without_vat", 0) for inv in invoices), 2),
             "invoice_count": len(invoices),
-            "avg_invoice": round(avg_invoice, 2),
-            "first_delivery": first_delivery.strftime("%Y-%m-%d") if first_delivery else None,
-            "last_delivery": last_delivery.strftime("%Y-%m-%d") if last_delivery else None,
+            "avg_invoice": round(total_amount / len(invoices), 2) if invoices else 0,
+            "first_delivery": first_delivery.isoformat() if first_delivery else None,
+            "last_delivery": (last_ever.isoformat() if last_ever else None),
             "is_active": is_active,
-            "days_inactive": days_inactive if not is_active else 0
+            "days_inactive": days_inactive if not is_active else 0,
         },
-        "monthly_trend": monthly_trend,
+        "group_by": group,
+        "series": series,
+        # The last twelve months of the same series, kept for older clients.
+        "monthly_trend": [
+            {"month": point["key"][:7], "amount": point["amount"], "count": point["count"],
+             "growth_percent": point["growth_percent"] or 0, "is_partial": point["is_partial"]}
+            for point in months[-12:]
+        ],
         "anomalies": anomalies,
-        "recent_invoices": recent_invoices
+        "recent_invoices": recent_invoices,
     }
 
 @router.get("/statistics/suppliers/compare")

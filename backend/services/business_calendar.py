@@ -197,3 +197,39 @@ class Period:
         if last < self.start:
             return None
         return Period(self.start, min(self.end, last))
+
+
+# Report granularities, finest first.
+GROUPS = ("day", "week", "month", "year")
+
+
+def bucket_of(day: date, group_by: str) -> Period:
+    """The whole calendar day, week (Monday to Sunday), month or year that
+    holds `day`."""
+    if group_by == "day":
+        return Period.day(day)
+    if group_by == "week":
+        return Period.week_of(day)
+    if group_by == "year":
+        return Period.year(day.year)
+    return Period.month_of(day)
+
+
+def buckets(span: Period, group_by: str) -> list:
+    """The calendar buckets covering the span, in order - whole units, so
+    the first and last may reach beyond it (see bucket_label/partial)."""
+    out = []
+    day = span.start
+    while day <= span.end:
+        bucket = bucket_of(day, group_by)
+        out.append(bucket)
+        day = bucket.end + timedelta(days=1)
+    return out
+
+
+def bucket_label(bucket: Period, group_by: str) -> str:
+    if group_by == "year":
+        return str(bucket.start.year)
+    if group_by == "month":
+        return f"{bucket.start.month:02d}.{bucket.start.year}"
+    return f"{bucket.start.day:02d}.{bucket.start.month:02d}"

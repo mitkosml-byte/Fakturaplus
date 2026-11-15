@@ -78,6 +78,21 @@ export function getPeriodBounds(state: PeriodState, now: Date = new Date()): Per
   }
 }
 
+// The previous period to compare a period with, like with like: for a
+// period still running (it contains today) only its first days are known,
+// so it is compared with the same number of days at the start of the
+// previous period - 1-15 November against 1-15 October, not against all of
+// October. A finished period compares with the whole previous one.
+export function getComparablePrevious(bounds: PeriodBounds, now: Date = new Date()): { prevStart: Date; prevEnd: Date } {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (bounds.start <= today && today <= bounds.end) {
+    const elapsed = differenceInCalendarDays(today, bounds.start);
+    const sameDays = addDays(bounds.prevStart, elapsed);
+    return { prevStart: bounds.prevStart, prevEnd: sameDays < bounds.prevEnd ? sameDays : bounds.prevEnd };
+  }
+  return { prevStart: bounds.prevStart, prevEnd: bounds.prevEnd };
+}
+
 export function formatPeriodLabel(state: PeriodState, bounds: PeriodBounds, locale: Locale): string {
   switch (state.mode) {
     case 'day':

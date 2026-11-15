@@ -29,9 +29,16 @@ const isYearBack = (forecast: any) => forecast?.method === 'year_back';
 // Only the average is known: under 4 months of history, and not read from
 // last year either.
 const isAverageOnly = (forecast: any) => forecast?.trend === 'insufficient_data' && !isYearBack(forecast);
+// The month in progress joined the revenue history as its expected end.
+const includesCurrentMonth = (forecast: any) => !!forecast?.historical?.some((h: any) => h.estimated);
 
 export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDays, onChangeRangeDays }: Props) {
   const { t } = useTranslation();
+  // The month in progress: what is in so far and where it is heading - the
+  // revenue at its average per entered day, the expenses at their pace so
+  // far plus the month's payroll and depreciation.
+  const revenueNow = revenueForecast?.current_month ?? null;
+  const expenseNow = expenseForecast?.current_month ?? null;
 
   // Against the same months last year for a yearly-rhythm forecast - a
   // turn its rhythm explains is not a trend - else the window's trend.
@@ -72,6 +79,36 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
             : 'stats.forecastHint6m'
         )}
       </Text>
+      {(revenueNow || expenseNow) && (
+        <View style={styles.currentMonthBox}>
+          <Text style={styles.currentMonthTitle}>{t('stats.forecastThisMonth')}</Text>
+          <View style={styles.forecastRow}>
+            {revenueNow && (
+              <View style={styles.currentMonthCell}>
+                <Text style={styles.forecastLabel}>{t('stats.income')}</Text>
+                <Text style={[styles.currentMonthValue, { color: COLORS.success }]}>{revenueNow.so_far.toFixed(0)} €</Text>
+                {revenueNow.expected !== null && revenueNow.expected !== undefined && (
+                  <Text style={styles.forecastTrend}>
+                    {t('stats.forecastExpectedEnd').replace('{amount}', `${revenueNow.expected.toFixed(0)} €`)}
+                  </Text>
+                )}
+              </View>
+            )}
+            {expenseNow && (
+              <View style={styles.currentMonthCell}>
+                <Text style={styles.forecastLabel}>{t('home.totalExpenses')}</Text>
+                <Text style={[styles.currentMonthValue, { color: COLORS.danger }]}>{expenseNow.so_far.toFixed(0)} €</Text>
+                {expenseNow.expected !== null && expenseNow.expected !== undefined && (
+                  <Text style={styles.forecastTrend}>
+                    {t('stats.forecastAtThisPace').replace('{amount}', `${expenseNow.expected.toFixed(0)} €`)}
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+
       <View style={styles.forecastRow}>
         {revenueForecast?.forecast?.[0] && (
           <View style={styles.forecastCard}>
@@ -120,8 +157,15 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
       </View>
 
       {(isYearBack(revenueForecast) || isYearBack(expenseForecast) ||
-        isAverageOnly(revenueForecast) || isAverageOnly(expenseForecast)) && (
+        isAverageOnly(revenueForecast) || isAverageOnly(expenseForecast) ||
+        includesCurrentMonth(revenueForecast) || expenseNow?.payroll_from_last_month) && (
         <View style={styles.forecastNotes}>
+          {includesCurrentMonth(revenueForecast) && (
+            <Text style={styles.forecastNote}>{t('stats.forecastWithCurrentMonth')}</Text>
+          )}
+          {expenseNow?.payroll_from_last_month && (
+            <Text style={styles.forecastNote}>{t('stats.forecastPayrollFromLastMonth')}</Text>
+          )}
           {(isYearBack(revenueForecast) || isYearBack(expenseForecast)) && (
             <Text style={styles.forecastNote}>
               {t(
@@ -199,6 +243,28 @@ const styles = StyleSheet.create({
   forecastRow: {
     flexDirection: 'row',
     gap: 12,
+  },
+  currentMonthBox: {
+    marginBottom: 12,
+  },
+  currentMonthTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginBottom: 8,
+  },
+  currentMonthCell: {
+    flex: 1,
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  currentMonthValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 4,
   },
   forecastCard: {
     flex: 1,

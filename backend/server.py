@@ -48,8 +48,8 @@ from slowapi.errors import RateLimitExceeded
 import services.scan_credit_service as scan_credit_service_module
 from services.scan_credit_service import ScanCreditService
 from services.business_calendar import (
-    BUSINESS_TZ, OPEN_END, OPEN_START, Period, business_day, day_start_utc, is_stored_day, now_local,
-    stored_day, today_local,
+    BUSINESS_TZ, OPEN_END, OPEN_START, Period, business_day, day_start_utc, days_in_month, is_stored_day,
+    now_local, stored_day, today_local,
 )
 
 ROOT_DIR = Path(__file__).parent
@@ -2311,6 +2311,60 @@ def period_income_expense(totals: Dict[str, Any], visibility: Optional[dict] = N
         invoice_total=totals["invoice_total"], off_book_expenses=totals["off_book_expenses"] if show_off_book else 0,
         payroll_cost=totals["payroll_cost"], depreciation_cost=totals["depreciation_cost"],
     )
+
+
+async def monthly_costs_by_day(company_id: Optional[str], user_id: str, period: Period) -> Dict[str, float]:
+    """Payroll and depreciation falling on each day of the period ("YYYY-MM-DD"
+    -> EUR): each month's amount spread evenly over its days, so a chart's
+    days add up to exactly what period_totals counts for the same period."""
+    per_month: Dict[tuple, float] = {}
+    for year, month in period.months():
+        whole = Period.month(year, month)
+        per_month[(year, month)] = (
+            await get_payroll_cost_for_period(company_id, user_id, whole.start, whole.end)
+            + await get_depreciation_cost_for_period(company_id, user_id, whole.start, whole.end)
+        )
+    return {
+        day.isoformat(): per_month[(day.year, day.month)] / days_in_month(day.year, day.month)
+        for day in period.iter_days()
+    }
+
+
+# A day-by-day pace means nothing over an open-ended or many-year range.
+PACE_MAX_DAYS = 1830
+
+
+async def period_pace(
+    company_id: Optional[str], period: Period, income: float, revenue_days: List[str]
+) -> Optional[Dict[str, Any]]:
+    """How a period is going, day by day - the rule every screen shows for
+    "average per day" and "expected end":
+
+    - average per day = income / the days revenue was entered on (a day
+      nobody entered is unknown, never a zero-revenue day; a closed day
+      or a day still to come is not a day of the average);
+    - expected end, for a period still running = average per day x every
+      open day of the period (closed days from the company's calendar).
+
+    `income` and `revenue_days` are the period's totals so far (counted
+    through today for a running period)."""
+    if period.days > PACE_MAX_DAYS:
+        return None
+    today = today_local()
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+    open_days = [day for day in period.iter_days() if not is_date_closed(day.isoformat(), closed_weekdays, exceptions_map)]
+    is_current = period.contains(today)
+    entered = len(revenue_days)
+    average = income / entered if entered else None
+    expected = average * len(open_days) if is_current and average is not None else None
+    return {
+        "is_current": is_current,
+        "open_days": len(open_days),
+        "open_days_so_far": sum(1 for day in open_days if day <= today),
+        "revenue_days": entered,
+        "avg_per_revenue_day": round(average, 2) if average is not None else None,
+        "expected_income": round(expected, 2) if expected is not None else None,
+    }
 
 
 async def _compute_month_profit(company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str) -> float:

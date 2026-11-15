@@ -509,8 +509,16 @@ export const translations: Translations = {
     en: 'Average Daily Turnover',
   },
   'home.avgDailyTurnoverSubtitle': {
-    bg: '{days} отворени дни · виж повече в Статистики',
-    en: '{days} open days · see more in Statistics',
+    bg: 'средно за {days} дни с въведен оборот',
+    en: 'average over {days} days with revenue entered',
+  },
+  'home.expectedPeriodEnd': {
+    bg: 'Очакван край на периода: {amount}',
+    en: 'Expected by the end of the period: {amount}',
+  },
+  'periodNav.soFar': {
+    bg: 'Досега: {range}',
+    en: 'So far: {range}',
   },
   'home.expenses': {
     bg: 'В канала',
@@ -3151,8 +3159,88 @@ export const translations: Translations = {
     en: 'Average Daily Turnover',
   },
   'stats.avgDailyTurnoverSubtitle': {
-    bg: 'средно за избрания период ({days} дни)',
-    en: 'averaged over the selected period ({days} days)',
+    bg: 'средно за {days} дни с въведен оборот',
+    en: 'average over {days} days with revenue entered',
+  },
+  'stats.forecastThisMonth': {
+    bg: 'Този месец досега',
+    en: 'This month so far',
+  },
+  'stats.forecastExpectedEnd': {
+    bg: 'очакван край {amount}',
+    en: 'expected end {amount}',
+  },
+  'stats.forecastAtThisPace': {
+    bg: 'по досегашния темп {amount}',
+    en: 'at the pace so far {amount}',
+  },
+  'stats.forecastWithCurrentMonth': {
+    bg: 'Прогнозата включва очаквания край на текущия месец.',
+    en: 'The forecast includes the expected end of the current month.',
+  },
+  'stats.chartFixedCostsNote': {
+    bg: 'Разходите включват дела на всеки ден от заплатите и амортизацията.',
+    en: 'Expenses include each day’s share of payroll and depreciation.',
+  },
+  'stats.activeInPeriod': {
+    bg: 'С покупки в периода',
+    en: 'Bought from in the period',
+  },
+  'stats.inactiveInPeriod': {
+    bg: 'Без покупки в периода',
+    en: 'Not bought from in the period',
+  },
+  'stats.groupDay': {
+    bg: 'Дни',
+    en: 'Days',
+  },
+  'stats.groupWeek': {
+    bg: 'Седмици',
+    en: 'Weeks',
+  },
+  'stats.groupMonth': {
+    bg: 'Месеци',
+    en: 'Months',
+  },
+  'stats.groupYear': {
+    bg: 'Години',
+    en: 'Years',
+  },
+  'stats.partialBucket': {
+    bg: 'незавършен',
+    en: 'in progress',
+  },
+  'stats.supplierSeriesTitle': {
+    bg: 'Покупки по периоди',
+    en: 'Purchases by period',
+  },
+  'stats.allTime': {
+    bg: 'Цялото време',
+    en: 'All time',
+  },
+  'stats.periodTotal': {
+    bg: 'Общо за периода',
+    en: 'Total for the period',
+  },
+  'stats.allTimeTotal': {
+    bg: 'Общо за цялото време',
+    en: 'Total for all time',
+  },
+  'stats.activityLast30Note': {
+    bg: 'Активен = доставка през последните 30 дни',
+    en: 'Active = a delivery in the last 30 days',
+  },
+  'stats.seriesLastGrowth': {
+    bg: 'Последен цял период ({label}): {growth}% спрямо предходния',
+    en: 'Last whole period ({label}): {growth}% vs the one before',
+  },
+  'stats.forecastPayrollFromLastMonth': {
+    bg: 'Заплатите за месеца още не са въведени – взети са от миналия месец.',
+    en: 'This month’s payroll isn’t entered yet - last month’s is used.',
+  },
+  'stats.byPeriod': {
+    bg: 'По период',
+    en: 'By period',
   },
   'stats.priceInflation': {
     bg: 'Обща инфлация на цените',

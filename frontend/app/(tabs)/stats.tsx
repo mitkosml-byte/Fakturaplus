@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { api } from '../../src/services/api';
-import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse, PriceAlertSettings, PriceAlertMute, ItemStatistics, ItemOtherSize, RelatedItems } from '../../src/types';
+import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse, SupplierGroupBy, PriceAlertSettings, PriceAlertMute, ItemStatistics, ItemOtherSize, RelatedItems } from '../../src/types';
 import { formatUnitPrice } from '../../src/utils/priceAlert';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
@@ -25,9 +25,11 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
-import { PeriodNavigator } from '../../src/components/PeriodNavigator';
+import { PeriodNavigator, PeriodSoFarNote } from '../../src/components/PeriodNavigator';
 import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
-import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
+import { getPeriodBounds, getComparablePrevious, toApiDate } from '../../src/utils/periodRange';
+import { useSharedPeriod } from '../../src/utils/sharedPeriod';
+import { differenceInCalendarDays, format, parseISO } from 'date-fns';
 import { PriceAlertsCard } from '../../src/components/stats/PriceAlertsCard';
 import { ReorderNudgesCard } from '../../src/components/stats/ReorderNudgesCard';
 import { ReorderRecommendationsCard } from '../../src/components/stats/ReorderRecommendationsCard';
@@ -48,9 +50,19 @@ const CHART_COLORS: string[] = [
   COLORS.pink, COLORS.teal, COLORS.orange, COLORS.indigo, COLORS.lime
 ];
 
+// How a supplier's purchases can be read - by day, week, month or year.
+const SUPPLIER_GROUPS: { key: SupplierGroupBy; labelKey: string }[] = [
+  { key: 'day', labelKey: 'stats.groupDay' },
+  { key: 'week', labelKey: 'stats.groupWeek' },
+  { key: 'month', labelKey: 'stats.groupMonth' },
+  { key: 'year', labelKey: 'stats.groupYear' },
+];
+// Bars wide enough for each granularity's label (DD.MM, MM.YYYY, YYYY).
+const SERIES_BAR_WIDTH: Record<SupplierGroupBy, number> = { day: 22, week: 26, month: 34, year: 34 };
+
 export default function StatsScreen() {
-  const { t } = useTranslation();
-  const { hasPermission, isOwner } = useAuth();
+  const { t, dateLocale } = useTranslation();
+  const { hasPermission } = useAuth();
   const router = useRouter();
   // Dimensions.get('window') used to be read ONCE at module-eval time -
   // harmless on native, but this app's web build is statically pre-rendered
@@ -69,10 +81,9 @@ export default function StatsScreen() {
   const chartAreaWidth = Math.min(windowWidth, 980) - 80;
   const chartWidth = chartAreaWidth;
   const pieChartRadius = chartAreaWidth / 3;
-  const params = useLocalSearchParams<{ period?: string; tab?: string }>();
+  const params = useLocalSearchParams<{ tab?: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
-  const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
 
   // Header shrinks/fades as the page scrolls past it - a calm, premium
   // reaction to scroll instead of the title just sitting there inert.
@@ -90,15 +101,6 @@ export default function StatsScreen() {
     };
   });
 
-  // Lets other screens (e.g. the Home dashboard's average-turnover card)
-  // deep-link straight into a specific period here instead of always
-  // landing on the default "week" view.
-  useEffect(() => {
-    if (params.period === 'week' || params.period === 'month' || params.period === 'year') {
-      setPeriod(params.period);
-    }
-  }, [params.period]);
-
   // ...and Home's daily review straight into the tab a signal's card is on
   // (prices and reorder under Items, the forecast under Overview).
   useEffect(() => {
@@ -107,14 +109,10 @@ export default function StatsScreen() {
     }
   }, [params.tab]);
 
-  // The income/expense charts below show a fixed 7-day window instead of
-  // cramming a whole month/year of bars into one view - 0 is the most
-  // recent 7 days, 1 the 7 before those, etc. Reset to the latest window
-  // whenever the period (and therefore the underlying data) changes.
+  // The income/expense charts below show 7 bars at a time instead of
+  // cramming a whole month/year into one view - 0 is the latest 7, 1 the 7
+  // before those, etc. Back to the latest whenever the period changes.
   const [chartPage, setChartPage] = useState(0);
-  useEffect(() => {
-    setChartPage(0);
-  }, [period]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'suppliers' | 'items'>('overview');
@@ -160,11 +158,29 @@ export default function StatsScreen() {
   const [loadingInflation, setLoadingInflation] = useState(false);
   const [inflationExpanded, setInflationExpanded] = useState(false);
 
-  // Which period the overview summary cards (income/expense/VAT/profit)
-  // below show - independent of `period` above, which only controls the
-  // rolling chart window further down. Defaults to the current calendar
-  // month, matching the previous hardcoded behavior.
-  const [summaryPeriodState, setSummaryPeriodState] = useState<PeriodState>(DEFAULT_PERIOD_STATE);
+  // The period every report on this screen shows - the cards, the charts,
+  // the averages, suppliers and items - and the same one Home and Джобче
+  // show (one shared choice, see utils/sharedPeriod).
+  const [summaryPeriodState, setSummaryPeriodState] = useSharedPeriod();
+  const periodBounds = useMemo(() => getPeriodBounds(summaryPeriodState), [summaryPeriodState]);
+  const periodStart = toApiDate(periodBounds.start);
+  const periodEnd = toApiDate(periodBounds.end);
+  // Suppliers and items: the chosen period, or the whole history.
+  const [reportScope, setReportScope] = useState<'period' | 'all'>('period');
+  const reportRange = useMemo(
+    () => (reportScope === 'period' ? { start_date: periodStart, end_date: periodEnd } : undefined),
+    [reportScope, periodStart, periodEnd],
+  );
+  // A supplier's purchases by day, week, month or year - picked in its
+  // detail, else the one that suits the period's length.
+  const [supplierGroupBy, setSupplierGroupBy] = useState<SupplierGroupBy | null>(null);
+  const periodDays = differenceInCalendarDays(periodBounds.end, periodBounds.start) + 1;
+  const defaultSupplierGroupBy: SupplierGroupBy = reportScope === 'all' ? 'month'
+    : periodDays <= 14 ? 'day' : periodDays <= 92 ? 'week' : periodDays <= 731 ? 'month' : 'year';
+  const activeSupplierGroupBy = supplierGroupBy ?? defaultSupplierGroupBy;
+  useEffect(() => {
+    setChartPage(0);
+  }, [periodStart, periodEnd]);
 
   // Overview enrichments: previous-period comparison, top-3 quick view,
   // forecast and ROI trend
@@ -191,12 +207,16 @@ export default function StatsScreen() {
       const bounds = getPeriodBounds(summaryPeriodState);
       const start_date = toApiDate(bounds.start);
       const end_date = toApiDate(bounds.end);
-      const prevStart = toApiDate(bounds.prevStart);
-      const prevEnd = toApiDate(bounds.prevEnd);
+      // Like with like: a period still running is compared with the same
+      // days of the previous one (1-15 November with 1-15 October), never
+      // half a month with a whole one.
+      const previous = getComparablePrevious(bounds);
+      const prevStart = toApiDate(previous.prevStart);
+      const prevEnd = toApiDate(previous.prevEnd);
 
       const [summaryData, chartDataResult, prevSummaryData] = await Promise.all([
         api.getSummary({ start_date, end_date }),
-        api.getChartData(period),
+        api.getChartData({ start_date, end_date }),
         api.getSummary({ start_date: prevStart, end_date: prevEnd }),
       ]);
       setSummary(summaryData);
@@ -208,9 +228,12 @@ export default function StatsScreen() {
 
     if (hasPermission('view_statistics')) {
       try {
+        // The top 3 of the same period as the cards above.
+        const bounds = getPeriodBounds(summaryPeriodState);
+        const range = { start_date: toApiDate(bounds.start), end_date: toApiDate(bounds.end) };
         const [supplierData, itemData, nudgesData, recommendationsData] = await Promise.all([
-          api.getSupplierOverview(),
-          api.getItemStatistics({ top_n: 3 }),
+          api.getSupplierOverview(range),
+          api.getItemStatistics({ ...range, top_n: 3 }),
           api.getReorderNudges(),
           api.getReorderRecommendations(),
         ]);
@@ -262,31 +285,37 @@ export default function StatsScreen() {
         console.error('Error loading ROI trend:', error);
       }
     }
-  }, [period, summaryPeriodState, hasPermission, isOwner, forecastRangeDays]);
+  }, [summaryPeriodState, hasPermission, forecastRangeDays]);
 
   const loadSupplierStats = useCallback(async () => {
     setLoadingSuppliers(true);
     try {
-      const data = await api.getSupplierOverview();
+      const data = await api.getSupplierOverview(reportRange);
       setSupplierOverview(data);
     } catch (error) {
       console.error('Error loading supplier stats:', error);
     } finally {
       setLoadingSuppliers(false);
     }
-  }, []);
+  }, [reportRange]);
 
-  const loadSupplierDetail = useCallback(async (supplierName: string) => {
+  const loadSupplierDetail = useCallback(async (supplierName: string, groupBy: SupplierGroupBy) => {
     setLoadingDetail(true);
     try {
-      const data = await api.getSupplierDetailed(supplierName);
+      const data = await api.getSupplierDetailed(supplierName, { ...reportRange, group_by: groupBy });
       setSupplierDetail(data);
     } catch (error) {
       console.error('Error loading supplier detail:', error);
     } finally {
       setLoadingDetail(false);
     }
-  }, []);
+  }, [reportRange]);
+
+  const closeSupplierDetail = () => {
+    setSelectedSupplier(null);
+    setSupplierDetail(null);
+    setSupplierGroupBy(null);
+  };
 
   const toggleCompareSelection = (supplierName: string) => {
     setSelectedForCompare((prev) => {
@@ -336,7 +365,7 @@ export default function StatsScreen() {
     setLoadingItems(true);
     try {
       const [statsData, alertsData] = await Promise.all([
-        api.getItemStatistics(),
+        api.getItemStatistics(reportRange),
         api.getPriceAlerts()
       ]);
       setItemStats(statsData);
@@ -347,7 +376,7 @@ export default function StatsScreen() {
     } finally {
       setLoadingItems(false);
     }
-  }, []);
+  }, [reportRange]);
   
   const loadItemDetail = useCallback(async (itemName: string) => {
     setLoadingItemDetail(true);
@@ -490,17 +519,18 @@ export default function StatsScreen() {
     }, [loadData])
   );
 
+  // Each tab reloads when it is opened and whenever its period changes.
   useEffect(() => {
-    if (activeTab === 'suppliers' && !supplierOverview) {
+    if (activeTab === 'suppliers') {
       loadSupplierStats();
     }
-  }, [activeTab, supplierOverview, loadSupplierStats]);
-  
+  }, [activeTab, loadSupplierStats]);
+
   useEffect(() => {
-    if (activeTab === 'items' && !itemStats) {
+    if (activeTab === 'items') {
       loadItemStats();
     }
-  }, [activeTab, itemStats, loadItemStats]);
+  }, [activeTab, loadItemStats]);
 
   useEffect(() => {
     if (activeTab === 'items') {
@@ -510,9 +540,9 @@ export default function StatsScreen() {
 
   useEffect(() => {
     if (selectedSupplier) {
-      loadSupplierDetail(selectedSupplier);
+      loadSupplierDetail(selectedSupplier, activeSupplierGroupBy);
     }
-  }, [selectedSupplier, loadSupplierDetail]);
+  }, [selectedSupplier, activeSupplierGroupBy, loadSupplierDetail]);
   
   useEffect(() => {
     if (selectedItem) {
@@ -583,12 +613,6 @@ export default function StatsScreen() {
         return itemStats.top_by_value || [];
     }
   };
-
-  // Open (non-closed) days within the currently loaded window - drives the
-  // average-daily-turnover card below instead of a fixed period day count,
-  // so a rest/holiday day (marked in Профил > Почивни дни) doesn't drag the
-  // average down like a bad zero-revenue day would.
-  const openDaysInWindow = Math.max(1, chartData.filter((d) => !d.is_closed).length);
 
   // Chart data for overview - a closed day (from Профил > Почивни дни) is
   // shown in muted grey instead of green/red, so a genuinely closed day
@@ -705,15 +729,34 @@ export default function StatsScreen() {
     }));
   };
 
-  // Prepare line chart data for supplier monthly trend
-  const getSupplierLineData = () => {
-    if (!supplierDetail?.monthly_trend) return [];
-    return supplierDetail.monthly_trend.map(m => ({
-      value: m.amount,
-      label: m.month.substring(5),
-      dataPointColor: COLORS.primary,
-    }));
-  };
+  // A supplier's purchases by day, week, month or year: every period is
+  // there (zero when nothing was bought), and one cut by the chosen
+  // range's ends or still running is drawn lighter - it is not a whole one.
+  const supplierSeries = supplierDetail?.series ?? [];
+  const lastSeriesGrowth = [...supplierSeries].reverse().find((point) => point.growth_percent !== null) ?? null;
+  const formatRange = (range?: { start_date: string; end_date: string } | null) =>
+    range ? `${format(parseISO(range.start_date), 'd MMM yyyy', { locale: dateLocale })} – ${format(parseISO(range.end_date), 'd MMM yyyy', { locale: dateLocale })}` : '';
+
+  // Suppliers and items: the chosen period (the same as everywhere) or the
+  // whole history.
+  const renderReportScope = () => (
+    <>
+      <View style={[styles.rankingSelector, styles.reportScopeSelector]}>
+        {(['period', 'all'] as const).map((scope) => (
+          <TouchableOpacity
+            key={scope}
+            style={[styles.rankingButton, reportScope === scope && styles.rankingButtonActive]}
+            onPress={() => setReportScope(scope)}
+          >
+            <Text style={[styles.rankingButtonText, reportScope === scope && styles.rankingButtonTextActive]}>
+              {scope === 'period' ? t('stats.byPeriod') : t('stats.allTime')}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {reportScope === 'period' && <PeriodNavigator state={summaryPeriodState} onChange={setSummaryPeriodState} />}
+    </>
+  );
 
   // Render chart type selector
   const renderChartTypeSelector = () => (
@@ -745,19 +788,13 @@ export default function StatsScreen() {
       visible={!!selectedSupplier}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={() => {
-        setSelectedSupplier(null);
-        setSupplierDetail(null);
-      }}
+      onRequestClose={closeSupplierDetail}
     >
       <View style={styles.modalContainer}>
         <View style={styles.modalHeader}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.modalCloseButton}
-            onPress={() => {
-              setSelectedSupplier(null);
-              setSupplierDetail(null);
-            }}
+            onPress={closeSupplierDetail}
           >
             <Ionicons name="close" size={24} color="white" />
           </TouchableOpacity>
@@ -765,7 +802,7 @@ export default function StatsScreen() {
           <View style={{ width: 40 }} />
         </View>
 
-        {loadingDetail ? (
+        {loadingDetail && !supplierDetail ? (
           <View style={styles.modalLoading}>
             <ActivityIndicator size="large" color={COLORS.primary} />
           </View>
@@ -774,6 +811,9 @@ export default function StatsScreen() {
             {/* Overview Card */}
             <View style={styles.detailCard}>
               <Text style={styles.detailCardTitle}>{t('stats.supplierOverview')}</Text>
+              <Text style={styles.detailPeriodText}>
+                {reportScope === 'period' ? formatRange(supplierDetail.period) : t('stats.allTime')}
+              </Text>
               <View style={styles.detailGrid}>
                 <View style={styles.detailItem}>
                   <Text style={styles.detailValue}>{supplierDetail.overview?.total_amount.toFixed(2)} €</Text>
@@ -824,27 +864,70 @@ export default function StatsScreen() {
               </View>
             </View>
 
-            {/* Monthly Trend Chart */}
-            {supplierDetail.monthly_trend && supplierDetail.monthly_trend.length > 0 && (
-              <View style={styles.detailCard}>
-                <Text style={styles.detailCardTitle}>{t('stats.monthlyTrend')}</Text>
-                <LineChart
-                  data={getSupplierLineData()}
-                  width={chartWidth - 20}
-                  height={150}
-                  color={COLORS.primary}
-                  thickness={2}
-                  dataPointsColor={COLORS.primary}
-                  yAxisColor={COLORS.border}
-                  xAxisColor={COLORS.border}
-                  yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
-                  xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
-                  hideRules
-                  isAnimated
-                  curved
-                />
+            {/* Purchases by day / week / month / year */}
+            <View style={styles.detailCard}>
+              <Text style={styles.detailCardTitle}>{t('stats.supplierSeriesTitle')}</Text>
+              <View style={[styles.unitChipsRow, { marginTop: 0, marginBottom: 12 }]}>
+                {SUPPLIER_GROUPS.map((group) => (
+                  <TouchableOpacity
+                    key={group.key}
+                    style={[styles.unitChip, activeSupplierGroupBy === group.key && styles.unitChipActive]}
+                    onPress={() => setSupplierGroupBy(group.key)}
+                  >
+                    <Text style={[styles.unitChipText, activeSupplierGroupBy === group.key && styles.unitChipTextActive]}>
+                      {t(group.labelKey)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                {loadingDetail && <ActivityIndicator size="small" color={COLORS.primary} />}
               </View>
-            )}
+              {supplierSeries.length > 0 ? (() => {
+                const group = supplierDetail.group_by ?? activeSupplierGroupBy;
+                const barWidth = SERIES_BAR_WIDTH[group];
+                const spacing = 10;
+                return (
+                  <BarChart
+                    key={`series-${group}-${supplierSeries.map((point) => point.amount).join('_')}`}
+                    data={supplierSeries.map((point) => ({
+                      value: point.amount,
+                      label: point.label,
+                      frontColor: point.is_partial ? COLORS.primary + '55' : COLORS.primary,
+                    }))}
+                    width={chartWidth - 54}
+                    height={160}
+                    barWidth={barWidth}
+                    spacing={spacing}
+                    initialSpacing={spacing}
+                    endSpacing={spacing}
+                    labelWidth={barWidth + spacing}
+                    noOfSections={4}
+                    barBorderRadius={4}
+                    yAxisColor={COLORS.border}
+                    xAxisColor={COLORS.border}
+                    yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                    xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
+                    yAxisLabelWidth={34}
+                    hideRules
+                    isAnimated
+                  />
+                );
+              })() : (
+                <Text style={styles.noDataText}>{t('stats.noData')}</Text>
+              )}
+              {supplierSeries.some((point) => point.is_partial) && (
+                <View style={styles.seriesLegendRow}>
+                  <View style={styles.seriesLegendSwatch} />
+                  <Text style={styles.seriesNote}>{t('stats.partialBucket')}</Text>
+                </View>
+              )}
+              {lastSeriesGrowth && lastSeriesGrowth.growth_percent !== null && (
+                <Text style={styles.seriesNote}>
+                  {t('stats.seriesLastGrowth')
+                    .replace('{label}', lastSeriesGrowth.label)
+                    .replace('{growth}', `${lastSeriesGrowth.growth_percent > 0 ? '+' : ''}${lastSeriesGrowth.growth_percent}`)}
+                </Text>
+              )}
+            </View>
 
             {/* Anomalies */}
             {supplierDetail.anomalies && supplierDetail.anomalies.length > 0 && (
@@ -977,40 +1060,36 @@ export default function StatsScreen() {
 
             {activeTab === 'overview' ? (
               <>
-                {/* Period Selector */}
-                <View style={styles.periodSelectorWrap}>
-                  <ChipTabs
-                    active={period}
-                    onChange={setPeriod}
-                    options={[
-                      { key: 'week', label: t('stats.week') },
-                      { key: 'month', label: t('stats.month') },
-                      { key: 'year', label: t('stats.year') },
-                    ]}
-                  />
-                </View>
-
-                {/* Average Daily Turnover - reacts to the same period selector above,
-                    so it doubles as period-by-period business analysis rather than
-                    a single fixed number. Divided by calendar days in the rolling
-                    window (not just days with entries), matching the backend's
-                    week/month/year window definition in getChartData. */}
-                <View style={styles.avgTurnoverStatCard}>
-                  <View style={styles.avgTurnoverStatHeader}>
-                    <Ionicons name="speedometer" size={24} color={COLORS.info} />
-                    <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
-                  </View>
-                  <CountUp
-                    value={chartData.reduce((sum, d) => sum + d.income, 0) / openDaysInWindow}
-                    formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
-                    style={styles.avgTurnoverStatValue}
-                  />
-                  <Text style={styles.avgTurnoverStatSubtitle}>
-                    {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysInWindow))}
-                  </Text>
-                </View>
-
+                {/* One period for everything below - the cards, the
+                    average, the charts, the top 3 - and for Home. */}
                 <PeriodNavigator state={summaryPeriodState} onChange={setSummaryPeriodState} />
+                <PeriodSoFarNote summary={summary} />
+
+                {/* Average per day: the period's revenue over the days it
+                    was entered on (a day nobody entered is unknown, not a
+                    zero day) - the same numbers as Home's card - and, for a
+                    period still running, where it is heading. */}
+                {(!summary || summary.pace) && (
+                  <View style={styles.avgTurnoverStatCard}>
+                    <View style={styles.avgTurnoverStatHeader}>
+                      <Ionicons name="speedometer" size={24} color={COLORS.info} />
+                      <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
+                    </View>
+                    <CountUp
+                      value={summary?.pace?.avg_per_revenue_day ?? 0}
+                      formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
+                      style={styles.avgTurnoverStatValue}
+                    />
+                    <Text style={styles.avgTurnoverStatSubtitle}>
+                      {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(summary?.pace?.revenue_days ?? 0))}
+                    </Text>
+                    {summary?.pace?.is_current && summary.pace.expected_income !== null && (
+                      <Text style={[styles.avgTurnoverStatSubtitle, styles.avgTurnoverExpected]}>
+                        {t('home.expectedPeriodEnd').replace('{amount}', `${summary.pace.expected_income.toFixed(2)} €`)}
+                      </Text>
+                    )}
+                  </View>
+                )}
 
                 {/* Summary Cards - a skeleton stand-in until the first real
                     summary lands, so the grid never briefly shows "0.00 €"
@@ -1206,6 +1285,9 @@ export default function StatsScreen() {
                       <Text style={styles.noDataText}>{t('stats.noData')}</Text>
                     </View>
                   )}
+                  {chartData.some((d) => (d.fixed_costs ?? 0) > 0) && (
+                    <Text style={styles.chartNote}>{t('stats.chartFixedCostsNote')}</Text>
+                  )}
                 </View>
 
                 {/* VAT Breakdown */}
@@ -1332,7 +1414,10 @@ export default function StatsScreen() {
                 )}
 
                 {/* Forecast */}
-                {hasPermission('view_statistics') && (revenueForecast?.forecast?.length > 0 || expenseForecast?.forecast?.length > 0) && (
+                {hasPermission('view_statistics') && (
+                  revenueForecast?.forecast?.length > 0 || expenseForecast?.forecast?.length > 0 ||
+                  revenueForecast?.current_month?.so_far > 0 || expenseForecast?.current_month?.so_far > 0
+                ) && (
                   <ForecastCard
                     revenueForecast={revenueForecast}
                     expenseForecast={expenseForecast}
@@ -1375,6 +1460,7 @@ export default function StatsScreen() {
             ) : activeTab === 'suppliers' ? (
               /* ========== ADVANCED SUPPLIERS TAB ========== */
               <View style={styles.suppliersContainer}>
+                {renderReportScope()}
                 {loadingSuppliers ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.primary} />
@@ -1398,15 +1484,22 @@ export default function StatsScreen() {
                           <Text style={[styles.execValue, { color: COLORS.success }]}>
                             {supplierOverview.executive_summary.active_suppliers}
                           </Text>
-                          <Text style={styles.execLabel}>{t('stats.activeSuppliers')}</Text>
+                          <Text style={styles.execLabel}>
+                            {supplierOverview.activity_basis === 'period' ? t('stats.activeInPeriod') : t('stats.activeSuppliers')}
+                          </Text>
                         </View>
                         <View style={styles.execItem}>
                           <Text style={[styles.execValue, { color: COLORS.danger }]}>
                             {supplierOverview.executive_summary.inactive_suppliers}
                           </Text>
-                          <Text style={styles.execLabel}>{t('stats.inactiveSuppliers')}</Text>
+                          <Text style={styles.execLabel}>
+                            {supplierOverview.activity_basis === 'period' ? t('stats.inactiveInPeriod') : t('stats.inactiveSuppliers')}
+                          </Text>
                         </View>
                       </View>
+                      {supplierOverview.activity_basis !== 'period' && (
+                        <Text style={styles.activityNote}>{t('stats.activityLast30Note')}</Text>
+                      )}
                       
                       {/* Concentration indicators */}
                       <View style={styles.concentrationRow}>
@@ -1437,7 +1530,9 @@ export default function StatsScreen() {
 
                     {/* Totals Summary */}
                     <View style={styles.supplierTotalsCard}>
-                      <Text style={styles.supplierTotalsTitle}>{t('stats.currentMonthTotal')}</Text>
+                      <Text style={styles.supplierTotalsTitle}>
+                        {reportScope === 'period' ? t('stats.periodTotal') : t('stats.allTimeTotal')}
+                      </Text>
                       <View style={styles.supplierTotalsRow}>
                         <View style={styles.supplierTotalItem}>
                           <Text style={styles.supplierTotalValue}>
@@ -1691,7 +1786,9 @@ export default function StatsScreen() {
                       <View style={styles.inactiveCard}>
                         <View style={styles.inactiveHeader}>
                           <Ionicons name="time" size={24} color={COLORS.danger} />
-                          <Text style={styles.inactiveTitle}>{t('stats.inactiveSuppliers')}</Text>
+                          <Text style={styles.inactiveTitle}>
+                            {supplierOverview.activity_basis === 'period' ? t('stats.inactiveInPeriod') : t('stats.inactiveSuppliers')}
+                          </Text>
                         </View>
                         {supplierOverview.inactive_suppliers.slice(0, 5).map((supplier, index) => (
                           <TouchableOpacity 
@@ -1742,6 +1839,7 @@ export default function StatsScreen() {
             ) : activeTab === 'items' ? (
               /* ========== ITEMS TAB ========== */
               <View style={styles.suppliersContainer}>
+                {renderReportScope()}
                 {loadingItems ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.primary} />
@@ -2338,9 +2436,6 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontWeight: '500',
   },
-  periodSelectorWrap: {
-    marginBottom: 20,
-  },
   periodButton: {
     flex: 1,
     paddingVertical: 12,
@@ -2387,6 +2482,48 @@ const styles = StyleSheet.create({
   avgTurnoverStatSubtitle: {
     fontSize: 13,
     color: COLORS.textSecondary,
+  },
+  avgTurnoverExpected: {
+    marginTop: 6,
+    color: COLORS.info,
+  },
+  chartNote: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 8,
+  },
+  reportScopeSelector: {
+    marginBottom: 12,
+  },
+  activityNote: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginTop: -6,
+    marginBottom: 10,
+  },
+  detailPeriodText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: -6,
+    marginBottom: 10,
+  },
+  seriesLegendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  seriesLegendSwatch: {
+    width: 12,
+    height: 12,
+    borderRadius: 3,
+    backgroundColor: COLORS.primary + '55',
+  },
+  seriesNote: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 6,
   },
   summaryGrid: {
     flexDirection: 'row',

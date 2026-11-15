@@ -11,13 +11,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { DailyRevenue } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, AnimatedEmptyIcon, SkeletonRow } from '../src/components';
+import { PeriodNavigator } from '../src/components/PeriodNavigator';
+import { getPeriodBounds, toApiDate } from '../src/utils/periodRange';
+import { useSharedPeriod } from '../src/utils/sharedPeriod';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -25,7 +28,9 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 const MONTH_NAMES_BG = ['Януари', 'Февруари', 'Март', 'Април', 'Май', 'Юни', 'Юли', 'Август', 'Септември', 'Октомври', 'Ноември', 'Декември'];
 const MONTH_NAMES_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-type PeriodPreset = 'all' | 'thisYear' | 'thisMonth' | 'lastMonth';
+// The chosen period - any day, week, month, year or range, the same one
+// Home and Statistics show - or the whole history.
+type HistoryScope = 'period' | 'all';
 
 // Module 2 audit correction: "Джобче" keeps its exact existing behavior
 // (the owner was explicit that it serves a different purpose than
@@ -45,7 +50,11 @@ export default function PocketMoneyHistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [revenues, setRevenues] = useState<DailyRevenue[]>([]);
-  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
+  const [scope, setScope] = useState<HistoryScope>('period');
+  const [periodState, setPeriodState] = useSharedPeriod();
+  const bounds = useMemo(() => getPeriodBounds(periodState), [periodState]);
+  const startDate = toApiDate(bounds.start);
+  const endDate = toApiDate(bounds.end);
 
   const loadData = useCallback(async () => {
     if (!canView) {
@@ -53,19 +62,7 @@ export default function PocketMoneyHistoryScreen() {
       return;
     }
     try {
-      const now = new Date();
-      const params: { start_date?: string; end_date?: string } = {};
-      if (periodPreset === 'thisMonth') {
-        params.start_date = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
-        params.end_date = format(new Date(now.getFullYear(), now.getMonth() + 1, 0), 'yyyy-MM-dd');
-      } else if (periodPreset === 'lastMonth') {
-        params.start_date = format(new Date(now.getFullYear(), now.getMonth() - 1, 1), 'yyyy-MM-dd');
-        params.end_date = format(new Date(now.getFullYear(), now.getMonth(), 0), 'yyyy-MM-dd');
-      } else if (periodPreset === 'thisYear') {
-        params.start_date = format(new Date(now.getFullYear(), 0, 1), 'yyyy-MM-dd');
-        params.end_date = format(new Date(now.getFullYear(), 11, 31), 'yyyy-MM-dd');
-      }
-      const data = await api.getDailyRevenues(params);
+      const data = await api.getDailyRevenues(scope === 'period' ? { start_date: startDate, end_date: endDate } : {});
       // Only days with a non-zero Джобче entry - this history is about
       // that one field, not a general daily-revenue ledger (which has
       // its own screens already).
@@ -75,7 +72,7 @@ export default function PocketMoneyHistoryScreen() {
     } finally {
       setLoading(false);
     }
-  }, [canView, periodPreset, t]);
+  }, [canView, scope, startDate, endDate, t]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -121,20 +118,24 @@ export default function PocketMoneyHistoryScreen() {
             contentContainerStyle={styles.chipsContent}
           >
             {([
-              { key: 'all', label: t('expenses.periodAll') },
-              { key: 'thisMonth', label: t('expenses.periodThisMonth') },
-              { key: 'lastMonth', label: t('expenses.periodLastMonth') },
-              { key: 'thisYear', label: t('invoices.periodThisYear') },
+              { key: 'period', label: t('stats.byPeriod') },
+              { key: 'all', label: t('stats.allTime') },
             ] as const).map((opt) => (
               <TouchableOpacity
                 key={opt.key}
-                style={[styles.chip, periodPreset === opt.key && styles.chipActive]}
-                onPress={() => setPeriodPreset(opt.key)}
+                style={[styles.chip, scope === opt.key && styles.chipActive]}
+                onPress={() => setScope(opt.key)}
               >
-                <Text style={[styles.chipText, periodPreset === opt.key && styles.chipTextActive]}>{opt.label}</Text>
+                <Text style={[styles.chipText, scope === opt.key && styles.chipTextActive]}>{opt.label}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
+
+          {scope === 'period' && (
+            <View style={styles.navigatorWrap}>
+              <PeriodNavigator state={periodState} onChange={setPeriodState} />
+            </View>
+          )}
 
           <View style={styles.summaryBar}>
             <Text style={styles.summaryLabel}>{t('invoices.count')}: <Text style={styles.summaryValue}>{revenues.length}</Text></Text>
@@ -175,7 +176,7 @@ export default function PocketMoneyHistoryScreen() {
                       .sort((a, b) => (a.date < b.date ? 1 : -1))
                       .map((r) => (
                         <View key={r.id} style={styles.card}>
-                          <Text style={styles.cardDate}>{format(new Date(r.date), 'd MMM yyyy', { locale: dateLocale })}</Text>
+                          <Text style={styles.cardDate}>{format(parseISO(r.date), 'd MMM yyyy', { locale: dateLocale })}</Text>
                           <Text style={styles.cardAmount}>{r.pocket_money.toFixed(2)} €</Text>
                         </View>
                       ))}
@@ -205,6 +206,7 @@ const styles = StyleSheet.create({
   backButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 18, fontWeight: 'bold', color: 'white', flex: 1, textAlign: 'center' },
   chipsRow: { maxHeight: 44, marginBottom: 8 },
+  navigatorWrap: { paddingHorizontal: 16 },
   chipsContent: { paddingHorizontal: 16, gap: 8 },
   chip: {
     paddingHorizontal: 14,

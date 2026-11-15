@@ -629,8 +629,10 @@ class ApiService {
     return this.fetch(`/statistics/summary${query ? `?${query}` : ''}`);
   }
 
-  async getChartData(period: 'week' | 'month' | 'year' = 'week'): Promise<ChartDataPoint[]> {
-    return this.fetch(`/statistics/chart-data?period=${period}`);
+  // A calendar period's revenue and expenses, by day (by month past two
+  // months), only the days that have happened.
+  async getChartData(range: { start_date: string; end_date: string }): Promise<ChartDataPoint[]> {
+    return this.fetch(`/statistics/chart-data?start_date=${range.start_date}&end_date=${range.end_date}`);
   }
 
   // Notification Settings
@@ -799,8 +801,16 @@ class ApiService {
     return this.fetch(`/statistics/suppliers${query ? `?${query}` : ''}`);
   }
 
-  async getSupplierDetailed(supplierName: string): Promise<any> {
-    return this.fetch(`/statistics/supplier/${encodeURIComponent(supplierName)}/detailed`);
+  async getSupplierDetailed(
+    supplierName: string,
+    params?: { start_date?: string; end_date?: string; group_by?: 'day' | 'week' | 'month' | 'year' },
+  ): Promise<any> {
+    const queryParams = new URLSearchParams();
+    if (params?.start_date) queryParams.set('start_date', params.start_date);
+    if (params?.end_date) queryParams.set('end_date', params.end_date);
+    if (params?.group_by) queryParams.set('group_by', params.group_by);
+    const query = queryParams.toString();
+    return this.fetch(`/statistics/supplier/${encodeURIComponent(supplierName)}/detailed${query ? `?${query}` : ''}`);
   }
 
   async compareSuppliers(supplierNames: string[], params?: {

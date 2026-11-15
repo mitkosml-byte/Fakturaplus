@@ -380,6 +380,24 @@ export interface Summary {
   total_overdue_amount: number | null;
   overdue_invoice_count: number | null;
   financial_visibility: FinancialVisibility;
+  // The days these totals cover: a period still running is counted through
+  // today (through_date), the rest of it hasn't happened yet.
+  period?: { start_date: string; end_date: string; days: number; through_date: string };
+  revenue_day_count?: number;
+  pace?: SummaryPace | null;
+}
+
+// How a period is going, day by day (backend server.period_pace).
+export interface SummaryPace {
+  is_current: boolean;
+  open_days: number;
+  open_days_so_far: number;
+  // Days revenue was entered on - the divisor of the average; a day
+  // nobody entered is unknown, never a zero day.
+  revenue_days: number;
+  avg_per_revenue_day: number | null;
+  // Average per day x every open day of the period - only while it runs.
+  expected_income: number | null;
 }
 
 export interface ReorderItem {
@@ -432,9 +450,16 @@ export interface ChartDataPoint {
   date: string;
   label: string;
   income: number;
+  // Includes the bucket's share of the month's payroll and depreciation
+  // (fixed_costs), so the buckets add up to the summary's total expense.
   expense: number;
+  fixed_costs?: number;
   vat: number;
   is_closed: boolean;
+  has_revenue?: boolean;
+  bucket?: 'day' | 'month';
+  revenue_days?: number;
+  open_days?: number;
 }
 
 export interface NotificationSettings {
@@ -465,10 +490,14 @@ export interface SupplierStats {
 }
 
 export interface SupplierOverviewResponse {
+  // Null ends when no period was asked for: the whole history.
   period: {
-    start_date: string;
-    end_date: string;
+    start_date: string | null;
+    end_date: string | null;
   };
+  // What "active" means: bought from in the chosen period, or - for the
+  // whole history - a delivery in the last 30 days.
+  activity_basis?: 'period' | 'last_30_days';
   executive_summary: {
     top_3_concentration: number;
     top_5_concentration: number;
@@ -494,9 +523,31 @@ export interface SupplierOverviewResponse {
   all_suppliers: SupplierStats[];
 }
 
+export type SupplierGroupBy = 'day' | 'week' | 'month' | 'year';
+
+// One calendar day, week (Monday-Sunday), month or year of a supplier's
+// purchases - present even when nothing was bought (amount 0).
+export interface SupplierSeriesPoint {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+  amount: number;
+  count: number;
+  // Reaches past the chosen period (a week cut by its first day) or is
+  // still running - not a whole one, so never compared with one.
+  is_partial: boolean;
+  // Against the whole bucket before it - only between two whole ones.
+  growth_percent: number | null;
+}
+
 export interface SupplierDetailedResponse {
   supplier: string;
   found: boolean;
+  // The days the totals and the series cover (up to today).
+  period?: { start_date: string; end_date: string } | null;
+  group_by?: SupplierGroupBy;
+  series?: SupplierSeriesPoint[];
   overview?: {
     total_amount: number;
     total_vat: number;
@@ -513,6 +564,7 @@ export interface SupplierDetailedResponse {
     amount: number;
     count: number;
     growth_percent: number;
+    is_partial?: boolean;
   }[];
   anomalies?: {
     date: string;

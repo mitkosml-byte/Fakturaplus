@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   format,
+  parseISO,
   startOfWeek,
   differenceInCalendarDays,
   differenceInCalendarWeeks,
@@ -19,6 +20,7 @@ import {
 } from '../utils/periodRange';
 import { COLORS } from '../theme/colors';
 import { ChipTabs } from './ChipTabs';
+import type { Summary } from '../types';
 
 interface PeriodNavigatorProps {
   state: PeriodState;
@@ -274,4 +276,22 @@ const styles = StyleSheet.create({
   rangeDash: {
     color: COLORS.textMuted,
   },
+  soFarNote: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: -6,
+    marginBottom: 10,
+  },
 });
+
+// Under the navigator, for a period still running: which days the totals
+// below cover ("Досега: 1 ное – 15 ное") - the rest of the period hasn't
+// happened yet, so "November" on the 15th means its first half.
+export function PeriodSoFarNote({ summary }: { summary: Summary | null }) {
+  const { t, dateLocale } = useTranslation();
+  const period = summary?.period;
+  if (!period || period.through_date >= period.end_date) return null;
+  const range = `${format(parseISO(period.start_date), 'd MMM', { locale: dateLocale })} – ${format(parseISO(period.through_date), 'd MMM', { locale: dateLocale })}`;
+  return <Text style={styles.soFarNote}>{t('periodNav.soFar').replace('{range}', range)}</Text>;
+}
