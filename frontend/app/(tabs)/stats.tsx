@@ -618,9 +618,12 @@ export default function StatsScreen() {
   // shown in muted grey instead of green/red, so a genuinely closed day
   // reads as "expected" at a glance instead of looking like a problem the
   // way an unexplained zero on an open day would.
+  // A month bar is labelled MM.YY - MM.YYYY doesn't fit under a bar.
+  const barLabel = (item: ChartDataPoint) =>
+    item.bucket === 'month' ? `${item.date.slice(5, 7)}.${item.date.slice(2, 4)}` : item.label;
   const incomeBarData = chartData.map((item) => ({
     value: item.income,
-    label: item.label,
+    label: barLabel(item),
     frontColor: item.is_closed ? COLORS.borderLight : COLORS.success,
     topLabelComponent: () => (
       <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.success, fontSize: 10 }}>
@@ -631,7 +634,7 @@ export default function StatsScreen() {
 
   const expenseBarData = chartData.map((item) => ({
     value: item.expense,
-    label: item.label,
+    label: barLabel(item),
     frontColor: item.is_closed ? COLORS.borderLight : COLORS.danger,
     topLabelComponent: () => (
       <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.danger, fontSize: 10 }}>
@@ -733,7 +736,12 @@ export default function StatsScreen() {
   // there (zero when nothing was bought), and one cut by the chosen
   // range's ends or still running is drawn lighter - it is not a whole one.
   const supplierSeries = supplierDetail?.series ?? [];
-  const lastSeriesGrowth = [...supplierSeries].reverse().find((point) => point.growth_percent !== null) ?? null;
+  // Month on month (or year on year) says something; deliveries come in
+  // lumps, so day on day or week on week is mostly noise.
+  const seriesHasGrowth = supplierDetail?.group_by === 'month' || supplierDetail?.group_by === 'year';
+  const lastSeriesGrowth = seriesHasGrowth
+    ? [...supplierSeries].reverse().find((point) => point.growth_percent !== null) ?? null
+    : null;
   const formatRange = (range?: { start_date: string; end_date: string } | null) =>
     range ? `${format(parseISO(range.start_date), 'd MMM yyyy', { locale: dateLocale })} – ${format(parseISO(range.end_date), 'd MMM yyyy', { locale: dateLocale })}` : '';
 
@@ -2811,6 +2819,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   execItem: {
+    flex: 1,
     alignItems: 'center',
   },
   execValue: {
@@ -2822,6 +2831,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 4,
+    textAlign: 'center',
   },
   concentrationRow: {
     marginBottom: 12,

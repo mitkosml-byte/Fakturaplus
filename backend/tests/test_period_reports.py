@@ -176,3 +176,22 @@ def test_supplier_reports_follow_the_chosen_period(client):
         headers=headers,
     ).json()
     assert len(by_day["series"]) == 31 and sum(p["amount"] for p in by_day["series"]) == 400.0
+
+
+def test_a_bucket_still_running_is_never_compared_as_whole(client):
+    company_id, user, headers = _owner()
+    today = today_local()
+    yesterday = today - timedelta(days=1)
+    _invoice(company_id, user, "Доставчик В", yesterday, 200.0)
+    week_ago = Period(yesterday - timedelta(days=6), today)
+
+    detail = client.get(
+        f"/api/statistics/supplier/Доставчик В/detailed?start_date={week_ago.start_text}&end_date={week_ago.end_text}&group_by=day",
+        headers=headers,
+    ).json()
+    days = {point["key"]: point for point in detail["series"]}
+    # Today isn't over: partial, so no "-100% vs yesterday" for a day still running.
+    assert days[today.isoformat()]["is_partial"] is True
+    assert days[today.isoformat()]["growth_percent"] is None
+    assert days[yesterday.isoformat()]["is_partial"] is False
+    assert days[yesterday.isoformat()]["amount"] == 200.0

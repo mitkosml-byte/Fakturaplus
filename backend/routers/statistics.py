@@ -705,8 +705,12 @@ async def get_supplier_statistics(
     total_invoices = sum(s["invoice_count"] for s in suppliers_list)
     
     # Executive summary
-    top_3_concentration = sum(s["dependency_percent"] for s in top_by_amount[:3]) if len(top_by_amount) >= 3 else 0
-    top_5_concentration = sum(s["dependency_percent"] for s in top_by_amount[:5]) if len(top_by_amount) >= 5 else 0
+    # From the amounts, not the rounded percents (three of them summed to 100.1%).
+    def _share(top: List[dict]) -> float:
+        return round(min(100.0, sum(s["total_amount"] for s in top) / total_all * 100), 1) if total_all > 0 else 0
+
+    top_3_concentration = _share(top_by_amount[:3]) if len(top_by_amount) >= 3 else 0
+    top_5_concentration = _share(top_by_amount[:5]) if len(top_by_amount) >= 5 else 0
     
     return {
         "period": {
@@ -749,12 +753,13 @@ def _invoice_series(invoices: List[dict], span: Optional[Period], group_by: str)
     """(granularity used, buckets) - an invoice series over the span by day,
     week, month or year, every bucket present (zero when nothing was bought)
     and flagged partial when it reaches past the span (a week cut by the
-    period's start, the month still running). Growth compares a complete
-    bucket with the complete one before it, never a half month with a whole
-    one."""
+    period's start) or is still running (today, this week, this month).
+    Growth compares a complete bucket with the complete one before it,
+    never a half month with a whole one."""
     group = group_by if group_by in GROUPS else "month"
     if span is None:
         return group, []
+    today = today_local()
     while len(buckets(span, group)) > SERIES_MAX_BUCKETS and group != "year":
         group = GROUPS[GROUPS.index(group) + 1]
     amounts: Dict[str, list] = {}
@@ -769,7 +774,7 @@ def _invoice_series(invoices: List[dict], span: Optional[Period], group_by: str)
     previous: Optional[Dict[str, Any]] = None
     for bucket in buckets(span, group):
         amount, count = amounts.get(bucket.start_text, [0.0, 0])
-        partial = bucket.start < span.start or bucket.end > span.end
+        partial = bucket.start < span.start or bucket.end > span.end or bucket.end >= today
         growth = None
         if previous is not None and not partial and not previous["is_partial"] and previous["amount"] > 0:
             growth = round((amount - previous["amount"]) / previous["amount"] * 100, 1)
