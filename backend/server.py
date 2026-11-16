@@ -222,6 +222,9 @@ class Company(BaseModel):
     # нулев оборот. None/липсващо поле = не е конфигурирано (нищо не се
     # изключва), за да не променя поведението на вече съществуващи фирми.
     closed_weekdays: Optional[List[int]] = None
+    # The parts of the program the business uses (see BUSINESS_MODULES);
+    # absent or missing one = used.
+    modules: Optional[Dict[str, bool]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -252,6 +255,26 @@ class CompanyUpdate(BaseModel):
     bank_iban: Optional[str] = None
     vat_registered: Optional[bool] = None
     closed_weekdays: Optional[List[int]] = None
+
+# The parts of the program a business can use or leave out ("Какво ползвам"):
+# the till and pocket money, invoices issued to customers, the team and its
+# schedule, payroll, fixed assets, the owner's personal wallet. What a
+# business leaves out leaves its menus, Home and the signals; whatever it
+# entered stays, and comes back with the module. Everything else - expenses,
+# supplier invoices, scanning, statistics - every business uses.
+BUSINESS_MODULES: Tuple[str, ...] = ("till", "billing", "team", "payroll", "assets", "wallet")
+
+
+def company_modules(company: Optional[dict]) -> Dict[str, bool]:
+    """Which modules the business uses - each one until the owner says not."""
+    chosen = (company or {}).get("modules") or {}
+    return {module: chosen.get(module) is not False for module in BUSINESS_MODULES}
+
+
+async def modules_for_company(company_id: Optional[str]) -> Dict[str, bool]:
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "modules": 1}) if company_id else None
+    return company_modules(company)
+
 
 def company_vat_registered(company: Optional[dict]) -> bool:
     """Whether the business charges and deducts VAT, as the owner set it.
@@ -2682,9 +2705,12 @@ ISSUED_INVOICES: Dict[str, Any] = {"doc_type": {"$in": NUMBERED_DOC_TYPES}, "can
 ISSUED_INVOICE_REVENUE: Dict[str, Any] = {**ISSUED_INVOICES, "in_till": {"$ne": True}}
 
 
-async def company_logs_till(scope: dict) -> bool:
+async def company_logs_till(scope: dict, company_id: Optional[str] = None) -> bool:
     """Does the business enter its till's daily revenue? Then a sale paid in
-    cash or by card went through the till (a fiscal receipt) and is in it."""
+    cash or by card went through the till (a fiscal receipt) and is in it.
+    A business that left the till out enters none: its sales are their own."""
+    if company_id and not (await modules_for_company(company_id))["till"]:
+        return False
     since = (today_local() - timedelta(days=90)).isoformat()
     return bool(await db.daily_revenue.find_one({**scope, "date": {"$gte": since}, "fiscal_revenue": {"$gt": 0}}, {"_id": 1}))
 INVOICE_TERM_DAYS = 14  # an issued invoice paid by bank is due 14 days on, unless given
@@ -4254,6 +4280,20 @@ _PROACTIVE_SIGNAL_BUILDERS = [
 # invoice gets forgotten. Every other signal is an insight or a nudge and
 # can also be marked done/hidden: it then stays hidden until its situation
 # changes (a different fingerprint), not for ever.
+# The modules a signal speaks for: while the business leaves one of them
+# out, the signal stays quiet (a business without a till is never told of
+# days without till revenue).
+SIGNAL_MODULES: Dict[str, Tuple[str, ...]] = {
+    "missing_revenue": ("till",),
+    "weak_weekday": ("till",),
+    "staffing_mismatch": ("team", "till"),
+    "schedule_unpaid": ("team",),
+    "team_on_leave": ("payroll",),
+    "payroll_rates_year": ("payroll",),
+    "personal_wallet": ("wallet",),
+    "receivables": ("billing",),
+}
+
 SNOOZE_ONLY_SIGNALS = {"unpaid_invoices", "receivables", "scan_credits", "budget", "schedule_unpaid"}
 SIGNAL_SNOOZE_DAYS = 3
 # A dismissed insight is looked at afresh after this long even if unchanged.
@@ -4310,9 +4350,11 @@ async def get_proactive_signals(current_user: User) -> List[dict]:
     ).to_list(1000)
     snoozed = {st["key"] for st in states if st.get("action") == "snooze"}
     dismissed = {(st["key"], st.get("fingerprint")) for st in states if st.get("action") == "dismiss"}
+    modules = await modules_for_company(company_id)
     signals = [
         s for s in signals
         if s["key"] not in snoozed and (s["key"], s["fingerprint"]) not in dismissed
+        and all(modules.get(module, True) for module in SIGNAL_MODULES.get(s["key"], ()))
     ]
     signals.sort(key=lambda s: s["priority"], reverse=True)
     return signals

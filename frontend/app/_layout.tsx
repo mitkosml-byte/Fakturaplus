@@ -13,6 +13,7 @@ import { WalletAlertPopup } from '../src/components/WalletAlertPopup';
 import { OnboardingTutorial } from '../src/components/OnboardingTutorial';
 import { ToastHost } from '../src/components/ToastHost';
 import { useLanguageStore } from '../src/i18n';
+import { useModulesStore } from '../src/stores/modulesStore';
 import { COLORS } from '../src/theme/colors';
 
 // Single source of truth for auth-based navigation. Screens (login.tsx,
@@ -66,6 +67,15 @@ function AppShell() {
   useEffect(() => {
     loadLanguage();
   }, [loadLanguage]);
+
+  // What this business uses - the menus, Home and the tabs follow it; again
+  // whenever the person moves to another company.
+  const { user, isAuthenticated } = useAuth();
+  const loadModules = useModulesStore((state) => state.load);
+  const companyId = isAuthenticated ? user?.company_id ?? null : null;
+  useEffect(() => {
+    loadModules(companyId);
+  }, [companyId, loadModules]);
 
   return (
     <>

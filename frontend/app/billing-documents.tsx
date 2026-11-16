@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { addDays, format } from 'date-fns';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
@@ -25,6 +25,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import { useModules } from '../src/stores/modulesStore';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -47,6 +48,10 @@ export default function BillingDocumentsScreen() {
   // Cancelling an issued invoice (a tax document): owner or manager only.
   const canCancelInvoices = canIssueInvoices && (user?.role === 'owner' || user?.role === 'manager');
   const canManage = hasPermission('add_revenue') || hasPermission('issue_invoices');
+  const usesTill = useModules().uses('till');
+  // Home's "+ Фактура": straight into a new invoice.
+  const { new: startNew } = useLocalSearchParams<{ new?: string }>();
+  const startedNew = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -107,6 +112,15 @@ export default function BillingDocumentsScreen() {
   }, [canManage, t]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (loading || startedNew.current || startNew !== 'invoice' || !canIssueInvoices) return;
+    startedNew.current = true;
+    resetForm();
+    setDocType('invoice');
+    setModalVisible(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, startNew, canIssueInvoices]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -683,7 +697,7 @@ export default function BillingDocumentsScreen() {
                     <Text style={styles.invoiceHint}>
                       {formPaymentMethod === 'bank_transfer' ? t('billingDocuments.invoiceOwed') : t('billingDocuments.invoicePaidNow')}
                     </Text>
-                    {formPaymentMethod !== 'bank_transfer' && (
+                    {usesTill && formPaymentMethod !== 'bank_transfer' && (
                       <View style={styles.tillRow}>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.tillLabel}>{t('billingDocuments.inTill')}</Text>

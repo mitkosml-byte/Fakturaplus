@@ -551,6 +551,43 @@ async def update_company(company_update: CompanyUpdate, current_user: User = Dep
     updated_company = await server.db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
     return Company(**updated_company)
 
+class ModulesUpdate(BaseModel):
+    modules: Dict[str, bool]
+
+
+@router.get("/company/modules")
+async def get_company_modules(current_user: User = Depends(get_current_user)):
+    """The parts of the program this business uses - for everyone in it (the
+    menus follow), set by the owner."""
+    company_id, _ = await get_company_scope(current_user)
+    return {"modules": await modules_for_company(company_id), "can_edit": current_user.role == "owner" and bool(company_id)}
+
+
+@router.put("/company/modules")
+async def update_company_modules(payload: ModulesUpdate, current_user: User = Depends(get_current_user)):
+    """The owner says which parts the business uses. Leaving one out hides
+    it and keeps what was entered in it."""
+    if current_user.role != "owner" or not current_user.company_id:
+        raise HTTPException(status_code=403, detail="Само собственикът избира какво ползва бизнесът")
+    unknown = sorted(set(payload.modules) - set(BUSINESS_MODULES))
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Непознат модул: {', '.join(unknown)}")
+    company = await server.db.companies.find_one({"id": current_user.company_id}, {"_id": 0, "modules": 1})
+    before = company_modules(company)
+    modules = {**before, **payload.modules}
+    await server.db.companies.update_one(
+        {"id": current_user.company_id},
+        {"$set": {"modules": modules, "updated_at": datetime.now(timezone.utc)}},
+    )
+    changed = {module: on for module, on in modules.items() if before.get(module) != on}
+    if changed:
+        await audit_service.log_action(
+            user_id=current_user.user_id, user_name=current_user.name, action="update", entity_type="company_modules",
+            entity_id=current_user.company_id, company_id=current_user.company_id, details={"modules": changed},
+        )
+    return {"modules": modules, "can_edit": True}
+
+
 @router.get("/company/closed-date-exceptions", response_model=List[ClosedDateException])
 async def get_closed_date_exceptions(current_user: User = Depends(get_current_user)):
     """Връща еднократните изключения от седмичния график (празници,

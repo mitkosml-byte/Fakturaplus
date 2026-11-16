@@ -12,6 +12,7 @@ import { Invoice, PaymentMethod, VatTreatment, InvoiceDocumentType } from '../..
 import { Avatar } from '../Avatar';
 import { COLORS } from '../../theme/colors';
 import { useAuth } from '../../contexts/AuthContext';
+import { useModules } from '../../stores/modulesStore';
 import { isPackSuspect, priceAlertMeaning } from '../../utils/priceAlert';
 
 // Extracted from invoices.tsx (Module 1 audit finding #4). The single
@@ -109,7 +110,8 @@ export function InvoiceDetailModal({
   const isCreditNote = invoice?.document_type === 'credit_note';
   // Recording the purchase as a fixed asset needs both screens' rights -
   // and a purchase: a credit note is never an asset's invoice.
-  const canMakeAsset = hasPermission('manage_budget') && hasPermission('manage_invoices') && !isCreditNote;
+  const { uses } = useModules();
+  const canMakeAsset = uses('assets') && hasPermission('manage_budget') && hasPermission('manage_invoices') && !isCreditNote;
 
   const formatDate = (dateStr: string) => {
     try {
@@ -396,7 +398,7 @@ export function InvoiceDetailModal({
                   </View>
                 );
               })()}
-              {!editMode && invoice.asset_id ? (
+              {!editMode && invoice.asset_id && uses('assets') ? (
                 <TouchableOpacity
                   style={styles.assetBanner}
                   onPress={() => { onClose(); router.push('/assets'); }}

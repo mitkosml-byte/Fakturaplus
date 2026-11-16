@@ -20,6 +20,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useModules } from '../../src/stores/modulesStore';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation, useLanguageStore, Language } from '../../src/i18n';
 import { api } from '../../src/services/api';
@@ -55,6 +56,7 @@ export default function ProfileScreen() {
   const { t } = useTranslation();
   const { language, setLanguage } = useLanguageStore();
   const { user, logout, refreshUser, setUser, hasPermission, isOwner } = useAuth();
+  const { uses } = useModules();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
@@ -344,7 +346,7 @@ export default function ProfileScreen() {
               onPress: () => router.push('/users-management'),
             }]
           : []),
-        ...(hasPermission('manage_company')
+        ...(uses('till') && hasPermission('manage_company')
           ? [{
               key: 'closedDays',
               title: t('profile.closedDays'),

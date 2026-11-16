@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useModules } from '../../src/stores/modulesStore';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
@@ -82,6 +83,7 @@ export default function InvoicesScreen() {
   const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
   const { hasPermission } = useAuth();
+  const usesBilling = useModules().uses('billing');
   const router = useRouter();
   const params = useLocalSearchParams<{ paymentFilter?: string; invoiceId?: string }>();
 
@@ -711,20 +713,20 @@ export default function InvoicesScreen() {
               category - they're all documents/money with the outside
               world, the same subject matter as the invoice list right
               below, so a visible link belongs here instead. */}
-          {(hasPermission('add_revenue') || hasPermission('view_statistics')) && (
+          {((usesBilling && hasPermission('add_revenue')) || hasPermission('view_statistics')) && (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               style={styles.quickLinksRow}
               contentContainerStyle={styles.quickLinksContent}
             >
-              {hasPermission('add_revenue') && (
+              {usesBilling && hasPermission('add_revenue') && (
                 <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/receivables')}>
                   <Ionicons name="cash-outline" size={15} color={COLORS.success} />
                   <Text style={styles.quickLinkChipText}>{t('receivables.title')}</Text>
                 </TouchableOpacity>
               )}
-              {(hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
+              {usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
                 <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/billing-documents')}>
                   <Ionicons name="document-text-outline" size={15} color={COLORS.success} />
                   <Text style={styles.quickLinkChipText}>{t('billingDocuments.title')}</Text>

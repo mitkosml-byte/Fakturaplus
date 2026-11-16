@@ -508,7 +508,7 @@ function TwoFactorSection({ hasPassword, onChanged }: { hasPassword: boolean; on
             </Text>
           )}
           <TextInput
-            style={[styles.passwordInput, styles.fullWidthInput, styles.codeField]}
+            style={[styles.passwordInput, styles.fullWidthInput, styles.codeField, !!code && styles.codeFieldFilled]}
             value={code}
             onChangeText={(v) => setCode(v.replace(/\D/g, ''))}
             keyboardType="number-pad"
@@ -662,7 +662,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   linkText: { color: COLORS.primary, fontSize: 13, fontWeight: '500', marginTop: 8, marginBottom: 12 },
-  codeField: { textAlign: 'center', letterSpacing: 6, fontWeight: '600', marginBottom: 12 },
+  codeField: { textAlign: 'center', marginBottom: 12 },
+  codeFieldFilled: { letterSpacing: 6, fontWeight: '600' },
   twoFactorRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
   secondaryButton: {
     flex: 1,

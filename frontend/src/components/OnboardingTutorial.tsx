@@ -8,6 +8,8 @@ import { useTranslation } from '../i18n';
 import { useOnboardingStore } from '../stores/onboardingStore';
 import { COLORS } from '../theme/colors';
 import { ModalBlurBackdrop } from './ModalBlurBackdrop';
+import { ModulesPicker } from './ModulesPicker';
+import { useModulesStore } from '../stores/modulesStore';
 
 // Non-intrusive, one-time product tour: auto-opens the first time a given
 // user logs in (see useOnboardingStore.checkAndMaybeOpen). The small floating
@@ -75,6 +77,10 @@ export function OnboardingTutorial() {
   const [step, setStep] = React.useState(0);
   const [businessType, setBusinessType] = React.useState<string | null>(null);
   const [branchAnswered, setBranchAnswered] = React.useState(false);
+  // The owner says what the business uses ("Какво ползвам"), right after
+  // the business type - whatever it leaves out leaves the menus.
+  const canEditModules = useModulesStore((state) => state.canEdit);
+  const [modulesAnswered, setModulesAnswered] = React.useState(false);
 
   useEffect(() => {
     if (isAuthenticated && user?.user_id) {
@@ -87,6 +93,7 @@ export function OnboardingTutorial() {
       setStep(0);
       setBusinessType(null);
       setBranchAnswered(false);
+      setModulesAnswered(false);
     }
   }, [isVisible]);
 
@@ -165,6 +172,22 @@ export function OnboardingTutorial() {
                 <TouchableOpacity style={styles.secondaryBtn} onPress={() => chooseBusinessType(null)}>
                   <Text style={styles.secondaryBtnText}>{t('tutorial.skip')}</Text>
                 </TouchableOpacity>
+              </>
+            ) : canEditModules && !modulesAnswered ? (
+              <>
+                <View style={styles.iconCircle}>
+                  <Ionicons name="apps" size={32} color={COLORS.primary} />
+                </View>
+                <Text style={styles.title}>{t('tutorial.modulesQuestion')}</Text>
+                <Text style={styles.text}>{t('tutorial.modulesSubtitle')}</Text>
+                <View style={styles.modulesList}>
+                  <ModulesPicker compact />
+                </View>
+                <View style={styles.actions}>
+                  <TouchableOpacity style={styles.primaryBtn} onPress={() => setModulesAnswered(true)}>
+                    <Text style={styles.primaryBtnText}>{t('tutorial.next')}</Text>
+                  </TouchableOpacity>
+                </View>
               </>
             ) : (
               <>
@@ -320,6 +343,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     width: '100%',
+  },
+  modulesList: {
+    alignSelf: 'stretch',
+    marginBottom: 16,
   },
   secondaryBtn: {
     flex: 1,

@@ -36,6 +36,9 @@ import { PersonalExpenseModal } from '../../src/components/home/PersonalExpenseM
 import { RevenueModal, rateAmountsTotal } from '../../src/components/home/RevenueModal';
 import type { VatGroupAmount } from '../../src/types';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
+import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCard';
+import { useModules } from '../../src/stores/modulesStore';
+import { useShowTeamTab } from '../../src/hooks/useTeamTab';
 import { getDescriptionSuggestions } from '../../src/utils/expenseSuggestions';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -44,6 +47,14 @@ export default function HomeScreen() {
   const { t, dateLocale } = useTranslation();
   const { language, setLanguage } = useLanguageStore();
   const { isOwner, hasPermission, isLoading: authLoading } = useAuth();
+  // Home shows what the business uses (У3): a business without a till sees
+  // no till revenue, average per day or pocket money; one that invoices
+  // sees what it issued and what customers owe, with "+ Фактура".
+  const { uses } = useModules();
+  const usesTill = uses('till');
+  const usesBilling = uses('billing');
+  const usesWallet = uses('wallet');
+  const showTeamTab = useShowTeamTab();
   const router = useRouter();
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string; revenueDate?: string }>();
 
@@ -682,7 +693,7 @@ export default function HomeScreen() {
   // Team instead, same destination the hidden tab bar icon would have
   // pointed at anyway.
   if (!authLoading && !hasPermission('view_statistics')) {
-    return <Redirect href="/(tabs)/team" />;
+    return <Redirect href={showTeamTab ? '/(tabs)/team' : '/(tabs)/profile'} />;
   }
 
   return (
@@ -736,10 +747,12 @@ export default function HomeScreen() {
                   <SkeletonStat style={[styles.summaryCard, styles.incomeCard]} />
                   <SkeletonStat style={[styles.summaryCard, styles.expenseCard]} />
                 </View>
+                {usesTill && (
                 <View style={styles.summaryContainer}>
                   <SkeletonStat style={[styles.summaryCard, styles.cashCard]} />
                   <SkeletonStat style={[styles.summaryCard, styles.cardCard]} />
                 </View>
+                )}
               </>
             ) : (
             <>
@@ -783,7 +796,9 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* How the income came: cash, card and - for invoices paid by bank - bank */}
+        {/* How the income came: cash, card and - for invoices paid by bank - bank.
+            Cash and card are the till's - shown without one only if money came so. */}
+        {(usesTill || (summary.total_cash_revenue || 0) > 0 || (summary.total_card_revenue || 0) > 0) && (
         <View style={styles.summaryContainer}>
           <View style={[styles.summaryCard, styles.cashCard]}>
             <View style={styles.cardIcon}>
@@ -817,6 +832,7 @@ export default function HomeScreen() {
             )}
           </View>
         </View>
+        )}
         {(summary.total_bank_revenue || 0) > 0 && (
           <View style={styles.summaryContainer}>
             <View style={[styles.summaryCard, styles.bankCard]}>
@@ -876,6 +892,17 @@ export default function HomeScreen() {
         )}
             </Animated.View>
 
+        {/* A business that invoices: issued in the period, owed now,
+            overdue - and "+ Фактура" (У2, У3). */}
+        {usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
+          <BillingOverviewCard
+            startDate={toApiDate(getPeriodBounds(periodState).start)}
+            endDate={toApiDate(getPeriodBounds(periodState).end)}
+            canIssue={hasPermission('issue_invoices')}
+            refreshSignal={summary}
+          />
+        )}
+
         {/* Unpaid supplier invoices reminder - company-wide, not scoped to
             this month, since money owed from any past period is still owed */}
         {(summary?.unpaid_invoice_count || 0) > 0 && (
@@ -908,7 +935,9 @@ export default function HomeScreen() {
         )}
 
         {/* Average Daily Turnover - taps through to the same stat in Statistics,
-            broken down by period, for deeper business analysis */}
+            broken down by period, for deeper business analysis. The till's:
+            the average of the days it was entered. */}
+        {usesTill && (
         <TouchableOpacity
           style={styles.avgTurnoverCard}
           onPress={() => router.push('/(tabs)/stats')}
@@ -937,6 +966,7 @@ export default function HomeScreen() {
             </Text>
           )}
         </TouchableOpacity>
+        )}
 
         {summary?.financial_visibility?.statistics === false && (
           <View style={styles.restrictedNote}>
@@ -948,7 +978,7 @@ export default function HomeScreen() {
         {/* Closed/open-days calendar - embedded here (collapsed by default)
             so it's regularly filled in without needing a trip to Profile,
             since it directly feeds the average-turnover figure above. */}
-        {hasPermission('manage_company') && (
+        {usesTill && hasPermission('manage_company') && (
           <View style={{ marginBottom: 16 }}>
             <ClosedDaysCalendar collapsible />
           </View>
@@ -956,7 +986,7 @@ export default function HomeScreen() {
 
         {/* Personal wallet teaser - collapsed by default, see component for
             why it's gated here rather than inside it. */}
-        {hasPermission('view_personal_wallet') && <PersonalWalletTeaser refreshSignal={summary} />}
+        {usesWallet && hasPermission('view_personal_wallet') && <PersonalWalletTeaser refreshSignal={summary} />}
 
         {/* Stats Overview */}
         <View style={styles.statsGrid}>
@@ -968,6 +998,8 @@ export default function HomeScreen() {
             )}
             <Text style={styles.statLabel}>{t('home.invoices')}</Text>
           </View>
+          {usesTill && (
+          <>
           <View style={styles.statItem}>
             {summary && summary.total_fiscal_revenue === null ? (
               <LockedValue textStyle={styles.statValue} fakeText="1240" iconSize={16} />
@@ -988,6 +1020,8 @@ export default function HomeScreen() {
             )}
             <Text style={styles.statLabel}>{t('home.pocket')}</Text>
           </TouchableOpacity>
+          </>
+          )}
           <View style={[styles.statItem, { overflow: 'visible' }]}>
             <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
             {summary && summary.profit === null ? (
@@ -1014,9 +1048,9 @@ export default function HomeScreen() {
             fine-tune these independently per member via the permissions
             checklist), rather than showing a button whose only possible
             outcome is a permission-denied error from the backend. */}
-        {(hasPermission('add_revenue') || hasPermission('add_expenses')) && (
+        {((usesTill && hasPermission('add_revenue')) || hasPermission('add_expenses')) && (
           <View style={styles.actionsContainer}>
-            {hasPermission('add_revenue') && (
+            {usesTill && hasPermission('add_revenue') && (
               <TouchableOpacity
                 style={[styles.actionButton, { backgroundColor: COLORS.success }]}
                 onPress={() => {
@@ -1044,9 +1078,9 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {(hasPermission('add_revenue') || hasPermission('add_expenses')) && (
+        {((usesTill && hasPermission('add_revenue')) || hasPermission('add_expenses')) && (
           <View style={styles.importLinksRow}>
-            {hasPermission('add_revenue') && (
+            {usesTill && hasPermission('add_revenue') && (
               <TouchableOpacity style={styles.importLink} onPress={() => setImportRevenueModalVisible(true)}>
                 <Ionicons name="cloud-upload-outline" size={14} color={COLORS.primary} />
                 <Text style={styles.importLinkText}>{t('home.importRevenueHistory')}</Text>
@@ -1064,7 +1098,7 @@ export default function HomeScreen() {
         {/* Personal Expenses & ROI Section - visible to anyone with
             view_personal_investments; adding a personal expense stays an
             owner-only write action regardless. */}
-        {canViewPersonalInvestments && (
+        {usesWallet && canViewPersonalInvestments && (
           <View style={styles.roiSection}>
             <View style={styles.roiHeader}>
               <View style={styles.roiTitleRow}>

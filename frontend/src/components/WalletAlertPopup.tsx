@@ -5,6 +5,7 @@ import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useModules } from '../stores/modulesStore';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
 import { ModalBlurBackdrop } from './ModalBlurBackdrop';
@@ -23,6 +24,7 @@ const DISMISSED_MONTH_KEY = 'dismissed_wallet_alert_month';
 
 export function WalletAlertPopup() {
   const { isAuthenticated, hasPermission } = useAuth();
+  const usesWallet = useModules().uses('wallet');
   const { t } = useTranslation();
   const router = useRouter();
   const segments = useSegments();
@@ -49,7 +51,7 @@ export function WalletAlertPopup() {
   const currentMonthKey = () => toApiMonth(new Date());
 
   const checkAlert = useCallback(async () => {
-    if (!isAuthenticated || !hasPermission('view_personal_wallet') || !storageLoaded) return;
+    if (!isAuthenticated || !usesWallet || !hasPermission('view_personal_wallet') || !storageLoaded) return;
     const now = Date.now();
     if (now - lastCheckRef.current < RECHECK_INTERVAL_MS) return;
     lastCheckRef.current = now;
@@ -63,7 +65,7 @@ export function WalletAlertPopup() {
     } catch (error) {
       console.error('Error checking wallet alert:', error);
     }
-  }, [isAuthenticated, hasPermission, storageLoaded]);
+  }, [isAuthenticated, hasPermission, storageLoaded, usesWallet]);
 
   useEffect(() => {
     if (isAuthenticated) checkAlert();

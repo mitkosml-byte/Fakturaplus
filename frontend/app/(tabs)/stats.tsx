@@ -22,6 +22,7 @@ import { formatUnitPrice } from '../../src/utils/priceAlert';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useModules } from '../../src/stores/modulesStore';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
@@ -64,6 +65,7 @@ const SERIES_BAR_WIDTH: Record<SupplierGroupBy, number> = { day: 22, week: 26, m
 export default function StatsScreen() {
   const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
+  const { uses } = useModules();
   const router = useRouter();
   // Dimensions.get('window') used to be read ONCE at module-eval time -
   // harmless on native, but this app's web build is statically pre-rendered
@@ -1069,7 +1071,7 @@ export default function StatsScreen() {
                     <Text style={styles.quickLinkChipText}>{t('profile.budget')}</Text>
                   </TouchableOpacity>
                 )}
-                {hasPermission('manage_budget') && (
+                {uses('assets') && hasPermission('manage_budget') && (
                   <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/assets')}>
                     <Ionicons name="business-outline" size={15} color={COLORS.warning} />
                     <Text style={styles.quickLinkChipText}>{t('assets.title')}</Text>

@@ -7,6 +7,7 @@ import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { AnimatedTabIcon } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
+import { useShowTeamTab } from '../../src/hooks/useTeamTab';
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
@@ -14,7 +15,7 @@ export default function TabsLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const { width } = useWindowDimensions();
-  const { hasPermission, user } = useAuth();
+  const { hasPermission } = useAuth();
 
   // The Team tab (Calendar/Messages/Payroll/Absences/Work schedule) earns
   // a slot in the bar for a viewer who can reach at least one of
@@ -26,7 +27,8 @@ export default function TabsLayout() {
   // used to resolve which tab a swipe should land on and to know a
   // swipe's direction relative to it - recomputed here (not a
   // module-level constant) since it now depends on this check.
-  const showTeamTab = hasPermission('team_collaboration') || hasPermission('manage_budget') || !!user?.company_id;
+  // ...and only while the business uses the team or payroll module.
+  const showTeamTab = useShowTeamTab();
   // Scan/Invoices both ultimately create or manage invoice records (the
   // scan endpoint itself requires manage_invoices server-side), and Stats
   // is squarely "advanced statistics" - none of these were ever meant to

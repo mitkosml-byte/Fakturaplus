@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useTranslation } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
+import { useModules } from '../../src/stores/modulesStore';
 
 // New tab (navigation-architecture review, 2026-10): Calendar and Messages
 // used to live as two unrelated entries buried inside Profile's "company"
@@ -31,13 +32,16 @@ export default function TeamScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { hasPermission } = useAuth();
+  const { uses } = useModules();
+  const team = uses('team');
+  const payroll = uses('payroll');
 
   const cards: CardDef[] = [
     // Not permission-gated, unlike every other card here - a work
     // schedule is relevant to EVERY team member (they see their own
     // shifts even with no special permission at all), not just managers
     // or team_collaboration holders.
-    {
+    ...(team ? [{
       key: 'schedule',
       title: t('profile.workSchedule'),
       subtitle: t('profile.workScheduleDesc'),
@@ -45,8 +49,8 @@ export default function TeamScreen() {
       iconBg: 'rgba(139, 92, 246, 0.15)',
       iconColor: COLORS.primary,
       route: '/work-schedule' as const,
-    },
-    ...(hasPermission('team_collaboration')
+    }] : []),
+    ...(team && hasPermission('team_collaboration')
       ? [{
           key: 'calendar',
           title: t('profile.calendar'),
@@ -57,7 +61,7 @@ export default function TeamScreen() {
           route: '/calendar' as const,
         }]
       : []),
-    ...(hasPermission('team_collaboration')
+    ...(team && hasPermission('team_collaboration')
       ? [{
           key: 'messages',
           title: t('profile.messages'),
@@ -68,7 +72,7 @@ export default function TeamScreen() {
           route: '/messages' as const,
         }]
       : []),
-    ...(hasPermission('manage_payroll')
+    ...(payroll && hasPermission('manage_payroll')
       ? [{
           key: 'payroll',
           title: t('payroll.title'),
@@ -79,7 +83,7 @@ export default function TeamScreen() {
           route: '/payroll' as const,
         }]
       : []),
-    ...(hasPermission('manage_budget')
+    ...(payroll && hasPermission('manage_budget')
       ? [{
           key: 'absences',
           title: t('absences.title'),

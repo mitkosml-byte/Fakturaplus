@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
+import { useModules } from '../src/stores/modulesStore';
 import { ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
@@ -19,6 +20,7 @@ export default function HistoryHubScreen() {
   const router = useRouter();
   const { t } = useTranslation();
   const { hasPermission } = useAuth();
+  const { uses } = useModules();
 
   const items: {
     key: string;
@@ -44,7 +46,7 @@ export default function HistoryHubScreen() {
       iconColor: COLORS.warning,
       onPress: () => router.push('/off-book-expenses'),
     }] : []),
-    ...(hasPermission('view_pocket_money') ? [{
+    ...(uses('till') && hasPermission('view_pocket_money') ? [{
       key: 'pocketMoney',
       title: t('pocketMoney.historyTitle'),
       subtitle: t('historyHub.pocketMoneyDesc'),
@@ -52,7 +54,7 @@ export default function HistoryHubScreen() {
       iconColor: COLORS.success,
       onPress: () => router.push('/pocket-money-history'),
     }] : []),
-    ...(hasPermission('view_personal_investments') || hasPermission('view_personal_wallet') ? [{
+    ...(uses('wallet') && (hasPermission('view_personal_investments') || hasPermission('view_personal_wallet')) ? [{
       key: 'personalExpenses',
       title: t('personal.title'),
       subtitle: t('historyHub.personalExpensesDesc'),
@@ -60,7 +62,7 @@ export default function HistoryHubScreen() {
       iconColor: COLORS.danger,
       onPress: () => router.push('/personal-expenses'),
     }] : []),
-    ...(hasPermission('add_revenue') ? [{
+    ...(uses('billing') && hasPermission('add_revenue') ? [{
       key: 'receivables',
       title: t('receivables.title'),
       subtitle: t('profile.receivablesDesc'),
@@ -68,7 +70,7 @@ export default function HistoryHubScreen() {
       iconColor: COLORS.success,
       onPress: () => router.push('/receivables'),
     }] : []),
-    ...(hasPermission('add_revenue') || hasPermission('issue_invoices') ? [{
+    ...(uses('billing') && (hasPermission('add_revenue') || hasPermission('issue_invoices')) ? [{
       key: 'billingDocuments',
       title: t('billingDocuments.title'),
       subtitle: t('profile.billingDocumentsDesc'),

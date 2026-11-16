@@ -197,7 +197,7 @@ export default function LoginScreen() {
                     <Ionicons name={useRecoveryCode ? 'key-outline' : 'keypad-outline'} size={20} color={COLORS.textMuted} style={styles.inputIcon} />
                     <TextInput
                       key={useRecoveryCode ? 'recovery' : 'code'}
-                      style={[styles.input, styles.codeInput]}
+                      style={[styles.input, !!code && styles.codeInput]}
                       placeholder={useRecoveryCode ? 'XXXX-XXXX' : t('login.twoFactorPlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                       value={code}

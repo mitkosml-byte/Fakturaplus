@@ -388,7 +388,7 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
     # unless the business says otherwise or keeps no till here: then its
     # money is in that day's till revenue and the invoice adds none.
     in_till = paid_when_issued and (
-        payload.in_till if payload.in_till is not None else await company_logs_till(scope)
+        payload.in_till if payload.in_till is not None else await company_logs_till(scope, company_id)
     )
     due_date = None
     if not paid_when_issued:
@@ -616,7 +616,34 @@ async def get_invoice_defaults(current_user: User = Depends(get_current_user)):
     company = await server.db.companies.find_one(
         {"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1},
     ) if company_id else None
-    return {"vat_registered": company_vat_registered(company), "logs_till": await company_logs_till(scope)}
+    return {"vat_registered": company_vat_registered(company), "logs_till": await company_logs_till(scope, company_id)}
+
+
+@router.get("/billing-documents/overview")
+async def get_billing_overview(
+    start_date: Optional[str] = None, end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Home's cards for a business that invoices: what it issued in the
+    period (invoices less their credit notes), what customers owe now and
+    what of that is overdue."""
+    require_sales_access(current_user)
+    _, scope = await get_company_scope(current_user)
+    try:
+        period = Period.parse(start_date, end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    documents = await server.db.billing_documents.find(
+        {**scope, **ISSUED_INVOICES, "issue_date": period.text_filter()},
+        {"_id": 0, "doc_type": 1, "total_amount": 1},
+    ).to_list(ALL_ROWS)
+    invoices = [d for d in documents if d.get("doc_type") == "invoice"]
+    credited = sum(abs(float(d.get("total_amount") or 0)) for d in documents if d.get("doc_type") == "credit_note")
+    return {
+        "issued_count": len(invoices),
+        "issued_total": round(sum(float(d.get("total_amount") or 0) for d in invoices) - credited, 2),
+        **(await receivables_summary_for(scope)),
+    }
 
 
 async def _with_payment(scope: dict, docs: List[dict]) -> List[BillingDocumentView]:

@@ -13,6 +13,22 @@ export interface User {
   created_at: string;
 }
 
+// The parts of the program a business uses (the owner chooses): the till
+// and pocket money, invoices issued to customers, the team and its
+// schedule, payroll, fixed assets, the owner's personal wallet.
+export type BusinessModule = 'till' | 'billing' | 'team' | 'payroll' | 'assets' | 'wallet';
+export type BusinessModules = Record<BusinessModule, boolean>;
+
+// Home's cards for a business that invoices.
+export interface BillingOverview {
+  issued_count: number;
+  issued_total: number;
+  total_owed: number;
+  unpaid_count: number;
+  total_overdue: number;
+  overdue_count: number;
+}
+
 export type TwoFactorMethod = 'totp' | 'email';
 
 // The password was right; the login waits for the code (or a recovery code).
@@ -62,6 +78,7 @@ export interface Company {
   // Weekdays the business is normally closed (0=Monday..6=Sunday) - excluded
   // from "average per day" statistics instead of counting as zero-revenue.
   closed_weekdays?: number[];
+  modules?: Partial<BusinessModules> | null;
   created_at: string;
   updated_at: string;
 }

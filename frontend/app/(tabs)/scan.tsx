@@ -25,6 +25,7 @@ import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useModules } from '../../src/stores/modulesStore';
 import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint, InvoiceDraftCheck, InvoiceDraftFix, InvoiceDocumentType } from '../../src/types';
 import { detectPackMultiple, formatEur, priceAlertMeaning } from '../../src/utils/priceAlert';
 import { format, parse } from 'date-fns';
@@ -73,7 +74,9 @@ export default function ScanScreen() {
   const [scanMode, setScanMode] = useState<'purchase' | 'sales'>('purchase');
   // An invoice the business issued is saved as an issued invoice - its own right.
   const { hasPermission } = useAuth();
-  const canIssueInvoices = hasPermission('issue_invoices');
+  const { uses } = useModules();
+  const canIssueInvoices = hasPermission('issue_invoices') && uses('billing');
+  const usesTill = uses('till');
   const [salesVatRate, setSalesVatRate] = useState<20 | 9 | 0>(20);
   const [salesCustomer, setSalesCustomer] = useState('');
   const [salesCustomerEik, setSalesCustomerEik] = useState('');
@@ -1162,7 +1165,7 @@ export default function ScanScreen() {
                             </TouchableOpacity>
                           ))}
                         </View>
-                        {salesPaymentMethod !== 'bank_transfer' && (
+                        {usesTill && salesPaymentMethod !== 'bank_transfer' && (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 }}>
                             <View style={{ flex: 1 }}>
                               <Text style={styles.inputLabel}>{t('billingDocuments.inTill')}</Text>
