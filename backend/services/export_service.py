@@ -435,13 +435,20 @@ class ExportService:
         cell_style = ParagraphStyle('InvCell', parent=styles['Normal'], fontName=PDF_FONT, fontSize=9, leading=12)
         normal_style = ParagraphStyle('InvNormal', parent=styles['Normal'], fontName=PDF_FONT, fontSize=10, spaceAfter=3)
 
+        credit_note = document.get("doc_type") == "credit_note"
         elements: List[Any] = [
-            Paragraph("ФАКТУРА", title_style),
+            Paragraph("КРЕДИТНО ИЗВЕСТИЕ" if credit_note else "ФАКТУРА", title_style),
             Paragraph(f"№ {text(document.get('invoice_number'))} / {day_text(document.get('issue_date'))}", center_style),
-            Paragraph("ОРИГИНАЛ", center_style),
         ]
+        if credit_note:
+            # The invoice it changes, as the law asks a credit note to name it.
+            elements.append(Paragraph(
+                f"към фактура № {text(document.get('credited_invoice_number'))} / {day_text(document.get('credited_issue_date'))}",
+                center_style,
+            ))
+        elements.append(Paragraph("ОРИГИНАЛ", center_style))
         if document.get("cancelled"):
-            elements.append(Paragraph("АНУЛИРАНА", warn_style))
+            elements.append(Paragraph("АНУЛИРАНО" if credit_note else "АНУЛИРАНА", warn_style))
         elements.append(Spacer(1, 5 * mm))
 
         city_address = ", ".join(part for part in (company.get("city"), company.get("address")) if part)
@@ -494,12 +501,15 @@ class ExportService:
         ]))
         elements += [lines, Spacer(1, 4 * mm)]
 
+        # A credit note's amounts are kept below zero; the document states
+        # them as the amounts it credits.
         totals: List[List[str]] = []
         for row in document.get("vat_by_rate") or []:
             rate = f"{float(row.get('rate', 0)):g}%"
-            totals.append([f"Данъчна основа {rate}:", f"{float(row.get('base', 0)):.2f} €"])
-            totals.append([f"ДДС {rate}:", f"{float(row.get('vat', 0)):.2f} €"])
-        totals.append(["Сума за плащане:", f"{float(document.get('total_amount', 0)):.2f} €"])
+            totals.append([f"Данъчна основа {rate}:", f"{abs(float(row.get('base', 0))):.2f} €"])
+            totals.append([f"ДДС {rate}:", f"{abs(float(row.get('vat', 0))):.2f} €"])
+        totals.append(["Сума на известието:" if credit_note else "Сума за плащане:",
+                       f"{abs(float(document.get('total_amount', 0))):.2f} €"])
         totals_table = Table(totals, colWidths=[50 * mm, 30 * mm], hAlign='RIGHT')
         totals_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
@@ -515,14 +525,17 @@ class ExportService:
         elements.append(Paragraph(f"Дата на данъчното събитие: {day_text(document.get('issue_date'))}", normal_style))
         if document.get("vat_exempt_basis"):
             elements.append(Paragraph(f"Основание за неначисляване на ДДС: {text(document.get('vat_exempt_basis'))}", normal_style))
-        elements.append(Paragraph(f"Начин на плащане: {method_text}", normal_style))
-        if method not in ("cash", "card"):
+        if credit_note:
+            elements.append(Paragraph(f"Основание за издаване: {text(document.get('notes'))}", normal_style))
+        else:
+            elements.append(Paragraph(f"Начин на плащане: {method_text}", normal_style))
+        if method not in ("cash", "card") and not credit_note:
             if company.get("bank_iban"):
                 bank = f" ({text(company.get('bank_name'))})" if company.get("bank_name") else ""
                 elements.append(Paragraph(f"IBAN: {text(company.get('bank_iban'))}{bank}", normal_style))
             if document.get("due_date"):
                 elements.append(Paragraph(f"Срок за плащане: {day_text(document.get('due_date'))}", normal_style))
-        if document.get("notes"):
+        if document.get("notes") and not credit_note:
             elements.append(Paragraph(f"Бележки: {text(document.get('notes'))}", normal_style))
         elements.append(Spacer(1, 14 * mm))
         signatures = Table([["Съставил: ..............................", "Получил: .............................."]], colWidths=[90 * mm, 90 * mm])
@@ -783,7 +796,10 @@ class ExportService:
             if not cancelled:
                 base_20, vat_20, base_9, vat_9, base_0 = _rate_parts(doc)
             total = 0.0 if cancelled else float(doc.get("total_amount", 0) or 0)
-            kind = "Фактура (01) - анулирана" if cancelled else "Фактура (01)"
+            # A credit note (its amounts below zero) is code 03 of the ledger.
+            kind = "Кредитно известие (03)" if doc.get("doc_type") == "credit_note" else "Фактура (01)"
+            if cancelled:
+                kind += " - анулирано" if doc.get("doc_type") == "credit_note" else " - анулирана"
             return (
                 str(doc.get("issue_date", ""))[:10], 1, kind, _excel_safe(doc.get("invoice_number") or ""),
                 _excel_safe(doc.get("customer_name") or ""), _excel_safe(doc.get("customer_eik") or ""),

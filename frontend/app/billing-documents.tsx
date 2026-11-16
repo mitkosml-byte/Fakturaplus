@@ -77,6 +77,8 @@ export default function BillingDocumentsScreen() {
   // its money is in that day's till revenue - not counted a second time.
   const [logsTill, setLogsTill] = useState(false);
   const [formInTill, setFormInTill] = useState(false);
+  // The invoice a credit note is being issued to (the form is then that).
+  const [creditFor, setCreditFor] = useState<BillingDocument | null>(null);
 
   const loadData = useCallback(async () => {
     if (!canManage) {
@@ -109,6 +111,7 @@ export default function BillingDocumentsScreen() {
   };
 
   const resetForm = () => {
+    setCreditFor(null);
     setDocType(canBill ? 'bill' : 'invoice');
     setFormCustomerEik('');
     setFormCustomerAddress('');
@@ -164,7 +167,20 @@ export default function BillingDocumentsScreen() {
     return itemDirectory.filter((it) => it.name.toLowerCase() !== q && it.name.toLowerCase().includes(q)).slice(0, 5);
   };
 
-  const isInvoice = docType === 'invoice';
+  // A credit note is laid out as an invoice is: lines with their VAT rates.
+  const isInvoice = docType === 'invoice' || docType === 'credit_note';
+  const isCreditNote = docType === 'credit_note';
+  const creditLeft = creditFor ? Math.max(creditFor.total_amount - (creditFor.credited_amount || 0), 0) : 0;
+
+  const openCreditNote = (invoice: BillingDocument) => {
+    resetForm();
+    setDocType('credit_note');
+    setCreditFor(invoice);
+    setFormCustomerName(invoice.customer_name);
+    setFormCustomerId(invoice.customer_id || null);
+    setFormItems([{ ...emptyFormItem(), vat_rate: String(invoice.vat_by_rate?.[0]?.rate ?? 20) }]);
+    setModalVisible(true);
+  };
   // Known customers matching what is typed (or the most recent few while
   // the field is empty) - one tap fills the name, EIK and address.
   const customerMatches = useMemo(() => {
@@ -191,7 +207,9 @@ export default function BillingDocumentsScreen() {
     const price = parseFloat(it.unit_price) || 0;
     return sum + qty * price;
   }, 0);
-  const vatExempt = isInvoice && !vatRegistered;
+  // Without VAT: an invoice of a business not registered for it, or a credit
+  // note to an invoice issued without VAT.
+  const vatExempt = isCreditNote ? !!creditFor?.vat_exempt_basis : isInvoice && !vatRegistered;
   // VAT on each rate's whole base, as the invoice prints it.
   const formVat = isInvoice && !vatExempt
     ? Object.entries(formItems.reduce<Record<string, number>>((acc, it) => {
@@ -214,9 +232,28 @@ export default function BillingDocumentsScreen() {
     setCustomerNameError(missingName);
     setItemsError(validItems.length === 0);
     if (missingName || validItems.length === 0) return;
+    if (isCreditNote && !formNotes.trim()) {
+      Alert.alert(t('common.error'), t('billingDocuments.creditNoteReasonPlaceholder'));
+      return;
+    }
 
     setSaving(true);
     try {
+      if (isCreditNote && creditFor) {
+        const note = await api.createBillingDocument({
+          doc_type: 'credit_note',
+          credited_document_id: creditFor.id,
+          customer_name: creditFor.customer_name,
+          items: validItems,
+          notes: formNotes.trim(),
+        });
+        Haptics.success();
+        Toast.success(t('billingDocuments.creditNoteSaved').replace('{number}', note.invoice_number || ''));
+        setModalVisible(false);
+        resetForm();
+        loadData();
+        return;
+      }
       const saved = await api.createBillingDocument({
         doc_type: docType,
         customer_name: formCustomerName.trim(),
@@ -250,7 +287,9 @@ export default function BillingDocumentsScreen() {
   const handleDownload = async (doc: BillingDocument) => {
     setDownloadingId(doc.id);
     try {
-      const name = doc.doc_type === 'invoice' && doc.invoice_number ? `faktura_${doc.invoice_number}` : `${doc.doc_type}_${doc.id.slice(0, 8)}`;
+      const name = doc.doc_type === 'invoice' && doc.invoice_number ? `faktura_${doc.invoice_number}`
+        : doc.doc_type === 'credit_note' && doc.invoice_number ? `kreditno_izvestie_${doc.invoice_number}`
+          : `${doc.doc_type}_${doc.id.slice(0, 8)}`;
       await downloadAndShareFile(api.getBillingDocumentPdfUrl(doc.id), `${name}.pdf`);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message || t('billingDocuments.downloadError'));
@@ -277,7 +316,8 @@ export default function BillingDocumentsScreen() {
         : status === 'credited' ? styles.paymentCredited : styles.paymentOwed;
 
   const handleDelete = (doc: BillingDocument) => {
-    const confirmText = doc.doc_type === 'invoice' ? t('billingDocuments.invoiceDeleteConfirm') : t('billingDocuments.deleteConfirm');
+    const confirmText = doc.doc_type === 'invoice' ? t('billingDocuments.invoiceDeleteConfirm')
+      : doc.doc_type === 'credit_note' ? t('billingDocuments.creditNoteDeleteConfirm') : t('billingDocuments.deleteConfirm');
     Alert.alert(t('common.delete'), confirmText, [
       { text: t('common.cancel'), style: 'cancel' },
       {
@@ -355,11 +395,16 @@ export default function BillingDocumentsScreen() {
                 <View key={doc.id} style={[styles.card, doc.cancelled && { opacity: 0.55 }]}>
                   <View style={styles.rowTop}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
-                      <View style={[styles.typeBadge, doc.doc_type === 'bill' && styles.typeBadgeBill, doc.doc_type === 'invoice' && styles.typeBadgeInvoice]}>
+                      <View style={[
+                        styles.typeBadge, doc.doc_type === 'bill' && styles.typeBadgeBill,
+                        (doc.doc_type === 'invoice' || doc.doc_type === 'credit_note') && styles.typeBadgeInvoice,
+                      ]}>
                         <Text style={styles.typeBadgeText}>
                           {doc.doc_type === 'invoice'
                             ? `${t('billingDocuments.typeInvoice')} № ${doc.invoice_number || ''}`
-                            : doc.doc_type === 'bill' ? t('billingDocuments.typeBill') : t('billingDocuments.typeQuote')}
+                            : doc.doc_type === 'credit_note'
+                              ? `${t('billingDocuments.typeCreditNote')} № ${doc.invoice_number || ''}`
+                              : doc.doc_type === 'bill' ? t('billingDocuments.typeBill') : t('billingDocuments.typeQuote')}
                         </Text>
                       </View>
                       {doc.cancelled && (
@@ -378,9 +423,22 @@ export default function BillingDocumentsScreen() {
                         </View>
                       )}
                     </View>
-                    <Text style={[styles.amount, doc.cancelled && { textDecorationLine: 'line-through' }]}>{doc.total_amount.toFixed(2)} €</Text>
+                    <Text style={[
+                      styles.amount, doc.total_amount < 0 && { color: COLORS.danger },
+                      doc.cancelled && { textDecorationLine: 'line-through' },
+                    ]}>{doc.total_amount.toFixed(2)} €</Text>
                   </View>
                   <Text style={styles.customerName} numberOfLines={1}>{doc.customer_name}</Text>
+                  {doc.doc_type === 'credit_note' && doc.credited_invoice_number && (
+                    <Text style={styles.creditLine}>
+                      {t('billingDocuments.creditNoteTo').replace('{number}', doc.credited_invoice_number)}
+                    </Text>
+                  )}
+                  {doc.doc_type === 'invoice' && (doc.credited_amount || 0) > 0 && (
+                    <Text style={styles.creditLine}>
+                      {t('billingDocuments.creditedLine').replace('{amount}', (doc.credited_amount || 0).toFixed(2))}
+                    </Text>
+                  )}
                   {doc.payment_status && (
                     <View style={styles.paymentRow}>
                       <View style={[styles.paymentBadge, paymentBadgeStyle(doc.payment_status)]}>
@@ -405,7 +463,15 @@ export default function BillingDocumentsScreen() {
                           )}
                         </TouchableOpacity>
                       )}
-                      {!doc.cancelled && (doc.doc_type !== 'invoice' ? canBill : doc.external ? canIssueInvoices : canCancelInvoices) && (
+                      {doc.doc_type === 'invoice' && !doc.cancelled && canIssueInvoices
+                        && doc.total_amount - (doc.credited_amount || 0) > 0.005 && (
+                        <TouchableOpacity onPress={() => openCreditNote(doc)} hitSlop={8} accessibilityLabel={t('billingDocuments.creditNoteAction')}>
+                          <Ionicons name="return-down-back-outline" size={18} color={COLORS.primary} />
+                        </TouchableOpacity>
+                      )}
+                      {!doc.cancelled && (
+                        doc.doc_type !== 'invoice' && doc.doc_type !== 'credit_note' ? canBill : doc.external ? canIssueInvoices : canCancelInvoices
+                      ) && (
                         <TouchableOpacity onPress={() => handleDelete(doc)} hitSlop={8}>
                           <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
                         </TouchableOpacity>
@@ -420,8 +486,18 @@ export default function BillingDocumentsScreen() {
           <BottomSheet visible={modalVisible} onClose={() => { setModalVisible(false); resetForm(); }}>
             <View style={styles.modalContent}>
               <ScrollView keyboardShouldPersistTaps="handled">
-                <Text style={styles.modalTitle}>{t('billingDocuments.addNew')}</Text>
+                <Text style={styles.modalTitle}>
+                  {creditFor
+                    ? t('billingDocuments.creditNoteTitle').replace('{number}', creditFor.invoice_number || '')
+                    : t('billingDocuments.addNew')}
+                </Text>
+                {creditFor && (
+                  <Text style={styles.invoiceHint}>
+                    {creditFor.customer_name} · {t('billingDocuments.creditNoteHint').replace('{left}', creditLeft.toFixed(2))}
+                  </Text>
+                )}
 
+                {!creditFor && (
                 <View style={styles.typeSelector}>
                   {(['bill', 'invoice', 'quote'] as const).filter((opt) => (opt === 'invoice' ? canIssueInvoices : canBill)).map((opt) => (
                     <TouchableOpacity
@@ -435,8 +511,11 @@ export default function BillingDocumentsScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
-                {isInvoice && <Text style={styles.invoiceHint}>{t('billingDocuments.invoiceHint')}</Text>}
+                )}
+                {isInvoice && !creditFor && <Text style={styles.invoiceHint}>{t('billingDocuments.invoiceHint')}</Text>}
 
+                {!creditFor && (
+                <>
                 <Text style={styles.inputLabel}>{t('receivables.customerName')}</Text>
                 <TextInput
                   style={[styles.input, customerNameError && styles.inputErrorBorder]}
@@ -460,8 +539,10 @@ export default function BillingDocumentsScreen() {
                 <Expandable expanded={customerNameError}>
                   <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
                 </Expandable>
+                </>
+                )}
 
-                {isInvoice && (
+                {isInvoice && !creditFor && (
                   <>
                     <Text style={styles.inputLabel}>{t('billingDocuments.customerEik')}</Text>
                     <TextInput
@@ -613,12 +694,14 @@ export default function BillingDocumentsScreen() {
                 )}
                 <Text style={styles.totalPreview}>{t('receivables.amount')}: {formTotal.toFixed(2)} €</Text>
 
-                <Text style={styles.inputLabel}>{t('receivables.description')}</Text>
+                <Text style={styles.inputLabel}>
+                  {isCreditNote ? t('billingDocuments.creditNoteReason') : t('receivables.description')}
+                </Text>
                 <TextInput
                   style={styles.input}
                   value={formNotes}
                   onChangeText={setFormNotes}
-                  placeholder={t('receivables.descriptionPlaceholder')}
+                  placeholder={isCreditNote ? t('billingDocuments.creditNoteReasonPlaceholder') : t('receivables.descriptionPlaceholder')}
                   placeholderTextColor={COLORS.textMuted}
                 />
 
@@ -684,6 +767,7 @@ const styles = StyleSheet.create({
   paymentOverdue: { backgroundColor: 'rgba(239, 68, 68, 0.35)' },
   paymentCredited: { backgroundColor: 'rgba(148, 163, 184, 0.3)' },
   refundText: { fontSize: 12, color: COLORS.warning },
+  creditLine: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 },
   invoiceHint: { fontSize: 12, color: COLORS.textSecondary, marginTop: 6, lineHeight: 17 },
   subtotalPreview: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6, textAlign: 'right' },
   typeBadgeText: { fontSize: 11, fontWeight: '700', color: 'white' },

@@ -281,7 +281,9 @@ export interface BillingDocumentItem {
 
 // quote / bill: non-fiscal; invoice: issued to a customer - numbered in
 // sequence, with VAT, revenue and VAT on its issue date, owed until paid.
-export type BillingDocumentType = 'quote' | 'bill' | 'invoice';
+// credit_note: a credit note to a customer on an invoice issued to them -
+// numbered with the invoices, its amounts below zero.
+export type BillingDocumentType = 'quote' | 'bill' | 'invoice' | 'credit_note';
 
 export interface BillingDocument {
   id: string;
@@ -312,6 +314,12 @@ export interface BillingDocument {
   // Paid in cash or by card through the till: its money is in that day's
   // till revenue already - not counted again as income or VAT.
   in_till?: boolean;
+  // A credit note: the invoice it is to.
+  credited_document_id?: string | null;
+  credited_invoice_number?: string | null;
+  credited_issue_date?: string | null;
+  // An invoice: what its credit notes took off (above zero).
+  credited_amount?: number;
   // Where a bill's or an invoice's money stands (as listed).
   payment_status?: 'paid' | 'partly_paid' | 'owed' | 'overdue' | 'credited' | null;
   paid_amount?: number | null;

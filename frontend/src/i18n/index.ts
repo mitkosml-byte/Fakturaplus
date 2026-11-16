@@ -1316,6 +1316,22 @@ export const translations: Translations = {
     bg: 'Сметката е изтрита. По вземането вече има плащане, затова то остава.',
     en: 'Bill deleted. Its receivable already has a payment, so it stays.',
   },
+  'billingDocuments.typeCreditNote': { bg: 'КИ', en: 'CN' },
+  'billingDocuments.creditNoteAction': { bg: 'Кредитно известие', en: 'Credit note' },
+  'billingDocuments.creditNoteTitle': { bg: 'Кредитно известие към фактура № {number}', en: 'Credit note to invoice No. {number}' },
+  'billingDocuments.creditNoteHint': {
+    bg: 'Намалява прихода и ДДС на датата си и дължимото по фактурата. Може да се кредитират още {left} €.',
+    en: 'Takes revenue and VAT off on its date, and off what is owed on the invoice. Up to {left} € more can be credited.',
+  },
+  'billingDocuments.creditNoteReason': { bg: 'Основание', en: 'Reason' },
+  'billingDocuments.creditNoteReasonPlaceholder': { bg: 'Напр. отстъпка, върната стока', en: 'E.g. a discount, goods returned' },
+  'billingDocuments.creditNoteSaved': { bg: 'Кредитно известие № {number} е издадено', en: 'Credit note No. {number} issued' },
+  'billingDocuments.creditNoteTo': { bg: 'към фактура № {number}', en: 'to invoice No. {number}' },
+  'billingDocuments.creditedLine': { bg: 'Кредитирана с {amount} €', en: 'Credited by {amount} €' },
+  'billingDocuments.creditNoteDeleteConfirm': {
+    bg: 'Да анулирам ли кредитното известие? Фактурата отново ще се дължи изцяло.',
+    en: 'Cancel this credit note? The invoice will be owed in full again.',
+  },
   'billingDocuments.refundAfterCancel': {
     bg: 'По нея вече е платено {amount} €. Нищо не се дължи повече, а платеното е за връщане на клиента (или прихващане) - вижда се във Вземания.',
     en: '{amount} € was already paid on it. Nothing is owed any more, and what was paid is the customer\'s to get back (or offset) - see Receivables.',

@@ -137,7 +137,9 @@ export default function CustomersScreen() {
   const docLabel = (doc: CustomerCard['documents'][number]) =>
     doc.doc_type === 'invoice'
       ? `${t('billingDocuments.typeInvoice')} № ${doc.invoice_number || ''}`
-      : doc.doc_type === 'bill' ? t('billingDocuments.typeBill') : t('billingDocuments.typeQuote');
+      : doc.doc_type === 'credit_note'
+        ? `${t('billingDocuments.typeCreditNote')} № ${doc.invoice_number || ''}`
+        : doc.doc_type === 'bill' ? t('billingDocuments.typeBill') : t('billingDocuments.typeQuote');
 
   if (!canManage) {
     return <AccessDenied />;

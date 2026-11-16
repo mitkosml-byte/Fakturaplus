@@ -128,13 +128,15 @@ async def get_customer_card(customer_id: str, current_user: User = Depends(get_c
     receivables = [r for r in await server.db.receivables.find(who, {"_id": 0}).to_list(ALL_ROWS) if theirs(r)]
 
     invoices = [d for d in documents if d.get("doc_type") == "invoice" and not d.get("cancelled")]
+    credit_notes = [d for d in documents if d.get("doc_type") == "credit_note" and not d.get("cancelled")]
     today = today_local().isoformat()
     open_debts = [r for r in receivables if not r.get("is_paid") and receivable_left(r) > 0]
     documents.sort(key=lambda d: (str(d.get("issue_date") or ""), str(d.get("invoice_number") or "")), reverse=True)
     return {
         "customer": Customer(**customer),
         "totals": {
-            "invoiced": round(sum(float(d.get("total_amount") or 0) for d in invoices), 2),
+            # Less what credit notes took off (theirs are below zero).
+            "invoiced": round(sum(float(d.get("total_amount") or 0) for d in invoices + credit_notes), 2),
             "invoice_count": len(invoices),
             "last_invoice_date": max((str(d.get("issue_date")) for d in invoices), default=None),
             "owed": round(sum(receivable_left(r) for r in open_debts), 2),
@@ -143,7 +145,8 @@ async def get_customer_card(customer_id: str, current_user: User = Depends(get_c
             "to_refund": round(sum(receivable_refund_due(r) for r in receivables), 2),
         },
         "documents": [
-            {k: d.get(k) for k in ("id", "doc_type", "invoice_number", "issue_date", "total_amount", "cancelled", "external", "in_till")}
+            {k: d.get(k) for k in ("id", "doc_type", "invoice_number", "issue_date", "total_amount", "cancelled", "external", "in_till",
+                                   "credited_invoice_number")}
             for d in documents[:15]
         ],
         "open_receivables": [
@@ -293,7 +296,7 @@ async def _latest_invoice_number(scope: dict) -> Optional[str]:
     """The highest number issued here (cancelled ones included - their
     numbers are spent)."""
     latest = await server.db.billing_documents.find(
-        {**scope, "doc_type": "invoice", "invoice_number": {"$type": "string"}}, {"_id": 0, "invoice_number": 1},
+        {**scope, "doc_type": {"$in": NUMBERED_DOC_TYPES}, "invoice_number": {"$type": "string"}}, {"_id": 0, "invoice_number": 1},
     ).sort("invoice_number", -1).limit(1).to_list(1)
     return latest[0]["invoice_number"] if latest else None
 
@@ -351,7 +354,7 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
         raise HTTPException(status_code=400, detail="Въведи номера на фактурата, както е отпечатан")
     if payload.invoice_number:
         number = payload.invoice_number.zfill(INVOICE_NUMBER_DIGITS)
-        if await server.db.billing_documents.find_one({**scope, "doc_type": "invoice", "invoice_number": number}):
+        if await server.db.billing_documents.find_one({**scope, "doc_type": {"$in": NUMBERED_DOC_TYPES}, "invoice_number": number}):
             raise HTTPException(
                 status_code=409,
                 detail=f"Фактура № {number} вече е въведена" if payload.external else f"Фактура № {number} вече е издадена",
@@ -397,12 +400,102 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
     return document
 
 
+async def _apply_credit(scope: dict, invoice: dict, delta: float) -> None:
+    """A credit note's amount (delta above zero; below zero when it is
+    cancelled) on its invoice and on what is owed on that invoice - the
+    receivable is settled once nothing is left to collect, and owed again
+    if a cancelled credit note leaves something."""
+    await server.db.billing_documents.update_one({"id": invoice["id"], **scope}, {"$inc": {"credited_amount": round(delta, 2)}})
+    receivable_id = invoice.get("receivable_id")
+    if not receivable_id:
+        return
+    await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$inc": {"credited_amount": round(delta, 2)}})
+    receivable = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
+    if receivable and not receivable.get("cancelled"):
+        settled = receivable_left(receivable) <= 0.005
+        if settled != bool(receivable.get("is_paid")):
+            await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$set": {"is_paid": settled}})
+
+
+async def _create_credit_note(payload: BillingDocumentCreate, current_user: User) -> BillingDocument:
+    """A credit note to a customer on an invoice issued to them: the next
+    number in the invoice sequence (or its own, issued elsewhere), the
+    invoice's customer, payment and VAT treatment, its amounts below zero -
+    revenue and VAT less on its own date - and what it credits off what is
+    owed on the invoice; paid already, that much is to give back."""
+    company_id, scope = await get_company_scope(current_user)
+    if not payload.credited_document_id:
+        raise HTTPException(status_code=400, detail="Изберете фактурата, към която е известието")
+    invoice = await server.db.billing_documents.find_one(
+        {"id": payload.credited_document_id, **scope, "doc_type": "invoice"}, {"_id": 0},
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+    if invoice.get("cancelled"):
+        raise HTTPException(status_code=400, detail="Фактурата е анулирана")
+    issued = business_day(payload.issue_date) if payload.issue_date else today_local()
+    if issued is None:
+        raise HTTPException(status_code=400, detail="Невалидна дата на издаване")
+    if issued.isoformat() < str(invoice.get("issue_date") or ""):
+        raise HTTPException(status_code=400, detail="Кредитното известие не може да е с дата преди фактурата")
+    reason = (payload.notes or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Напишете основанието (напр. отстъпка, върната стока)")
+    # The invoice's VAT treatment: one issued without VAT is credited without it.
+    items = payload.items
+    if invoice.get("vat_exempt_basis"):
+        items = [item.model_copy(update={"vat_rate": 0}) for item in items]
+    amounts = invoice_vat_breakdown(items)
+    left = round(float(invoice.get("total_amount") or 0) - float(invoice.get("credited_amount") or 0), 2)
+    if amounts["total_amount"] > left + 0.005:
+        raise HTTPException(status_code=400, detail=f"Известието е по-голямо от остатъка по фактурата ({left:.2f} €)")
+
+    if payload.external and not payload.invoice_number:
+        raise HTTPException(status_code=400, detail="Въведи номера на известието, както е отпечатан")
+    if payload.invoice_number:
+        number = payload.invoice_number.zfill(INVOICE_NUMBER_DIGITS)
+        if await server.db.billing_documents.find_one({**scope, "doc_type": {"$in": NUMBERED_DOC_TYPES}, "invoice_number": number}):
+            raise HTTPException(status_code=409, detail=f"№ {number} вече е издаден")
+    else:
+        latest = await _latest_invoice_number(scope)
+        number = str(int(latest) + 1 if latest else 1).zfill(INVOICE_NUMBER_DIGITS)
+
+    document = BillingDocument(
+        user_id=current_user.user_id, company_id=company_id, doc_type=BillingDocumentType.CREDIT_NOTE,
+        customer_id=invoice.get("customer_id"), customer_name=invoice.get("customer_name") or payload.customer_name,
+        customer_eik=invoice.get("customer_eik"), customer_address=invoice.get("customer_address"),
+        items=items, notes=reason, issue_date=issued.isoformat(), invoice_number=number,
+        payment_method=invoice.get("payment_method"), in_till=bool(invoice.get("in_till")),
+        amount_without_vat=-amounts["amount_without_vat"], vat_amount=-amounts["vat_amount"],
+        total_amount=-amounts["total_amount"],
+        vat_by_rate=[{**part, "base": -float(part.get("base") or 0), "vat": -float(part.get("vat") or 0)} for part in amounts["by_rate"]],
+        vat_exempt_basis=invoice.get("vat_exempt_basis"), external=payload.external,
+        credited_document_id=invoice["id"], credited_invoice_number=invoice.get("invoice_number"),
+        credited_issue_date=invoice.get("issue_date"),
+    )
+    try:
+        await server.db.billing_documents.insert_one(document.model_dump())
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail=f"№ {number} току-що беше издаден - опитайте отново")
+    await _apply_credit(scope, invoice, amounts["total_amount"])
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="create", entity_type="issued_credit_note",
+        entity_id=document.id, company_id=company_id,
+        details={"invoice_number": number, "credited_invoice_number": invoice.get("invoice_number"),
+                 "customer_name": document.customer_name, "total_amount": document.total_amount},
+    )
+    return document
+
+
 @router.post("/billing-documents", response_model=BillingDocument)
 async def create_billing_document(payload: BillingDocumentCreate, current_user: User = Depends(get_current_user)):
     # An invoice is a tax document - its own right; bills and quotes go with revenue.
     if payload.doc_type == BillingDocumentType.INVOICE:
         require_permission(current_user, "issue_invoices")
         return await _create_issued_invoice(payload, current_user)
+    if payload.doc_type == BillingDocumentType.CREDIT_NOTE:
+        require_permission(current_user, "issue_invoices")
+        return await _create_credit_note(payload, current_user)
     require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
     payload.customer_id = await _customer_for(company_id, scope, current_user.user_id, payload)
@@ -497,14 +590,16 @@ async def export_billing_document_pdf(document_id: str, current_user: User = Dep
     if document.get("external"):
         raise HTTPException(status_code=400, detail="Фактурата е издадена в друга програма - документът е там")
     try:
-        if document["doc_type"] == "invoice":
+        if document["doc_type"] in NUMBERED_DOC_TYPES:
             pdf_data = await asyncio.to_thread(ExportService.generate_issued_invoice_pdf, document, company)
         else:
             pdf_data = await asyncio.to_thread(ExportService.generate_billing_document_pdf, document, company_name)
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF export not available")
 
-    if document["doc_type"] == "invoice":
+    if document["doc_type"] == "credit_note":
+        filename = f"kreditno_izvestie_{document.get('invoice_number') or document_id[:8]}.pdf"
+    elif document["doc_type"] == "invoice":
         filename = f"faktura_{document.get('invoice_number') or document_id[:8]}.pdf"
     else:
         doc_label = "offerta" if document["doc_type"] == "quote" else "smetka"
@@ -520,31 +615,38 @@ async def delete_billing_document(document_id: str, current_user: User = Depends
     company_id, scope = await get_company_scope(current_user)
     document: Dict[str, Any] = dict(await server.db.billing_documents.find_one(
         {"id": document_id, **scope},
-        {"_id": 0, "receivable_id": 1, "doc_type": 1, "invoice_number": 1, "cancelled": 1, "external": 1},
+        {"_id": 0, "id": 1, "receivable_id": 1, "doc_type": 1, "invoice_number": 1, "cancelled": 1, "external": 1,
+         "total_amount": 1, "credited_document_id": 1},
     ) or {})
     if not document:
         raise HTTPException(status_code=404, detail="Документът не е намерен")
     cancelled = False
-    if document.get("doc_type") == "invoice":
+    numbered = document.get("doc_type") in NUMBERED_DOC_TYPES
+    entity_type = "issued_credit_note" if document.get("doc_type") == "credit_note" else "issued_invoice"
+    if numbered:
         require_permission(current_user, "issue_invoices")
         if not document.get("external") and current_user.role not in INVOICE_CANCEL_ROLES:
             raise HTTPException(status_code=403, detail="Само собственикът или управителят могат да анулират или изтрият издадена фактура")
     else:
         require_permission(current_user, "add_revenue")
-    if document.get("doc_type") == "invoice" and document.get("external"):
+    if document.get("doc_type") == "invoice" and not document.get("cancelled") and await server.db.billing_documents.find_one(
+        {**scope, "doc_type": "credit_note", "credited_document_id": document_id, "cancelled": {"$ne": True}}, {"_id": 1},
+    ):
+        raise HTTPException(status_code=409, detail="Към фактурата има кредитно известие - първо анулирайте него")
+    if numbered and document.get("external"):
         # Issued in another program: cancelled there if at all - the record
         # here (entered by mistake, say) just goes.
         await audit_service.log_action(
-            user_id=current_user.user_id, user_name=current_user.name, action="delete", entity_type="issued_invoice",
+            user_id=current_user.user_id, user_name=current_user.name, action="delete", entity_type=entity_type,
             entity_id=document_id, company_id=company_id,
             details={"invoice_number": document.get("invoice_number"), "external": True},
         )
-    elif document.get("doc_type") == "invoice":
-        # The numbering stays unbroken: the last invoice issued can go; an
+    elif numbered:
+        # The numbering stays unbroken: the last number issued can go; an
         # earlier one is cancelled - it keeps its number and counts for
         # nothing (revenue, VAT) from then on.
         if document.get("cancelled"):
-            raise HTTPException(status_code=409, detail="Фактурата вече е анулирана")
+            raise HTTPException(status_code=409, detail="Документът вече е анулиран")
         if document.get("invoice_number") != await _latest_invoice_number(scope):
             await server.db.billing_documents.update_one(
                 {"id": document_id, **scope}, {"$set": {"cancelled": True, "cancelled_at": datetime.now(timezone.utc)}},
@@ -552,13 +654,22 @@ async def delete_billing_document(document_id: str, current_user: User = Depends
             cancelled = True
         await audit_service.log_action(
             user_id=current_user.user_id, user_name=current_user.name,
-            action="update" if cancelled else "delete", entity_type="issued_invoice", entity_id=document_id,
+            action="update" if cancelled else "delete", entity_type=entity_type, entity_id=document_id,
             company_id=company_id, details={"invoice_number": document.get("invoice_number"), "cancelled": cancelled},
         )
     if not cancelled:
         result = await server.db.billing_documents.delete_one({"id": document_id, **scope})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Документът не е намерен")
+    if document.get("doc_type") == "credit_note" and not document.get("cancelled") and document.get("credited_document_id"):
+        # Gone or cancelled, it takes nothing off its invoice any more.
+        invoice = await server.db.billing_documents.find_one(
+            {"id": document["credited_document_id"], **scope}, {"_id": 0, "id": 1, "receivable_id": 1},
+        )
+        if invoice:
+            await _apply_credit(scope, invoice, -abs(float(document.get("total_amount") or 0)))
+        return {"message": "Кредитното известие е анулирано" if cancelled else "Документът е изтрит",
+                "cancelled": cancelled, "receivable": None, "refund_due": 0.0}
     # Its receivable goes with it while nothing was paid on it - before, a
     # deleted bill left the customer "owing" it for ever. Once money came
     # in, the receivable (and what was paid) stays.

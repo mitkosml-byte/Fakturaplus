@@ -163,8 +163,8 @@ async def export_vat_ledger_excel(
     # Invoices issued to customers are sales of their issue date - cancelled
     # ones too, listed at zero so the numbering reads unbroken.
     issued_invoices = await server.db.billing_documents.find(
-        {**scope, "doc_type": "invoice", "issue_date": period.text_filter()},
-        {"_id": 0, "issue_date": 1, "invoice_number": 1, "customer_name": 1, "customer_eik": 1,
+        {**scope, "doc_type": {"$in": NUMBERED_DOC_TYPES}, "issue_date": period.text_filter()},
+        {"_id": 0, "doc_type": 1, "issue_date": 1, "invoice_number": 1, "customer_name": 1, "customer_eik": 1,
          "vat_by_rate": 1, "total_amount": 1, "cancelled": 1, "in_till": 1},
     ).sort("invoice_number", 1).to_list(ALL_ROWS)
 

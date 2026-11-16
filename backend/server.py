@@ -2612,6 +2612,10 @@ class BillingDocumentType(str, Enum):
     # An invoice issued to a customer: numbered in sequence, with VAT,
     # revenue and VAT on its issue date, owed (a receivable) until paid.
     INVOICE = "invoice"
+    # A credit note to a customer on one of those invoices: numbered in the
+    # same sequence, its amounts below zero - it takes revenue and VAT off on
+    # its own date, and what it credits off what is owed on the invoice.
+    CREDIT_NOTE = "credit_note"
 
 class BillingDocumentItem(BaseModel):
     name: str
@@ -2620,9 +2624,13 @@ class BillingDocumentItem(BaseModel):
     unit_price: float = Field(ge=0)  # on an invoice: without VAT
     vat_rate: float = Field(default=20, ge=0, le=100)  # an invoice's line only
 
-# Issued invoices that count: every one not cancelled. A cancelled invoice
-# keeps its number (the numbering stays unbroken) and counts for nothing.
-ISSUED_INVOICES: Dict[str, Any] = {"doc_type": "invoice", "cancelled": {"$ne": True}}
+# The documents numbered in the invoice sequence: invoices and the credit
+# notes to them.
+NUMBERED_DOC_TYPES = ["invoice", "credit_note"]
+# Issued invoices (and credit notes, below zero) that count: every one not
+# cancelled. A cancelled one keeps its number (the numbering stays
+# unbroken) and counts for nothing.
+ISSUED_INVOICES: Dict[str, Any] = {"doc_type": {"$in": NUMBERED_DOC_TYPES}, "cancelled": {"$ne": True}}
 # What issued invoices add to income and VAT: not those rung up at the till,
 # whose money the day's till revenue already holds.
 ISSUED_INVOICE_REVENUE: Dict[str, Any] = {**ISSUED_INVOICES, "in_till": {"$ne": True}}
@@ -2690,6 +2698,12 @@ class BillingDocument(BaseModel):
     # fiscal receipts already, so its money is in the day's till revenue -
     # never counted a second time as income or VAT (ISSUED_INVOICE_REVENUE).
     in_till: bool = False
+    # A credit note: the invoice it is to (its number and date are printed on it).
+    credited_document_id: Optional[str] = None
+    credited_invoice_number: Optional[str] = None
+    credited_issue_date: Optional[str] = None
+    # An invoice: what its credit notes (not cancelled) took off, above zero.
+    credited_amount: float = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -2742,6 +2756,9 @@ class BillingDocumentCreate(BaseModel):
     # Paid in cash or by card: was it rung up at the till (a fiscal receipt)?
     # Left out, yes when the business enters its till's daily revenue.
     in_till: Optional[bool] = None
+    # A credit note: the invoice it is to (its customer, rates and payment
+    # are that invoice's). Its notes are the reason for it.
+    credited_document_id: Optional[str] = None
 
 
 
@@ -2873,7 +2890,8 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
     issued_rows = await db.billing_documents.aggregate([
         {"$match": {**scope, **ISSUED_INVOICE_REVENUE, "issue_date": period.text_filter()}},
         {"$group": {"_id": "$payment_method", "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
-                    "net": {"$sum": "$amount_without_vat"}, "count": {"$sum": 1}}},
+                    "net": {"$sum": "$amount_without_vat"},
+                    "count": {"$sum": {"$cond": [{"$eq": ["$doc_type", "credit_note"]}, 0, 1]}}}},
     ]).to_list(ALL_ROWS)
     issued = {field: sum(float(row.get(field) or 0) for row in issued_rows) for field in ("total", "vat", "net", "count")}
     # How the money of those invoices came: cash, card, or by bank (owed until paid).

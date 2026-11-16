@@ -634,6 +634,8 @@ class ApiService {
     external?: boolean;
     // Paid in cash or by card: rung up at the till? Left out, the server decides.
     in_till?: boolean;
+    // A credit note: the invoice it is to (notes are its reason).
+    credited_document_id?: string;
   }): Promise<BillingDocument> {
     return this.fetch('/billing-documents', { method: 'POST', body: JSON.stringify(doc) });
   }
