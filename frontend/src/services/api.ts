@@ -623,8 +623,12 @@ class ApiService {
     return this.fetch('/billing-documents');
   }
 
-  async deleteBillingDocument(id: string): Promise<void> {
-    await this.fetch(`/billing-documents/${id}`, { method: 'DELETE' });
+  async deleteBillingDocument(id: string): Promise<{ receivable: 'deleted' | 'kept' | null }> {
+    return this.fetch(`/billing-documents/${id}`, { method: 'DELETE' });
+  }
+
+  async addReceivablePayment(id: string, payment: { amount: number; date: string; method: 'cash' | 'bank_transfer' | 'card' }): Promise<Receivable> {
+    return this.fetch(`/receivables/${id}/payments`, { method: 'POST', body: JSON.stringify(payment) });
   }
 
   getBillingDocumentPdfUrl(id: string): string {

@@ -794,6 +794,17 @@ export const translations: Translations = {
     bg: 'Отбелязано като платено',
     en: 'Marked as paid',
   },
+  'receivables.paymentTitle': { bg: 'Получено плащане', en: 'Payment received' },
+  'receivables.paymentAmount': { bg: 'Сума', en: 'Amount' },
+  'receivables.paymentDate': { bg: 'Дата на плащане', en: 'Payment date' },
+  'receivables.recordPayment': { bg: 'Запиши плащането', en: 'Record payment' },
+  'receivables.leftToPay': { bg: 'остават {left} €', en: '{left} € left' },
+  'receivables.paidSoFar': { bg: 'Платени {paid} € · остават {left} €', en: '{paid} € paid · {left} € left' },
+  'receivables.partPaid': { bg: 'Частичното плащане е записано', en: 'Part payment recorded' },
+  'receivables.logAsRevenueHintDay': {
+    bg: '{name} плати {amount} € в брой. Да го добавя ли към джобчето за {date}?',
+    en: '{name} paid {amount} € in cash. Add it to the pocket money for {date}?',
+  },
   'receivables.logAsRevenueTitle': {
     bg: 'Добави ли го и в дневния оборот?',
     en: 'Log it as revenue too?',
@@ -865,6 +876,10 @@ export const translations: Translations = {
   'billingDocuments.quoteSaved': {
     bg: 'Офертата е записана',
     en: 'Quote saved',
+  },
+  'billingDocuments.deletedReceivableKept': {
+    bg: 'Сметката е изтрита. По вземането вече има плащане, затова то остава.',
+    en: 'Bill deleted. Its receivable already has a payment, so it stays.',
   },
   'billingDocuments.deleted': {
     bg: 'Документът е изтрит',

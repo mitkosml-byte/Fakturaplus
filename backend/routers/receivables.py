@@ -31,6 +31,7 @@ from server import (
     _team_channel_id,
 )
 import server
+import uuid
 
 router = APIRouter(prefix="/api")
 
@@ -108,10 +109,11 @@ async def get_receivables_summary(current_user: User = Depends(get_current_user)
     require_permission(current_user, "add_revenue")
     _, query = await get_company_scope(current_user)
     now_str = today_local().isoformat()
-    unpaid = await server.db.receivables.find({**query, "is_paid": False}, {"_id": 0, "amount": 1, "due_date": 1}).to_list(ALL_ROWS)
-    total_owed = sum(r.get("amount", 0) for r in unpaid)
+    unpaid = await server.db.receivables.find({**query, "is_paid": False}, {"_id": 0, "amount": 1, "paid_amount": 1, "due_date": 1}).to_list(ALL_ROWS)
+    # What is still owed: less whatever was already paid in parts.
+    total_owed = sum(receivable_left(r) for r in unpaid)
     overdue = [r for r in unpaid if r.get("due_date") and r["due_date"] < now_str]
-    total_overdue = sum(r.get("amount", 0) for r in overdue)
+    total_overdue = sum(receivable_left(r) for r in overdue)
     return {
         "total_owed": round(total_owed, 2),
         "unpaid_count": len(unpaid),
@@ -129,11 +131,54 @@ async def update_receivable(receivable_id: str, payload: ReceivableUpdate, curre
 
     update_data = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     if update_data.get("is_paid") is True and not existing.get("is_paid"):
+        # "Paid in full" today: whatever was left is the last payment.
+        left = receivable_left(existing)
         update_data["paid_at"] = datetime.now(timezone.utc)
         update_data.setdefault("paid_amount", existing.get("amount", 0))
+        if left > 0:
+            update_data["payments"] = [*(existing.get("payments") or []), {
+                "id": str(uuid.uuid4()), "amount": round(left, 2), "date": today_local().isoformat(), "method": None,
+            }]
     await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$set": update_data})
     receivable = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
     return Receivable(**receivable)
+
+@router.post("/receivables/{receivable_id}/payments", response_model=Receivable)
+async def add_receivable_payment(
+    receivable_id: str, payload: ReceivablePaymentCreate, current_user: User = Depends(get_current_user),
+):
+    """A payment received on a receivable - in part or in full, on its own
+    day and by its own method. Paid in full once the payments reach the
+    amount. Daily revenue is never touched here: the screen offers to add
+    a cash payment to that day's pocket money."""
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    existing = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    left = receivable_left(existing)
+    if existing.get("is_paid") or left <= 0:
+        raise HTTPException(status_code=400, detail="Вземането вече е платено")
+    if payload.amount > left + 0.01:
+        raise HTTPException(status_code=400, detail=f"Остават {left:.2f} € - плащането е по-голямо")
+    day = business_day(payload.date) if payload.date else today_local()
+    if day is None:
+        raise HTTPException(status_code=400, detail="Невалидна дата")
+    paid = round(float(existing.get("paid_amount") or 0) + payload.amount, 2)
+    fully = paid >= float(existing.get("amount") or 0) - 0.01
+    update: Dict[str, Any] = {
+        "paid_amount": paid,
+        "is_paid": fully,
+        "payments": [*(existing.get("payments") or []), {
+            "id": str(uuid.uuid4()), "amount": round(payload.amount, 2), "date": day.isoformat(), "method": payload.method,
+        }],
+    }
+    if fully:
+        update["paid_at"] = day_start_utc(day)
+    await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$set": update})
+    receivable = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
+    return Receivable(**receivable)
+
 
 @router.delete("/receivables/{receivable_id}")
 async def delete_receivable(receivable_id: str, current_user: User = Depends(get_current_user)):
@@ -150,10 +195,15 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
     company_id, _ = await get_company_scope(current_user)
     total_amount = round(sum(item.quantity * item.unit_price for item in payload.items), 2)
     issue_date = payload.issue_date or today_local().isoformat()
+    due_date = None
+    if payload.doc_type == BillingDocumentType.BILL:
+        # A bill is owed by a date - never "some day", which never became overdue.
+        issued = business_day(issue_date) or today_local()
+        due_date = payload.due_date or (issued + timedelta(days=BILL_TERM_DAYS)).isoformat()
 
     document = BillingDocument(
         user_id=current_user.user_id, company_id=company_id, total_amount=total_amount,
-        issue_date=issue_date, **payload.model_dump(exclude={"issue_date"}),
+        issue_date=issue_date, due_date=due_date, **payload.model_dump(exclude={"issue_date", "due_date"}),
     )
 
     # A "bill" (not a quote) is money actually owed - automatically record
@@ -164,7 +214,7 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
             user_id=current_user.user_id, company_id=company_id,
             customer_id=document.customer_id, customer_name=document.customer_name,
             description=f"Сметка от {issue_date}" + (f" - {payload.notes}" if payload.notes else ""),
-            amount=total_amount, due_date=None,
+            amount=total_amount, due_date=due_date,
         )
         await server.db.receivables.insert_one(receivable.model_dump())
         document.receivable_id = receivable.id
@@ -217,7 +267,20 @@ async def export_billing_document_pdf(document_id: str, current_user: User = Dep
 async def delete_billing_document(document_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     _, scope = await get_company_scope(current_user)
+    document: Dict[str, Any] = dict(await server.db.billing_documents.find_one({"id": document_id, **scope}, {"_id": 0, "receivable_id": 1}) or {})
     result = await server.db.billing_documents.delete_one({"id": document_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Документът не е намерен")
-    return {"message": "Документът е изтрит"}
+    # Its receivable goes with it while nothing was paid on it - before, a
+    # deleted bill left the customer "owing" it for ever. Once money came
+    # in, the receivable (and what was paid) stays.
+    receivable_status = None
+    receivable_id = document.get("receivable_id")
+    if receivable_id:
+        receivable = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0, "paid_amount": 1})
+        if receivable and float(receivable.get("paid_amount") or 0) <= 0:
+            await server.db.receivables.delete_one({"id": receivable_id, **scope})
+            receivable_status = "deleted"
+        elif receivable:
+            receivable_status = "kept"
+    return {"message": "Документът е изтрит", "receivable": receivable_status}

@@ -148,17 +148,29 @@ export default function ReceivablesScreen() {
     }
   };
 
-  // Marking a receivable paid never touches daily revenue on its own -
-  // same explicit-control philosophy as Work Schedule's own "Mark as
-  // paid" button and payroll's counted_in_expenses toggle, rather than
-  // silently assuming every payment belongs in the till. This just makes
-  // the option easy to reach in the same gesture instead of a separate,
-  // easy-to-forget trip to "Дневен оборот".
-  const handleLogAsRevenue = async (r: Receivable) => {
+  // A payment received: in part or in full, on its own day, by its own
+  // method. Daily revenue is never touched on its own - a cash payment is
+  // offered to that day's pocket money (added on the server to what the
+  // day holds); a bank or card payment is not till money.
+  const [payingReceivable, setPayingReceivable] = useState<Receivable | null>(null);
+  const [payAmount, setPayAmount] = useState('');
+  const [payDate, setPayDate] = useState(new Date());
+  const [showPayDatePicker, setShowPayDatePicker] = useState(false);
+  const [payMethod, setPayMethod] = useState<'cash' | 'bank_transfer' | 'card'>('cash');
+  const [paySaving, setPaySaving] = useState(false);
+
+  const leftToPay = (r: Receivable) => Math.max(r.amount - (r.paid_amount || 0), 0);
+
+  const handleMarkPaid = (r: Receivable) => {
+    setPayingReceivable(r);
+    setPayAmount(leftToPay(r).toFixed(2));
+    setPayDate(new Date());
+    setPayMethod('cash');
+  };
+
+  const handleLogAsRevenue = async (amount: number, day: string) => {
     try {
-      // Added on the server to what the day holds - never a read-then-
-      // write that would replace pocket money this person may not see.
-      await api.addPocketMoney({ date: format(new Date(), 'yyyy-MM-dd'), amount: r.amount });
+      await api.addPocketMoney({ date: day, amount });
       Haptics.success();
       Toast.success(t('receivables.logAsRevenueSuccess'));
     } catch (error: any) {
@@ -166,22 +178,38 @@ export default function ReceivablesScreen() {
     }
   };
 
-  const handleMarkPaid = async (r: Receivable) => {
+  const handleSavePayment = async () => {
+    const r = payingReceivable;
+    if (!r) return;
+    const amount = parseFloat(payAmount.replace(',', '.'));
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert(t('common.error'), t('msg.fillRequired'));
+      return;
+    }
+    const day = format(payDate, 'yyyy-MM-dd');
+    setPaySaving(true);
     try {
-      await api.updateReceivable(r.id, { is_paid: true });
+      const updated = await api.addReceivablePayment(r.id, { amount, date: day, method: payMethod });
       Haptics.success();
-      Toast.success(t('receivables.markedPaid'));
+      Toast.success(updated.is_paid ? t('receivables.markedPaid') : t('receivables.partPaid'));
+      setPayingReceivable(null);
       loadData();
-      Alert.alert(
-        t('receivables.logAsRevenueTitle'),
-        t('receivables.logAsRevenueHint').replace('{name}', r.customer_name).replace('{amount}', r.amount.toFixed(2)),
-        [
-          { text: t('receivables.logAsRevenueSkip'), style: 'cancel' },
-          { text: t('receivables.logAsRevenueConfirm'), onPress: () => handleLogAsRevenue(r) },
-        ]
-      );
+      if (payMethod === 'cash') {
+        Alert.alert(
+          t('receivables.logAsRevenueTitle'),
+          t('receivables.logAsRevenueHintDay')
+            .replace('{name}', r.customer_name).replace('{amount}', amount.toFixed(2))
+            .replace('{date}', format(payDate, 'd MMM', { locale: dateLocale })),
+          [
+            { text: t('receivables.logAsRevenueSkip'), style: 'cancel' },
+            { text: t('receivables.logAsRevenueConfirm'), onPress: () => handleLogAsRevenue(amount, day) },
+          ]
+        );
+      }
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
+    } finally {
+      setPaySaving(false);
     }
   };
 
@@ -292,6 +320,11 @@ export default function ReceivablesScreen() {
                       <Text style={styles.customerName} numberOfLines={1}>{r.customer_name}</Text>
                       <Text style={[styles.amount, r.is_paid && styles.amountPaid]}>{r.amount.toFixed(2)} €</Text>
                     </View>
+                    {!r.is_paid && (r.paid_amount || 0) > 0 && (
+                      <Text style={styles.description}>
+                        {t('receivables.paidSoFar').replace('{paid}', r.paid_amount.toFixed(2)).replace('{left}', leftToPay(r).toFixed(2))}
+                      </Text>
+                    )}
                     {r.description ? <Text style={styles.description} numberOfLines={1}>{r.description}</Text> : null}
                     <View style={styles.rowBottom}>
                       <Text style={[styles.dueDate, overdue && styles.dueDateOverdue]}>
@@ -318,6 +351,55 @@ export default function ReceivablesScreen() {
               })}
             </ScrollView>
           )}
+
+          <BottomSheet visible={!!payingReceivable} onClose={() => setPayingReceivable(null)}>
+            <View style={styles.modalContent}>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                <Text style={styles.modalTitle}>{t('receivables.paymentTitle')}</Text>
+                {payingReceivable && (
+                  <Text style={styles.description}>
+                    {payingReceivable.customer_name} · {t('receivables.leftToPay').replace('{left}', leftToPay(payingReceivable).toFixed(2))}
+                  </Text>
+                )}
+                <Text style={styles.inputLabel}>{t('receivables.paymentAmount')}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={payAmount}
+                  onChangeText={setPayAmount}
+                  keyboardType="decimal-pad"
+                  placeholderTextColor={COLORS.textMuted}
+                />
+                <Text style={styles.inputLabel}>{t('receivables.paymentDate')}</Text>
+                <TouchableOpacity style={styles.input} onPress={() => setShowPayDatePicker(true)}>
+                  <Text style={{ color: 'white' }}>{format(payDate, 'd MMMM yyyy', { locale: dateLocale })}</Text>
+                </TouchableOpacity>
+                <DateTimePickerModal
+                  isVisible={showPayDatePicker}
+                  mode="date"
+                  date={payDate}
+                  maximumDate={new Date()}
+                  onConfirm={(d) => { setPayDate(d); setShowPayDatePicker(false); }}
+                  onCancel={() => setShowPayDatePicker(false)}
+                  locale={language}
+                />
+                <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
+                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                  {(['cash', 'card', 'bank_transfer'] as const).map((m) => (
+                    <TouchableOpacity
+                      key={m}
+                      onPress={() => setPayMethod(m)}
+                      style={[styles.methodChip, payMethod === m && styles.methodChipActive]}
+                    >
+                      <Text style={[styles.methodChipText, payMethod === m && styles.methodChipTextActive]}>{t(`scan.paymentMethod.${m}`)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity style={[styles.saveButton, { marginTop: 18 }]} onPress={handleSavePayment} disabled={paySaving}>
+                  <Text style={styles.saveButtonText}>{paySaving ? '...' : t('receivables.recordPayment')}</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </BottomSheet>
 
           <BottomSheet visible={modalVisible} onClose={() => { setModalVisible(false); resetForm(); }}>
             <View style={styles.modalContent}>
@@ -392,6 +474,13 @@ export default function ReceivablesScreen() {
 }
 
 const styles = StyleSheet.create({
+  methodChip: {
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18,
+    borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.background,
+  },
+  methodChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  methodChipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
+  methodChipTextActive: { color: 'white' },
   backgroundImage: { flex: 1 },
   overlay: { flex: 1, backgroundColor: 'rgba(10, 15, 28, 0.88)' },
   container: { flex: 1 },

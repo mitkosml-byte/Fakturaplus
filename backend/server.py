@@ -2250,6 +2250,9 @@ class Receivable(BaseModel):
     is_paid: bool = False
     paid_amount: float = 0
     paid_at: Optional[datetime] = None
+    # Each payment received: {id, amount, date "YYYY-MM-DD", method}. A
+    # customer can pay in parts, by bank or in cash, on a day of their own.
+    payments: List[Dict[str, Any]] = []
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ReceivableCreate(BaseModel):
@@ -2258,6 +2261,14 @@ class ReceivableCreate(BaseModel):
     description: Optional[str] = None
     amount: float = Field(gt=0)
     due_date: Optional[str] = None
+
+# A bill is due this many days after it is issued unless given a date.
+BILL_TERM_DAYS = 7
+
+class ReceivablePaymentCreate(BaseModel):
+    amount: float = Field(gt=0)
+    date: Optional[str] = None  # "YYYY-MM-DD", today if left out
+    method: Literal["cash", "bank_transfer", "card"] = "cash"
 
 class ReceivableUpdate(BaseModel):
     customer_name: Optional[str] = None
@@ -2304,6 +2315,9 @@ class BillingDocument(BaseModel):
     items: List[BillingDocumentItem] = []
     notes: Optional[str] = None
     issue_date: str  # "YYYY-MM-DD"
+    # When a bill is due (its receivable's due date) - BILL_TERM_DAYS after
+    # the issue date unless given; quotes have none.
+    due_date: Optional[str] = None
     total_amount: float = 0
     receivable_id: Optional[str] = None  # set when this doc created a receivable (bills only)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -2315,6 +2329,7 @@ class BillingDocumentCreate(BaseModel):
     items: List[BillingDocumentItem] = Field(min_length=1)
     notes: Optional[str] = None
     issue_date: Optional[str] = None
+    due_date: Optional[str] = None
 
 
 
@@ -2673,6 +2688,11 @@ async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: 
     items.sort(key=lambda x: x["amount"], reverse=True)
     return items[:limit]
 
+def receivable_left(r: dict) -> float:
+    """What is still owed on a receivable - its amount less what was paid in parts."""
+    return max(float(r.get("amount") or 0) - float(r.get("paid_amount") or 0), 0.0)
+
+
 async def _business_digest_receivables(scope: dict) -> dict:
     """What customers owe the business - the mirror image of
     unpaid_invoices above, and a glaring gap in the original digest: a
@@ -2681,10 +2701,10 @@ async def _business_digest_receivables(scope: dict) -> dict:
     since that endpoint lives in routers/receivables.py (star-imported
     from here, not the other way around)."""
     now_str = today_local().isoformat()
-    unpaid = await db.receivables.find({**scope, "is_paid": False}, {"_id": 0, "amount": 1, "due_date": 1}).to_list(ALL_ROWS)
-    total_owed = sum(r.get("amount", 0) for r in unpaid)
+    unpaid = await db.receivables.find({**scope, "is_paid": False}, {"_id": 0, "amount": 1, "paid_amount": 1, "due_date": 1}).to_list(ALL_ROWS)
+    total_owed = sum(receivable_left(r) for r in unpaid)
     overdue = [r for r in unpaid if r.get("due_date") and r["due_date"] < now_str]
-    total_overdue = sum(r.get("amount", 0) for r in overdue)
+    total_overdue = sum(receivable_left(r) for r in overdue)
     return {
         "total_owed": round(total_owed, 2),
         "unpaid_count": len(unpaid),

@@ -179,8 +179,9 @@ export default function BillingDocumentsScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
-            await api.deleteBillingDocument(doc.id);
-            Toast.success(t('billingDocuments.deleted'));
+            const result = await api.deleteBillingDocument(doc.id);
+            // Its receivable goes with it unless something was already paid on it.
+            Toast.success(result?.receivable === 'kept' ? t('billingDocuments.deletedReceivableKept') : t('billingDocuments.deleted'));
             loadData();
           } catch (error: any) {
             Alert.alert(t('common.error'), error.message);

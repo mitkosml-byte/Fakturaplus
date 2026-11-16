@@ -675,3 +675,33 @@ def test_f3_f4_payment_follows_a_corrected_total_and_a_changed_method(client):
     # A part payment typed in still works as before.
     part = client.put(f"/api/invoices/{bank['id']}", headers=owner, json={"paid_amount": 1200}).json()
     assert part["is_paid"] is True
+
+
+def test_v1_v2_v4_bills_are_due_paid_in_parts_and_deleted_with_their_receivable(client):
+    _, _, owner = _company()
+    bill = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "bill", "customer_name": "Сватба Иванови", "issue_date": "2026-11-02",
+        "items": [{"name": "Кетъринг", "quantity": 1, "unit_price": 250}],
+    }).json()
+    assert bill["due_date"] == "2026-11-09"
+    receivable = asyncio.run(server.db.receivables.find_one({"id": bill["receivable_id"]}, {"_id": 0}))
+    assert receivable["due_date"] == "2026-11-09"
+
+    part = client.post(f"/api/receivables/{receivable['id']}/payments", headers=owner,
+                       json={"amount": 100, "date": "2026-11-05", "method": "bank_transfer"}).json()
+    assert (part["is_paid"], part["paid_amount"], part["payments"][0]["method"]) == (False, 100, "bank_transfer")
+    summary = client.get("/api/receivables/summary", headers=owner).json()
+    assert summary["total_owed"] == 150
+    assert client.post(f"/api/receivables/{receivable['id']}/payments", headers=owner, json={"amount": 200}).status_code == 400
+    # Something was paid: deleting the bill keeps the receivable.
+    assert client.delete(f"/api/billing-documents/{bill['id']}", headers=owner).json()["receivable"] == "kept"
+    rest = client.post(f"/api/receivables/{receivable['id']}/payments", headers=owner,
+                       json={"amount": 150, "date": "2026-11-08", "method": "cash"}).json()
+    assert rest["is_paid"] is True and len(rest["payments"]) == 2
+
+    # A bill with nothing paid takes its receivable with it.
+    other = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "bill", "customer_name": "Фирма Х", "items": [{"name": "Услуга", "quantity": 2, "unit_price": 40}],
+    }).json()
+    assert client.delete(f"/api/billing-documents/{other['id']}", headers=owner).json()["receivable"] == "deleted"
+    assert asyncio.run(server.db.receivables.count_documents({"id": other["receivable_id"]})) == 0

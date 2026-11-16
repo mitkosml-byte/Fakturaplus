@@ -173,7 +173,16 @@ export interface Receivable {
   is_paid: boolean;
   paid_amount: number;
   paid_at?: string | null;
+  // Each payment received (in part or in full), on its day and by its method.
+  payments?: ReceivablePayment[];
   created_at: string;
+}
+
+export interface ReceivablePayment {
+  id: string;
+  amount: number;
+  date: string;
+  method?: 'cash' | 'bank_transfer' | 'card' | null;
 }
 
 export interface BillingDocumentItem {
