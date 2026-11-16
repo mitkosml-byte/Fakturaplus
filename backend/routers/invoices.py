@@ -62,6 +62,10 @@ def _day_or_400(value, what: str) -> datetime:
         raise HTTPException(status_code=400, detail=f"Невалидна {what}")
     return day
 
+# Cash and card are paid at the till, the moment the invoice is issued.
+PAID_ON_THE_SPOT = {"cash", "card"}
+
+
 @router.post("/invoices", response_model=Invoice)
 async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_invoices")
@@ -112,7 +116,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     paid_amount = 0.0
     paid_at = None
     payment_due_date = None
-    if invoice_dict.get("payment_method") == "cash":
+    if invoice_dict.get("payment_method") in PAID_ON_THE_SPOT:
         is_paid = True
         paid_amount = invoice_dict.get("total_amount", 0)
         paid_at = invoice_date
@@ -422,7 +426,7 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     # Same auto-paid/due-date rules as on create, so switching an invoice's
     # payment method later behaves the same as picking it up front.
     cash_auto_paid = (
-        update_data.get("payment_method") == "cash"
+        update_data.get("payment_method") in PAID_ON_THE_SPOT
         and "is_paid" not in update_data
         and "paid_amount" not in update_data
     )

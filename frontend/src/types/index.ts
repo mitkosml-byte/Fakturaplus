@@ -91,7 +91,8 @@ export type VatTreatment =
   | 'reverse_charge'
   | 'outside_scope';
 
-export type PaymentMethod = 'cash' | 'bank_transfer';
+// Cash and card are paid at the till; a bank transfer is owed until paid.
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'card';
 
 export interface Invoice {
   id: string;
@@ -343,6 +344,7 @@ export interface OCRResult {
   total_amount: number;
   invoice_date?: string;  // Дата на издаване от фактурата
   payment_due_date?: string;  // Срок за плащане, ако е отпечатан на фактурата
+  payment_method?: PaymentMethod | null;  // Начин на плащане, ако е отпечатан на фактурата
   items?: OCRItemResult[];  // Разпознати продукти от таблицата с артикули
   corrections?: string[];  // AI корекции
   confidence?: number;  // Увереност в резултата

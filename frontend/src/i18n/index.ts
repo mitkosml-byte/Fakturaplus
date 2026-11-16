@@ -1056,9 +1056,21 @@ export const translations: Translations = {
     bg: 'Банков превод',
     en: 'Bank transfer',
   },
+  'scan.paymentMethod.card': {
+    bg: 'С карта',
+    en: 'Card',
+  },
   'scan.cashAutoPaidNote': {
-    bg: 'Плащанията в брой се маркират автоматично като платени.',
-    en: 'Cash payments are automatically marked as paid.',
+    bg: 'Платеното в брой или с карта се маркира автоматично като платено.',
+    en: 'Cash and card payments are automatically marked as paid.',
+  },
+  'scan.paymentMethodRequired': {
+    bg: 'Избери начин на плащане – от него зависи дали фактурата е платена или се дължи.',
+    en: 'Choose the payment method – it decides whether the invoice is paid or still owed.',
+  },
+  'scan.paymentMethodFromInvoice': {
+    bg: 'Разчетено от фактурата.',
+    en: 'Read from the invoice.',
   },
   'scan.paymentDueDateDefault': {
     bg: 'Срок за плащане (по подразбиране 14 дни)',

@@ -355,7 +355,7 @@ class Invoice(BaseModel):
     # Плащане към доставчика - незададено (None) означава "не се следи",
     # за да не се третират стари фактури (преди тази функционалност) като
     # неплатени по подразбиране.
-    payment_method: Optional[str] = None  # cash | bank_transfer
+    payment_method: Optional[str] = None  # cash | bank_transfer | card
     is_paid: bool = False
     # Кумулативна платена сума към момента - "напълно платена" означава
     # paid_amount >= total_amount (is_paid се извежда от това, не обратното).
@@ -496,7 +496,7 @@ class InvoiceCreate(BaseModel):
     image_base64s: Optional[List[str]] = None  # Всички страници на сканираната фактура, по ред
     notes: Optional[str] = None
     items: Optional[List[InvoiceItemCreate]] = None  # Артикули
-    payment_method: Optional[str] = None  # cash | bank_transfer
+    payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = None  # paid on the spot: cash, card
     payment_due_date: Optional[str] = None  # само при bank_transfer; ако липсва се изчислява
 
 class InvoiceUpdate(BaseModel):
@@ -510,7 +510,7 @@ class InvoiceUpdate(BaseModel):
     protocol_number: Optional[str] = None
     date: Optional[str] = None
     notes: Optional[str] = None
-    payment_method: Optional[str] = None
+    payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = None
     payment_due_date: Optional[str] = None
     is_paid: Optional[bool] = None
     paid_amount: Optional[float] = Field(default=None, ge=0)
@@ -723,6 +723,7 @@ class OCRResult(BaseModel):
     total_amount: float
     invoice_date: Optional[str] = None  # Дата на издаване от фактурата
     payment_due_date: Optional[str] = None  # Срок за плащане, ако е отпечатан на фактурата
+    payment_method: Optional[str] = None  # cash | bank_transfer | card - ако е отпечатан
     items: List[OCRItemResult] = []  # Разпознати продукти от таблицата с артикули
     corrections: Optional[List[str]] = None  # Списък с направени корекции
     confidence: Optional[float] = None  # Увереност в резултата (0-1)
@@ -2002,6 +2003,10 @@ class ClaudeInvoiceExtraction(BaseModel):
     amount_without_vat: float = Field(description="Данъчна основа / обща сума без ДДС")
     vat_amount: float = Field(description="ДДС (обикновено 20%)")
     total_amount: float = Field(description="Обща сума за плащане с ДДС")
+    payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = Field(
+        default=None,
+        description="Начин на плащане, само ако е отпечатан: в брой → cash, по банков път/по сметка → bank_transfer, с карта/ПОС → card",
+    )
     items: List[ClaudeInvoiceItem] = Field(default_factory=list, description="Всички редове от таблицата с артикули/продукти/услуги на фактурата")
 
 OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за автоматично разпознаване на данни от български фактури.
@@ -2024,6 +2029,9 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 
 СРОК ЗА ПЛАЩАНЕ (payment_due_date):
 Много фактури печатат изрично срока/падежа за плащане - текст като "Срок за плащане", "Падеж", "Платимо до", "Дата на падеж", "Due date". Ако видиш такава изрична дата, върни я в payment_due_date (YYYY-MM-DD). Ако вместо дата е отпечатан само брой дни (напр. "Срок за плащане: 14 дни от датата на издаване"), изчисли конкретната дата спрямо датата на издаване на фактурата. Ако на фактурата изобщо няма отпечатан срок или брой дни за плащане, остави payment_due_date празно (null) - НЕ гадай и НЕ прилагай стандартен срок по подразбиране, това ще бъде направено от приложението само ако полето остане празно.
+
+НАЧИН НА ПЛАЩАНЕ (payment_method):
+Повечето фактури печатат "Начин на плащане" / "Плащане". "В брой" → cash; "По банков път", "Банков превод", "По сметка" → bank_transfer; "С карта", "Карта", "ПОС", "Дебитна/кредитна карта" → card. Ако начинът на плащане не е отпечатан, остави payment_method празно (null) - НЕ гадай: приложението ще попита човека.
 
 ОБЩИ ПРАВИЛА:
 - Всички суми в полетата на артикулите и amount_without_vat са БЕЗ ДДС.

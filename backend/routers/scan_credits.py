@@ -161,6 +161,7 @@ async def scan_invoice(request: Request, image_base64: Optional[str] = None, cur
             total_amount=float(corrected.get("total_amount", 0)),
             invoice_date=corrected.get("invoice_date"),
             payment_due_date=corrected.get("payment_due_date"),
+            payment_method=corrected.get("payment_method"),
             items=[OCRItemResult(**item) for item in corrected.get("items", [])],
             corrections=correction_result.corrections_made,
             confidence=correction_result.confidence

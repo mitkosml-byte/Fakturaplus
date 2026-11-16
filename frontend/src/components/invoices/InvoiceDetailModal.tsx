@@ -383,7 +383,9 @@ export function InvoiceDetailModal({
                       <Text style={styles.paymentMethodTag}>
                         {invoice.payment_method === 'cash'
                           ? t('invoices.paymentMethodCash')
-                          : t('invoices.paymentMethodBankTransfer')}
+                          : invoice.payment_method === 'card'
+                            ? t('scan.paymentMethod.card')
+                            : t('invoices.paymentMethodBankTransfer')}
                       </Text>
                     </View>
 

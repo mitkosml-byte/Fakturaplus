@@ -587,3 +587,17 @@ def test_p5_an_older_schedule_payment_expense_becomes_wages(monkeypatch):
 
     result, expense = asyncio.run(run())
     assert result["marked"] == 1 and expense["kind"] == "schedule_wages" and expense["schedule_payment_id"] == "p-old"
+
+
+def test_f2_card_is_paid_on_the_spot_and_the_method_is_one_of_three(client):
+    _, _, owner = _company()
+    base = {"supplier": "Кафе Зрънце", "date": "2026-11-03", "amount_without_vat": 10, "vat_amount": 2, "total_amount": 12}
+    card = client.post("/api/invoices", headers=owner, json={**base, "invoice_number": "C-1", "payment_method": "card"})
+    assert card.status_code == 200, card.text
+    assert card.json()["is_paid"] is True and card.json()["paid_amount"] == 12
+    owed = client.post("/api/invoices", headers=owner, json={**base, "invoice_number": "C-2", "payment_method": "bank_transfer"})
+    assert owed.json()["is_paid"] is False and owed.json()["payment_due_date"]
+    assert client.post("/api/invoices", headers=owner, json={**base, "invoice_number": "C-3", "payment_method": "crypto"}).status_code == 422
+    # The scanner's answer carries the printed method through to the form.
+    assert "payment_method" in server.OCRResult.model_fields
+    assert "payment_method" in server.ClaudeInvoiceExtraction.model_fields

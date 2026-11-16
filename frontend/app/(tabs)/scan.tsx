@@ -129,6 +129,8 @@ export default function ScanScreen() {
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [items, setItems] = useState<EditableItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>('');
+  const [paymentMethodFromOcr, setPaymentMethodFromOcr] = useState(false);
+  const [paymentMethodMissing, setPaymentMethodMissing] = useState(false);
   const [paymentDueDate, setPaymentDueDate] = useState<Date | null>(null);
   const [isDueDatePickerVisible, setDueDatePickerVisible] = useState(false);
 
@@ -480,6 +482,13 @@ export default function ScanScreen() {
       // purchases as unpaid. The due date is still useful if the user DOES
       // pick bank transfer themselves, so it's still pre-filled - just no
       // longer used to pick the payment method on the user's behalf.
+      // The payment method printed on the invoice ("Начин на плащане") is
+      // taken as read; when it isn't printed, the person picks it before
+      // saving - an invoice without one was never tracked as owed.
+      setPaymentMethodFromOcr(!!result.payment_method);
+      if (result.payment_method) {
+        setPaymentMethod(result.payment_method);
+      }
       if (result.payment_due_date) {
         try {
           const parsedDueDate = new Date(result.payment_due_date);
@@ -512,6 +521,13 @@ export default function ScanScreen() {
   };
 
   const handleSaveInvoice = async (confirmed: boolean = false) => {
+    if (!paymentMethod) {
+      // Whether the invoice is owed or already paid decides every payables
+      // figure - it is never left to a default.
+      setPaymentMethodMissing(true);
+      Alert.alert(t('common.error'), t('scan.paymentMethodRequired'));
+      return;
+    }
     if (!supplier || !invoiceNumber || !totalAmount) {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;
@@ -798,6 +814,8 @@ export default function ScanScreen() {
     setInvoiceDate(new Date());
     setDateFoundByOcr(null);
     setPaymentMethod('');
+    setPaymentMethodFromOcr(false);
+    setPaymentMethodMissing(false);
     setPaymentDueDate(null);
   };
 
@@ -1191,13 +1209,19 @@ export default function ScanScreen() {
                   </StaggerReveal>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
+                    <Text style={[styles.inputLabel, paymentMethodMissing && !paymentMethod && { color: COLORS.danger }]}>
+                      {t('scan.paymentMethod')} *
+                    </Text>
                     <View style={styles.vatTreatmentGrid}>
-                      {(['cash', 'bank_transfer'] as PaymentMethod[]).map((option) => (
+                      {(['cash', 'card', 'bank_transfer'] as PaymentMethod[]).map((option) => (
                         <TouchableOpacity
                           key={option}
-                          style={[styles.vatTreatmentChip, paymentMethod === option && styles.vatTreatmentChipActive]}
-                          onPress={() => setPaymentMethod(option)}
+                          style={[
+                            styles.vatTreatmentChip,
+                            paymentMethod === option && styles.vatTreatmentChipActive,
+                            paymentMethodMissing && !paymentMethod && { borderColor: COLORS.danger },
+                          ]}
+                          onPress={() => { setPaymentMethod(option); setPaymentMethodFromOcr(false); }}
                         >
                           <Text style={[styles.vatTreatmentChipText, paymentMethod === option && styles.vatTreatmentChipTextActive]}>
                             {t(`scan.paymentMethod.${option}`)}
@@ -1211,7 +1235,13 @@ export default function ScanScreen() {
                         <Text style={styles.protocolNoteText}>{t('scan.paymentMethodNotDetectedNote')}</Text>
                       </View>
                     )}
-                    {paymentMethod === 'cash' && (
+                    {paymentMethodFromOcr && !!paymentMethod && (
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="scan" size={16} color={COLORS.primary} />
+                        <Text style={styles.protocolNoteText}>{t('scan.paymentMethodFromInvoice')}</Text>
+                      </View>
+                    )}
+                    {(paymentMethod === 'cash' || paymentMethod === 'card') && (
                       <View style={styles.protocolNote}>
                         <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
                         <Text style={styles.protocolNoteText}>{t('scan.cashAutoPaidNote')}</Text>
