@@ -158,6 +158,9 @@ export interface NonInvoiceExpense {
   amount: number;
   date: string;
   created_at: string;
+  // A recurring expense's payment for a month (recorded from Budget)
+  recurring_id?: string | null;
+  recurring_month?: string | null;
 }
 
 export interface Customer {
@@ -243,7 +246,10 @@ export interface BillingDocument {
 // What the viewer can say about a Home signal. Money-at-risk signals offer
 // only "snooze"; "dismiss" hides a signal until its situation changes
 // (fingerprint); the reorder question offers still_buying/discontinue.
-export type ProactiveSignalAction = 'snooze' | 'dismiss' | 'still_buying' | 'discontinue' | 'mark_paid';
+export type ProactiveSignalAction =
+  | 'snooze' | 'dismiss' | 'still_buying' | 'discontinue' | 'mark_paid'
+  // A recurring expense's month: paid - record it / skip it / is this it?
+  | 'recurring_record' | 'recurring_skip' | 'recurring_yes' | 'recurring_no';
 
 export interface ProactiveSignal {
   key: string;
@@ -257,8 +263,83 @@ export interface ProactiveSignal {
   item_key?: string;
   // invoices_likely_paid only: the invoices "mark paid" applies to
   invoice_ids?: string[];
+  // Recurring expense signals: which expense and month, and the record asked about
+  recurring_id?: string;
+  recurring_month?: string;
+  match_source?: 'expense' | 'invoice';
+  match_id?: string;
   // First shown to this viewer within the last day (or back after a while away)
   is_new?: boolean;
+}
+
+// Recurring expenses: "invoice" - its invoice is the expense, awaited each
+// month; "no_invoice" - recorded as an off-book expense (asked, or on its day).
+export type RecurringKind = 'invoice' | 'no_invoice';
+
+export type RecurringState =
+  | 'paid_by_invoice' | 'paid_by_expense' | 'skipped' | 'probable'
+  | 'upcoming' | 'awaiting_invoice' | 'invoice_missing' | 'due';
+
+export interface RecurringRecord {
+  id: string;
+  amount: number;
+  date: string | null;
+  number?: string | null;
+  supplier?: string | null;
+  description?: string | null;
+  source?: 'expense' | 'invoice';
+}
+
+export interface RecurringOccurrence {
+  recurring_id: string;
+  month: string;
+  due_date: string;
+  expected_amount: number;
+  kind: RecurringKind;
+  state: RecurringState;
+  paid_amount: number | null;
+  invoices: RecurringRecord[];
+  expenses: RecurringRecord[];
+  // A record that looks like this month's payment - the owner says
+  match: RecurringRecord | null;
+  // Paid by an invoice and also recorded without one
+  duplicate?: boolean;
+  replace_automatically?: boolean;
+  // Recorded without an invoice, and an invoice that looks the same came
+  duplicate_suspected?: boolean;
+}
+
+export interface RecurringExpense {
+  id: string;
+  description: string;
+  amount: number;
+  day_of_month: number;
+  category?: string | null;
+  kind: RecurringKind;
+  supplier_name?: string | null;
+  supplier_eik?: string | null;
+  auto_record: boolean;
+  is_active: boolean;
+  start_month: string;
+  current: RecurringOccurrence | null;
+  previous: RecurringOccurrence | null;
+}
+
+export interface RecurringExpenseInput {
+  description: string;
+  amount: number;
+  day_of_month: number;
+  kind: RecurringKind;
+  supplier_name?: string | null;
+  supplier_eik?: string | null;
+  auto_record?: boolean;
+  is_active?: boolean;
+}
+
+export interface RecurringOverview {
+  recurring_expenses: RecurringExpense[];
+  month: string | null;
+  outlook: { paid_so_far: number; month_total: number; still_expected: number } | null;
 }
 
 // "Ask your own numbers" chat (Module 4 Finding #3)

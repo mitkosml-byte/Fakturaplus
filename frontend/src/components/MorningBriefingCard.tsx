@@ -40,7 +40,7 @@ const SEVERITY_COLOR: Record<ProactiveSignal['severity'], string> = {
 // and as "Done" on everything else.
 const INSIGHT_KEYS = new Set([
   'weak_weekday', 'staffing_mismatch', 'forecast_revenue', 'forecast_expense', 'year_back_revenue', 'year_back_expense',
-  'team_on_leave', 'personal_wallet',
+  'team_on_leave', 'personal_wallet', 'recurring_replaced',
 ]);
 
 // The review shows the few most important things first; the rest wait
@@ -68,7 +68,13 @@ const CTA_LABEL: Record<string, string> = {
   weak_weekday: 'briefing.cta.weak_weekday',
   staffing_mismatch: 'briefing.cta.staffing_mismatch',
   missing_revenue: 'briefing.cta.missing_revenue',
+  recurring_invoice_missing: 'briefing.cta.recurring_invoice_missing',
+  recurring_replaced: 'briefing.cta.recurring',
 };
+
+// Answers that settle a recurring expense's month right here.
+const RECURRING_ACTIONS = new Set<ProactiveSignalAction>(['recurring_record', 'recurring_skip', 'recurring_yes', 'recurring_no']);
+const STRONG_ACTIONS = new Set<ProactiveSignalAction>(['discontinue', 'mark_paid', 'recurring_record', 'recurring_yes']);
 
 function actionLabelKey(signal: ProactiveSignal, action: ProactiveSignalAction): string {
   switch (action) {
@@ -82,6 +88,14 @@ function actionLabelKey(signal: ProactiveSignal, action: ProactiveSignalAction):
       return 'briefing.discontinue';
     case 'mark_paid':
       return 'briefing.markPaid';
+    case 'recurring_record':
+      return 'briefing.recurringRecord';
+    case 'recurring_skip':
+      return 'briefing.recurringSkip';
+    case 'recurring_yes':
+      return 'briefing.recurringYes';
+    case 'recurring_no':
+      return 'briefing.recurringNo';
   }
 }
 
@@ -142,9 +156,37 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
     );
   };
 
+  // A recurring expense's month: recorded, skipped, or the look-alike record
+  // confirmed or not - the signal leaves at once and returns if saving fails.
+  const answerRecurring = async (signal: ProactiveSignal, action: ProactiveSignalAction) => {
+    const { recurring_id: id, recurring_month: month } = signal;
+    if (!id || !month) return;
+    setSignals((prev) => prev.filter((s) => s !== signal));
+    try {
+      if (action === 'recurring_record') {
+        await api.recordRecurringMonth(id, month);
+        Toast.success(t('recurring.recorded'));
+      } else if (action === 'recurring_skip') {
+        await api.skipRecurringMonth(id, month, true);
+      } else if (signal.match_id && signal.match_source) {
+        await api.answerRecurringMatch(id, month, {
+          source: signal.match_source, id: signal.match_id, same: action === 'recurring_yes',
+        });
+      }
+      refresh();
+    } catch (error: any) {
+      setSignals((prev) => [...prev, signal].sort((a, b) => b.priority - a.priority));
+      Alert.alert(t('common.error'), error?.message || '');
+    }
+  };
+
   const act = async (signal: ProactiveSignal, action: ProactiveSignalAction) => {
     if (action === 'mark_paid') {
       markPaid(signal);
+      return;
+    }
+    if (RECURRING_ACTIONS.has(action)) {
+      await answerRecurring(signal, action);
       return;
     }
     setSignals((prev) => prev.filter((s) => s !== signal));
@@ -231,10 +273,10 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
                 {(signal.actions || []).map((action) => (
                   <TouchableOpacity
                     key={action}
-                    style={[styles.actionBtn, (action === 'discontinue' || action === 'mark_paid') && styles.actionBtnStrong]}
+                    style={[styles.actionBtn, STRONG_ACTIONS.has(action) && styles.actionBtnStrong]}
                     onPress={() => act(signal, action)}
                   >
-                    <Text style={[styles.actionText, (action === 'discontinue' || action === 'mark_paid') && styles.actionTextStrong]}>
+                    <Text style={[styles.actionText, STRONG_ACTIONS.has(action) && styles.actionTextStrong]}>
                       {t(actionLabelKey(signal, action))}
                     </Text>
                   </TouchableOpacity>

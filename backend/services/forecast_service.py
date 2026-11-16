@@ -6,6 +6,7 @@ import calendar
 import statistics
 
 from services.business_calendar import Period, business_day, day_start_utc, days_in_month, now_local, today_local
+from services import recurring_service
 
 # Below this many months of history, a trend computed any way at all is
 # mostly noise dressed up as a number - with 2-3 points, a single unusual
@@ -582,10 +583,16 @@ class ForecastService:
         assets = await self.db.assets.find({"company_id": company_id}, {"_id": 0}).to_list(None)
         depreciation = sum(_asset_depreciation_for_month(a, today.year, today.month) for a in assets)
         entered_fixed = (0.0 if payroll_estimated else (payroll or 0.0)) + depreciation
+        # Recurring expenses (rent, subscriptions) as they are - paid or
+        # still to come this month - never spread as a daily pace.
+        recurring = await recurring_service.month_projection(
+            self.db, company_id, scope, today.year, today.month, today, include_off_book_expenses,
+        )
+        paced = max(0.0, variable - recurring["paid_so_far"])
         return {
             "month": _month_key(today.year, today.month),
             "so_far": round(variable + entered_fixed * elapsed / dim, 2),
-            "expected": round(variable * dim / elapsed + (payroll or 0.0) + depreciation, 2),
+            "expected": round(paced * dim / elapsed + recurring["month_total"] + (payroll or 0.0) + depreciation, 2),
             "days_elapsed": elapsed, "days_in_month": dim,
             "payroll_from_last_month": payroll_estimated and payroll is not None,
         }
@@ -797,6 +804,18 @@ class ForecastService:
         year_back = await self._year_back(company_id, "expense", include_off_book_expenses)
         result = _build_forecast(historical, months_ahead, year_back)
         result["current_month"] = current
+        # A month ahead holds at least the recurring expenses already known
+        # (a floor, not added on top: the history already carries them).
+        known = recurring_service.known_monthly_total(
+            await recurring_service.active_items(self.db, company_id), include_off_book_expenses,
+        )
+        result["known_recurring_monthly"] = known
+        for entry in result["forecast"]:
+            if entry["predicted_amount"] < known:
+                entry.update({
+                    "predicted_amount": known, "lower_bound": max(entry["lower_bound"], known),
+                    "upper_bound": max(entry["upper_bound"], known), "floor": "known_recurring",
+                })
         return result
 
     async def get_revenue_forecast(

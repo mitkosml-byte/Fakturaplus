@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
-PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType } from '../types';
+PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence } from '../types';
 import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -1136,14 +1136,43 @@ class ApiService {
   }
 
   // Recurring Expenses
-  async getRecurringExpenses(): Promise<{ recurring_expenses: any[] }> {
+  async getRecurringExpenses(): Promise<RecurringOverview> {
     return this.fetch('/recurring-expenses');
   }
 
-  async createRecurringExpense(expense: { description: string; amount: number; day_of_month: number; category?: string }): Promise<{ message: string; id: string }> {
+  async createRecurringExpense(expense: RecurringExpenseInput): Promise<{ message: string; id: string }> {
     return this.fetch('/recurring-expenses', {
       method: 'POST',
       body: JSON.stringify(expense),
+    });
+  }
+
+  async updateRecurringExpense(id: string, changes: Partial<RecurringExpenseInput>): Promise<{ recurring_expense: RecurringExpense }> {
+    return this.fetch(`/recurring-expenses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(changes),
+    });
+  }
+
+  // A month of a recurring expense: paid - record it (the amount paid, when
+  // it differs), skip it, or answer "is this it?" about a look-alike record.
+  async recordRecurringMonth(id: string, month: string, amount?: number): Promise<{ occurrence: RecurringOccurrence }> {
+    return this.fetch(`/recurring-expenses/${id}/months/${month}/record`, {
+      method: 'POST',
+      body: JSON.stringify(amount ? { amount } : {}),
+    });
+  }
+
+  async skipRecurringMonth(id: string, month: string, skip: boolean = true): Promise<{ occurrence: RecurringOccurrence }> {
+    return this.fetch(`/recurring-expenses/${id}/months/${month}/${skip ? 'skip' : 'unskip'}`, { method: 'POST' });
+  }
+
+  async answerRecurringMatch(
+    id: string, month: string, answer: { source: 'expense' | 'invoice'; id: string; same: boolean },
+  ): Promise<{ occurrence: RecurringOccurrence }> {
+    return this.fetch(`/recurring-expenses/${id}/months/${month}/match`, {
+      method: 'POST',
+      body: JSON.stringify(answer),
     });
   }
 

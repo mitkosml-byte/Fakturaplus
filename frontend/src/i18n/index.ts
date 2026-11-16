@@ -276,6 +276,218 @@ export const translations: Translations = {
     bg: 'Въведи оборота',
     en: 'Enter revenue',
   },
+  'briefing.cta.recurring_invoice_missing': {
+    bg: 'Сканирай фактурата',
+    en: 'Scan the invoice',
+  },
+  'briefing.cta.recurring': {
+    bg: 'Към периодичните',
+    en: 'Recurring expenses',
+  },
+  'briefing.recurringRecord': {
+    bg: 'Платен е – запиши',
+    en: 'Paid – record it',
+  },
+  'briefing.recurringSkip': {
+    bg: 'Пропусни месеца',
+    en: 'Skip this month',
+  },
+  'briefing.recurringYes': {
+    bg: 'Да, същото е',
+    en: 'Yes, the same',
+  },
+  'briefing.recurringNo': {
+    bg: 'Не, различно е',
+    en: 'No, different',
+  },
+  'recurring.badge': {
+    bg: 'Периодичен разход',
+    en: 'Recurring expense',
+  },
+  'recurring.dayRange': {
+    bg: 'Денят трябва да е между 1 и 28.',
+    en: 'The day must be between 1 and 28.',
+  },
+  'recurring.supplierRequired': {
+    bg: 'Посочи доставчика, от когото идва фактурата – по него програмата я разпознава всеки месец.',
+    en: 'Name the supplier the invoice comes from – that is how the app recognises it every month.',
+  },
+  'recurring.updated': {
+    bg: 'Периодичният разход е обновен',
+    en: 'Recurring expense updated',
+  },
+  'recurring.deleteConfirm': {
+    bg: 'Да спре ли този периодичен разход? Вече записаните плащания остават.',
+    en: 'Stop this recurring expense? Payments already recorded stay.',
+  },
+  'recurring.recorded': {
+    bg: 'Записан като разход',
+    en: 'Recorded as an expense',
+  },
+  'recurring.expenseLabel': {
+    bg: 'разход „{description}“ – {amount} на {date}',
+    en: 'expense “{description}” – {amount} on {date}',
+  },
+  'recurring.invoiceLabel': {
+    bg: 'фактура № {number} от {supplier} – {amount} на {date}',
+    en: 'invoice No. {number} from {supplier} – {amount} on {date}',
+  },
+  'recurring.paidByInvoice': {
+    bg: '{month}: платен с фактура № {number} – {amount}',
+    en: '{month}: paid by invoice No. {number} – {amount}',
+  },
+  'recurring.recordedTwice': {
+    bg: 'Записан е и разход без фактура за {amount}. Едно и също плащане ли е?',
+    en: 'An expense without an invoice of {amount} is recorded too. Is it the same payment?',
+  },
+  'recurring.sameKeepInvoice': {
+    bg: 'Същото е – остави фактурата',
+    en: 'Same – keep the invoice',
+  },
+  'recurring.different': {
+    bg: 'Не, различно е',
+    en: 'No, different',
+  },
+  'recurring.paidByExpense': {
+    bg: '{month}: записан на {date} – {amount}',
+    en: '{month}: recorded on {date} – {amount}',
+  },
+  'recurring.invoiceCameToo': {
+    bg: 'Дойде и {record}. Ако е същото плащане, фактурата заменя записа.',
+    en: 'Also came: {record}. If it is the same payment, the invoice replaces the record.',
+  },
+  'recurring.skipped': {
+    bg: '{month}: пропуснат този месец',
+    en: '{month}: skipped this month',
+  },
+  'recurring.unskip': {
+    bg: 'Върни',
+    en: 'Undo',
+  },
+  'recurring.isThisIt': {
+    bg: '{month}: това ли е плащането – {record}?',
+    en: '{month}: is this the payment – {record}?',
+  },
+  'recurring.yesThatIsIt': {
+    bg: 'Да, това е',
+    en: 'Yes, that is it',
+  },
+  'recurring.upcomingInvoice': {
+    bg: '{month}: очаква се фактура около {date}',
+    en: '{month}: invoice expected around {date}',
+  },
+  'recurring.upcoming': {
+    bg: '{month}: плаща се на {date}',
+    en: '{month}: due on {date}',
+  },
+  'recurring.awaitingInvoice': {
+    bg: '{month}: чака се фактурата (около {date})',
+    en: '{month}: waiting for the invoice (around {date})',
+  },
+  'recurring.invoiceMissing': {
+    bg: '{month}: фактурата липсва (очаквана около {date}). Въведи я, когато дойде.',
+    en: '{month}: the invoice is missing (expected around {date}). Enter it when it comes.',
+  },
+  'recurring.skipMonth': {
+    bg: 'Пропусни месеца',
+    en: 'Skip this month',
+  },
+  'recurring.duePaid': {
+    bg: '{month}: платен ли е? (на {date})',
+    en: '{month}: is it paid? (due {date})',
+  },
+  'recurring.paidRecord': {
+    bg: 'Платен е – запиши',
+    en: 'Paid – record it',
+  },
+  'recurring.outlook': {
+    bg: 'Този месец: {total} периодични разходи · платени {paid} · очакват се още {left}',
+    en: 'This month: {total} in recurring expenses · paid {paid} · still to come {left}',
+  },
+  'recurring.emptyHint': {
+    bg: 'Наем, абонаменти, застраховки, сметки – добави ги веднъж и програмата следи всеки месец дали са платени, без да ги брои два пъти.',
+    en: 'Rent, subscriptions, insurance, bills – add them once and the app tracks each month whether they are paid, never counting them twice.',
+  },
+  'recurring.everyMonthOn': {
+    bg: 'всеки месец на {day}-о',
+    en: 'every month on day {day}',
+  },
+  'recurring.withInvoiceFrom': {
+    bg: 'с фактура от {supplier}',
+    en: 'invoiced by {supplier}',
+  },
+  'recurring.noInvoiceAuto': {
+    bg: 'без фактура · записва се сам',
+    en: 'no invoice · recorded by itself',
+  },
+  'recurring.noInvoiceAsk': {
+    bg: 'без фактура · пита на деня',
+    en: 'no invoice · asks on the day',
+  },
+  'recurring.pause': {
+    bg: 'Спри',
+    en: 'Pause',
+  },
+  'recurring.resume': {
+    bg: 'Пусни',
+    en: 'Resume',
+  },
+  'recurring.startsIn': {
+    bg: 'Започва от {month}',
+    en: 'Starts in {month}',
+  },
+  'recurring.edit': {
+    bg: 'Периодичен разход',
+    en: 'Recurring expense',
+  },
+  'recurring.usualAmount': {
+    bg: 'Обичайна сума (€)',
+    en: 'Usual amount (€)',
+  },
+  'recurring.invoiceComes': {
+    bg: 'Идва ли фактура за него?',
+    en: 'Does an invoice come for it?',
+  },
+  'recurring.withInvoice': {
+    bg: 'С фактура',
+    en: 'With invoice',
+  },
+  'recurring.withoutInvoice': {
+    bg: 'Без фактура',
+    en: 'Without invoice',
+  },
+  'recurring.withInvoiceHint': {
+    bg: 'Фактурата е разходът: програмата не записва нищо отделно. Чака я всеки месец от доставчика, отбелязва месеца като платен и напомня, ако закъснее.',
+    en: 'The invoice is the expense: the app records nothing separately. It waits for it every month from the supplier, marks the month paid and reminds you when it is late.',
+  },
+  'recurring.withoutInvoiceHint': {
+    bg: 'Програмата записва разход без фактура – когато потвърдиш, че е платен, или сама на деня му. Ако все пак дойде фактура за него, тя заменя записа и разходът не се брои два пъти.',
+    en: 'The app records an expense without an invoice – when you confirm it is paid, or by itself on its day. If an invoice does come for it, the invoice replaces the record and the cost is never counted twice.',
+  },
+  'recurring.supplier': {
+    bg: 'Доставчик',
+    en: 'Supplier',
+  },
+  'recurring.supplierOptional': {
+    bg: 'Доставчик (по избор)',
+    en: 'Supplier (optional)',
+  },
+  'recurring.supplierPlaceholder': {
+    bg: 'Име на доставчика',
+    en: 'Supplier name',
+  },
+  'recurring.supplierEik': {
+    bg: 'ЕИК на доставчика (по избор)',
+    en: 'Supplier EIK (optional)',
+  },
+  'recurring.autoRecord': {
+    bg: 'Записвай сам на деня му',
+    en: 'Record by itself on its day',
+  },
+  'recurring.autoRecordHint': {
+    bg: 'Без да пита. Изключено – на деня пита „Платен ли е?“.',
+    en: 'Without asking. Off – on the day it asks “Is it paid?”.',
+  },
   'briefing.snooze': {
     bg: 'Отложи 3 дни',
     en: 'Snooze 3 days',

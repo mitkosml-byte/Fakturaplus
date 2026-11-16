@@ -5,6 +5,7 @@ after module load, so this file always accesses them as `server.db` /
 `server.AI_FEATURES_ENABLED` (qualified), never via the star-import, to
 stay correct when server.py's test fixture monkeypatches them."""
 from fastapi import APIRouter
+from routers.recurring import maintain_quietly
 from server import *
 from server import (
     _eik_check_digit,
@@ -230,6 +231,9 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         company_id=company_id,
         details={"supplier": invoice_obj.supplier, "invoice_number": invoice_obj.invoice_number, "total_amount": invoice_obj.total_amount}
     )
+    # It may pay a recurring expense's month - one recorded without an
+    # invoice included (then it replaces that record).
+    await maintain_quietly(company_id, {"user_id": current_user.user_id, "user_name": current_user.name})
 
     return invoice_obj
 
@@ -653,6 +657,7 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
         company_id=company_id,
         details={k: v for k, v in update_data.items() if k != "date"}
     )
+    await maintain_quietly(company_id, {"user_id": current_user.user_id, "user_name": current_user.name})
 
     return Invoice(**invoice)
 
@@ -702,6 +707,11 @@ async def _restore_record(log_entry: dict, details: dict, company_id: str, curre
     if await collection.find_one({"id": snapshot["id"]}, {"_id": 1}):
         raise HTTPException(status_code=400, detail="Записът вече съществува")
     doc = {**snapshot, "company_id": company_id}
+    if kind == "expense" and details.get("replaced_by_invoice"):
+        # Put back on purpose although an invoice paid the same month: a
+        # cost of its own now, no longer that recurring expense's month
+        # (tied to it, the invoice would replace it again).
+        doc.update({"recurring_id": None, "recurring_month": None})
     if kind == "payroll" and await server.db.payroll_entries.find_one({
         "employee_id": doc.get("employee_id"), "period_year": doc.get("period_year"), "period_month": doc.get("period_month"),
     }, {"_id": 1}):

@@ -305,7 +305,12 @@ export default function OffBookExpensesHistoryScreen() {
                         onPress={() => canManage && openEdit(expense)}
                       >
                         <View style={styles.expenseRowTop}>
-                          <Text style={styles.expenseDescription} numberOfLines={1}>{expense.description}</Text>
+                          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            {!!expense.recurring_id && (
+                              <Ionicons name="repeat" size={14} color={COLORS.success} accessibilityLabel={t('recurring.badge')} />
+                            )}
+                            <Text style={[styles.expenseDescription, { flexShrink: 1 }]} numberOfLines={1}>{expense.description}</Text>
+                          </View>
                           <Text style={styles.expenseAmount}>{expense.amount.toFixed(2)} €</Text>
                         </View>
                         <View style={styles.expenseRowBottom}>

@@ -273,6 +273,13 @@ async def delete_expense(expense_id: str, current_user: User = Depends(get_curre
     result = await server.db.expenses.delete_one({"id": expense_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Разходът не е намерен")
+    if expense.get("recurring_id") and expense.get("recurring_month"):
+        # A recurring expense's month deleted on purpose is not paid that
+        # month - never recorded again by itself.
+        await server.db.recurring_expenses.update_one(
+            {"id": expense["recurring_id"], "company_id": company_id},
+            {"$addToSet": {"skipped_months": expense["recurring_month"]}},
+        )
     # A trace in the action log, with the whole record so it can be put
     # back (restore_audit_entry) - before, a deleted expense vanished.
     await audit_service.log_action(

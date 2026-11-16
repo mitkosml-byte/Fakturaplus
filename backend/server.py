@@ -159,6 +159,7 @@ async def lifespan(app: FastAPI):
     await start_calendar_reminder_loop()
     await start_budget_alert_loop()
     await start_scan_credit_depletion_loop()
+    await start_recurring_expense_loop()
     await create_indexes()
     await run_data_migrations()
     yield
@@ -632,6 +633,10 @@ class NonInvoiceExpense(BaseModel):
     date: str
     kind: Optional[str] = None  # SCHEDULE_WAGES, or None for an ordinary off-book expense
     schedule_payment_id: Optional[str] = None
+    # A recurring expense's payment for a month ("YYYY-MM") - see
+    # routers/recurring.py; one per recurring expense and month.
+    recurring_id: Optional[str] = None
+    recurring_month: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class NonInvoiceExpenseCreate(BaseModel):
@@ -3680,12 +3685,17 @@ async def _signal_missing_revenue(company_id, scope, current_user, visibility) -
         "fingerprint": missing[-1],
     }
 
+async def _signal_recurring_expenses(company_id, scope, current_user, visibility) -> List[dict]:
+    """Questions about the recurring expenses - see routers/recurring.py
+    (imported at the bottom of this module, resolved at call time)."""
+    return await recurring_expense_signals(company_id, current_user)
+
 _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_unpaid_invoices, _signal_receivables, _signal_scan_credits,
     _signal_budget, _signal_price_alerts, _signal_reorder, _signal_forecast,
     _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
-    _signal_vat_registration,
+    _signal_vat_registration, _signal_recurring_expenses,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
@@ -4098,6 +4108,7 @@ async def maybe_schedule_ai_item_merge(company_id: Optional[str]):
 from services.export_service import ExportService
 from services.audit_service import AuditService
 from services.forecast_service import ForecastService
+from services import recurring_service
 from services import import_service
 from services import push_service
 
@@ -4187,14 +4198,18 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
     is_exceeded = percent_used >= 100
 
     # Where the month is heading: purchases at their pace so far, plus the
-    # month's whole payroll and depreciation (fixed, not a pace).
+    # month's whole payroll and depreciation (fixed, not a pace), plus its
+    # recurring expenses as they are - paid or still to come, never spread
+    # as a pace (rent paid on the 5th is not a daily rate).
     expected_month_end = None
     if counted.days < whole.days:
         fixed_whole_month = (
             await get_payroll_cost_for_period(company_id, "", whole.start, whole.end)
             + await get_depreciation_cost_for_period(company_id, "", whole.start, whole.end)
         )
-        expected_month_end = round(variable_so_far / counted.days * whole.days + fixed_whole_month, 2)
+        recurring = await recurring_service.month_projection(db, company_id, scope, year, mon, counted.end, True)
+        paced = max(0.0, variable_so_far - recurring["paid_so_far"])
+        expected_month_end = round(paced / counted.days * whole.days + recurring["month_total"] + fixed_whole_month, 2)
 
     return {
         "is_running": counted.days < whole.days,
@@ -4217,13 +4232,7 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
     }
 
 
-# ===================== RECURRING EXPENSES =====================
-
-class RecurringExpenseCreate(BaseModel):
-    description: str
-    amount: float
-    day_of_month: int  # 1-28
-    category: Optional[str] = None
+# Recurring expenses: routers/recurring.py and services/recurring_service.py.
 
 
 
@@ -5620,6 +5629,22 @@ async def mark_schedule_wages() -> dict:
     return {"marked": marked}
 
 
+async def start_legacy_recurring_expenses() -> dict:
+    """Recurring expenses saved before they did anything: they start with
+    this month (no questions about months long gone) and ask before
+    recording - nothing is recorded for them by itself."""
+    marker = "recurring_expenses_kinds_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    this_month = today_local().strftime("%Y-%m")
+    result = await db.recurring_expenses.update_many(
+        {"start_month": {"$exists": False}},
+        {"$set": {"start_month": this_month, "kind": "no_invoice", "auto_record": False}},
+    )
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), "started": result.modified_count})
+    return {"started": result.modified_count}
+
+
 async def ensure_unique_records():
     """After dedupe_revenue_days_and_payroll: one revenue record per company
     and day, one payroll record per employee and month."""
@@ -5645,6 +5670,13 @@ async def ensure_unique_records():
         )
     except Exception:
         logger.exception("Unique issued-invoice number index could not be created")
+    try:
+        await db.expenses.create_index(
+            [("recurring_id", 1), ("recurring_month", 1)], unique=True, name="one_record_per_recurring_month",
+            partialFilterExpression={"recurring_id": {"$type": "string"}},
+        )
+    except Exception:
+        logger.exception("Unique recurring-month index could not be created")
 
 
 async def run_data_migrations():
@@ -5678,6 +5710,12 @@ async def run_data_migrations():
             logger.info(f"Schedule payments' expenses marked as wages: {result}")
     except Exception:
         logger.exception("Schedule wages migration failed")
+    try:
+        result = await start_legacy_recurring_expenses()
+        if result and not result.get("skipped"):
+            logger.info(f"Recurring expenses from before kinds started this month: {result}")
+    except Exception:
+        logger.exception("Recurring expenses migration failed")
 
 # ===================== HEALTH CHECK =====================
 
@@ -5727,7 +5765,10 @@ from routers.revenue_expenses import create_daily_revenue, create_expense
 from routers.budget import create_budget
 from routers.assets import create_asset
 from routers.payroll import create_payroll_entry
+from routers.recurring import recurring_expense_signals, start_recurring_expense_loop
 
+from routers import recurring
+app.include_router(recurring.router)
 from routers import scan_credits
 app.include_router(scan_credits.router)
 from routers import price_tracking
