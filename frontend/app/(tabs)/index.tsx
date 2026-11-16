@@ -704,6 +704,12 @@ export default function HomeScreen() {
                     style={[styles.cardValue, { color: COLORS.success }]}
                   />
                 )}
+                {/* Invoices issued to customers are income of their day. */}
+                {!!summary.total_issued_invoices && (
+                  <Text style={styles.cardIssuedNote}>
+                    {t('stats.ofWhichIssuedInvoices').replace('{amount}', summary.total_issued_invoices.toFixed(2))}
+                  </Text>
+                )}
               </View>
 
               <View style={[styles.summaryCard, styles.expenseCard]}>
@@ -1407,6 +1413,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  cardIssuedNote: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 4,
   },
   cardLabel: {
     fontSize: 13,

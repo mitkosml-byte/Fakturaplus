@@ -95,6 +95,7 @@ async def _roi_month_data(
         f"{y}-{m:02d}": {
             "year": y, "month": m, "personal": 0.0, "investment_only": 0.0,
             "fiscal_by_day": defaultdict(float), "pocket_by_day": defaultdict(float),
+            "issued_by_day": defaultdict(float),
             "invoices": [], "off_book": [], "payroll": 0.0, "depreciation": 0.0,
         }
         for y, m in months
@@ -121,6 +122,12 @@ async def _roi_month_data(
             day = int(date_str[8:10])
             month["fiscal_by_day"][day] += r.get("fiscal_revenue", 0)
             month["pocket_by_day"][day] += r.get("pocket_money", 0)
+    # Invoices issued to customers are revenue of their issue date.
+    window = Period.parse(first_start, (date_type.fromisoformat(last_end) - timedelta(days=1)).isoformat())
+    for day_text, issued in (await issued_invoices_by_day(scope, window)).items():
+        month = data.get(day_text[:7])
+        if month is not None:
+            month["issued_by_day"][int(day_text[8:10])] += issued["total"]
     invoices = await server.db.invoices.find(
         {**scope, **NOT_AN_ASSET, "date": {
             "$gte": datetime.fromisoformat(first_start + "T00:00:00+00:00"),
@@ -164,6 +171,7 @@ def _month_totals(month: Dict[str, Any], visibility: dict, through_day: Optional
         return limit is None or day <= limit
 
     fiscal = sum(v for d, v in month["fiscal_by_day"].items() if upto(d))
+    issued = sum(v for d, v in month.get("issued_by_day", {}).items() if upto(d))
     pocket = sum(v for d, v in month["pocket_by_day"].items() if upto(d)) if visibility["pocket_money"] else 0.0
     invoice_total = sum(amount for d, _, amount in month["invoices"] if upto(d))
     off_book = sum(amount for d, amount in month["off_book"] if upto(d))
@@ -172,6 +180,7 @@ def _month_totals(month: Dict[str, Any], visibility: dict, through_day: Optional
     income, expense = _profit_formula(
         fiscal_revenue=fiscal, pocket_money=pocket, invoice_total=invoice_total,
         off_book_expenses=off_book, payroll_cost=payroll, depreciation_cost=depreciation,
+        issued_invoices=issued,
     )
     by_supplier: Dict[str, float] = defaultdict(float)
     for d, supplier, amount in month["invoices"]:
@@ -180,7 +189,9 @@ def _month_totals(month: Dict[str, Any], visibility: dict, through_day: Optional
     return {
         "revenue": income, "expenses": expense, "profit": income - expense,
         "by_supplier": dict(by_supplier), "off_book": off_book,
-        "has_data": bool(month["fiscal_by_day"] or month["invoices"] or month["off_book"] or month["personal"]),
+        "has_data": bool(
+            month["fiscal_by_day"] or month.get("issued_by_day") or month["invoices"] or month["off_book"] or month["personal"]
+        ),
     }
 
 

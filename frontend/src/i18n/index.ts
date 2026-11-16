@@ -858,8 +858,8 @@ export const translations: Translations = {
     en: 'Delete this entry?',
   },
   'billingDocuments.title': {
-    bg: 'Оферти и сметки',
-    en: 'Quotes & bills',
+    bg: 'Фактури, оферти и сметки',
+    en: 'Invoices, quotes & bills',
   },
   'billingDocuments.add': {
     bg: 'Добави',
@@ -868,6 +868,62 @@ export const translations: Translations = {
   'billingDocuments.addNew': {
     bg: 'Нов документ',
     en: 'New document',
+  },
+  'billingDocuments.typeInvoice': {
+    bg: 'Фактура',
+    en: 'Invoice',
+  },
+  'billingDocuments.invoiceSaved': {
+    bg: 'Фактура № {number} е издадена',
+    en: 'Invoice No. {number} issued',
+  },
+  'billingDocuments.invoiceDeleteConfirm': {
+    bg: 'Последната издадена фактура се изтрива. По-ранна се анулира: номерът ѝ остава, а сумата ѝ вече не е приход и ДДС.',
+    en: 'The last invoice issued is deleted. An earlier one is cancelled: its number stays, and its amount no longer counts as revenue and VAT.',
+  },
+  'billingDocuments.invoiceCancelled': {
+    bg: 'Фактурата е анулирана - номерът ѝ остава',
+    en: 'Invoice cancelled - its number stays',
+  },
+  'billingDocuments.cancelled': {
+    bg: 'Анулирана',
+    en: 'Cancelled',
+  },
+  'billingDocuments.invoiceHint': {
+    bg: 'Фактура към клиент: пореден номер, ДДС за всеки ред, приход и ДДС на датата на издаване. Данните на доставчика в PDF-а са от профила на фирмата.',
+    en: 'An invoice to a customer: the next number, VAT on each line, revenue and VAT on the issue date. The supplier details on the PDF come from the company profile.',
+  },
+  'billingDocuments.customerEik': {
+    bg: 'ЕИК на клиента',
+    en: 'Customer EIK',
+  },
+  'billingDocuments.customerAddress': {
+    bg: 'Адрес на клиента',
+    en: 'Customer address',
+  },
+  'billingDocuments.invoiceOwed': {
+    bg: 'Клиентът я плаща до 14 дни - вземането се появява във „Вземания“ и плащането по него не се брои втори път като приход.',
+    en: 'The customer pays within 14 days - it shows under Receivables, and the payment is not counted as revenue a second time.',
+  },
+  'billingDocuments.invoicePaidNow': {
+    bg: 'Платена при издаването - не остава вземане.',
+    en: 'Paid when issued - nothing left owed.',
+  },
+  'billingDocuments.startNumber': {
+    bg: 'Номер на тази фактура (по избор - ако продължавате своя номерация)',
+    en: 'Number of this invoice (optional - to continue your own numbering)',
+  },
+  'billingDocuments.priceWithoutVat': {
+    bg: 'Цена без ДДС',
+    en: 'Price excl. VAT',
+  },
+  'billingDocuments.vatRate': {
+    bg: 'ДДС %',
+    en: 'VAT %',
+  },
+  'billingDocuments.netAndVat': {
+    bg: 'Основа {net} € + ДДС {vat} €',
+    en: 'Base {net} € + VAT {vat} €',
   },
   'billingDocuments.typeBill': {
     bg: 'Сметка',
@@ -890,8 +946,8 @@ export const translations: Translations = {
     en: 'Add at least one item with a valid price',
   },
   'billingDocuments.empty': {
-    bg: 'Няма оферти или сметки още - добави първата с бутона горе',
-    en: 'No quotes or bills yet - add the first one above',
+    bg: 'Няма фактури, оферти или сметки още - добави първата с бутона горе',
+    en: 'No invoices, quotes or bills yet - add the first one above',
   },
   'billingDocuments.billSaved': {
     bg: 'Сметката е записана',
@@ -2773,6 +2829,10 @@ export const translations: Translations = {
     bg: 'Допълнителна информация',
     en: 'Additional Information',
   },
+  'stats.ofWhichIssuedInvoices': {
+    bg: 'от тях издадени фактури: {amount} €',
+    en: 'of which issued invoices: {amount} €',
+  },
   'stats.top3Title': {
     bg: 'Топ 3',
     en: 'Top 3',
@@ -4330,6 +4390,10 @@ export const translations: Translations = {
   },
   'auditLog.entityExpense': { bg: 'Разход без фактура', en: 'Expense without invoice' },
   'auditLog.entityPayroll': { bg: 'Ведомост', en: 'Payroll entry' },
+  'auditLog.entityIssuedInvoice': {
+    bg: 'Издадена фактура',
+    en: 'Issued invoice',
+  },
   'auditLog.entityInvoice': {
     bg: 'фактура',
     en: 'invoice',

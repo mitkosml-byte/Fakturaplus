@@ -1125,6 +1125,11 @@ export default function StatsScreen() {
                       style={[styles.cardValue, { color: COLORS.success }]}
                     />
                     {renderTrendBadge(summary?.total_income, previousSummary?.total_income, true)}
+                    {!!summary?.total_issued_invoices && (
+                      <Text style={styles.cardIssuedNote}>
+                        {t('stats.ofWhichIssuedInvoices').replace('{amount}', summary.total_issued_invoices.toFixed(2))}
+                      </Text>
+                    )}
                   </View>
                   <View style={[styles.summaryCard, { borderLeftColor: COLORS.danger }]}>
                     <Ionicons name="trending-down" size={24} color={COLORS.danger} />
@@ -2559,6 +2564,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     borderLeftWidth: 4,
+  },
+  cardIssuedNote: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 4,
   },
   cardLabel: {
     fontSize: 12,

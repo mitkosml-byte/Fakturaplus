@@ -845,3 +845,91 @@ def test_p4_a_credit_note_takes_purchases_and_vat_credit_down(client):
     assert imported["imported"] == 1, imported
     stored = asyncio.run(server.db.invoices.find_one({"company_id": company_id, "invoice_number": "КИ-7"}))
     assert stored["document_type"] == "credit_note" and stored["total_amount"] == -12
+
+
+def test_v3_an_issued_invoice_is_revenue_and_vat_on_its_day_and_owed_until_paid(client):
+    company_id, _, owner = _company()
+    october = "start_date=2026-10-01&end_date=2026-10-31"
+    client.post("/api/daily-revenue", json={"date": "2026-10-02", "fiscal_revenue": 1200, "vat_rate_percent": 20}, headers=owner)
+    before = client.get(f"/api/statistics/summary?{october}", headers=owner).json()
+
+    issued = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "invoice", "customer_name": "Фирма & Син ООД", "customer_eik": "131071587",
+        "issue_date": "2026-10-10", "payment_method": "bank_transfer",
+        "items": [{"name": "Кетъринг", "quantity": 2, "unit_price": 100, "vat_rate": 20},
+                  {"name": "Книги", "quantity": 1, "unit_price": 50, "vat_rate": 9}],
+    })
+    assert issued.status_code == 200, issued.text
+    issued = issued.json()
+    assert issued["invoice_number"] == "0000000001"
+    assert (issued["amount_without_vat"], issued["vat_amount"], issued["total_amount"]) == (250, 44.5, 294.5)
+    assert issued["due_date"] == "2026-10-24" and issued["receivable_id"]
+
+    after = client.get(f"/api/statistics/summary?{october}", headers=owner).json()
+    assert round(after["total_income"] - before["total_income"], 2) == 294.5
+    assert round(after["fiscal_vat"] - before["fiscal_vat"], 2) == 44.5
+    assert round(after["vat_to_pay"] - before["vat_to_pay"], 2) == 44.5
+    assert after["total_issued_invoices"] == 294.5 and after["issued_invoice_count"] == 1
+    assert after["total_fiscal_revenue"] == before["total_fiscal_revenue"]   # the till is the till
+
+    chart = client.get("/api/statistics/chart-data?start_date=2026-10-10&end_date=2026-10-10", headers=owner)
+    assert chart.status_code == 200, chart.text
+    points = chart.json()
+    assert len(points) == 1 and abs(points[0]["income"] - 294.5) < 0.01, points
+
+    # Owed until paid, and a payment on it is not new revenue.
+    receivable = asyncio.run(server.db.receivables.find_one({"id": issued["receivable_id"]}))
+    assert receivable["revenue_counted"] is True and receivable["amount"] == 294.5
+    assert receivable["billing_document_id"] == issued["id"]
+
+    # Paid at issue: no receivable. Numbers follow on; a number of one's own to continue from.
+    cash = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "invoice", "customer_name": "Клиент", "issue_date": "2026-10-11", "payment_method": "cash",
+        "items": [{"name": "Услуга", "quantity": 1, "unit_price": 10}],
+    }).json()
+    assert cash["invoice_number"] == "0000000002" and cash["receivable_id"] is None and cash["due_date"] is None
+    own = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "invoice", "customer_name": "Клиент", "issue_date": "2026-10-12", "payment_method": "card",
+        "invoice_number": "155", "items": [{"name": "Услуга", "quantity": 1, "unit_price": 10}],
+    }).json()
+    assert own["invoice_number"] == "0000000155"
+    taken = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "invoice", "customer_name": "Клиент", "invoice_number": "155",
+        "items": [{"name": "Услуга", "quantity": 1, "unit_price": 10}],
+    })
+    assert taken.status_code == 409
+
+    pdf = client.get(f"/api/billing-documents/{issued['id']}/pdf", headers=owner)
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+
+    # An earlier invoice is cancelled (its number kept, counting for nothing); the last one can go.
+    gone = client.delete(f"/api/billing-documents/{issued['id']}", headers=owner).json()
+    assert gone["cancelled"] is True and gone["receivable"] == "deleted"
+    kept = asyncio.run(server.db.billing_documents.find_one({"id": issued["id"]}))
+    assert kept["cancelled"] is True and kept["invoice_number"] == "0000000001"
+    last = client.delete(f"/api/billing-documents/{own['id']}", headers=owner).json()
+    assert last["cancelled"] is False
+    assert asyncio.run(server.db.billing_documents.find_one({"id": own["id"]})) is None
+    final = client.get(f"/api/statistics/summary?{october}", headers=owner).json()
+    assert final["total_issued_invoices"] == 12.0 and round(final["total_income"] - before["total_income"], 2) == 12.0
+
+
+def test_v3_issued_invoices_join_the_revenue_forecast_as_known_amounts(client):
+    _, _, owner = _company()
+    today = today_local()
+    for months_back in (3, 2, 1):
+        first = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+        for _ in range(months_back - 1):
+            first = (first - timedelta(days=1)).replace(day=1)
+        client.post("/api/billing-documents", headers=owner, json={
+            "doc_type": "invoice", "customer_name": "Клиент", "issue_date": first.replace(day=5).isoformat(),
+            "payment_method": "bank_transfer", "items": [{"name": "Проект", "quantity": 1, "unit_price": 1000, "vat_rate": 20}],
+        })
+    client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "invoice", "customer_name": "Клиент", "issue_date": today.isoformat(), "payment_method": "card",
+        "items": [{"name": "Проект", "quantity": 1, "unit_price": 500, "vat_rate": 20}],
+    })
+    forecast = client.get("/api/forecast/revenue", headers=owner).json()
+    assert forecast["current_month"]["so_far"] == 600
+    history = {row["month"]: row["amount"] for row in forecast.get("historical", [])}
+    assert sorted(history.values())[-3:] == [1200, 1200, 1200], forecast

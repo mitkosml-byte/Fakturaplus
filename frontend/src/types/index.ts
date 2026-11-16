@@ -182,6 +182,10 @@ export interface Receivable {
   paid_at?: string | null;
   // Each payment received (in part or in full), on its day and by its method.
   payments?: ReceivablePayment[];
+  // Owed on an invoice the business issued - already revenue on its date,
+  // so a payment on it is never offered as new revenue.
+  billing_document_id?: string | null;
+  revenue_counted?: boolean;
   created_at: string;
 }
 
@@ -196,21 +200,36 @@ export interface BillingDocumentItem {
   name: string;
   quantity: number;
   unit: string;
-  unit_price: number;
+  unit_price: number;  // on an invoice: without VAT
+  vat_rate?: number;   // an invoice's line only (20, 9, 0...)
 }
+
+// quote / bill: non-fiscal; invoice: issued to a customer - numbered in
+// sequence, with VAT, revenue and VAT on its issue date, owed until paid.
+export type BillingDocumentType = 'quote' | 'bill' | 'invoice';
 
 export interface BillingDocument {
   id: string;
   company_id: string | null;
   user_id: string;
-  doc_type: 'quote' | 'bill';
+  doc_type: BillingDocumentType;
   customer_id?: string | null;
   customer_name: string;
   items: BillingDocumentItem[];
   notes?: string | null;
   issue_date: string;
-  total_amount: number;
+  due_date?: string | null;
+  total_amount: number;  // an invoice's is with VAT
   receivable_id?: string | null;
+  invoice_number?: string | null;
+  customer_eik?: string | null;
+  customer_address?: string | null;
+  payment_method?: 'cash' | 'bank_transfer' | 'card' | null;
+  amount_without_vat?: number;
+  vat_amount?: number;
+  vat_by_rate?: { rate: number; base: number; vat: number }[];
+  // A cancelled invoice keeps its number and counts for nothing.
+  cancelled?: boolean;
   created_at: string;
 }
 
@@ -384,6 +403,10 @@ export interface Summary {
   total_invoice_amount: number | null;
   total_invoice_vat: number | null;
   total_fiscal_revenue: number | null;
+  // Invoices issued to customers in the period (with VAT) - part of income.
+  total_issued_invoices?: number | null;
+  issued_invoice_count?: number | null;
+  issued_invoice_vat?: number | null;
   total_pocket_money: number | null;
   fiscal_vat: number | null;
   vat_to_pay: number | null;

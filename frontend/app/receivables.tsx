@@ -194,7 +194,9 @@ export default function ReceivablesScreen() {
       Toast.success(updated.is_paid ? t('receivables.markedPaid') : t('receivables.partPaid'));
       setPayingReceivable(null);
       loadData();
-      if (payMethod === 'cash') {
+      // Owed on an invoice the business issued: that invoice is already
+      // revenue on its own date - the payment is never offered as more.
+      if (payMethod === 'cash' && !r.revenue_counted) {
         Alert.alert(
           t('receivables.logAsRevenueTitle'),
           t('receivables.logAsRevenueHintDay')

@@ -111,8 +111,12 @@ SECTIONS: List[Section] = [
     ),
     Section(
         "billing_documents",
-        lambda d: (_norm(d.get("doc_type")), _day(d.get("issue_date")), _money(d.get("total_amount")), _norm(d.get("customer_name"))),
-        label="Сметки и оферти",
+        # An issued invoice is its number; a bill or quote its day, amount, customer.
+        lambda d: (
+            _norm(d.get("doc_type")), _norm(d.get("invoice_number")), _day(d.get("issue_date")),
+            _money(d.get("total_amount")), _norm(d.get("customer_name")),
+        ),
+        label="Сметки, оферти и издадени фактури",
     ),
     Section(
         "receivables",

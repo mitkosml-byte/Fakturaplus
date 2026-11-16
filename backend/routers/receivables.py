@@ -32,6 +32,7 @@ from server import (
 )
 import server
 import uuid
+from pymongo.errors import DuplicateKeyError
 
 router = APIRouter(prefix="/api")
 
@@ -189,9 +190,80 @@ async def delete_receivable(receivable_id: str, current_user: User = Depends(get
         raise HTTPException(status_code=404, detail="Записът не е намерен")
     return {"message": "Записът е изтрит"}
 
+async def _latest_invoice_number(scope: dict) -> Optional[str]:
+    """The highest number issued here (cancelled ones included - their
+    numbers are spent)."""
+    latest = await server.db.billing_documents.find(
+        {**scope, "doc_type": "invoice", "invoice_number": {"$type": "string"}}, {"_id": 0, "invoice_number": 1},
+    ).sort("invoice_number", -1).limit(1).to_list(1)
+    return latest[0]["invoice_number"] if latest else None
+
+
+async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: User) -> BillingDocument:
+    """An invoice to a customer: the next number in sequence (or the one the
+    business continues from), VAT by rate, revenue and VAT on its issue
+    date (period_totals reads it there). Paid in cash or by card when
+    issued; otherwise owed - a receivable that is already revenue."""
+    company_id, scope = await get_company_scope(current_user)
+    issued = business_day(payload.issue_date) if payload.issue_date else today_local()
+    if issued is None:
+        raise HTTPException(status_code=400, detail="Невалидна дата на издаване")
+    amounts = invoice_vat_breakdown(payload.items)
+    paid_when_issued = payload.payment_method in ("cash", "card")
+    due_date = None
+    if not paid_when_issued:
+        due_day = business_day(payload.due_date) if payload.due_date else issued + timedelta(days=INVOICE_TERM_DAYS)
+        if due_day is None:
+            raise HTTPException(status_code=400, detail="Невалиден срок за плащане")
+        due_date = due_day.isoformat()
+
+    if payload.invoice_number:
+        number = payload.invoice_number.zfill(INVOICE_NUMBER_DIGITS)
+        if await server.db.billing_documents.find_one({**scope, "doc_type": "invoice", "invoice_number": number}):
+            raise HTTPException(status_code=409, detail=f"Фактура № {number} вече е издадена")
+    else:
+        latest = await _latest_invoice_number(scope)
+        number = str(int(latest) + 1 if latest else 1).zfill(INVOICE_NUMBER_DIGITS)
+
+    document = BillingDocument(
+        user_id=current_user.user_id, company_id=company_id, doc_type=BillingDocumentType.INVOICE,
+        customer_id=payload.customer_id, customer_name=payload.customer_name, items=payload.items,
+        notes=payload.notes, issue_date=issued.isoformat(), due_date=due_date,
+        invoice_number=number, customer_eik=(payload.customer_eik or "").strip() or None,
+        customer_address=(payload.customer_address or "").strip() or None, payment_method=payload.payment_method,
+        amount_without_vat=amounts["amount_without_vat"], vat_amount=amounts["vat_amount"],
+        total_amount=amounts["total_amount"], vat_by_rate=amounts["by_rate"],
+    )
+    if not paid_when_issued:
+        receivable = Receivable(
+            user_id=current_user.user_id, company_id=company_id,
+            customer_id=document.customer_id, customer_name=document.customer_name,
+            description=f"Фактура № {number} от {issued.strftime('%d.%m.%Y')}",
+            amount=document.total_amount, due_date=due_date,
+            billing_document_id=document.id, revenue_counted=True,
+        )
+        await server.db.receivables.insert_one(receivable.model_dump())
+        document.receivable_id = receivable.id
+    try:
+        await server.db.billing_documents.insert_one(document.model_dump())
+    except DuplicateKeyError:
+        # Someone issued the same number at the same moment.
+        if document.receivable_id:
+            await server.db.receivables.delete_one({"id": document.receivable_id})
+        raise HTTPException(status_code=409, detail=f"Фактура № {number} току-що беше издадена - опитайте отново")
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="create", entity_type="issued_invoice",
+        entity_id=document.id, company_id=company_id,
+        details={"invoice_number": number, "customer_name": document.customer_name, "total_amount": document.total_amount},
+    )
+    return document
+
+
 @router.post("/billing-documents", response_model=BillingDocument)
 async def create_billing_document(payload: BillingDocumentCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
+    if payload.doc_type == BillingDocumentType.INVOICE:
+        return await _create_issued_invoice(payload, current_user)
     company_id, _ = await get_company_scope(current_user)
     total_amount = round(sum(item.quantity * item.unit_price for item in payload.items), 2)
     issue_date = payload.issue_date or today_local().isoformat()
@@ -203,7 +275,8 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
 
     document = BillingDocument(
         user_id=current_user.user_id, company_id=company_id, total_amount=total_amount,
-        issue_date=issue_date, due_date=due_date, **payload.model_dump(exclude={"issue_date", "due_date"}),
+        issue_date=issue_date, due_date=due_date,
+        **payload.model_dump(exclude={"issue_date", "due_date", "invoice_number", "payment_method"}),
     )
 
     # A "bill" (not a quote) is money actually owed - automatically record
@@ -247,17 +320,24 @@ async def export_billing_document_pdf(document_id: str, current_user: User = Dep
         raise HTTPException(status_code=404, detail="Документът не е намерен")
 
     company_name = ""
+    company: Dict[str, Any] = {}
     if current_user.company_id:
-        company = await server.db.companies.find_one({"id": current_user.company_id})
-        company_name = company.get("name", "") if company else ""
+        company = dict(await server.db.companies.find_one({"id": current_user.company_id}, {"_id": 0}) or {})
+        company_name = company.get("name", "")
 
     try:
-        pdf_data = await asyncio.to_thread(ExportService.generate_billing_document_pdf, document, company_name)
+        if document["doc_type"] == "invoice":
+            pdf_data = await asyncio.to_thread(ExportService.generate_issued_invoice_pdf, document, company)
+        else:
+            pdf_data = await asyncio.to_thread(ExportService.generate_billing_document_pdf, document, company_name)
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF export not available")
 
-    doc_label = "offerta" if document["doc_type"] == "quote" else "smetka"
-    filename = f"{doc_label}_{document_id[:8]}.pdf"
+    if document["doc_type"] == "invoice":
+        filename = f"faktura_{document.get('invoice_number') or document_id[:8]}.pdf"
+    else:
+        doc_label = "offerta" if document["doc_type"] == "quote" else "smetka"
+        filename = f"{doc_label}_{document_id[:8]}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_data), media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
@@ -266,11 +346,33 @@ async def export_billing_document_pdf(document_id: str, current_user: User = Dep
 @router.delete("/billing-documents/{document_id}")
 async def delete_billing_document(document_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
-    _, scope = await get_company_scope(current_user)
-    document: Dict[str, Any] = dict(await server.db.billing_documents.find_one({"id": document_id, **scope}, {"_id": 0, "receivable_id": 1}) or {})
-    result = await server.db.billing_documents.delete_one({"id": document_id, **scope})
-    if result.deleted_count == 0:
+    company_id, scope = await get_company_scope(current_user)
+    document: Dict[str, Any] = dict(await server.db.billing_documents.find_one(
+        {"id": document_id, **scope}, {"_id": 0, "receivable_id": 1, "doc_type": 1, "invoice_number": 1, "cancelled": 1},
+    ) or {})
+    if not document:
         raise HTTPException(status_code=404, detail="Документът не е намерен")
+    cancelled = False
+    if document.get("doc_type") == "invoice":
+        # The numbering stays unbroken: the last invoice issued can go; an
+        # earlier one is cancelled - it keeps its number and counts for
+        # nothing (revenue, VAT) from then on.
+        if document.get("cancelled"):
+            raise HTTPException(status_code=409, detail="Фактурата вече е анулирана")
+        if document.get("invoice_number") != await _latest_invoice_number(scope):
+            await server.db.billing_documents.update_one(
+                {"id": document_id, **scope}, {"$set": {"cancelled": True, "cancelled_at": datetime.now(timezone.utc)}},
+            )
+            cancelled = True
+        await audit_service.log_action(
+            user_id=current_user.user_id, user_name=current_user.name,
+            action="update" if cancelled else "delete", entity_type="issued_invoice", entity_id=document_id,
+            company_id=company_id, details={"invoice_number": document.get("invoice_number"), "cancelled": cancelled},
+        )
+    if not cancelled:
+        result = await server.db.billing_documents.delete_one({"id": document_id, **scope})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Документът не е намерен")
     # Its receivable goes with it while nothing was paid on it - before, a
     # deleted bill left the customer "owing" it for ever. Once money came
     # in, the receivable (and what was paid) stays.
@@ -283,4 +385,6 @@ async def delete_billing_document(document_id: str, current_user: User = Depends
             receivable_status = "deleted"
         elif receivable:
             receivable_status = "kept"
-    return {"message": "Документът е изтрит", "receivable": receivable_status}
+    if cancelled:
+        return {"message": "Фактурата е анулирана", "cancelled": True, "receivable": receivable_status}
+    return {"message": "Документът е изтрит", "cancelled": False, "receivable": receivable_status}

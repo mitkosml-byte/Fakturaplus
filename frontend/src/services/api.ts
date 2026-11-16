@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
-PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice } from '../types';
+PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType } from '../types';
 import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -609,12 +609,18 @@ class ApiService {
 
   // Billing documents (non-fiscal bill/quote) - Module 7 Finding #3.
   async createBillingDocument(doc: {
-    doc_type: 'quote' | 'bill';
+    doc_type: BillingDocumentType;
     customer_id?: string;
     customer_name: string;
-    items: { name: string; quantity: number; unit: string; unit_price: number }[];
+    items: { name: string; quantity: number; unit: string; unit_price: number; vat_rate?: number }[];
     notes?: string;
     issue_date?: string;
+    due_date?: string;
+    // An issued invoice only.
+    customer_eik?: string;
+    customer_address?: string;
+    payment_method?: 'cash' | 'bank_transfer' | 'card';
+    invoice_number?: string;
   }): Promise<BillingDocument> {
     return this.fetch('/billing-documents', { method: 'POST', body: JSON.stringify(doc) });
   }
@@ -623,7 +629,9 @@ class ApiService {
     return this.fetch('/billing-documents');
   }
 
-  async deleteBillingDocument(id: string): Promise<{ receivable: 'deleted' | 'kept' | null }> {
+  // An issued invoice that is not the last one is cancelled, not deleted
+  // (cancelled: true) - its number stays and it counts for nothing.
+  async deleteBillingDocument(id: string): Promise<{ receivable: 'deleted' | 'kept' | null; cancelled?: boolean }> {
     return this.fetch(`/billing-documents/${id}`, { method: 'DELETE' });
   }
 

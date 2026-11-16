@@ -116,7 +116,9 @@ async def get_summary(
     # (20% стандартна, 9% намалена, 0% и т.н.). Нито джобчето, нито
     # разходите "в канала" влизат в ДДС, така че тази сметка е еднаква за
     # всеки зрител независимо от финансовата видимост.
-    fiscal_vat = totals["fiscal_vat"]
+    # ДДС от продажби: от касата и от издадените към клиенти фактури.
+    issued_total = totals["issued_invoice_total"]
+    fiscal_vat = totals["fiscal_vat"] + totals["issued_invoice_vat"]
 
     # Общ ДДС за плащане = ДДС от продажби - ДДС от покупки (фактури)
     vat_to_pay = fiscal_vat - total_invoice_vat
@@ -132,7 +134,11 @@ async def get_summary(
 
     # Average per day with revenue entered, and - while the period runs -
     # where it is heading (server.period_pace).
-    pace = await period_pace(company_id, period, total_income, totals["revenue_days"])
+    # Takings are averaged over the days entered; issued invoices are added
+    # to the expected end as they are, never spread over days.
+    pace = await period_pace(
+        company_id, period, total_income - issued_total, totals["revenue_days"], unprojected=issued_total,
+    )
 
     # "statistics" is the overarching gate - without it, a viewer (e.g. a
     # newly invited staff member with no permissions at all) gets back
@@ -152,6 +158,10 @@ async def get_summary(
         "total_invoice_amount": _redact(round(total_invoice_amount, 2)),
         "total_invoice_vat": _redact(round(total_invoice_vat, 2)),
         "total_fiscal_revenue": _redact(round(total_fiscal_revenue, 2)),
+        # Invoices issued to customers in the period (with VAT) - part of income.
+        "total_issued_invoices": _redact(round(issued_total, 2)),
+        "issued_invoice_count": _redact(totals["issued_invoice_count"]),
+        "issued_invoice_vat": _redact(round(totals["issued_invoice_vat"], 2)),
         "total_pocket_money": round(total_pocket_money, 2) if show_stats and visibility["pocket_money"] else None,
         "fiscal_vat": _redact(round(fiscal_vat, 2)),
         "vat_to_pay": _redact(round(vat_to_pay, 2)),
@@ -261,6 +271,11 @@ async def get_chart_data(
         date_str = exp["date"][:10] if isinstance(exp.get("date"), str) else None
         if date_str in days:
             days[date_str]["expense"] += exp.get("amount", 0)
+    # Invoices issued to customers: income and VAT of their issue date.
+    for date_str, issued in (await issued_invoices_by_day(scope, shown)).items():
+        if date_str in days:
+            days[date_str]["income"] += issued["total"]
+            days[date_str]["vat"] += issued["vat"]  # ДДС от продажби
 
     def _point(key: str, label: str, values: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
         return {

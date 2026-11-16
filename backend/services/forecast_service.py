@@ -429,6 +429,22 @@ class ForecastService:
                 )
         return dict(by_day)
 
+    async def _issued_by_month(self, scope: dict, period: Period) -> Dict[str, float]:
+        """Invoices issued to customers in the period, by month ("YYYY-MM" ->
+        EUR with VAT) - revenue of their issue date, the same documents as
+        server.ISSUED_INVOICES (a cancelled one counts for nothing). Known
+        amounts: added to a month as they are, never spread over its days."""
+        rows = await self.db.billing_documents.find(
+            {**scope, "doc_type": "invoice", "cancelled": {"$ne": True}, "issue_date": period.text_filter()},
+            {"_id": 0, "issue_date": 1, "total_amount": 1},
+        ).to_list(None)
+        totals: Dict[str, float] = defaultdict(float)
+        for row in rows:
+            day = str(row.get("issue_date") or "")
+            if len(day) >= 7:
+                totals[day[:7]] += float(row.get("total_amount") or 0)
+        return dict(totals)
+
     def _estimate_from_entered_days(self, period: Period, by_day: Dict[str, float], lookup: tuple, upto=None) -> Dict[str, Any]:
         """A period's revenue read from the days that were entered: average of
         the entered open days x all open days, plus what was entered on
@@ -480,19 +496,24 @@ class ForecastService:
             return {}
         window = Period(window_start.date(), (window_end - timedelta(days=1)).date())
         by_day = await self._revenue_by_day(scope, window, include_pocket_money)
+        # Invoices issued to customers: known amounts, added to their month.
+        issued = await self._issued_by_month(scope, window)
         if not by_day:
-            return {}
+            return dict(issued)
         if not daily:
             totals: Dict[str, float] = defaultdict(float)
             for day_str, amount in by_day.items():
                 totals[day_str[:7]] += amount
+            for month_key, amount in issued.items():
+                totals[month_key] += amount
             return dict(totals)
         lookup = await self._closed_lookup(company_id)
         estimates: Dict[str, float] = {}
         for year, month in window.months():
             reading = self._estimate_from_entered_days(Period.month(year, month), by_day, lookup)
             if reading["entered_days"] and reading["estimate"] is not None and reading["coverage"] >= REVENUE_MONTH_MIN_COVERAGE:
-                estimates[_month_key(year, month)] = reading["estimate"]
+                key = _month_key(year, month)
+                estimates[key] = reading["estimate"] + issued.get(key, 0.0)
         return estimates
 
     async def _current_month_revenue(
@@ -507,9 +528,15 @@ class ForecastService:
         so_far_period = Period(month.start, today)
         by_day = await self._revenue_by_day(scope, so_far_period, include_pocket_money)
         reading = self._estimate_from_entered_days(month, by_day, await self._closed_lookup(company_id), upto=today.isoformat())
-        expected = reading["estimate"] if daily and reading["entered_days"] >= CURRENT_MONTH_MIN_ENTERED_DAYS else None
+        # Invoices issued so far are in the month as they are - not projected.
+        issued_so_far = sum((await self._issued_by_month(scope, so_far_period)).values())
+        expected = (
+            reading["estimate"] + issued_so_far
+            if daily and reading["estimate"] is not None and reading["entered_days"] >= CURRENT_MONTH_MIN_ENTERED_DAYS
+            else None
+        )
         return {
-            "month": _month_key(today.year, today.month), "so_far": reading["so_far"],
+            "month": _month_key(today.year, today.month), "so_far": round(reading["so_far"] + issued_so_far, 2),
             "expected": round(expected, 2) if expected is not None else None,
             "days_entered": reading["entered_days"], "open_days": reading["open_days"],
             "days_elapsed": today.day, "days_in_month": month.days,
@@ -666,6 +693,11 @@ class ForecastService:
                 if include_pocket_money:
                     monthly_totals[month_key] += float(rev.get("pocket_money", 0))
                 entered_days[month_key].add(date_str[:10])
+        # Invoices issued to customers join their month's revenue (no days).
+        if window_end > window_start:
+            window = Period(window_start.date(), (window_end - timedelta(days=1)).date())
+            for month_key, amount in (await self._issued_by_month(scope, window)).items():
+                monthly_totals[month_key] += amount
         return dict(monthly_totals), entered_days
 
     async def _known_revenue_months(

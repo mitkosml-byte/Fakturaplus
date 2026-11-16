@@ -19,7 +19,7 @@ import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
 import { downloadAndShareFile } from '../src/utils/downloadFile';
 import { api } from '../src/services/api';
-import { BillingDocument, BillingDocumentItem } from '../src/types';
+import { BillingDocument, BillingDocumentItem, BillingDocumentType } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow } from '../src/components';
@@ -27,12 +27,15 @@ import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
-type FormItem = { name: string; quantity: string; unit: string; unit_price: string };
-const emptyFormItem = (): FormItem => ({ name: '', quantity: '1', unit: 'бр.', unit_price: '' });
+type FormItem = { name: string; quantity: string; unit: string; unit_price: string; vat_rate: string };
+const emptyFormItem = (): FormItem => ({ name: '', quantity: '1', unit: 'бр.', unit_price: '', vat_rate: '20' });
+type PaymentMethod = 'cash' | 'bank_transfer' | 'card';
 
-// Module 7, Finding #3 (decided): a non-fiscal bill/quote - never a
-// sequentially-numbered VAT invoice. A "bill" automatically creates a
-// receivable (see /receivables); a "quote" never does.
+// A bill or quote is non-fiscal: a "bill" creates a receivable (see
+// /receivables), a "quote" never does. An invoice is issued to a customer:
+// numbered in sequence, with VAT, revenue and VAT on its issue date, and
+// owed (a receivable that is already revenue) until paid - unless paid in
+// cash or by card when issued.
 export default function BillingDocumentsScreen() {
   const router = useRouter();
   const { t, dateLocale } = useTranslation();
@@ -44,7 +47,11 @@ export default function BillingDocumentsScreen() {
   const [documents, setDocuments] = useState<BillingDocument[]>([]);
 
   const [modalVisible, setModalVisible] = useState(false);
-  const [docType, setDocType] = useState<'quote' | 'bill'>('bill');
+  const [docType, setDocType] = useState<BillingDocumentType>('bill');
+  const [formCustomerEik, setFormCustomerEik] = useState('');
+  const [formCustomerAddress, setFormCustomerAddress] = useState('');
+  const [formPaymentMethod, setFormPaymentMethod] = useState<PaymentMethod>('bank_transfer');
+  const [formStartNumber, setFormStartNumber] = useState('');
   const [formCustomerName, setFormCustomerName] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [formItems, setFormItems] = useState<FormItem[]>([emptyFormItem()]);
@@ -77,6 +84,10 @@ export default function BillingDocumentsScreen() {
 
   const resetForm = () => {
     setDocType('bill');
+    setFormCustomerEik('');
+    setFormCustomerAddress('');
+    setFormPaymentMethod('bank_transfer');
+    setFormStartNumber('');
     setFormCustomerName('');
     setFormNotes('');
     setFormItems([emptyFormItem()]);
@@ -125,31 +136,57 @@ export default function BillingDocumentsScreen() {
     return itemDirectory.filter((it) => it.name.toLowerCase() !== q && it.name.toLowerCase().includes(q)).slice(0, 5);
   };
 
-  const formTotal = formItems.reduce((sum, it) => {
+  const isInvoice = docType === 'invoice';
+  // The first invoice issued here may continue the business's own numbering.
+  const hasIssuedInvoices = documents.some((doc) => doc.doc_type === 'invoice');
+  const formNet = formItems.reduce((sum, it) => {
     const qty = parseFloat(it.quantity) || 0;
     const price = parseFloat(it.unit_price) || 0;
     return sum + qty * price;
   }, 0);
+  // VAT on each rate's whole base, as the invoice prints it.
+  const formVat = isInvoice
+    ? Object.entries(formItems.reduce<Record<string, number>>((acc, it) => {
+        const base = (parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0);
+        const rate = it.vat_rate.trim() === '' ? '20' : it.vat_rate.trim();
+        acc[rate] = (acc[rate] || 0) + base;
+        return acc;
+      }, {})).reduce((sum, [rate, base]) => sum + Math.round(base * (parseFloat(rate) || 0)) / 100, 0)
+    : 0;
+  const formTotal = formNet + formVat;
 
   const handleSave = async () => {
     const missingName = !formCustomerName.trim();
     const validItems: BillingDocumentItem[] = formItems
       .filter((it) => it.name.trim() && parseFloat(it.unit_price) >= 0 && parseFloat(it.quantity) > 0)
-      .map((it) => ({ name: it.name.trim(), quantity: parseFloat(it.quantity), unit: it.unit || 'бр.', unit_price: parseFloat(it.unit_price) }));
+      .map((it) => ({
+        name: it.name.trim(), quantity: parseFloat(it.quantity), unit: it.unit || 'бр.', unit_price: parseFloat(it.unit_price),
+        ...(isInvoice ? { vat_rate: Math.min(100, Math.max(0, parseFloat(it.vat_rate) || 0)) } : {}),
+      }));
     setCustomerNameError(missingName);
     setItemsError(validItems.length === 0);
     if (missingName || validItems.length === 0) return;
 
     setSaving(true);
     try {
-      await api.createBillingDocument({
+      const saved = await api.createBillingDocument({
         doc_type: docType,
         customer_name: formCustomerName.trim(),
         items: validItems,
         notes: formNotes.trim() || undefined,
+        ...(isInvoice ? {
+          customer_eik: formCustomerEik.trim() || undefined,
+          customer_address: formCustomerAddress.trim() || undefined,
+          payment_method: formPaymentMethod,
+          invoice_number: !hasIssuedInvoices && formStartNumber.trim() ? formStartNumber.trim() : undefined,
+        } : {}),
       });
       Haptics.success();
-      Toast.success(docType === 'bill' ? t('billingDocuments.billSaved') : t('billingDocuments.quoteSaved'));
+      Toast.success(
+        isInvoice
+          ? t('billingDocuments.invoiceSaved').replace('{number}', saved.invoice_number || '')
+          : docType === 'bill' ? t('billingDocuments.billSaved') : t('billingDocuments.quoteSaved'),
+      );
       setModalVisible(false);
       resetForm();
       loadData();
@@ -163,7 +200,8 @@ export default function BillingDocumentsScreen() {
   const handleDownload = async (doc: BillingDocument) => {
     setDownloadingId(doc.id);
     try {
-      await downloadAndShareFile(api.getBillingDocumentPdfUrl(doc.id), `${doc.doc_type}_${doc.id.slice(0, 8)}.pdf`);
+      const name = doc.doc_type === 'invoice' && doc.invoice_number ? `faktura_${doc.invoice_number}` : `${doc.doc_type}_${doc.id.slice(0, 8)}`;
+      await downloadAndShareFile(api.getBillingDocumentPdfUrl(doc.id), `${name}.pdf`);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message || t('billingDocuments.downloadError'));
     } finally {
@@ -172,7 +210,8 @@ export default function BillingDocumentsScreen() {
   };
 
   const handleDelete = (doc: BillingDocument) => {
-    Alert.alert(t('common.delete'), t('billingDocuments.deleteConfirm'), [
+    const confirmText = doc.doc_type === 'invoice' ? t('billingDocuments.invoiceDeleteConfirm') : t('billingDocuments.deleteConfirm');
+    Alert.alert(t('common.delete'), confirmText, [
       { text: t('common.cancel'), style: 'cancel' },
       {
         text: t('common.delete'),
@@ -180,8 +219,13 @@ export default function BillingDocumentsScreen() {
         onPress: async () => {
           try {
             const result = await api.deleteBillingDocument(doc.id);
-            // Its receivable goes with it unless something was already paid on it.
-            Toast.success(result?.receivable === 'kept' ? t('billingDocuments.deletedReceivableKept') : t('billingDocuments.deleted'));
+            // Its receivable goes with it unless something was already paid on
+            // it; an earlier invoice is cancelled, keeping its number.
+            if (result?.cancelled) {
+              Toast.success(t('billingDocuments.invoiceCancelled'));
+            } else {
+              Toast.success(result?.receivable === 'kept' ? t('billingDocuments.deletedReceivableKept') : t('billingDocuments.deleted'));
+            }
             loadData();
           } catch (error: any) {
             Alert.alert(t('common.error'), error.message);
@@ -231,14 +275,23 @@ export default function BillingDocumentsScreen() {
                 </View>
               )}
               {documents.map((doc) => (
-                <View key={doc.id} style={styles.card}>
+                <View key={doc.id} style={[styles.card, doc.cancelled && { opacity: 0.55 }]}>
                   <View style={styles.rowTop}>
-                    <View style={[styles.typeBadge, doc.doc_type === 'bill' && styles.typeBadgeBill]}>
-                      <Text style={styles.typeBadgeText}>
-                        {doc.doc_type === 'bill' ? t('billingDocuments.typeBill') : t('billingDocuments.typeQuote')}
-                      </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+                      <View style={[styles.typeBadge, doc.doc_type === 'bill' && styles.typeBadgeBill, doc.doc_type === 'invoice' && styles.typeBadgeInvoice]}>
+                        <Text style={styles.typeBadgeText}>
+                          {doc.doc_type === 'invoice'
+                            ? `${t('billingDocuments.typeInvoice')} № ${doc.invoice_number || ''}`
+                            : doc.doc_type === 'bill' ? t('billingDocuments.typeBill') : t('billingDocuments.typeQuote')}
+                        </Text>
+                      </View>
+                      {doc.cancelled && (
+                        <View style={[styles.typeBadge, styles.typeBadgeCancelled]}>
+                          <Text style={styles.typeBadgeText}>{t('billingDocuments.cancelled')}</Text>
+                        </View>
+                      )}
                     </View>
-                    <Text style={styles.amount}>{doc.total_amount.toFixed(2)} €</Text>
+                    <Text style={[styles.amount, doc.cancelled && { textDecorationLine: 'line-through' }]}>{doc.total_amount.toFixed(2)} €</Text>
                   </View>
                   <Text style={styles.customerName} numberOfLines={1}>{doc.customer_name}</Text>
                   <View style={styles.rowBottom}>
@@ -251,9 +304,11 @@ export default function BillingDocumentsScreen() {
                           <Ionicons name="download-outline" size={18} color={COLORS.primary} />
                         )}
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleDelete(doc)} hitSlop={8}>
-                        <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
-                      </TouchableOpacity>
+                      {!doc.cancelled && (
+                        <TouchableOpacity onPress={() => handleDelete(doc)} hitSlop={8}>
+                          <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+                        </TouchableOpacity>
+                      )}
                     </View>
                   </View>
                 </View>
@@ -267,18 +322,19 @@ export default function BillingDocumentsScreen() {
                 <Text style={styles.modalTitle}>{t('billingDocuments.addNew')}</Text>
 
                 <View style={styles.typeSelector}>
-                  {(['bill', 'quote'] as const).map((opt) => (
+                  {(['bill', 'invoice', 'quote'] as const).map((opt) => (
                     <TouchableOpacity
                       key={opt}
                       style={[styles.typeOption, docType === opt && styles.typeOptionActive]}
                       onPress={() => setDocType(opt)}
                     >
                       <Text style={[styles.typeOptionText, docType === opt && styles.typeOptionTextActive]}>
-                        {opt === 'bill' ? t('billingDocuments.typeBill') : t('billingDocuments.typeQuote')}
+                        {opt === 'invoice' ? t('billingDocuments.typeInvoice') : opt === 'bill' ? t('billingDocuments.typeBill') : t('billingDocuments.typeQuote')}
                       </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
+                {isInvoice && <Text style={styles.invoiceHint}>{t('billingDocuments.invoiceHint')}</Text>}
 
                 <Text style={styles.inputLabel}>{t('receivables.customerName')}</Text>
                 <TextInput
@@ -291,6 +347,57 @@ export default function BillingDocumentsScreen() {
                 <Expandable expanded={customerNameError}>
                   <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
                 </Expandable>
+
+                {isInvoice && (
+                  <>
+                    <Text style={styles.inputLabel}>{t('billingDocuments.customerEik')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formCustomerEik}
+                      onChangeText={setFormCustomerEik}
+                      keyboardType="number-pad"
+                      maxLength={13}
+                      placeholderTextColor={COLORS.textMuted}
+                    />
+                    <Text style={styles.inputLabel}>{t('billingDocuments.customerAddress')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formCustomerAddress}
+                      onChangeText={setFormCustomerAddress}
+                      placeholderTextColor={COLORS.textMuted}
+                    />
+                    <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
+                    <View style={styles.typeSelector}>
+                      {(['bank_transfer', 'cash', 'card'] as PaymentMethod[]).map((method) => (
+                        <TouchableOpacity
+                          key={method}
+                          style={[styles.typeOption, formPaymentMethod === method && styles.typeOptionActive]}
+                          onPress={() => setFormPaymentMethod(method)}
+                        >
+                          <Text style={[styles.typeOptionText, formPaymentMethod === method && styles.typeOptionTextActive]}>
+                            {t(`scan.paymentMethod.${method}`)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <Text style={styles.invoiceHint}>
+                      {formPaymentMethod === 'bank_transfer' ? t('billingDocuments.invoiceOwed') : t('billingDocuments.invoicePaidNow')}
+                    </Text>
+                    {!hasIssuedInvoices && (
+                      <>
+                        <Text style={styles.inputLabel}>{t('billingDocuments.startNumber')}</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={formStartNumber}
+                          onChangeText={(v) => setFormStartNumber(v.replace(/\D/g, '').slice(0, 10))}
+                          keyboardType="number-pad"
+                          placeholder="0000000001"
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </>
+                    )}
+                  </>
+                )}
 
                 <Text style={styles.inputLabel}>{t('billingDocuments.items')}</Text>
                 {formItems.map((item, index) => (
@@ -342,9 +449,20 @@ export default function BillingDocumentsScreen() {
                         value={item.unit_price}
                         onChangeText={(v) => updateFormItem(index, { unit_price: v })}
                         keyboardType="decimal-pad"
-                        placeholder={t('scan.pricePlaceholder')}
+                        placeholder={isInvoice ? t('billingDocuments.priceWithoutVat') : t('scan.pricePlaceholder')}
                         placeholderTextColor={COLORS.textMuted}
                       />
+                      {isInvoice && (
+                        <TextInput
+                          style={[styles.input, styles.itemSmallInput]}
+                          value={item.vat_rate}
+                          onChangeText={(v) => updateFormItem(index, { vat_rate: v.replace(/[^\d.,]/g, '').replace(',', '.') })}
+                          keyboardType="decimal-pad"
+                          placeholder={t('billingDocuments.vatRate')}
+                          placeholderTextColor={COLORS.textMuted}
+                          accessibilityLabel={t('billingDocuments.vatRate')}
+                        />
+                      )}
                       {formItems.length > 1 && (
                         <TouchableOpacity onPress={() => removeFormItem(index)}>
                           <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
@@ -361,6 +479,11 @@ export default function BillingDocumentsScreen() {
                   <Text style={styles.addItemButtonText}>{t('billingDocuments.addItem')}</Text>
                 </TouchableOpacity>
 
+                {isInvoice && (
+                  <Text style={styles.subtotalPreview}>
+                    {t('billingDocuments.netAndVat').replace('{net}', formNet.toFixed(2)).replace('{vat}', formVat.toFixed(2))}
+                  </Text>
+                )}
                 <Text style={styles.totalPreview}>{t('receivables.amount')}: {formTotal.toFixed(2)} €</Text>
 
                 <Text style={styles.inputLabel}>{t('receivables.description')}</Text>
@@ -416,6 +539,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(139, 92, 246, 0.2)',
   },
   typeBadgeBill: { backgroundColor: 'rgba(16, 185, 129, 0.2)' },
+  typeBadgeInvoice: { backgroundColor: 'rgba(59, 130, 246, 0.25)' },
+  typeBadgeCancelled: { backgroundColor: 'rgba(239, 68, 68, 0.3)' },
+  invoiceHint: { fontSize: 12, color: COLORS.textSecondary, marginTop: 6, lineHeight: 17 },
+  subtotalPreview: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6, textAlign: 'right' },
   typeBadgeText: { fontSize: 11, fontWeight: '700', color: 'white' },
   amount: { fontSize: 15, fontWeight: 'bold', color: COLORS.warning },
   customerName: { fontSize: 14, fontWeight: '600', color: 'white', marginBottom: 6 },

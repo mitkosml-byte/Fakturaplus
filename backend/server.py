@@ -2318,6 +2318,11 @@ class Receivable(BaseModel):
     # Each payment received: {id, amount, date "YYYY-MM-DD", method}. A
     # customer can pay in parts, by bank or in cash, on a day of their own.
     payments: List[Dict[str, Any]] = []
+    # Owed on an invoice the business issued: that invoice is already
+    # revenue (and VAT) on its own date, so a payment on it is money
+    # coming in, never new revenue to log.
+    billing_document_id: Optional[str] = None
+    revenue_counted: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ReceivableCreate(BaseModel):
@@ -2363,12 +2368,40 @@ class ReceivableUpdate(BaseModel):
 class BillingDocumentType(str, Enum):
     QUOTE = "quote"
     BILL = "bill"
+    # An invoice issued to a customer: numbered in sequence, with VAT,
+    # revenue and VAT on its issue date, owed (a receivable) until paid.
+    INVOICE = "invoice"
 
 class BillingDocumentItem(BaseModel):
     name: str
     quantity: float = Field(default=1, gt=0)
     unit: str = "бр."
-    unit_price: float = Field(ge=0)
+    unit_price: float = Field(ge=0)  # on an invoice: without VAT
+    vat_rate: float = Field(default=20, ge=0, le=100)  # an invoice's line only
+
+# Issued invoices that count: every one not cancelled. A cancelled invoice
+# keeps its number (the numbering stays unbroken) and counts for nothing.
+ISSUED_INVOICES: Dict[str, Any] = {"doc_type": "invoice", "cancelled": {"$ne": True}}
+INVOICE_TERM_DAYS = 14  # an issued invoice paid by bank is due 14 days on, unless given
+INVOICE_NUMBER_DIGITS = 10  # "0000000001" - the usual Bulgarian invoice number
+
+
+def invoice_vat_breakdown(items: List[Any]) -> Dict[str, Any]:
+    """An issued invoice's amounts: the base and the VAT of each rate (VAT
+    worked out on the rate's whole base, as an invoice prints it) and the
+    totals."""
+    bases: Dict[float, float] = {}
+    for item in items:
+        line = item if isinstance(item, dict) else item.model_dump()
+        rate = float(line.get("vat_rate", 20))
+        bases[rate] = bases.get(rate, 0.0) + float(line["quantity"]) * float(line["unit_price"])
+    by_rate = [
+        {"rate": rate, "base": round(base, 2), "vat": round(base * rate / 100, 2)}
+        for rate, base in sorted(bases.items(), reverse=True)
+    ]
+    net = round(sum(r["base"] for r in by_rate), 2)
+    vat = round(sum(r["vat"] for r in by_rate), 2)
+    return {"by_rate": by_rate, "amount_without_vat": net, "vat_amount": vat, "total_amount": round(net + vat, 2)}
 
 class BillingDocument(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -2384,7 +2417,18 @@ class BillingDocument(BaseModel):
     # the issue date unless given; quotes have none.
     due_date: Optional[str] = None
     total_amount: float = 0
-    receivable_id: Optional[str] = None  # set when this doc created a receivable (bills only)
+    receivable_id: Optional[str] = None  # set when this doc created a receivable (bills, invoices owed)
+    # An issued invoice only: its number, the customer as the invoice names
+    # them, how it is paid, the base and the VAT (total_amount is with VAT).
+    invoice_number: Optional[str] = None
+    customer_eik: Optional[str] = None
+    customer_address: Optional[str] = None
+    payment_method: Optional[str] = None  # cash | card (paid when issued) | bank_transfer (owed)
+    amount_without_vat: float = 0
+    vat_amount: float = 0
+    vat_by_rate: List[Dict[str, Any]] = []
+    cancelled: bool = False
+    cancelled_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class BillingDocumentCreate(BaseModel):
@@ -2395,6 +2439,12 @@ class BillingDocumentCreate(BaseModel):
     notes: Optional[str] = None
     issue_date: Optional[str] = None
     due_date: Optional[str] = None
+    customer_eik: Optional[str] = None
+    customer_address: Optional[str] = None
+    payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = None
+    # An invoice only: a number of the business's own to continue from (its
+    # last one issued elsewhere + 1); left out, the next after the last one here.
+    invoice_number: Optional[str] = Field(default=None, pattern=r"^\d{1,10}$")
 
 
 
@@ -2443,6 +2493,7 @@ def _month_bounds(dt: datetime) -> tuple:
 def _profit_formula(
     fiscal_revenue: float, pocket_money: float, invoice_total: float,
     off_book_expenses: float, payroll_cost: float, depreciation_cost: float,
+    issued_invoices: float = 0.0,
 ) -> tuple:
     """The one income/expense formula get_summary (routers/statistics.py)
     and _compute_month_profit below both must stay in sync on: income =
@@ -2454,8 +2505,9 @@ def _profit_formula(
     or zeroed out for a viewer who can't see it (or, for
     _compute_month_profit, always the real value - see its own docstring).
     Returns (total_income, total_expense), not the subtraction, since
-    get_summary also reports each side on its own."""
-    total_income = fiscal_revenue + pocket_money
+    get_summary also reports each side on its own. Invoices the business
+    issued to customers are income on their issue date, like the till."""
+    total_income = fiscal_revenue + pocket_money + issued_invoices
     total_expense = invoice_total + off_book_expenses + payroll_cost + depreciation_cost
     return total_income, total_expense
 
@@ -2509,6 +2561,13 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
         {"$match": {**scope, "date": period.text_filter(), **NOT_WAGES}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
     ]).to_list(ALL_ROWS)
+    # Invoices issued to customers: revenue and VAT on their issue date.
+    issued_rows = await db.billing_documents.aggregate([
+        {"$match": {**scope, **ISSUED_INVOICES, "issue_date": period.text_filter()}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
+                    "net": {"$sum": "$amount_without_vat"}, "count": {"$sum": 1}}},
+    ]).to_list(ALL_ROWS)
+    issued = issued_rows[0] if issued_rows else {}
 
     # VAT inside fiscal revenue at each record's own rate (20% unless set,
     # 9%, 0%...) - summed per rate, which is the same sum record by record.
@@ -2531,6 +2590,10 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
         "invoice_count": int(every_invoice.get("count") or 0),
         "asset_invoice_total": float(every_invoice.get("total") or 0) - float(invoice.get("total") or 0),
         "off_book_expenses": float(expenses[0].get("total") or 0) if expenses else 0.0,
+        "issued_invoice_total": float(issued.get("total") or 0),
+        "issued_invoice_vat": float(issued.get("vat") or 0),
+        "issued_invoice_net": float(issued.get("net") or 0),
+        "issued_invoice_count": int(issued.get("count") or 0),
         "payroll_cost": await get_payroll_cost_for_period(company_id, user_id, period.start, period.end),
         "depreciation_cost": await get_depreciation_cost_for_period(company_id, user_id, period.start, period.end),
         "revenue_days": sorted(d for d in revenue_days if isinstance(d, str)),
@@ -2548,7 +2611,25 @@ def period_income_expense(totals: Dict[str, Any], visibility: Optional[dict] = N
         fiscal_revenue=totals["fiscal_revenue"], pocket_money=totals["pocket_money"] if show_pocket else 0,
         invoice_total=totals["invoice_total"], off_book_expenses=totals["off_book_expenses"] if show_off_book else 0,
         payroll_cost=totals["payroll_cost"], depreciation_cost=totals["depreciation_cost"],
+        issued_invoices=totals.get("issued_invoice_total", 0.0),
     )
+
+
+async def issued_invoices_by_day(scope: dict, period: Period) -> Dict[str, Dict[str, float]]:
+    """Invoices issued to customers on each day of the period ("YYYY-MM-DD"
+    -> {"total", "vat"}): revenue and VAT of their issue date, so a day's
+    chart and the period's totals read the same documents."""
+    rows = await db.billing_documents.find(
+        {**scope, **ISSUED_INVOICES, "issue_date": period.text_filter()},
+        {"_id": 0, "issue_date": 1, "total_amount": 1, "vat_amount": 1},
+    ).to_list(ALL_ROWS)
+    days: Dict[str, Dict[str, float]] = {}
+    for row in rows:
+        day = str(row.get("issue_date") or "")[:10]
+        entry = days.setdefault(day, {"total": 0.0, "vat": 0.0})
+        entry["total"] += float(row.get("total_amount") or 0)
+        entry["vat"] += float(row.get("vat_amount") or 0)
+    return days
 
 
 async def monthly_costs_by_day(company_id: Optional[str], user_id: str, period: Period) -> Dict[str, float]:
@@ -2575,7 +2656,8 @@ PACE_MAX_DAYS = 1830
 
 
 async def period_pace(
-    company_id: Optional[str], period: Period, income: float, revenue_days: List[str]
+    company_id: Optional[str], period: Period, income: float, revenue_days: List[str],
+    unprojected: float = 0.0,
 ) -> Optional[Dict[str, Any]]:
     """How a period is going, day by day - the rule every screen shows for
     "average per day" and "expected end":
@@ -2587,7 +2669,9 @@ async def period_pace(
       open day of the period (closed days from the company's calendar).
 
     `income` and `revenue_days` are the period's totals so far (counted
-    through today for a running period)."""
+    through today for a running period). `unprojected` is income that is
+    no day's takings - invoices issued so far: added to the expected end
+    as it is, never averaged over the days."""
     if period.days > PACE_MAX_DAYS:
         return None
     today = today_local()
@@ -2596,7 +2680,7 @@ async def period_pace(
     is_current = period.contains(today)
     entered = len(revenue_days)
     average = income / entered if entered else None
-    expected = average * len(open_days) if is_current and average is not None else None
+    expected = average * len(open_days) + unprojected if is_current and average is not None else None
     return {
         "is_current": is_current,
         "open_days": len(open_days),
@@ -2726,6 +2810,9 @@ async def _business_digest_period(
         "expenses": round(total_expense, 2),
         "profit": round(total_income - total_expense, 2) if visibility["profit"] else None,
         "invoice_count": totals["invoice_count"],
+        # Part of revenue: invoices issued to customers (with VAT).
+        "issued_invoices": round(totals["issued_invoice_total"], 2),
+        "issued_invoice_count": totals["issued_invoice_count"],
     }
 
 async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: str, visibility: dict, limit: int = 8) -> List[dict]:
@@ -5487,6 +5574,13 @@ async def ensure_unique_records():
         )
     except Exception:
         logger.exception("Unique payroll index could not be created")
+    try:
+        await db.billing_documents.create_index(
+            [("company_id", 1), ("invoice_number", 1)], unique=True, name="one_invoice_number_per_company",
+            partialFilterExpression={"invoice_number": {"$type": "string"}},
+        )
+    except Exception:
+        logger.exception("Unique issued-invoice number index could not be created")
 
 
 async def run_data_migrations():

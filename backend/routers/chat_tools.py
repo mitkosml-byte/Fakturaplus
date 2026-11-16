@@ -112,8 +112,12 @@ class ChatDataTools:
                 amount = r.get("fiscal_revenue", 0) + (r.get("pocket_money", 0) if self.visibility["pocket_money"] else 0)
                 by_day[r["date"][:10]] += amount
 
-        groups: Dict[str, Dict[str, float]] = defaultdict(lambda: {"revenue": 0.0, "days_entered": 0})
-        for day_str, amount in by_day.items():
+        # Invoices issued to customers are revenue of their issue date - added
+        # to the revenue, never counted as days of takings entered.
+        issued_by_day = {day: v["total"] for day, v in (await issued_invoices_by_day(self.scope, Period(start, end))).items()}
+
+        groups: Dict[str, Dict[str, float]] = defaultdict(lambda: {"revenue": 0.0, "days_entered": 0, "issued_invoices": 0.0})
+        for day_str in set(by_day) | set(issued_by_day):
             day = date_type.fromisoformat(day_str)
             if group_by == "day":
                 key = day_str
@@ -124,11 +128,19 @@ class ChatDataTools:
                 key = _WEEKDAYS_BG[day.weekday()]
             else:
                 key = day_str[:7]
-            groups[key]["revenue"] += amount
-            groups[key]["days_entered"] += 1
+            if day_str in by_day:
+                groups[key]["revenue"] += by_day[day_str]
+                groups[key]["days_entered"] += 1
+            if day_str in issued_by_day:
+                groups[key]["revenue"] += issued_by_day[day_str]
+                groups[key]["issued_invoices"] += issued_by_day[day_str]
         rows: List[Dict[str, Any]] = [
             {"group": key, "revenue": round(v["revenue"], 2), "days_entered": int(v["days_entered"]),
-             "average_per_entered_day": round(v["revenue"] / v["days_entered"], 2) if v["days_entered"] else None}
+             "average_per_entered_day": (
+                 round((v["revenue"] - v["issued_invoices"]) / v["days_entered"], 2) if v["days_entered"] else None
+             ),
+             # Said only where there are any: the takings are the rest.
+             **({"of_which_issued_invoices": round(v["issued_invoices"], 2)} if v["issued_invoices"] else {})}
             for key, v in groups.items()
         ]
         if group_by == "weekday":

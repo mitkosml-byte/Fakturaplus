@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta
 from typing import List, Optional, Any
 import json
+from xml.sax.saxutils import escape as _xml_escape
 
 try:
     import openpyxl
@@ -351,7 +352,7 @@ class ExportService:
         ))
 
         issue_date = document.get('issue_date', '')
-        elements.append(Paragraph(f"<b>Клиент:</b> {document.get('customer_name', '')}", bold_style))
+        elements.append(Paragraph(f"<b>Клиент:</b> {_xml_escape(str(document.get('customer_name', '')))}", bold_style))
         elements.append(Paragraph(f"<b>Дата:</b> {issue_date}", normal_style))
         elements.append(Spacer(1, 6 * mm))
 
@@ -391,7 +392,132 @@ class ExportService:
 
         if document.get('notes'):
             elements.append(Spacer(1, 6 * mm))
-            elements.append(Paragraph(f"<b>Бележки:</b> {document['notes']}", normal_style))
+            elements.append(Paragraph(f"<b>Бележки:</b> {_xml_escape(str(document['notes']))}", normal_style))
+
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    @staticmethod
+    def generate_issued_invoice_pdf(document: dict, company: dict) -> bytes:
+        """An invoice issued to a customer, laid out as a Bulgarian invoice
+        is: number and date (the date of the tax event), the supplier - the
+        company, from its profile - and the recipient, the lines, the base
+        and the VAT of each rate, the amount due, how and by when it is paid.
+        A cancelled invoice says so across its title."""
+        if not PDF_AVAILABLE:
+            raise ImportError("reportlab is not installed")
+
+        def text(value: Any) -> str:
+            return _xml_escape(str(value or ""))
+
+        def day_text(value: Any) -> str:
+            try:
+                return datetime.strptime(str(value)[:10], "%Y-%m-%d").strftime("%d.%m.%Y")
+            except ValueError:
+                return text(value)
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=16 * mm, bottomMargin=16 * mm)
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('InvTitle', parent=styles['Heading1'], fontName=PDF_FONT_BOLD, fontSize=20, alignment=1, spaceAfter=2)
+        center_style = ParagraphStyle('InvCenter', parent=styles['Normal'], fontName=PDF_FONT, fontSize=10, alignment=1, spaceAfter=2)
+        warn_style = ParagraphStyle('InvWarn', parent=styles['Normal'], fontName=PDF_FONT_BOLD, fontSize=12, alignment=1,
+                                    textColor=colors.HexColor('#DC2626'), spaceAfter=4)
+        cell_style = ParagraphStyle('InvCell', parent=styles['Normal'], fontName=PDF_FONT, fontSize=9, leading=12)
+        normal_style = ParagraphStyle('InvNormal', parent=styles['Normal'], fontName=PDF_FONT, fontSize=10, spaceAfter=3)
+
+        elements: List[Any] = [
+            Paragraph("ФАКТУРА", title_style),
+            Paragraph(f"№ {text(document.get('invoice_number'))} / {day_text(document.get('issue_date'))}", center_style),
+            Paragraph("ОРИГИНАЛ", center_style),
+        ]
+        if document.get("cancelled"):
+            elements.append(Paragraph("АНУЛИРАНА", warn_style))
+        elements.append(Spacer(1, 5 * mm))
+
+        city_address = ", ".join(part for part in (company.get("city"), company.get("address")) if part)
+        supplier_lines = [
+            f"<b>Доставчик</b>", f"<b>{text(company.get('name'))}</b>",
+            f"ЕИК: {text(company.get('eik'))}",
+        ]
+        if company.get("vat_number"):
+            supplier_lines.append(f"ДДС №: {text(company.get('vat_number'))}")
+        if city_address:
+            supplier_lines.append(f"Адрес: {text(city_address)}")
+        if company.get("mol"):
+            supplier_lines.append(f"МОЛ: {text(company.get('mol'))}")
+        recipient_lines = [f"<b>Получател</b>", f"<b>{text(document.get('customer_name'))}</b>"]
+        if document.get("customer_eik"):
+            recipient_lines.append(f"ЕИК: {text(document.get('customer_eik'))}")
+        if document.get("customer_address"):
+            recipient_lines.append(f"Адрес: {text(document.get('customer_address'))}")
+        parties = Table(
+            [[Paragraph("<br/>".join(supplier_lines), cell_style), Paragraph("<br/>".join(recipient_lines), cell_style)]],
+            colWidths=[90 * mm, 90 * mm],
+        )
+        parties.setStyle(TableStyle([
+            ('BOX', (0, 0), (0, 0), 0.8, colors.HexColor('#CBD5E1')),
+            ('BOX', (1, 0), (1, 0), 0.8, colors.HexColor('#CBD5E1')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6), ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        elements += [parties, Spacer(1, 5 * mm)]
+
+        data: List[List[Any]] = [["№", "Артикул/услуга", "Кол-во", "Мярка", "Ед. цена", "ДДС", "Стойност"]]
+        for index, item in enumerate(document.get("items") or [], 1):
+            quantity = float(item.get("quantity", 1))
+            unit_price = float(item.get("unit_price", 0))
+            data.append([
+                str(index), Paragraph(text(item.get("name")), cell_style), f"{quantity:g}", text(item.get("unit", "бр.")),
+                f"{unit_price:.2f}", f"{float(item.get('vat_rate', 20)):g}%", f"{quantity * unit_price:.2f}",
+            ])
+        lines = Table(data, colWidths=[9 * mm, 71 * mm, 18 * mm, 16 * mm, 22 * mm, 14 * mm, 25 * mm], repeatRows=1)
+        lines.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
+            ('FONTNAME', (0, 0), (-1, 0), PDF_FONT_BOLD),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#8B5CF6')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        elements += [lines, Spacer(1, 4 * mm)]
+
+        totals: List[List[str]] = []
+        for row in document.get("vat_by_rate") or []:
+            rate = f"{float(row.get('rate', 0)):g}%"
+            totals.append([f"Данъчна основа {rate}:", f"{float(row.get('base', 0)):.2f} €"])
+            totals.append([f"ДДС {rate}:", f"{float(row.get('vat', 0)):.2f} €"])
+        totals.append(["Сума за плащане:", f"{float(document.get('total_amount', 0)):.2f} €"])
+        totals_table = Table(totals, colWidths=[50 * mm, 30 * mm], hAlign='RIGHT')
+        totals_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
+            ('FONTNAME', (0, -1), (-1, -1), PDF_FONT_BOLD),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+            ('LINEABOVE', (0, -1), (-1, -1), 0.8, colors.HexColor('#334155')),
+        ]))
+        elements += [totals_table, Spacer(1, 5 * mm)]
+
+        method = document.get("payment_method")
+        method_text = {"cash": "В брой", "card": "С карта", "bank_transfer": "По банков път"}.get(method or "", "По банков път")
+        elements.append(Paragraph(f"Дата на данъчното събитие: {day_text(document.get('issue_date'))}", normal_style))
+        elements.append(Paragraph(f"Начин на плащане: {method_text}", normal_style))
+        if method not in ("cash", "card"):
+            if company.get("bank_iban"):
+                bank = f" ({text(company.get('bank_name'))})" if company.get("bank_name") else ""
+                elements.append(Paragraph(f"IBAN: {text(company.get('bank_iban'))}{bank}", normal_style))
+            if document.get("due_date"):
+                elements.append(Paragraph(f"Срок за плащане: {day_text(document.get('due_date'))}", normal_style))
+        if document.get("notes"):
+            elements.append(Paragraph(f"Бележки: {text(document.get('notes'))}", normal_style))
+        elements.append(Spacer(1, 14 * mm))
+        signatures = Table([["Съставил: ..............................", "Получил: .............................."]], colWidths=[90 * mm, 90 * mm])
+        signatures.setStyle(TableStyle([('FONTNAME', (0, 0), (-1, -1), PDF_FONT), ('FONTSIZE', (0, 0), (-1, -1), 10)]))
+        elements.append(signatures)
 
         doc.build(elements)
         buffer.seek(0)

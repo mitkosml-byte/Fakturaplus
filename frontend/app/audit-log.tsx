@@ -117,6 +117,13 @@ export default function AuditLogScreen() {
       }
       return `${t('auditLog.entityInvoice')}${numberBit}${supplierBit}${amountBit}`;
     }
+    if (entry.entity_type === 'issued_invoice') {
+      // An invoice issued to a customer; an earlier one is cancelled, not deleted.
+      const customerBit = d.customer_name ? ` – ${d.customer_name}` : '';
+      const amountBit = typeof d.total_amount === 'number' ? ` (${d.total_amount.toFixed(2)} €)` : '';
+      const cancelledBit = d.cancelled ? ` – ${t('billingDocuments.cancelled')}` : '';
+      return `${t('auditLog.entityIssuedInvoice')} №${d.invoice_number || ''}${customerBit}${amountBit}${cancelledBit}`;
+    }
     if (entry.entity_type === 'expense') {
       const amountBit = typeof d.amount === 'number' ? ` (${d.amount.toFixed(2)} €)` : '';
       return `${t('auditLog.entityExpense')}${d.description ? ` – ${d.description}` : ''}${d.date ? `, ${d.date}` : ''}${amountBit}`;
