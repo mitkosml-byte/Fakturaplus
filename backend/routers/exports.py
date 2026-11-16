@@ -51,6 +51,8 @@ async def export_statistics_pdf(
 ):
     """Export a one-page financial report (summary + top suppliers/items) as PDF"""
     require_permission(current_user, "export_data")
+    # The report is the company's figures - the same right as the screen.
+    require_permission(current_user, "view_statistics")
     # One period for every part of the sheet - the one chosen on screen, or
     # this month - and it is printed on it. Before, the summary was this
     # month, the top lists were for all time, and nothing said which.
@@ -81,7 +83,8 @@ async def export_statistics_pdf(
             top_suppliers=suppliers_data.get("top_by_amount", []),
             top_items=items_data.get("top_by_value", []),
             company_name=company_name,
-            period_label=period_label
+            period_label=period_label,
+            visibility_note=restricted_data_note(get_financial_visibility(current_user)),
         )
 
         await audit_service.log_action(
@@ -157,13 +160,22 @@ async def export_vat_ledger_excel(
 
     period_label = f"Период: {start_date} - {end_date}"
 
+    # Invoices issued to customers are sales of their issue date - cancelled
+    # ones too, listed at zero so the numbering reads unbroken.
+    issued_invoices = await server.db.billing_documents.find(
+        {**scope, "doc_type": "invoice", "issue_date": period.text_filter()},
+        {"_id": 0, "issue_date": 1, "invoice_number": 1, "customer_name": 1, "customer_eik": 1,
+         "vat_by_rate": 1, "total_amount": 1, "cancelled": 1},
+    ).sort("invoice_number", 1).to_list(ALL_ROWS)
+
     try:
         excel_data = await asyncio.to_thread(
             ExportService.generate_vat_ledger_excel,
             purchases=purchases,
             sales=sales,
             company_name=company_name,
-            period_label=period_label
+            period_label=period_label,
+            issued_invoices=issued_invoices,
         )
 
         await audit_service.log_action(

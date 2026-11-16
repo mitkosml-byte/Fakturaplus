@@ -933,3 +933,63 @@ def test_v3_issued_invoices_join_the_revenue_forecast_as_known_amounts(client):
     assert forecast["current_month"]["so_far"] == 600
     history = {row["month"]: row["amount"] for row in forecast.get("historical", [])}
     assert sorted(history.values())[-3:] == [1200, 1200, 1200], forecast
+
+
+def test_x10_c1_the_sales_ledger_holds_the_invoices_issued(client, monkeypatch):
+    _, _, owner = _company()
+    client.post("/api/daily-revenue", json={"date": "2026-10-02", "fiscal_revenue": 1200, "vat_rate_percent": 20}, headers=owner)
+    for day, rate in (("2026-10-05", 20), ("2026-10-06", 9)):
+        client.post("/api/billing-documents", headers=owner, json={
+            "doc_type": "invoice", "customer_name": "Клиент ООД", "customer_eik": "131071587", "issue_date": day,
+            "payment_method": "bank_transfer", "items": [{"name": "Услуга", "quantity": 1, "unit_price": 100, "vat_rate": rate}],
+        })
+    client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "invoice", "customer_name": "Друг", "issue_date": "2026-10-07", "payment_method": "cash",
+        "items": [{"name": "Услуга", "quantity": 1, "unit_price": 50}],
+    })
+    docs = client.get("/api/billing-documents", headers=owner).json()
+    first = next(d for d in docs if d["issue_date"] == "2026-10-05")
+    assert client.delete(f"/api/billing-documents/{first['id']}", headers=owner).json()["cancelled"] is True
+    seen = {}
+
+    def fake(**kwargs):
+        seen.update(kwargs)
+        return b"x"
+    monkeypatch.setattr(server.ExportService, "generate_vat_ledger_excel", staticmethod(fake))
+    assert client.get("/api/export/vat-ledger/excel?start_date=2026-10-01&end_date=2026-10-31", headers=owner).status_code == 200
+    issued = seen["issued_invoices"]
+    assert [d["invoice_number"] for d in issued] == ["0000000001", "0000000002", "0000000003"]
+    assert issued[0]["cancelled"] is True
+
+    # The real sheet: till row, the cancelled invoice at zero, the others by rate.
+    monkeypatch.undo()
+    import io
+    import openpyxl  # type: ignore[import-untyped]
+    data = server.ExportService.generate_vat_ledger_excel(
+        purchases=[], sales=[{"date": "2026-10-02", "fiscal_revenue": 1200, "vat_rate_percent": 20}],
+        issued_invoices=issued,
+    )
+    sheet = openpyxl.load_workbook(io.BytesIO(data))["Дневник продажби"]
+    rows = [[c.value for c in row] for row in sheet.iter_rows() if isinstance(row[0].value, int)]
+    assert [r[2] for r in rows] == ["Отчет за извършени продажби (81)", "Фактура (01) - анулирана", "Фактура (01)", "Фактура (01)"]
+    assert rows[1][3] == "0000000001" and rows[1][-1] == 0
+    assert rows[2][8:10] == [100, 9] and rows[2][-1] == 109   # the 9% invoice: base 100, VAT 9
+    assert rows[3][6:8] == [50, 10] and rows[3][-1] == 60
+
+
+def test_x10_c2_the_statistics_pdf_says_what_is_hidden_instead_of_failing(client, monkeypatch):
+    company_id, _, owner = _company()
+    client.post("/api/daily-revenue", json={"date": "2026-10-02", "fiscal_revenue": 100}, headers=owner)
+    _, viewer = _user(company_id, "manager", ["export_data", "view_statistics"], "Счетоводител")
+    r = client.get("/api/export/statistics/pdf?start_date=2026-10-01&end_date=2026-10-31", headers=viewer)
+    assert r.status_code == 200 and r.content.startswith(b"%PDF")
+    seen = {}
+
+    def fake(**kwargs):
+        seen.update(kwargs)
+        return b"%PDF-1.4"
+    monkeypatch.setattr(server.ExportService, "generate_statistics_pdf", staticmethod(fake))
+    client.get("/api/export/statistics/pdf?start_date=2026-10-01&end_date=2026-10-31", headers=viewer)
+    assert seen["stats"]["profit"] is None and "Печалбата е скрита" in seen["visibility_note"]
+    _, export_only = _user(company_id, "manager", ["export_data"], "Само експорт")
+    assert client.get("/api/export/statistics/pdf", headers=export_only).status_code == 403

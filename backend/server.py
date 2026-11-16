@@ -1079,6 +1079,21 @@ def get_financial_visibility(current_user: User) -> dict:
         "personal_investments": "view_personal_investments" in granted,
     }
 
+def restricted_data_note(visibility: dict) -> Optional[str]:
+    """What a viewer with partial access is looking at, in one sentence -
+    the same words as the screens' note (frontend utils/visibilityNote):
+    which parts the totals leave out, and so which profit is shown."""
+    if not visibility.get("statistics", True):
+        return "Общите суми на фирмата са скрити за вашия достъп."
+    left_out = [name for key, name in (("pocket_money", "джобчето"), ("off_book_expenses", "разходите без фактура"))
+                if not visibility.get(key, True)]
+    items = " и ".join(left_out)
+    if not visibility.get("profit", True):
+        return (f"Сумите са без {items} - скрити са за вашия достъп. " if left_out else "") + "Печалбата е скрита за вашия достъп."
+    if not left_out:
+        return None
+    return f"Сумите и печалбата са без {items} (скрити за вашия достъп) - това не е действителната печалба на фирмата."
+
 async def ensure_membership(user_id: str, company_id: str, role: str, permissions: Optional[List[str]] = None):
     """Записва (или обновява) връзката потребител-фирма в company_memberships.
 

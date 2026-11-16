@@ -867,14 +867,14 @@ def test_roles_invitations_permissions(client):
     r = client.get("/api/export/vat-ledger/excel?start_date=2026-09-01&end_date=2026-09-30", headers=owner)
     assert r.status_code == 200
     owner_ws = load_workbook(BytesIO(r.content))["Дневник продажби"]
-    assert owner_ws.cell(row=5, column=9).value == 15  # pocket_money, visible to the owner
-    assert owner_ws.cell(row=5, column=10).value == 115  # total = fiscal_revenue + pocket_money
+    assert owner_ws.cell(row=5, column=12).value == 15  # pocket_money, visible to the owner
+    assert owner_ws.cell(row=5, column=13).value == 115  # total = fiscal_revenue + pocket_money
 
     r = client.get("/api/export/vat-ledger/excel?start_date=2026-09-01&end_date=2026-09-30", headers=staff)
     assert r.status_code == 200
     staff_ws = load_workbook(BytesIO(r.content))["Дневник продажби"]
-    assert staff_ws.cell(row=5, column=9).value == 0  # no view_pocket_money -> redacted, not just blanked
-    assert staff_ws.cell(row=5, column=10).value == 100
+    assert staff_ws.cell(row=5, column=12).value == 0  # no view_pocket_money -> redacted, not just blanked
+    assert staff_ws.cell(row=5, column=13).value == 100
 
     # Off-book expense (30) must not leak into the expense-forecast
     # aggregate for a viewer without view_off_book_expenses either.

@@ -57,6 +57,12 @@ def _document_number(inv: dict) -> str:
     return f"КИ {number}" if inv.get("document_type") == "credit_note" else number
 
 
+def _money_or_hidden(value: Any) -> str:
+    """An amount as the report prints it, or "скрито" where the reader's
+    access hides it (None) - never a crash on a hidden field."""
+    return "скрито" if value is None else f"{float(value):.2f} €"
+
+
 def _excel_safe(value):
     if isinstance(value, str) and value.startswith(_FORMULA_TRIGGER_CHARS):
         return "'" + value
@@ -577,7 +583,8 @@ class ExportService:
         purchases: List[dict],
         sales: List[dict],
         company_name: str = "",
-        period_label: str = ""
+        period_label: str = "",
+        issued_invoices: Optional[List[dict]] = None,
     ) -> bytes:
         """Generate a working ДДС purchases/sales ledger (Дневник на
         покупки/продажби), grouped by the same VAT-rate categories NRA's
@@ -698,21 +705,24 @@ class ExportService:
         # Split by the actual VAT rate of each entry (20%/9%/0%), not a
         # blanket 20% assumption - matters for restaurants/hotels/bakeries
         # and anyone else on the reduced or zero rate.
-        sales_headers = ["№", "Дата", "Вид документ", "ДО 20%", "ДДС 20%", "ДО 9%", "ДДС 9%", "ДО нулева ставка", "Необлагаема част (джобни)", "Общо"]
+        # The till's daily reports and the invoices issued to customers, day
+        # by day: each invoice its own row with its number, customer and the
+        # base and VAT of each of its rates; a cancelled one keeps its number
+        # in the list at zero.
+        sales_headers = [
+            "№", "Дата", "Вид документ", "№ документ", "Клиент", "ЕИК",
+            "ДО 20%", "ДДС 20%", "ДО 9%", "ДДС 9%", "ДО нулева ставка", "Необлагаема част (джобни)", "Общо",
+        ]
+        first_amount_col = 7
         for col, header in enumerate(sales_headers, 1):
             cell = ws2.cell(row=header_row, column=col, value=header)
             cell.font = header_font
             cell.fill = header_fill
 
-        sales_totals = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        row2 = header_row
-        for idx, rev in enumerate(sales, 1):
-            row2 = header_row + idx
+        def _till_row(rev: dict) -> tuple:
             fiscal_revenue = rev.get("fiscal_revenue", 0) or 0
             pocket_money = rev.get("pocket_money", 0) or 0
             rate = rev.get("vat_rate_percent", 20.0) or 0.0
-            total = fiscal_revenue + pocket_money
-
             base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
             if rate and abs(rate - 20.0) < 0.01:
                 base_20 = round(fiscal_revenue * 100 / (100 + rate), 2)
@@ -722,25 +732,55 @@ class ExportService:
                 vat_9 = round(fiscal_revenue - base_9, 2)
             else:
                 base_0 = fiscal_revenue
+            return (
+                str(rev.get("date", ""))[:10], 0, "Отчет за извършени продажби (81)", "", "", "",
+                [base_20, vat_20, base_9, vat_9, base_0, pocket_money, fiscal_revenue + pocket_money],
+            )
 
-            values = [base_20, vat_20, base_9, vat_9, base_0]
-            row_values = [idx, rev.get("date", ""), "Отчет за извършени продажби (81)", *values, pocket_money, total]
+        def _invoice_row(doc: dict) -> tuple:
+            base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
+            cancelled = bool(doc.get("cancelled"))
+            if not cancelled:
+                for part in doc.get("vat_by_rate") or []:
+                    rate = float(part.get("rate", 0) or 0)
+                    base, vat = float(part.get("base", 0) or 0), float(part.get("vat", 0) or 0)
+                    if abs(rate - 20.0) < 0.01:
+                        base_20, vat_20 = base_20 + base, vat_20 + vat
+                    elif abs(rate - 9.0) < 0.01:
+                        base_9, vat_9 = base_9 + base, vat_9 + vat
+                    else:
+                        base_0 += base
+            total = 0.0 if cancelled else float(doc.get("total_amount", 0) or 0)
+            kind = "Фактура (01) - анулирана" if cancelled else "Фактура (01)"
+            return (
+                str(doc.get("issue_date", ""))[:10], 1, kind, _excel_safe(doc.get("invoice_number") or ""),
+                _excel_safe(doc.get("customer_name") or ""), _excel_safe(doc.get("customer_eik") or ""),
+                [round(base_20, 2), round(vat_20, 2), round(base_9, 2), round(vat_9, 2), round(base_0, 2), 0.0, round(total, 2)],
+            )
+
+        sale_rows = [_till_row(rev) for rev in sales] + [_invoice_row(doc) for doc in (issued_invoices or [])]
+        sale_rows.sort(key=lambda r: (r[0], r[1], r[3]))
+        sales_totals = [0.0] * 7
+        row2 = header_row
+        for idx, (day, _order, kind, number, customer, eik, values) in enumerate(sale_rows, 1):
+            row2 = header_row + idx
+            row_values = [idx, day, kind, number, customer, eik, *values]
             for col, value in enumerate(row_values, 1):
                 cell = ws2.cell(row=row2, column=col, value=value)
-                if col >= 4:
+                if col >= first_amount_col:
                     cell.number_format = money_format
-            for i, v in enumerate(values + [pocket_money, total]):
+            for i, v in enumerate(values):
                 sales_totals[i] += v
 
         total_row2 = row2 + 1
-        ws2.cell(row=total_row2, column=3, value="ОБЩО:").font = total_font
+        ws2.cell(row=total_row2, column=first_amount_col - 1, value="ОБЩО:").font = total_font
         for i, t in enumerate(sales_totals):
-            cell = ws2.cell(row=total_row2, column=4 + i, value=round(t, 2))
+            cell = ws2.cell(row=total_row2, column=first_amount_col + i, value=round(t, 2))
             cell.font = total_font
             cell.fill = total_fill
             cell.number_format = money_format
 
-        for col, width in zip(range(1, len(sales_headers) + 1), [5, 12, 28, 11, 10, 11, 10, 13, 22, 13]):
+        for col, width in zip(range(1, len(sales_headers) + 1), [5, 12, 28, 13, 24, 13, 11, 10, 11, 10, 13, 22, 13]):
             ws2.column_dimensions[get_column_letter(col)].width = width
 
         output = io.BytesIO()
@@ -842,7 +882,8 @@ class ExportService:
         top_suppliers: Optional[List[dict]] = None,
         top_items: Optional[List[dict]] = None,
         company_name: str = "",
-        period_label: str = ""
+        period_label: str = "",
+        visibility_note: Optional[str] = None,
     ) -> bytes:
         """Generate a one-page PDF financial report - summary + top suppliers/items"""
         if not PDF_AVAILABLE:
@@ -867,11 +908,11 @@ class ExportService:
         elements.append(Paragraph("Обобщение", section_style))
         summary_rows = [
             ["Показател", "Стойност"],
-            ["Общо приходи", f"{stats.get('total_income', 0):.2f} €"],
-            ["Общо разходи", f"{stats.get('total_expense', 0):.2f} €"],
-            ["Печалба", f"{stats.get('profit', 0):.2f} €"],
-            ["ДДС за плащане", f"{stats.get('vat_to_pay', 0):.2f} €"],
-            ["Брой фактури", str(stats.get('invoice_count', 0))],
+            ["Общо приходи", _money_or_hidden(stats.get('total_income'))],
+            ["Общо разходи", _money_or_hidden(stats.get('total_expense'))],
+            ["Печалба", _money_or_hidden(stats.get('profit'))],
+            ["ДДС за плащане", _money_or_hidden(stats.get('vat_to_pay'))],
+            ["Брой фактури", "скрито" if stats.get('invoice_count') is None else str(stats.get('invoice_count'))],
         ]
         summary_table = Table(summary_rows, colWidths=[90*mm, 60*mm])
         summary_table.setStyle(TableStyle([
@@ -886,6 +927,11 @@ class ExportService:
             ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8FAFC')),
         ]))
         elements.append(summary_table)
+        if visibility_note:
+            # The same note as on screen: which totals - and so which profit
+            # - this reader's access leaves out.
+            elements.append(Spacer(1, 3*mm))
+            elements.append(Paragraph(_xml_escape(visibility_note), subtitle_style))
 
         if top_suppliers:
             elements.append(Paragraph("Топ доставчици", section_style))
