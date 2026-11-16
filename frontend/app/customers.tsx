@@ -36,7 +36,7 @@ export default function CustomersScreen() {
   const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
   const router = useRouter();
-  const canManage = hasPermission('add_revenue');
+  const canManage = hasPermission('add_revenue') || hasPermission('issue_invoices');
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);

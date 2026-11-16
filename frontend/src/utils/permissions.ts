@@ -9,6 +9,7 @@ export type Permission =
   | 'export_data'
   | 'view_statistics'
   | 'manage_invoices'
+  | 'issue_invoices'
   | 'add_revenue'
   | 'add_expenses'
   | 'view_pocket_money'
@@ -36,7 +37,7 @@ export type ConfigurableRole = 'manager' | 'staff' | 'accountant';
 export const ROLE_DEFAULT_PERMISSIONS: Record<ConfigurableRole, Permission[]> = {
   manager: [
     'manage_budget', 'export_data', 'view_statistics', 'manage_invoices', 'add_revenue', 'add_expenses',
-    'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'team_collaboration',
+    'issue_invoices', 'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'team_collaboration',
   ],
   // Empty by design: a newly invited staff member starts with no
   // permission at all - everything these gate is opt-in, ticked explicitly
@@ -55,7 +56,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<ConfigurableRole, Permission[]> = 
 // manage_company never appear here for anyone but the owner.
 const STAFF_LIKE_CONFIGURABLE: Permission[] = [
   'view_audit_log', 'manage_budget', 'manage_payroll', 'export_data', 'view_statistics',
-  'manage_invoices', 'add_revenue', 'add_expenses',
+  'manage_invoices', 'add_revenue', 'add_expenses', 'issue_invoices',
   'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
   'team_collaboration', 'restore_deleted_data',
   'view_personal_wallet', 'add_personal_wallet_entries', 'manage_personal_wallet',
@@ -72,7 +73,7 @@ export const ROLE_CONFIGURABLE_PERMISSIONS: Record<ConfigurableRole, Permission[
   accountant: [
     'view_audit_log', 'manage_budget', 'manage_payroll', 'export_data', 'view_statistics', 'manage_invoices',
     'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
-    'team_collaboration', 'restore_deleted_data',
+    'team_collaboration', 'restore_deleted_data', 'issue_invoices',
     'view_personal_wallet', 'add_personal_wallet_entries', 'manage_personal_wallet',
   ],
 };
@@ -86,7 +87,8 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   export_data: { bg: 'Износ на данни (Excel/PDF)', en: 'Export data (Excel/PDF)' },
   view_statistics: { bg: 'Разширена статистика', en: 'Advanced statistics' },
   manage_invoices: { bg: 'Фактури', en: 'Invoices' },
-  add_revenue: { bg: 'Въвеждане на оборот', en: 'Enter revenue' },
+  add_revenue: { bg: 'Въвеждане на оборот, сметки и вземания', en: 'Enter revenue, bills and receivables' },
+  issue_invoices: { bg: 'Издаване на фактури (анулира само собственик/управител)', en: 'Issue invoices (only owner/manager cancel)' },
   add_expenses: { bg: 'Въвеждане на разходи', en: 'Enter expenses' },
   view_pocket_money: { bg: 'Вижда "джобче"', en: 'Sees pocket money' },
   view_off_book_expenses: { bg: 'Вижда разходи "в канала"', en: 'Sees off-book expenses' },

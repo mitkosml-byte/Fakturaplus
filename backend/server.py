@@ -925,6 +925,9 @@ def sanitize_user(user_doc: dict) -> dict:
             # payroll rather than losing a screen they used.
             if stamped_version < 6 and "manage_budget" in user_doc["permissions"]:
                 defaults.add("manage_payroll")
+            # Invoices used to come with entering revenue: kept likewise.
+            if stamped_version < 7 and "add_revenue" in user_doc["permissions"]:
+                defaults.add("issue_invoices")
             user_doc["permissions"] = sorted(set(user_doc["permissions"]) | defaults)
     return user_doc
 
@@ -998,11 +1001,11 @@ ROLE_PERMISSIONS = {
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
         "team_collaboration", "manage_billing", "restore_deleted_data",
         "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
-        "manage_payroll",
+        "manage_payroll", "issue_invoices",
     },
     "manager": {
         "manage_budget", "export_data", "view_statistics", "manage_invoices",
-        "add_revenue", "add_expenses",
+        "add_revenue", "add_expenses", "issue_invoices",
         # Not view_personal_investments - a manager enters revenue/expenses
         # themselves but has no stake in the owner's personal investments.
         "view_pocket_money", "view_off_book_expenses", "view_profit",
@@ -1032,7 +1035,7 @@ ROLE_PERMISSIONS = {
 
 _STAFF_LIKE_CONFIGURABLE = {
     "view_audit_log", "manage_budget", "manage_payroll", "export_data", "view_statistics",
-    "manage_invoices", "add_revenue", "add_expenses",
+    "manage_invoices", "add_revenue", "add_expenses", "issue_invoices",
     "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
     "team_collaboration", "restore_deleted_data",
     "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
@@ -1052,7 +1055,7 @@ _SENSITIVE_FIELD_PERMISSIONS = {
 # inspecting the stored list - is the only way to tell "never touched since
 # this version" apart from "deliberately configured to have none of the new
 # permissions").
-PERMISSIONS_SCHEMA_VERSION = 6
+PERMISSIONS_SCHEMA_VERSION = 7
 
 # Permissions introduced after PERMISSIONS_SCHEMA_VERSION 1, keyed by the
 # version that added them - see sanitize_user's migration branch below,
@@ -1068,6 +1071,10 @@ _PERMISSIONS_ADDED_AT_VERSION = {
     # and schedule payments. See sanitize_user: an account from before that
     # holds manage_budget keeps payroll too until its next real edit.
     6: {"manage_payroll"},
+    # Issuing invoices to customers split off "Въвеждане на оборот"
+    # (add_revenue): an invoice is a tax document, not a till entry. See
+    # sanitize_user: whoever could issue them before keeps it.
+    7: {"issue_invoices"},
 }
 
 ROLE_CONFIGURABLE_PERMISSIONS = {
@@ -1077,7 +1084,7 @@ ROLE_CONFIGURABLE_PERMISSIONS = {
     "accountant": {
         "view_audit_log", "manage_budget", "manage_payroll", "export_data", "view_statistics", "manage_invoices",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
-        "team_collaboration", "restore_deleted_data",
+        "team_collaboration", "restore_deleted_data", "issue_invoices",
         "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
     },
 }
@@ -1098,6 +1105,17 @@ def resolve_permissions(role: str, requested: Optional[List[str]]) -> List[str]:
 def require_permission(current_user: User, permission: str):
     if permission not in set(current_user.permissions or []):
         raise HTTPException(status_code=403, detail="Нямате права за тази операция")
+
+
+def require_sales_access(current_user: User) -> None:
+    """Customers and the documents to them: for whoever enters revenue or
+    issues invoices."""
+    if not {"add_revenue", "issue_invoices"} & set(current_user.permissions or []):
+        raise HTTPException(status_code=403, detail="Нямате права за тази операция")
+
+
+# Only these roles cancel an issued invoice: a tax document, its number kept.
+INVOICE_CANCEL_ROLES = {"owner", "manager"}
 
 def get_financial_visibility(current_user: User) -> dict:
     """Which of the four sensitive financial data fields this viewer may

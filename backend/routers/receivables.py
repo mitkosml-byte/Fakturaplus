@@ -52,7 +52,7 @@ async def _refuse_duplicate_eik(scope: dict, eik: Optional[str], exclude_id: Opt
 
 @router.post("/customers", response_model=Customer)
 async def create_customer(payload: CustomerCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     company_id, scope = await get_company_scope(current_user)
     data = _clean_customer_fields(payload.model_dump())
     if not data.get("name"):
@@ -64,7 +64,7 @@ async def create_customer(payload: CustomerCreate, current_user: User = Depends(
 
 @router.get("/customers", response_model=List[Customer])
 async def get_customers(search: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     _, query = await get_company_scope(current_user)
     if search:
         query["name"] = {"$regex": re.escape(search), "$options": "i"}
@@ -73,7 +73,7 @@ async def get_customers(search: Optional[str] = None, current_user: User = Depen
 
 @router.put("/customers/{customer_id}", response_model=Customer)
 async def update_customer(customer_id: str, payload: CustomerUpdate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     _, scope = await get_company_scope(current_user)
     update_data = _clean_customer_fields(payload.model_dump(exclude_unset=True))
     if "name" in update_data and not update_data["name"]:
@@ -91,7 +91,7 @@ async def update_customer(customer_id: str, payload: CustomerUpdate, current_use
 
 @router.delete("/customers/{customer_id}")
 async def delete_customer(customer_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     _, scope = await get_company_scope(current_user)
     result = await server.db.customers.delete_one({"id": customer_id, **scope})
     if result.deleted_count == 0:
@@ -107,7 +107,7 @@ async def get_customer_card(customer_id: str, current_user: User = Depends(get_c
     """One customer at a glance: invoiced, owed and overdue now, their last
     documents and open debts. Documents from before they were tied to the
     customer count by the name they were issued to."""
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     _, scope = await get_company_scope(current_user)
     customer = await server.db.customers.find_one({"id": customer_id, **scope}, {"_id": 0})
     if not customer:
@@ -377,9 +377,11 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
 
 @router.post("/billing-documents", response_model=BillingDocument)
 async def create_billing_document(payload: BillingDocumentCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_revenue")
+    # An invoice is a tax document - its own right; bills and quotes go with revenue.
     if payload.doc_type == BillingDocumentType.INVOICE:
+        require_permission(current_user, "issue_invoices")
         return await _create_issued_invoice(payload, current_user)
+    require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
     payload.customer_id = await _customer_for(company_id, scope, current_user.user_id, payload)
     total_amount = round(sum(item.quantity * item.unit_price for item in payload.items), 2)
@@ -417,7 +419,7 @@ async def get_invoice_defaults(current_user: User = Depends(get_current_user)):
     """What the invoice form starts from: whether the business is registered
     for VAT, and whether it enters its till's daily revenue (then an invoice
     paid in cash or by card went through the till)."""
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     company_id, scope = await get_company_scope(current_user)
     company = await server.db.companies.find_one(
         {"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1},
@@ -427,14 +429,14 @@ async def get_invoice_defaults(current_user: User = Depends(get_current_user)):
 
 @router.get("/billing-documents", response_model=List[BillingDocument])
 async def get_billing_documents(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     _, query = await get_company_scope(current_user)
     docs = await server.db.billing_documents.find(query, {"_id": 0}).sort("created_at", -1).to_list(ALL_ROWS)
     return [BillingDocument(**d) for d in docs]
 
 @router.get("/billing-documents/{document_id}", response_model=BillingDocument)
 async def get_billing_document(document_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     _, scope = await get_company_scope(current_user)
     document = await server.db.billing_documents.find_one({"id": document_id, **scope}, {"_id": 0})
     if not document:
@@ -443,7 +445,7 @@ async def get_billing_document(document_id: str, current_user: User = Depends(ge
 
 @router.get("/billing-documents/{document_id}/pdf")
 async def export_billing_document_pdf(document_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     _, scope = await get_company_scope(current_user)
     document = await server.db.billing_documents.find_one({"id": document_id, **scope}, {"_id": 0})
     if not document:
@@ -477,7 +479,7 @@ async def export_billing_document_pdf(document_id: str, current_user: User = Dep
 
 @router.delete("/billing-documents/{document_id}")
 async def delete_billing_document(document_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_revenue")
+    require_sales_access(current_user)
     company_id, scope = await get_company_scope(current_user)
     document: Dict[str, Any] = dict(await server.db.billing_documents.find_one(
         {"id": document_id, **scope},
@@ -486,6 +488,12 @@ async def delete_billing_document(document_id: str, current_user: User = Depends
     if not document:
         raise HTTPException(status_code=404, detail="Документът не е намерен")
     cancelled = False
+    if document.get("doc_type") == "invoice":
+        require_permission(current_user, "issue_invoices")
+        if not document.get("external") and current_user.role not in INVOICE_CANCEL_ROLES:
+            raise HTTPException(status_code=403, detail="Само собственикът или управителят могат да анулират или изтрият издадена фактура")
+    else:
+        require_permission(current_user, "add_revenue")
     if document.get("doc_type") == "invoice" and document.get("external"):
         # Issued in another program: cancelled there if at all - the record
         # here (entered by mistake, say) just goes.

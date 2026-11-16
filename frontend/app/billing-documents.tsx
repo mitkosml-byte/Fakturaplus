@@ -40,8 +40,13 @@ type PaymentMethod = 'cash' | 'bank_transfer' | 'card';
 export default function BillingDocumentsScreen() {
   const router = useRouter();
   const { t, dateLocale } = useTranslation();
-  const { hasPermission } = useAuth();
-  const canManage = hasPermission('add_revenue');
+  const { hasPermission, user } = useAuth();
+  // Invoices are their own right; bills and quotes go with entering revenue.
+  const canIssueInvoices = hasPermission('issue_invoices');
+  const canBill = hasPermission('add_revenue');
+  // Cancelling an issued invoice (a tax document): owner or manager only.
+  const canCancelInvoices = canIssueInvoices && (user?.role === 'owner' || user?.role === 'manager');
+  const canManage = hasPermission('add_revenue') || hasPermission('issue_invoices');
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -104,7 +109,7 @@ export default function BillingDocumentsScreen() {
   };
 
   const resetForm = () => {
-    setDocType('bill');
+    setDocType(canBill ? 'bill' : 'invoice');
     setFormCustomerEik('');
     setFormCustomerAddress('');
     setFormPaymentMethod('bank_transfer');
@@ -364,7 +369,7 @@ export default function BillingDocumentsScreen() {
                           )}
                         </TouchableOpacity>
                       )}
-                      {!doc.cancelled && (
+                      {!doc.cancelled && (doc.doc_type !== 'invoice' ? canBill : doc.external ? canIssueInvoices : canCancelInvoices) && (
                         <TouchableOpacity onPress={() => handleDelete(doc)} hitSlop={8}>
                           <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
                         </TouchableOpacity>
@@ -382,7 +387,7 @@ export default function BillingDocumentsScreen() {
                 <Text style={styles.modalTitle}>{t('billingDocuments.addNew')}</Text>
 
                 <View style={styles.typeSelector}>
-                  {(['bill', 'invoice', 'quote'] as const).map((opt) => (
+                  {(['bill', 'invoice', 'quote'] as const).filter((opt) => (opt === 'invoice' ? canIssueInvoices : canBill)).map((opt) => (
                     <TouchableOpacity
                       key={opt}
                       style={[styles.typeOption, docType === opt && styles.typeOptionActive]}

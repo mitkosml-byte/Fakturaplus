@@ -82,3 +82,33 @@ def test_d5_the_customer_card_shows_invoiced_owed_and_overdue(client):
     assert client.delete(f"/api/customers/{customer_id}", headers=owner).status_code == 200
     kept = asyncio.run(server.db.billing_documents.find_one({"id": owed["id"]}, {"_id": 0}))
     assert kept["customer_id"] is None and kept["customer_name"] == "Гама Трейд ООД"
+
+
+def test_e1_issuing_invoices_is_its_own_right_and_only_the_owner_or_manager_cancels(client):
+    from tests.test_whole_program_fixes import _user
+    company_id, _, owner = _company()
+    cashier_id, cashier = _user(company_id, "staff", ["add_revenue"], "Касиер")
+    clerk_id, clerk = _user(company_id, "staff", ["issue_invoices"], "Фактуриста")
+    invoice = {
+        "doc_type": "invoice", "customer_name": "Клиент ООД", "payment_method": "bank_transfer",
+        "items": [{"name": "Услуга", "quantity": 1, "unit_price": 100}],
+    }
+    # Entering revenue no longer issues invoices; bills still go with it.
+    assert client.post("/api/billing-documents", headers=cashier, json=invoice).status_code == 403
+    bill = {"doc_type": "bill", "customer_name": "Клиент ООД", "items": [{"name": "Обяд", "quantity": 1, "unit_price": 20}]}
+    assert client.post("/api/billing-documents", headers=cashier, json=bill).status_code == 200
+
+    issued = client.post("/api/billing-documents", headers=clerk, json=invoice)
+    assert issued.status_code == 200, issued.text
+    assert client.get("/api/billing-documents", headers=clerk).status_code == 200
+    assert client.get("/api/customers", headers=clerk).status_code == 200
+    # Cancelling (or deleting) an issued invoice: owner or manager only.
+    refused = client.delete(f"/api/billing-documents/{issued.json()['id']}", headers=clerk)
+    assert refused.status_code == 403
+    external = client.post("/api/billing-documents", headers=clerk, json={**invoice, "external": True, "invoice_number": "900"}).json()
+    assert client.delete(f"/api/billing-documents/{external['id']}", headers=clerk).status_code == 200
+    assert client.delete(f"/api/billing-documents/{issued.json()['id']}", headers=owner).status_code == 200
+
+    # Someone who issued invoices before the right existed keeps it.
+    asyncio.run(server.db.users.update_one({"user_id": cashier_id}, {"$set": {"permissions_schema_version": 6}}))
+    assert client.post("/api/billing-documents", headers=cashier, json=invoice).status_code == 200

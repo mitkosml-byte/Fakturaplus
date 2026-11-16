@@ -693,7 +693,7 @@ export default function InvoicesScreen() {
                   <Text style={styles.quickLinkChipText}>{t('receivables.title')}</Text>
                 </TouchableOpacity>
               )}
-              {hasPermission('add_revenue') && (
+              {(hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
                 <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/billing-documents')}>
                   <Ionicons name="document-text-outline" size={15} color={COLORS.success} />
                   <Text style={styles.quickLinkChipText}>{t('billingDocuments.title')}</Text>

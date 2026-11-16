@@ -68,7 +68,7 @@ export default function HistoryHubScreen() {
       iconColor: COLORS.success,
       onPress: () => router.push('/receivables'),
     }] : []),
-    ...(hasPermission('add_revenue') ? [{
+    ...(hasPermission('add_revenue') || hasPermission('issue_invoices') ? [{
       key: 'billingDocuments',
       title: t('billingDocuments.title'),
       subtitle: t('profile.billingDocumentsDesc'),

@@ -24,6 +24,7 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
+import { useAuth } from '../../src/contexts/AuthContext';
 import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint, InvoiceDraftCheck, InvoiceDraftFix, InvoiceDocumentType } from '../../src/types';
 import { detectPackMultiple, formatEur, priceAlertMeaning } from '../../src/utils/priceAlert';
 import { format, parse } from 'date-fns';
@@ -70,6 +71,9 @@ export default function ScanScreen() {
   // issued invoice with its own number (income of its day; one paid at the
   // till is in that day's till revenue already and is not counted again).
   const [scanMode, setScanMode] = useState<'purchase' | 'sales'>('purchase');
+  // An invoice the business issued is saved as an issued invoice - its own right.
+  const { hasPermission } = useAuth();
+  const canIssueInvoices = hasPermission('issue_invoices');
   const [salesVatRate, setSalesVatRate] = useState<20 | 9 | 0>(20);
   const [salesCustomer, setSalesCustomer] = useState('');
   const [salesCustomerEik, setSalesCustomerEik] = useState('');
@@ -902,14 +906,16 @@ export default function ScanScreen() {
                       {t('scan.modePurchase')}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modeButton, scanMode === 'sales' && styles.modeButtonActive]}
-                    onPress={() => setScanMode('sales')}
-                  >
-                    <Text style={[styles.modeButtonText, scanMode === 'sales' && styles.modeButtonTextActive]} numberOfLines={1}>
-                      {t('scan.modeSales')}
-                    </Text>
-                  </TouchableOpacity>
+                  {canIssueInvoices && (
+                    <TouchableOpacity
+                      style={[styles.modeButton, scanMode === 'sales' && styles.modeButtonActive]}
+                      onPress={() => setScanMode('sales')}
+                    >
+                      <Text style={[styles.modeButtonText, scanMode === 'sales' && styles.modeButtonTextActive]} numberOfLines={1}>
+                        {t('scan.modeSales')}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
 
