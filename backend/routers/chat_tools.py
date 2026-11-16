@@ -264,6 +264,98 @@ class ChatDataTools:
         return {"from": start.isoformat(), "to": end.isoformat(), "query": supplier, "matches": matches,
                 "note": None if matches else "No supplier with a similar name has invoices in this period."}
 
+    def sees_customers(self) -> bool:
+        """Customers and the documents to them: as in the app, for whoever
+        enters revenue or issues invoices."""
+        return bool({"add_revenue", "issue_invoices"} & set(self.user.permissions or []))
+
+    async def customer_sales(self, customer: Optional[str] = None, start_date: Optional[str] = None,
+                             end_date: Optional[str] = None) -> dict:
+        """Per customer: invoiced in the range (less credit notes), bills,
+        paid in it, owed and overdue now, to give back, and days late on
+        average - one customer by a similar name, or the ones owing and
+        bought the most."""
+        if not self.sees_customers():
+            return {"note": "customers are not visible to this user"}
+        start, end = _resolve_range(start_date, end_date)
+        today = today_local()
+        known = await server.db.customers.find(self.scope, {"_id": 0, "id": 1, "name": 1}).to_list(ALL_ROWS)
+        id_by_name = {_compare_key(c.get("name") or ""): c["id"] for c in known}
+        name_by_id = {c["id"]: c.get("name") or "" for c in known}
+
+        def key_of(doc: dict) -> str:
+            return doc.get("customer_id") or id_by_name.get(_compare_key(doc.get("customer_name") or "")) \
+                or "name:" + _compare_key(doc.get("customer_name") or "")
+
+        rows: Dict[str, Dict[str, Any]] = {}
+
+        def row(doc: dict) -> Dict[str, Any]:
+            key = key_of(doc)
+            if key not in rows:
+                rows[key] = {"customer": name_by_id.get(key) or (doc.get("customer_name") or "—").strip(),
+                             "invoiced": 0.0, "invoices": 0, "credit_notes": 0.0, "bills": 0.0, "paid_in_range": 0.0,
+                             "owed_now": 0.0, "overdue_now": 0.0, "to_give_back": 0.0, "last_invoice": None,
+                             "_late": []}
+            return rows[key]
+
+        documents = await server.db.billing_documents.find(
+            {**self.scope, "doc_type": {"$in": ["invoice", "credit_note", "bill"]}, "cancelled": {"$ne": True}},
+            {"_id": 0, "doc_type": 1, "customer_id": 1, "customer_name": 1, "issue_date": 1, "total_amount": 1},
+        ).to_list(ALL_ROWS)
+        for doc in documents:
+            day = str(doc.get("issue_date") or "")[:10]
+            entry = row(doc)
+            if doc.get("doc_type") == "invoice" and day:
+                entry["last_invoice"] = max(entry["last_invoice"] or day, day)
+            if not (start.isoformat() <= day <= end.isoformat()):
+                continue
+            amount = float(doc.get("total_amount") or 0)
+            if doc.get("doc_type") == "invoice":
+                entry["invoiced"] += amount
+                entry["invoices"] += 1
+            elif doc.get("doc_type") == "credit_note":
+                entry["invoiced"] += amount
+                entry["credit_notes"] += amount
+            else:
+                entry["bills"] += amount
+
+        for r in await server.db.receivables.find(self.scope, {"_id": 0}).to_list(ALL_ROWS):
+            entry = row(r)
+            left = receivable_left(r)
+            entry["owed_now"] += left
+            if left > 0 and r.get("due_date") and str(r["due_date"]) < today.isoformat():
+                entry["overdue_now"] += left
+            entry["to_give_back"] += receivable_refund_due(r)
+            for payment in r.get("payments") or []:
+                if start.isoformat() <= str(payment.get("date") or "") <= end.isoformat():
+                    entry["paid_in_range"] += float(payment.get("amount") or 0)
+            due = business_day(r.get("due_date")) if r.get("due_date") else None
+            paid_days = [business_day(p.get("date")) for p in r.get("payments") or []]
+            paid_on = max((d for d in paid_days if d), default=None)
+            if r.get("is_paid") and not r.get("cancelled") and due and paid_on:
+                entry["_late"].append(max((paid_on - due).days, 0))
+
+        def shown(entry: Dict[str, Any]) -> Dict[str, Any]:
+            late = entry.pop("_late")
+            return {**{k: round(v, 2) if isinstance(v, float) else v for k, v in entry.items()},
+                    "average_days_late": round(sum(late) / len(late), 1) if late else None}
+
+        if customer:
+            scored = sorted(((name_match_score(customer, e["customer"]), e) for e in rows.values()),
+                            key=lambda pair: (pair[0], pair[1]["invoiced"]), reverse=True)
+            matches = [shown(dict(e)) | {"match_score": round(score, 2)} for score, e in scored if score >= 0.4][:MAX_MATCHES]
+            return {"from": start.isoformat(), "to": end.isoformat(), "query": customer, "matches": matches,
+                    "note": None if matches else "No customer with a similar name."}
+        everyone = [shown(dict(e)) for e in rows.values()]
+        return {
+            "from": start.isoformat(), "to": end.isoformat(),
+            "owing_most_now": sorted((e for e in everyone if e["owed_now"] > 0), key=lambda e: e["owed_now"], reverse=True)[:10],
+            "invoiced_most_in_range": sorted((e for e in everyone if e["invoiced"] or e["bills"]),
+                                             key=lambda e: e["invoiced"] + e["bills"], reverse=True)[:10],
+            "owed_now_total": round(sum(e["owed_now"] for e in everyone), 2),
+            "overdue_now_total": round(sum(e["overdue_now"] for e in everyone), 2),
+        }
+
     async def _top_items_for_supplier(self, supplier: str, start: date_type, end: date_type) -> List[dict]:
         if not self.company_id:
             return []
@@ -401,4 +493,32 @@ def build_chat_tools(data: ChatDataTools) -> list:
     async def supplier_purchases(supplier: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
         return _dump(await data.supplier_purchases(supplier, start_date, end_date))
 
-    return [period_totals, revenue_breakdown, top_expenses, item_purchases, supplier_purchases]
+    @beta_async_tool(
+        name="customer_sales",
+        description=(
+            "Customers (the business's buyers): per customer what was invoiced in a date range (invoices less "
+            "credit notes), bills, what they paid in it, what they owe now and how much of it is overdue, money "
+            "to give back, the last invoice and how many days late they pay on average. With a customer name: "
+            "that customer (found by a similar name). Without: the customers owing the most now and those "
+            "invoiced the most in the range. Call it for 'who owes me the most', 'how much did I invoice X this "
+            "year', 'does X pay on time'. Omit the dates for all of history."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "customer": {"type": "string", "description": "The customer as the user named it (optional)"},
+                "start_date": {"type": "string", "description": f"First day, {_DATE_HINT} (optional)"},
+                "end_date": {"type": "string", "description": f"Last day, {_DATE_HINT} (optional)"},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+    )
+    async def customer_sales(customer: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
+        return _dump(await data.customer_sales(customer, start_date, end_date))
+
+    tools = [period_totals, revenue_breakdown, top_expenses, item_purchases, supplier_purchases]
+    # Customers: only for whoever may see them in the app.
+    if data.sees_customers():
+        tools.append(customer_sales)
+    return tools

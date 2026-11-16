@@ -232,6 +232,10 @@ export const translations: Translations = {
     bg: 'Виж вземанията',
     en: 'View receivables',
   },
+  'briefing.cta.payments_this_week': {
+    bg: 'Виж плащанията',
+    en: 'View payments',
+  },
   'briefing.cta.scan_credits': {
     bg: 'Добави сканирания',
     en: 'Add scans',

@@ -10,7 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ValidationError, model_validator
-from typing import Annotated, List, Optional, Dict, Any, Literal
+from typing import Annotated, List, Optional, Dict, Any, Literal, Tuple
 from enum import Enum
 import uuid
 from datetime import datetime, timezone, timedelta, date
@@ -3534,24 +3534,116 @@ async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -
         })
     return signals
 
+def _count_bg(count: int, one: str, many: str) -> str:
+    return f"{count} {one if count == 1 else many}"
+
+
 async def _signal_receivables(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """What customers owe - counted as debts AND as customers (before, two
+    overdue invoices of one customer read "2 customers owe"), with who owes
+    the most."""
     if "add_revenue" not in set(current_user.permissions or []):
         return None
-    summary = await get_receivables_summary(current_user)
-    if summary["unpaid_count"] == 0:
+    today = today_local().isoformat()
+    open_debts = [
+        r for r in await db.receivables.find(
+            {**scope, "is_paid": False}, {**RECEIVABLE_BALANCE_FIELDS, "customer_id": 1, "customer_name": 1},
+        ).to_list(ALL_ROWS)
+        if receivable_left(r) > 0
+    ]
+    if not open_debts:
         return None
-    if summary["overdue_count"] > 0:
+    overdue = [r for r in open_debts if r.get("due_date") and str(r["due_date"]) < today]
+    shown = overdue or open_debts
+
+    def customer_of(r: dict) -> str:
+        return r.get("customer_id") or _compare_key(r.get("customer_name") or "")
+
+    owed_by: Dict[str, float] = {}
+    names: Dict[str, str] = {}
+    for r in shown:
+        owed_by[customer_of(r)] = owed_by.get(customer_of(r), 0.0) + receivable_left(r)
+        names.setdefault(customer_of(r), (r.get("customer_name") or "").strip())
+    top = max(owed_by, key=lambda key: owed_by[key])
+    total = sum(owed_by.values())
+    customers = _count_bg(len(owed_by), "клиент", "клиента")
+    most = f" Най-много дължи {names[top]} - {owed_by[top]:.2f} €." if len(owed_by) > 1 else f" Дължи {names[top]}."
+    if overdue:
         return {
             "key": "receivables", "severity": "critical", "priority": 85,
             "title": "Просрочени вземания от клиенти",
-            "detail": f"{summary['overdue_count']} клиенти дължат просрочено общо {summary['total_overdue']:.2f} €.",
+            "detail": f"{_count_bg(len(shown), 'просрочено вземане', 'просрочени вземания')} от {customers} - общо {total:.2f} €.{most}",
             "route": "/receivables",
         }
     return {
         "key": "receivables", "severity": "info", "priority": 35,
         "title": "Чакащи плащания от клиенти",
-        "detail": f"{summary['unpaid_count']} неплатени вземания на стойност {summary['total_owed']:.2f} €.",
+        "detail": f"{_count_bg(len(shown), 'неплатено вземане', 'неплатени вземания')} от {customers} - общо {total:.2f} €.{most}",
         "route": "/receivables",
+    }
+
+
+def payment_week(today: date) -> Tuple[date, date, bool]:
+    """The days whose payments a week's notice covers: the rest of this
+    week through Sunday - or, at the weekend, the week ahead."""
+    if today.weekday() >= 5:
+        return today, today + timedelta(days=13 - today.weekday()), True
+    return today, today + timedelta(days=6 - today.weekday()), False
+
+
+async def _signal_payments_this_week(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """What is to be paid this week: invoices by bank falling due and the
+    recurring expenses whose day comes (an invoice that already came for
+    one is counted once, as the invoice)."""
+    perms = set(current_user.permissions or [])
+    if not {"manage_invoices", "view_statistics"} & perms:
+        return None
+    today = today_local()
+    start, end, next_week = payment_week(today)
+    unpaid, _, _ = await split_overdue_invoices(scope)
+    due = [
+        inv for inv in unpaid
+        if isinstance(inv.get("payment_due_date"), datetime)
+        and (day := business_day(inv["payment_due_date"])) is not None and start <= day <= end
+        and invoice_left(inv) > 0
+    ]
+    recurring: List[Tuple[str, float]] = []
+    seen_items: set = set()
+    if company_id and {"manage_budget", "view_statistics"} & perms:
+        items = await recurring_service.active_items(db, company_id)
+        months = sorted({(start.year, start.month), (end.year, end.month)})
+        for year, month in months if items else []:
+            records = await recurring_service.load_month_records(db, scope, [item["id"] for item in items], year, month)
+            occurrences = recurring_service.resolve_month(items, year, month, records)
+            for item in items:
+                occurrence = occurrences.get(item["id"])
+                if not occurrence or occurrence["state"] not in recurring_service.UNPAID_STATES:
+                    continue
+                if recurring_service.item_kind(item) != recurring_service.INVOICE and not visibility.get("off_book_expenses"):
+                    continue
+                day = business_day(occurrence["due_date"])
+                if day and start <= day <= end and (item["id"], year, month) not in seen_items:
+                    seen_items.add((item["id"], year, month))
+                    recurring.append((str(item.get("description") or "").strip(), float(occurrence["expected_amount"])))
+    if not due and not recurring:
+        return None
+    parts = []
+    if due:
+        parts.append(f"{_count_bg(len(due), 'фактура', 'фактури')} за {sum(invoice_left(inv) for inv in due):.2f} €")
+    if recurring:
+        named = ", ".join(f"{name} {amount:.2f} €" for name, amount in recurring[:2])
+        if len(recurring) > 2:
+            rest = recurring[2:]
+            named += f" и още {_count_bg(len(rest), 'периодичен разход', 'периодични разхода')} за {sum(a for _, a in rest):.2f} €"
+        parts.append(named)
+    when = "Следващата седмица" if next_week else "Тази седмица"
+    return {
+        "key": "payments_this_week", "severity": "info", "priority": 55,
+        "title": "Плащания следващата седмица" if next_week else "Плащания тази седмица",
+        "detail": f"{when} (до {end.strftime('%d.%m')}) плащаш {' и '.join(parts)}.",
+        "route": "/(tabs)/invoices?paymentFilter=unpaid",
+        "fingerprint": f"{start.isoformat()}|" + ",".join(sorted(inv["id"] for inv in due))
+                       + "|" + ",".join(sorted(f"{i}:{y}-{m}" for i, y, m in seen_items)),
     }
 
 async def _signal_scan_credits(company_id, scope, current_user, visibility) -> Optional[dict]:
@@ -4090,6 +4182,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
     _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
+    _signal_payments_this_week,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
