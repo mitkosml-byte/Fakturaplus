@@ -4,6 +4,8 @@ Shares server.py's db/models/helpers/services via `from server import *`;
 after module load, so this file always accesses them as `server.db` /
 `server.AI_FEATURES_ENABLED` (qualified), never via the star-import, to
 stay correct when server.py's test fixture monkeypatches them."""
+import uuid
+
 from fastapi import APIRouter
 from routers.recurring import maintain_quietly
 from server import *
@@ -268,14 +270,17 @@ async def mark_invoices_paid(body: MarkInvoicesPaidRequest, current_user: User =
     now = datetime.now(timezone.utc)
     invoices = await server.db.invoices.find(
         {**scope, "id": {"$in": body.invoice_ids}, "is_paid": False},
-        {"_id": 0, "id": 1, "total_amount": 1, "credited_amount": 1, "supplier": 1, "invoice_number": 1},
+        {"_id": 0, "id": 1, "total_amount": 1, "credited_amount": 1, "supplier": 1, "invoice_number": 1,
+         "paid_amount": 1, "payments": 1},
     ).to_list(len(body.invoice_ids))
     for inv in invoices:
-        # Paid in full is the total less what credit notes took off.
+        # Paid in full is the total less what credit notes took off - the
+        # rest paid today, as one payment in its history.
         paid = max(float(inv.get("total_amount") or 0) - float(inv.get("credited_amount") or 0), 0.0)
         await server.db.invoices.update_one(
             {**scope, "id": inv["id"]},
-            {"$set": {"is_paid": True, "paid_amount": round(paid, 2), "paid_at": now}},
+            {"$set": {"is_paid": True, "paid_amount": round(paid, 2), "paid_at": now,
+                      "payments": invoice_payments_for(inv, paid, today_local())}},
         )
         await audit_service.log_action(
             user_id=current_user.user_id,
@@ -290,6 +295,96 @@ async def mark_invoices_paid(body: MarkInvoicesPaidRequest, current_user: User =
             },
         )
     return {"updated": len(invoices)}
+
+
+async def _payable_invoice(scope: dict, invoice_id: str) -> dict:
+    existing = await server.db.invoices.find_one(
+        {"id": invoice_id, **scope}, {"_id": 0, "image_base64": 0, "image_base64s": 0},
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+    if existing.get("document_type") == CREDIT_NOTE:
+        raise HTTPException(status_code=400, detail="Кредитното известие не се плаща")
+    if existing.get("payment_method") != "bank_transfer":
+        raise HTTPException(status_code=400, detail="Плащания се въвеждат за фактури по банков път - тази е платена на място")
+    return existing
+
+
+def _paid_at(existing: dict, payments: List[dict], fully: bool) -> Optional[datetime]:
+    """Paid in full on the day of the payment that completed it."""
+    if not fully:
+        return None
+    days = [business_day(p.get("date")) for p in payments]
+    latest = max((d for d in days if d), default=None)
+    return day_start_utc(latest) if latest else existing.get("paid_at") or datetime.now(timezone.utc)
+
+
+async def _invoice_now(scope: dict, invoice_id: str) -> Invoice:
+    saved = await server.db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0, "image_base64": 0, "image_base64s": 0})
+    if not saved:
+        raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+    return Invoice(**saved)
+
+
+@router.post("/invoices/{invoice_id}/payments", response_model=Invoice)
+async def add_invoice_payment(invoice_id: str, payload: InvoicePaymentCreate, current_user: User = Depends(get_current_user)):
+    """A payment to the supplier on an invoice by bank - in part or in
+    full, on its own day and by its own method (before, every payment was
+    "today" and part payments only a sum). Paid in full once the payments
+    and credit notes reach the total."""
+    require_permission(current_user, "manage_invoices")
+    company_id, scope = await get_company_scope(current_user)
+    existing = await _payable_invoice(scope, invoice_id)
+    left = invoice_left(existing)
+    if existing.get("is_paid") or left <= 0.005:
+        raise HTTPException(status_code=400, detail="Фактурата вече е платена")
+    if payload.amount > left + 0.01:
+        raise HTTPException(status_code=400, detail=f"Остават {left:.2f} € - плащането е по-голямо")
+    day = business_day(payload.date) if payload.date else today_local()
+    if day is None:
+        raise HTTPException(status_code=400, detail="Невалидна дата")
+    if day > today_local():
+        raise HTTPException(status_code=400, detail="Плащането не може да е с бъдеща дата")
+    paid = round(float(existing.get("paid_amount") or 0) + payload.amount, 2)
+    payments = [*(existing.get("payments") or []), {
+        "id": str(uuid.uuid4()), "amount": round(payload.amount, 2), "date": day.isoformat(), "method": payload.method,
+    }]
+    fully = invoice_left({**existing, "paid_amount": paid}) <= 0.01
+    await server.db.invoices.update_one({"id": invoice_id, **scope}, {"$set": {
+        "paid_amount": paid, "is_paid": fully, "payments": payments, "paid_at": _paid_at(existing, payments, fully),
+    }})
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="update", entity_type="invoice",
+        entity_id=invoice_id, company_id=company_id,
+        details={"payment": round(payload.amount, 2), "payment_date": day.isoformat(), "method": payload.method,
+                 "supplier": existing.get("supplier"), "invoice_number": existing.get("invoice_number")},
+    )
+    return await _invoice_now(scope, invoice_id)
+
+
+@router.delete("/invoices/{invoice_id}/payments/{payment_id}", response_model=Invoice)
+async def delete_invoice_payment(invoice_id: str, payment_id: str, current_user: User = Depends(get_current_user)):
+    """A payment entered by mistake, taken out of the invoice's history -
+    what is paid and owed follows."""
+    require_permission(current_user, "manage_invoices")
+    company_id, scope = await get_company_scope(current_user)
+    existing = await _payable_invoice(scope, invoice_id)
+    payment = next((p for p in existing.get("payments") or [] if p.get("id") == payment_id), None)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Плащането не е намерено")
+    payments = [p for p in existing.get("payments") or [] if p.get("id") != payment_id]
+    paid = round(max(float(existing.get("paid_amount") or 0) - float(payment.get("amount") or 0), 0.0), 2)
+    fully = invoice_left({**existing, "paid_amount": paid}) <= 0.01
+    await server.db.invoices.update_one({"id": invoice_id, **scope}, {"$set": {
+        "paid_amount": paid, "is_paid": fully, "payments": payments, "paid_at": _paid_at(existing, payments, fully),
+    }})
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="update", entity_type="invoice",
+        entity_id=invoice_id, company_id=company_id,
+        details={"payment_removed": payment.get("amount"), "payment_date": payment.get("date"),
+                 "supplier": existing.get("supplier"), "invoice_number": existing.get("invoice_number")},
+    )
+    return await _invoice_now(scope, invoice_id)
 
 
 class DraftCheckLine(BaseModel):
@@ -579,6 +674,14 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
         update_data["paid_amount"] = update_data.get("total_amount", existing.get("total_amount", 0))
         update_data["paid_at"] = existing.get("paid_at") or update_data.get("date", existing["date"])
         update_data["payment_due_date"] = None
+        update_data["payments"] = []
+    elif "paid_amount" in update_data:
+        # The payment history follows a paid amount set at once: by bank, a
+        # rise is a payment of today; paid on the spot keeps none.
+        update_data["payments"] = (
+            invoice_payments_for(existing, float(update_data["paid_amount"]), today_local())
+            if new_method == "bank_transfer" else []
+        )
 
     # A credit note's invoice ("към фактура №"), worked out again whenever
     # its number, supplier or type changes; an invoice names none.

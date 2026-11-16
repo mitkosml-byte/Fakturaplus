@@ -134,6 +134,8 @@ export interface Invoice {
   paid_amount: number;
   payment_due_date?: string;
   paid_at?: string;
+  // Each payment to the supplier on an invoice by bank, on its own day.
+  payments?: ReceivablePayment[];
   created_at: string;
   // Set when this is a fixed asset's purchase invoice (not an expense of its day).
   asset_id?: string | null;

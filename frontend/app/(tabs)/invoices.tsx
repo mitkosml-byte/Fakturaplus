@@ -28,7 +28,7 @@ import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { ScanCreditsBadge, Expandable, CountUp, SkeletonRow, AnimatedEmptyIcon } from '../../src/components';
 import { ExportFormatModal } from '../../src/components/invoices/ExportFormatModal';
 import { ImageViewerModal } from '../../src/components/invoices/ImageViewerModal';
-import { PaymentModal } from '../../src/components/invoices/PaymentModal';
+import { PaymentModal, PaymentMethodChoice } from '../../src/components/invoices/PaymentModal';
 import { InvoiceDetailModal } from '../../src/components/invoices/InvoiceDetailModal';
 import { COLORS } from '../../src/theme/colors';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
@@ -285,6 +285,8 @@ export default function InvoicesScreen() {
   const [updatingPayment, setUpdatingPayment] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [paymentAmountInput, setPaymentAmountInput] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date());
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodChoice>('bank_transfer');
 
   const applyInvoiceUpdate = (updated: Invoice) => {
     setSelectedInvoice(updated);
@@ -448,26 +450,35 @@ export default function InvoicesScreen() {
     }
   };
 
+  // What is left to pay: the total less what was paid and what credit
+  // notes took off.
+  const invoiceLeft = (invoice: Invoice) =>
+    Math.max(invoice.total_amount - invoice.paid_amount - (invoice.credited_amount || 0), 0);
+
   const openPaymentModal = (invoice: Invoice) => {
-    setPaymentAmountInput(invoice.paid_amount > 0 ? invoice.paid_amount.toFixed(2) : '');
+    setPaymentAmountInput(invoiceLeft(invoice).toFixed(2));
+    setPaymentDate(new Date());
+    setPaymentMethod('bank_transfer');
     setPaymentModalVisible(true);
   };
 
-  const handleSavePaymentAmount = async () => {
+  // A payment on its own day, added to the invoice's payment history.
+  const handleSavePayment = async () => {
     if (!selectedInvoice) return;
-    const amount = parseFloat(paymentAmountInput);
-    if (isNaN(amount) || amount < 0) {
+    const amount = parseFloat(paymentAmountInput.replace(',', '.'));
+    if (isNaN(amount) || amount <= 0) {
       Alert.alert(t('common.error'), t('budget.invalidAmount'));
       return;
     }
-    // What can be paid: the total less what credit notes took off.
-    if (amount > selectedInvoice.total_amount - (selectedInvoice.credited_amount || 0) + 0.01) {
+    if (amount > invoiceLeft(selectedInvoice) + 0.01) {
       Alert.alert(t('common.error'), t('invoices.paidAmountExceedsTotal'));
       return;
     }
     setUpdatingPayment(true);
     try {
-      const updated = await api.updateInvoice(selectedInvoice.id, { paid_amount: amount });
+      const updated = await api.addInvoicePayment(selectedInvoice.id, {
+        amount, date: format(paymentDate, 'yyyy-MM-dd'), method: paymentMethod,
+      });
       applyInvoiceUpdate(updated);
       setPaymentModalVisible(false);
       Haptics.success();
@@ -476,6 +487,26 @@ export default function InvoicesScreen() {
     } finally {
       setUpdatingPayment(false);
     }
+  };
+
+  const handleDeletePayment = (invoice: Invoice, paymentId: string) => {
+    Alert.alert(t('invoices.deletePaymentTitle'), t('invoices.deletePaymentConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          setUpdatingPayment(true);
+          try {
+            applyInvoiceUpdate(await api.deleteInvoicePayment(invoice.id, paymentId));
+          } catch (error: any) {
+            Alert.alert(t('common.error'), error.message);
+          } finally {
+            setUpdatingPayment(false);
+          }
+        },
+      },
+    ]);
   };
 
   // Reverted the immediate-delete + 4s-undo-toast pattern (Motion Design
@@ -982,6 +1013,7 @@ export default function InvoicesScreen() {
         updatingPayment={updatingPayment}
         onTogglePaid={handleTogglePaid}
         onOpenPaymentModal={openPaymentModal}
+        onDeletePayment={handleDeletePayment}
         scannedPages={scannedPages}
         loadingScannedPages={loadingScannedPages}
         onViewPage={setViewerPageIndex}
@@ -1005,7 +1037,11 @@ export default function InvoicesScreen() {
         invoice={selectedInvoice}
         amountInput={paymentAmountInput}
         onChangeAmountInput={setPaymentAmountInput}
-        onSave={handleSavePaymentAmount}
+        date={paymentDate}
+        onChangeDate={setPaymentDate}
+        method={paymentMethod}
+        onChangeMethod={setPaymentMethod}
+        onSave={handleSavePayment}
         saving={updatingPayment}
       />
         </SafeAreaView>

@@ -426,6 +426,11 @@ class Invoice(BaseModel):
     paid_amount: float = 0.0
     payment_due_date: Optional[datetime] = None  # само при bank_transfer
     paid_at: Optional[datetime] = None
+    # Each payment to the supplier on an invoice by bank: {id, amount, date
+    # "YYYY-MM-DD", method} - in parts, each on its own day, as with what
+    # customers pay (paid_amount is their sum, plus any paid before there
+    # was a history).
+    payments: List[Dict[str, Any]] = []
     # Set when this is the purchase invoice of a fixed asset (routers/assets):
     # not an expense of its day then - the asset's depreciation is.
     asset_id: Optional[str] = None
@@ -1732,6 +1737,30 @@ async def find_duplicate_invoice(
         if _compare_key(inv.get("supplier") or "") == name_key:
             return inv
     return None
+
+
+class InvoicePaymentCreate(BaseModel):
+    """A payment to a supplier on an invoice by bank."""
+    amount: float = Field(gt=0)
+    date: Optional[str] = None  # "YYYY-MM-DD", today if left out
+    method: Literal["cash", "bank_transfer", "card"] = "bank_transfer"
+
+
+def invoice_payments_for(existing: dict, paid: float, day: date) -> List[Dict[str, Any]]:
+    """The payment history for a paid amount set at once (the "paid in
+    full" tick, an amount typed in, a corrected total): what was paid
+    before stays and a rise is one payment of the difference on this day;
+    nothing paid clears it, and a cut starts it over as one payment."""
+    history = list(existing.get("payments") or [])
+    before = float(existing.get("paid_amount") or 0)
+    if paid <= 0.005:
+        return []
+    entry = {"id": str(uuid.uuid4()), "date": day.isoformat(), "method": "bank_transfer"}
+    if paid < before - 0.005:
+        return [{**entry, "amount": round(paid, 2)}]
+    if paid > before + 0.005:
+        history.append({**entry, "amount": round(paid - before, 2)})
+    return history
 
 
 def invoice_left(invoice: dict) -> float:

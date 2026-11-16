@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
@@ -219,6 +219,26 @@ export default function ReceivablesScreen() {
       setPaySaving(false);
     }
   };
+
+  // A payment entered by mistake, taken out of the receivable's history.
+  const handleDeletePayment = (r: Receivable, paymentId: string) => {
+    Alert.alert(t('invoices.deletePaymentTitle'), t('invoices.deletePaymentConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.deleteReceivablePayment(r.id, paymentId);
+            loadData();
+          } catch (error: any) {
+            Alert.alert(t('common.error'), error.message);
+          }
+        },
+      },
+    ]);
+  };
+  const editingReceivable = receivables.find((r) => r.id === editingId);
 
   const handleDelete = (r: Receivable) => {
     Alert.alert(t('common.delete'), t('receivables.deleteConfirm'), [
@@ -484,6 +504,29 @@ export default function ReceivablesScreen() {
                   locale={language}
                 />
 
+                {editingReceivable && (editingReceivable.payments || []).length > 0 && (
+                  <View style={styles.paymentHistory}>
+                    <Text style={styles.inputLabel}>{t('invoices.paymentHistory')}</Text>
+                    {(editingReceivable.payments || []).map((payment) => (
+                      <View key={payment.id} style={styles.paymentHistoryRow}>
+                        <Text style={styles.paymentHistoryText}>
+                          {format(parseISO(payment.date), 'd MMM yyyy', { locale: dateLocale })} · {payment.amount.toFixed(2)} €
+                          {payment.method ? ` · ${t(`scan.paymentMethod.${payment.method}`)}` : ''}
+                        </Text>
+                        {!editingReceivable.cancelled && (
+                          <TouchableOpacity
+                            onPress={() => handleDeletePayment(editingReceivable, payment.id)}
+                            hitSlop={8}
+                            accessibilityLabel={t('invoices.deletePaymentTitle')}
+                          >
+                            <Ionicons name="close-circle-outline" size={16} color={COLORS.textMuted} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
+
                 <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
                   {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
                 </TouchableOpacity>
@@ -580,6 +623,9 @@ const styles = StyleSheet.create({
   },
   inputErrorBorder: { borderColor: COLORS.danger },
   inputLocked: { opacity: 0.6 },
+  paymentHistory: { marginTop: 12, gap: 4 },
+  paymentHistoryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  paymentHistoryText: { fontSize: 13, color: 'white' },
   lockedNote: { color: COLORS.textMuted, fontSize: 12, marginTop: 4 },
   fieldErrorText: { color: COLORS.danger, fontSize: 12, marginTop: 4 },
   saveButton: {

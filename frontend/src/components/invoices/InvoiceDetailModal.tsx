@@ -81,6 +81,8 @@ type Props = {
   updatingPayment: boolean;
   onTogglePaid: (invoice: Invoice) => void;
   onOpenPaymentModal: (invoice: Invoice) => void;
+  // A payment entered by mistake, taken out of the history.
+  onDeletePayment: (invoice: Invoice, paymentId: string) => void;
 
   scannedPages: string[];
   loadingScannedPages: boolean;
@@ -98,7 +100,7 @@ export function InvoiceDetailModal({
   editVatTreatment, onChangeVatTreatment, editPaymentMethod, onChangePaymentMethod,
   editDocumentType, onChangeDocumentType, editCreditedNumber, onChangeCreditedNumber, editNotes, onChangeNotes,
   editItems, onChangeEditItemField, savingEdit, onSaveEdit,
-  selectedInvoiceAlerts, loadingInvoiceAlerts, updatingPayment, onTogglePaid, onOpenPaymentModal,
+  selectedInvoiceAlerts, loadingInvoiceAlerts, updatingPayment, onTogglePaid, onOpenPaymentModal, onDeletePayment,
   scannedPages, loadingScannedPages, onViewPage, onDelete,
 }: Props) {
   const { t } = useTranslation();
@@ -516,6 +518,28 @@ export function InvoiceDetailModal({
                           </View>
                         )}
 
+                        {(invoice.payments || []).length > 0 && (
+                          <View style={styles.paymentHistory}>
+                            <Text style={styles.paymentHistoryTitle}>{t('invoices.paymentHistory')}</Text>
+                            {(invoice.payments || []).map((payment) => (
+                              <View key={payment.id} style={styles.paymentHistoryRow}>
+                                <Text style={styles.paymentHistoryText}>
+                                  {formatDate(payment.date)} · {payment.amount.toFixed(2)} €
+                                  {payment.method ? ` · ${t(`scan.paymentMethod.${payment.method}`)}` : ''}
+                                </Text>
+                                <TouchableOpacity
+                                  onPress={() => onDeletePayment(invoice, payment.id)}
+                                  disabled={updatingPayment}
+                                  hitSlop={8}
+                                  accessibilityLabel={t('invoices.deletePaymentTitle')}
+                                >
+                                  <Ionicons name="close-circle-outline" size={16} color={COLORS.textMuted} />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+
                         <TouchableOpacity
                           style={styles.paidCheckboxRow}
                           onPress={() => onTogglePaid(invoice)}
@@ -539,9 +563,7 @@ export function InvoiceDetailModal({
                             disabled={updatingPayment}
                           >
                             <Ionicons name="cash-outline" size={16} color={COLORS.primary} />
-                            <Text style={styles.recordPaymentButtonText}>
-                              {invoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
-                            </Text>
+                            <Text style={styles.recordPaymentButtonText}>{t('invoices.recordPayment')}</Text>
                           </TouchableOpacity>
                         )}
                       </>
@@ -1016,6 +1038,24 @@ const styles = StyleSheet.create({
   },
   paymentProgressBox: {
     marginBottom: 10,
+  },
+  paymentHistory: {
+    marginBottom: 10,
+    gap: 4,
+  },
+  paymentHistoryTitle: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  paymentHistoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  paymentHistoryText: {
+    fontSize: 13,
+    color: 'white',
   },
   paymentProgressText: {
     fontSize: 13,

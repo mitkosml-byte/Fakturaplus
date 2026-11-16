@@ -2772,24 +2772,18 @@ export const translations: Translations = {
     en: 'Remaining',
   },
   'invoices.recordPayment': {
-    bg: 'Регистрирай плащане',
-    en: 'Record payment',
+    bg: 'Добави плащане',
+    en: 'Add a payment',
   },
-  'invoices.editPayment': {
-    bg: 'Промени плащането',
-    en: 'Edit payment',
+  'invoices.paymentHistory': { bg: 'Плащания', en: 'Payments' },
+  'invoices.deletePaymentTitle': { bg: 'Махни плащането', en: 'Remove the payment' },
+  'invoices.deletePaymentConfirm': {
+    bg: 'Да махна ли това плащане? Сумата отново ще се води дължима.',
+    en: 'Remove this payment? Its amount will be owed again.',
   },
   'invoices.markFullyPaid': {
     bg: 'Маркирай като напълно платена',
     en: 'Mark as fully paid',
-  },
-  'invoices.paidAmountLabel': {
-    bg: 'Платена сума до момента (€)',
-    en: 'Amount paid so far (€)',
-  },
-  'invoices.paidAmountEditNotice': {
-    bg: 'Полето показва вече платената сума до момента. Промяна го заменя изцяло - не се добавя към старата.',
-    en: 'This field shows the total paid so far. Changing it replaces that value - it does not add to it.',
   },
   'invoices.paidAmountExceedsTotal': {
     bg: 'Платената сума не може да надвишава общата сума на фактурата',

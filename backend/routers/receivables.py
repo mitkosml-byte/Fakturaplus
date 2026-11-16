@@ -278,6 +278,30 @@ async def add_receivable_payment(
     return receivable_view(receivable)
 
 
+@router.delete("/receivables/{receivable_id}/payments/{payment_id}", response_model=ReceivableView)
+async def delete_receivable_payment(receivable_id: str, payment_id: str, current_user: User = Depends(get_current_user)):
+    """A payment entered by mistake, taken out of the receivable's history -
+    what is paid and owed follows."""
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    existing = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    if existing.get("cancelled"):
+        raise HTTPException(status_code=400, detail="Документът е анулиран - платеното е за връщане")
+    payment = next((p for p in existing.get("payments") or [] if p.get("id") == payment_id), None)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Плащането не е намерено")
+    payments = [p for p in existing.get("payments") or [] if p.get("id") != payment_id]
+    paid = round(max(float(existing.get("paid_amount") or 0) - float(payment.get("amount") or 0), 0.0), 2)
+    fully = receivable_left({**existing, "paid_amount": paid}) <= 0.01
+    await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$set": {
+        "paid_amount": paid, "is_paid": fully, "payments": payments, **({} if fully else {"paid_at": None}),
+    }})
+    receivable = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
+    return receivable_view(receivable)
+
+
 @router.delete("/receivables/{receivable_id}")
 async def delete_receivable(receivable_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")

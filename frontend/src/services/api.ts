@@ -654,6 +654,19 @@ class ApiService {
     return this.fetch(`/receivables/${id}/payments`, { method: 'POST', body: JSON.stringify(payment) });
   }
 
+  async deleteReceivablePayment(id: string, paymentId: string): Promise<Receivable> {
+    return this.fetch(`/receivables/${id}/payments/${paymentId}`, { method: 'DELETE' });
+  }
+
+  // A payment to a supplier on an invoice by bank, on its own day.
+  async addInvoicePayment(id: string, payment: { amount: number; date: string; method: 'cash' | 'bank_transfer' | 'card' }): Promise<Invoice> {
+    return this.fetch(`/invoices/${id}/payments`, { method: 'POST', body: JSON.stringify(payment) });
+  }
+
+  async deleteInvoicePayment(id: string, paymentId: string): Promise<Invoice> {
+    return this.fetch(`/invoices/${id}/payments/${paymentId}`, { method: 'DELETE' });
+  }
+
   getBillingDocumentPdfUrl(id: string): string {
     return `/api/billing-documents/${id}/pdf`;
   }
