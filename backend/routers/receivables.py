@@ -342,12 +342,35 @@ async def _customer_for(company_id: Optional[str], scope: dict, user_id: str, pa
     return await remember_customer(company_id, scope, user_id, payload.customer_name, payload.customer_eik, payload.customer_address)
 
 
+async def _quote_to_convert(scope: dict, quote_id: Optional[str]) -> Optional[dict]:
+    """The quote a new bill or invoice is made of - this company's, and not
+    made into a document already (one since deleted does not count)."""
+    if not quote_id:
+        return None
+    quote = await server.db.billing_documents.find_one({"id": quote_id, **scope, "doc_type": "quote"}, {"_id": 0})
+    if not quote:
+        raise HTTPException(status_code=404, detail="Офертата не е намерена")
+    made = quote.get("converted_document_id")
+    if made and await server.db.billing_documents.find_one({"id": made, **scope}, {"_id": 1}):
+        raise HTTPException(status_code=409, detail="От тази оферта вече е направен документ")
+    return quote
+
+
+async def _mark_quote_converted(scope: dict, quote: Optional[dict], document: BillingDocument) -> None:
+    if quote:
+        await server.db.billing_documents.update_one(
+            {"id": quote["id"], **scope},
+            {"$set": {"quote_status": "accepted", "converted_document_id": document.id}},
+        )
+
+
 async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: User) -> BillingDocument:
     """An invoice to a customer: the next number in sequence (or the one the
     business continues from), VAT by rate, revenue and VAT on its issue
     date (period_totals reads it there). Paid in cash or by card when
     issued; otherwise owed - a receivable that is already revenue."""
     company_id, scope = await get_company_scope(current_user)
+    quote = await _quote_to_convert(scope, payload.from_quote_id)
     issued = business_day(payload.issue_date) if payload.issue_date else today_local()
     if issued is None:
         raise HTTPException(status_code=400, detail="Невалидна дата на издаване")
@@ -396,7 +419,7 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
         amount_without_vat=amounts["amount_without_vat"], vat_amount=amounts["vat_amount"],
         total_amount=amounts["total_amount"], vat_by_rate=amounts["by_rate"],
         vat_exempt_basis=None if vat_registered else VAT_EXEMPT_BASIS,
-        external=payload.external, in_till=in_till,
+        external=payload.external, in_till=in_till, source_quote_id=quote["id"] if quote else None,
     )
     if not paid_when_issued:
         receivable = Receivable(
@@ -415,6 +438,7 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
         if document.receivable_id:
             await server.db.receivables.delete_one({"id": document.receivable_id})
         raise HTTPException(status_code=409, detail=f"Фактура № {number} току-що беше издадена - опитайте отново")
+    await _mark_quote_converted(scope, quote, document)
     await audit_service.log_action(
         user_id=current_user.user_id, user_name=current_user.name, action="create", entity_type="issued_invoice",
         entity_id=document.id, company_id=company_id,
@@ -522,19 +546,31 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
         return await _create_credit_note(payload, current_user)
     require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
+    quote = await _quote_to_convert(scope, payload.from_quote_id) if payload.doc_type == BillingDocumentType.BILL else None
     payload.customer_id = await _customer_for(company_id, scope, current_user.user_id, payload)
     total_amount = round(sum(item.quantity * item.unit_price for item in payload.items), 2)
     issue_date = payload.issue_date or today_local().isoformat()
+    issued = business_day(issue_date) or today_local()
     due_date = None
+    quote_fields: Dict[str, Any] = {}
     if payload.doc_type == BillingDocumentType.BILL:
         # A bill is owed by a date - never "some day", which never became overdue.
-        issued = business_day(issue_date) or today_local()
         due_date = payload.due_date or (issued + timedelta(days=BILL_TERM_DAYS)).isoformat()
+        quote_fields["source_quote_id"] = quote["id"] if quote else None
+    else:
+        # A quote is valid until a date, and open until answered.
+        valid = business_day(payload.valid_until) if payload.valid_until else issued + timedelta(days=QUOTE_VALID_DAYS)
+        if valid is None or valid < issued:
+            raise HTTPException(status_code=400, detail="Невалиден срок на офертата")
+        quote_fields.update(valid_until=valid.isoformat(), quote_status="open")
 
     document = BillingDocument(
         user_id=current_user.user_id, company_id=company_id, total_amount=total_amount,
-        issue_date=issue_date, due_date=due_date,
-        **payload.model_dump(exclude={"issue_date", "due_date", "invoice_number", "payment_method", "in_till", "external"}),
+        issue_date=issue_date, due_date=due_date, **quote_fields,
+        **payload.model_dump(exclude={
+            "issue_date", "due_date", "invoice_number", "payment_method", "in_till", "external",
+            "valid_until", "from_quote_id", "credited_document_id",
+        }),
     )
 
     # A "bill" (not a quote) is money actually owed - automatically record
@@ -551,7 +587,24 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
         document.receivable_id = receivable.id
 
     await server.db.billing_documents.insert_one(document.model_dump())
+    await _mark_quote_converted(scope, quote, document)
     return document
+
+
+@router.put("/billing-documents/{document_id}/quote-status", response_model=BillingDocumentView)
+async def set_quote_status(document_id: str, payload: QuoteStatusUpdate, current_user: User = Depends(get_current_user)):
+    """A quote answered: accepted or declined by the customer (or open
+    again). One made into a bill or an invoice stays accepted."""
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    quote = await server.db.billing_documents.find_one({"id": document_id, **scope, "doc_type": "quote"}, {"_id": 0})
+    if not quote:
+        raise HTTPException(status_code=404, detail="Офертата не е намерена")
+    made = quote.get("converted_document_id")
+    if made and payload.status != "accepted" and await server.db.billing_documents.find_one({"id": made, **scope}, {"_id": 1}):
+        raise HTTPException(status_code=409, detail="От офертата вече е направен документ - тя е приета")
+    await server.db.billing_documents.update_one({"id": document_id, **scope}, {"$set": {"quote_status": payload.status}})
+    return await get_billing_document(document_id, current_user)
 
 @router.get("/billing-documents/invoice-defaults")
 async def get_invoice_defaults(current_user: User = Depends(get_current_user)):

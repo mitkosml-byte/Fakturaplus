@@ -636,8 +636,16 @@ class ApiService {
     in_till?: boolean;
     // A credit note: the invoice it is to (notes are its reason).
     credited_document_id?: string;
+    // A quote: valid until (YYYY-MM-DD).
+    valid_until?: string;
+    // A bill or an invoice made of a quote.
+    from_quote_id?: string;
   }): Promise<BillingDocument> {
     return this.fetch('/billing-documents', { method: 'POST', body: JSON.stringify(doc) });
+  }
+
+  async setQuoteStatus(id: string, status: 'open' | 'accepted' | 'declined'): Promise<BillingDocument> {
+    return this.fetch(`/billing-documents/${id}/quote-status`, { method: 'PUT', body: JSON.stringify({ status }) });
   }
 
   async getBillingDocuments(): Promise<BillingDocument[]> {

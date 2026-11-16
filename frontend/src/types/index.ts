@@ -322,6 +322,12 @@ export interface BillingDocument {
   credited_issue_date?: string | null;
   // An invoice: what its credit notes took off (above zero).
   credited_amount?: number;
+  // A quote: valid until, its answer, and the bill or invoice made of it.
+  valid_until?: string | null;
+  quote_status?: 'open' | 'accepted' | 'declined' | null;
+  converted_document_id?: string | null;
+  // A bill or an invoice made of a quote.
+  source_quote_id?: string | null;
   // Where a bill's or an invoice's money stands (as listed).
   payment_status?: 'paid' | 'partly_paid' | 'owed' | 'overdue' | 'credited' | null;
   paid_amount?: number | null;

@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { format } from 'date-fns';
+import { addDays, format } from 'date-fns';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
@@ -79,6 +79,10 @@ export default function BillingDocumentsScreen() {
   const [formInTill, setFormInTill] = useState(false);
   // The invoice a credit note is being issued to (the form is then that).
   const [creditFor, setCreditFor] = useState<BillingDocument | null>(null);
+  // The quote a bill or an invoice is being made of.
+  const [fromQuote, setFromQuote] = useState<BillingDocument | null>(null);
+  // A quote: how long it is valid.
+  const [formValidDays, setFormValidDays] = useState(30);
 
   const loadData = useCallback(async () => {
     if (!canManage) {
@@ -112,6 +116,8 @@ export default function BillingDocumentsScreen() {
 
   const resetForm = () => {
     setCreditFor(null);
+    setFromQuote(null);
+    setFormValidDays(30);
     setDocType(canBill ? 'bill' : 'invoice');
     setFormCustomerEik('');
     setFormCustomerAddress('');
@@ -171,6 +177,35 @@ export default function BillingDocumentsScreen() {
   const isInvoice = docType === 'invoice' || docType === 'credit_note';
   const isCreditNote = docType === 'credit_note';
   const creditLeft = creditFor ? Math.max(creditFor.total_amount - (creditFor.credited_amount || 0), 0) : 0;
+
+  // A quote made into a bill or an invoice: the form filled from it, to
+  // check and issue.
+  const makeFromQuote = (quote: BillingDocument, target: 'bill' | 'invoice') => {
+    resetForm();
+    setDocType(target);
+    setFromQuote(quote);
+    setFormCustomerName(quote.customer_name);
+    setFormCustomerId(quote.customer_id || null);
+    const known = customers.find((c) => c.id === quote.customer_id);
+    setFormCustomerEik(known?.eik || '');
+    setFormCustomerAddress(known?.address || '');
+    setFormNotes(quote.notes || '');
+    setFormItems(quote.items.map((item) => ({
+      name: item.name, quantity: String(item.quantity), unit: item.unit || 'бр.',
+      unit_price: String(item.unit_price), vat_rate: String(item.vat_rate ?? 20),
+    })));
+    setModalVisible(true);
+  };
+
+  const answerQuote = async (quote: BillingDocument, status: 'accepted' | 'declined') => {
+    try {
+      await api.setQuoteStatus(quote.id, quote.quote_status === status ? 'open' : status);
+      Haptics.success();
+      loadData();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    }
+  };
 
   const openCreditNote = (invoice: BillingDocument) => {
     resetForm();
@@ -260,6 +295,8 @@ export default function BillingDocumentsScreen() {
         customer_id: formCustomerId || undefined,
         items: validItems,
         notes: formNotes.trim() || undefined,
+        ...(fromQuote ? { from_quote_id: fromQuote.id } : {}),
+        ...(docType === 'quote' ? { valid_until: format(addDays(new Date(), formValidDays), 'yyyy-MM-dd') } : {}),
         ...(isInvoice ? {
           customer_eik: formCustomerEik.trim() || undefined,
           customer_address: formCustomerAddress.trim() || undefined,
@@ -439,6 +476,52 @@ export default function BillingDocumentsScreen() {
                       {t('billingDocuments.creditedLine').replace('{amount}', (doc.credited_amount || 0).toFixed(2))}
                     </Text>
                   )}
+                  {doc.doc_type === 'quote' && (() => {
+                    const today = format(new Date(), 'yyyy-MM-dd');
+                    const expired = doc.quote_status === 'open' && !!doc.valid_until && doc.valid_until < today;
+                    const label = doc.quote_status === 'accepted' ? t('billingDocuments.quoteAccepted')
+                      : doc.quote_status === 'declined' ? t('billingDocuments.quoteDeclined')
+                        : expired ? t('billingDocuments.quoteExpired')
+                          : doc.valid_until
+                            ? t('billingDocuments.quoteOpenUntil').replace('{date}', format(new Date(doc.valid_until), 'd MMM', { locale: dateLocale }))
+                            : null;
+                    const made = !!doc.converted_document_id && documents.some((d) => d.id === doc.converted_document_id);
+                    return (
+                      <View style={styles.paymentRow}>
+                        {label && (
+                          <View style={[styles.paymentBadge,
+                            doc.quote_status === 'accepted' ? styles.paymentPaid
+                              : doc.quote_status === 'declined' || expired ? styles.paymentCredited : styles.paymentOwed]}>
+                            <Text style={styles.typeBadgeText}>{label}</Text>
+                          </View>
+                        )}
+                        {!made && canBill && (
+                          <>
+                            <TouchableOpacity onPress={() => answerQuote(doc, 'accepted')} hitSlop={6}>
+                              <Text style={[styles.quoteAction, doc.quote_status === 'accepted' && styles.quoteActionOn]}>
+                                ✓ {t('billingDocuments.quoteMarkAccepted')}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => answerQuote(doc, 'declined')} hitSlop={6}>
+                              <Text style={[styles.quoteAction, doc.quote_status === 'declined' && styles.quoteActionOn]}>
+                                ✗ {t('billingDocuments.quoteMarkDeclined')}
+                              </Text>
+                            </TouchableOpacity>
+                          </>
+                        )}
+                        {!made && doc.quote_status !== 'declined' && canBill && (
+                          <TouchableOpacity onPress={() => makeFromQuote(doc, 'bill')} hitSlop={6}>
+                            <Text style={styles.quoteAction}>{t('billingDocuments.quoteToBill')}</Text>
+                          </TouchableOpacity>
+                        )}
+                        {!made && doc.quote_status !== 'declined' && canIssueInvoices && (
+                          <TouchableOpacity onPress={() => makeFromQuote(doc, 'invoice')} hitSlop={6}>
+                            <Text style={styles.quoteAction}>{t('billingDocuments.quoteToInvoice')}</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })()}
                   {doc.payment_status && (
                     <View style={styles.paymentRow}>
                       <View style={[styles.paymentBadge, paymentBadgeStyle(doc.payment_status)]}>
@@ -513,6 +596,29 @@ export default function BillingDocumentsScreen() {
                 </View>
                 )}
                 {isInvoice && !creditFor && <Text style={styles.invoiceHint}>{t('billingDocuments.invoiceHint')}</Text>}
+                {fromQuote && (
+                  <Text style={styles.invoiceHint}>
+                    {t('billingDocuments.fromQuote').replace('{amount}', fromQuote.total_amount.toFixed(2))}
+                  </Text>
+                )}
+                {docType === 'quote' && (
+                  <>
+                    <Text style={styles.inputLabel}>{t('billingDocuments.quoteValidFor')}</Text>
+                    <View style={styles.typeSelector}>
+                      {[7, 14, 30].map((days) => (
+                        <TouchableOpacity
+                          key={days}
+                          style={[styles.typeOption, formValidDays === days && styles.typeOptionActive]}
+                          onPress={() => setFormValidDays(days)}
+                        >
+                          <Text style={[styles.typeOptionText, formValidDays === days && styles.typeOptionTextActive]}>
+                            {t('billingDocuments.quoteDays').replace('{days}', String(days))}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
 
                 {!creditFor && (
                 <>
@@ -693,6 +799,12 @@ export default function BillingDocumentsScreen() {
                   </Text>
                 )}
                 <Text style={styles.totalPreview}>{t('receivables.amount')}: {formTotal.toFixed(2)} €</Text>
+                {fromQuote && docType === 'invoice' && Math.abs(formTotal - fromQuote.total_amount) > 0.01 && (
+                  <Text style={styles.quoteDiffers}>
+                    {t('billingDocuments.fromQuoteDiffers')
+                      .replace('{quote}', fromQuote.total_amount.toFixed(2)).replace('{total}', formTotal.toFixed(2))}
+                  </Text>
+                )}
 
                 <Text style={styles.inputLabel}>
                   {isCreditNote ? t('billingDocuments.creditNoteReason') : t('receivables.description')}
@@ -768,6 +880,9 @@ const styles = StyleSheet.create({
   paymentCredited: { backgroundColor: 'rgba(148, 163, 184, 0.3)' },
   refundText: { fontSize: 12, color: COLORS.warning },
   creditLine: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 },
+  quoteAction: { fontSize: 12, fontWeight: '600', color: COLORS.primaryLight },
+  quoteActionOn: { color: COLORS.success },
+  quoteDiffers: { fontSize: 12, color: COLORS.warning, marginTop: 6, lineHeight: 17 },
   invoiceHint: { fontSize: 12, color: COLORS.textSecondary, marginTop: 6, lineHeight: 17 },
   subtotalPreview: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6, textAlign: 'right' },
   typeBadgeText: { fontSize: 11, fontWeight: '700', color: 'white' },

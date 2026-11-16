@@ -362,6 +362,8 @@ class ExportService:
         issue_date = document.get('issue_date', '')
         elements.append(Paragraph(f"<b>Клиент:</b> {_xml_escape(str(document.get('customer_name', '')))}", bold_style))
         elements.append(Paragraph(f"<b>Дата:</b> {issue_date}", normal_style))
+        if doc_type == "quote" and document.get("valid_until"):
+            elements.append(Paragraph(f"<b>Валидна до:</b> {_xml_escape(str(document['valid_until']))}", normal_style))
         elements.append(Spacer(1, 6 * mm))
 
         data = [["Артикул/услуга", "Кол-во", "Ед.", "Ед. цена", "Общо"]]

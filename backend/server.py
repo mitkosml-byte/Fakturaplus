@@ -2733,6 +2733,13 @@ class BillingDocument(BaseModel):
     credited_issue_date: Optional[str] = None
     # An invoice: what its credit notes (not cancelled) took off, above zero.
     credited_amount: float = 0
+    # A quote: valid until (YYYY-MM-DD), open / accepted / declined (an open
+    # one past its date reads as expired), and the bill or invoice made of it.
+    valid_until: Optional[str] = None
+    quote_status: Optional[str] = None
+    converted_document_id: Optional[str] = None
+    # A bill or an invoice made of a quote: that quote.
+    source_quote_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -2788,6 +2795,19 @@ class BillingDocumentCreate(BaseModel):
     # A credit note: the invoice it is to (its customer, rates and payment
     # are that invoice's). Its notes are the reason for it.
     credited_document_id: Optional[str] = None
+    # A quote: valid until (YYYY-MM-DD); left out, QUOTE_VALID_DAYS on.
+    valid_until: Optional[str] = None
+    # A bill or an invoice made of a quote: that quote (it is then accepted).
+    from_quote_id: Optional[str] = None
+
+
+# A quote is valid this many days after it is issued unless given a date.
+QUOTE_VALID_DAYS = 30
+QUOTE_STATUSES = ("open", "accepted", "declined")
+
+
+class QuoteStatusUpdate(BaseModel):
+    status: Literal["open", "accepted", "declined"]
 
 
 
