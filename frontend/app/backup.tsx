@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Share,
   Platform,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,7 +38,23 @@ export default function BackupScreen() {
     last_backup_date: string | null;
     file_name?: string;
     statistics?: { invoices: number; revenues: number; expenses: number };
+    monthly_email?: boolean;
+    email_available?: boolean;
   } | null>(null);
+  const [savingMonthly, setSavingMonthly] = useState(false);
+
+  // A copy of the data by email every month (gzip-ed, the same as a hand-made one).
+  const toggleMonthlyEmail = async (value: boolean) => {
+    setSavingMonthly(true);
+    try {
+      await api.setMonthlyBackupEmail(value);
+      setBackupStatus((prev) => (prev ? { ...prev, monthly_email: value } : prev));
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setSavingMonthly(false);
+    }
+  };
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
 
@@ -308,6 +325,21 @@ export default function BackupScreen() {
                   <Text style={styles.statusText}>{t('backup.noBackup')}</Text>
                 </View>
               )}
+              {backupStatus?.email_available && (
+                <View style={[styles.statusRow, { marginTop: 12 }]}>
+                  <Ionicons name="mail-outline" size={20} color={COLORS.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.statusText}>{t('backup.monthlyEmail')}</Text>
+                    <Text style={styles.monthlyHint}>{t('backup.monthlyEmailHint')}</Text>
+                  </View>
+                  <Switch
+                    value={!!backupStatus.monthly_email}
+                    onValueChange={toggleMonthlyEmail}
+                    disabled={savingMonthly}
+                    accessibilityLabel={t('backup.monthlyEmail')}
+                  />
+                </View>
+              )}
             </View>
 
             {/* Actions */}
@@ -384,6 +416,7 @@ export default function BackupScreen() {
 }
 
 const styles = StyleSheet.create({
+  monthlyHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   backgroundImage: {
     flex: 1,
   },

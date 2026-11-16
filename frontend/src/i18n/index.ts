@@ -236,6 +236,10 @@ export const translations: Translations = {
     bg: 'Виж плащанията',
     en: 'View payments',
   },
+  'briefing.cta.backup': {
+    bg: 'Направи архив',
+    en: 'Make a backup',
+  },
   'briefing.cta.scan_credits': {
     bg: 'Добави сканирания',
     en: 'Add scans',
@@ -3024,6 +3028,11 @@ export const translations: Translations = {
     bg: 'Няма създаден backup',
     en: 'No backup created',
   },
+  'backup.monthlyEmail': { bg: 'Месечен архив по имейл', en: 'Monthly backup by email' },
+  'backup.monthlyEmailHint': {
+    bg: 'Веднъж месечно архивът идва на имейла ви - копие извън приложението.',
+    en: 'Once a month the backup comes to your email - a copy outside the app.',
+  },
   'backup.create': {
     bg: 'Създай Backup',
     en: 'Create Backup',
@@ -4931,6 +4940,10 @@ export const translations: Translations = {
   'auditLog.entityIssuedInvoice': {
     bg: 'Издадена фактура',
     en: 'Issued invoice',
+  },
+  'auditLog.entityIssuedCreditNote': {
+    bg: 'Кредитно известие към клиент',
+    en: 'Credit note to a customer',
   },
   'auditLog.entityInvoice': {
     bg: 'фактура',

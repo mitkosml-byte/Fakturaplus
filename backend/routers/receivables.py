@@ -690,14 +690,20 @@ async def export_billing_document_pdf(document_id: str, current_user: User = Dep
 async def delete_billing_document(document_id: str, current_user: User = Depends(get_current_user)):
     require_sales_access(current_user)
     company_id, scope = await get_company_scope(current_user)
-    document: Dict[str, Any] = dict(await server.db.billing_documents.find_one(
-        {"id": document_id, **scope},
-        {"_id": 0, "id": 1, "receivable_id": 1, "doc_type": 1, "invoice_number": 1, "cancelled": 1, "external": 1,
-         "total_amount": 1, "credited_document_id": 1},
-    ) or {})
+    document: Dict[str, Any] = dict(await server.db.billing_documents.find_one({"id": document_id, **scope}, {"_id": 0}) or {})
     if not document:
         raise HTTPException(status_code=404, detail="Документът не е намерен")
     cancelled = False
+
+    async def restorable() -> Dict[str, Any]:
+        """A deleted invoice or credit note, whole on its audit entry - and
+        its receivable, which goes with it while nothing was paid on it -
+        so "Върни" in the activity log brings it back."""
+        receivable = await server.db.receivables.find_one(
+            {"id": document.get("receivable_id"), **scope}, {"_id": 0},
+        ) if document.get("receivable_id") else None
+        return {"snapshot": document,
+                "receivable_snapshot": receivable if receivable and float(receivable.get("paid_amount") or 0) <= 0 else None}
     numbered = document.get("doc_type") in NUMBERED_DOC_TYPES
     entity_type = "issued_credit_note" if document.get("doc_type") == "credit_note" else "issued_invoice"
     if numbered:
@@ -716,7 +722,7 @@ async def delete_billing_document(document_id: str, current_user: User = Depends
         await audit_service.log_action(
             user_id=current_user.user_id, user_name=current_user.name, action="delete", entity_type=entity_type,
             entity_id=document_id, company_id=company_id,
-            details={"invoice_number": document.get("invoice_number"), "external": True},
+            details={"invoice_number": document.get("invoice_number"), "external": True, **await restorable()},
         )
     elif numbered:
         # The numbering stays unbroken: the last number issued can go; an
@@ -732,7 +738,8 @@ async def delete_billing_document(document_id: str, current_user: User = Depends
         await audit_service.log_action(
             user_id=current_user.user_id, user_name=current_user.name,
             action="update" if cancelled else "delete", entity_type=entity_type, entity_id=document_id,
-            company_id=company_id, details={"invoice_number": document.get("invoice_number"), "cancelled": cancelled},
+            company_id=company_id, details={"invoice_number": document.get("invoice_number"), "cancelled": cancelled,
+                                            **({} if cancelled else await restorable())},
         )
     if not cancelled:
         result = await server.db.billing_documents.delete_one({"id": document_id, **scope})

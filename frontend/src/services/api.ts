@@ -787,8 +787,15 @@ class ApiService {
     last_backup_date: string | null;
     file_name?: string;
     statistics?: { invoices: number; revenues: number; expenses: number };
+    // A copy by email every month, and whether email is set up at all.
+    monthly_email?: boolean;
+    email_available?: boolean;
   }> {
     return this.fetch('/backup/status');
+  }
+
+  async setMonthlyBackupEmail(monthlyEmail: boolean): Promise<{ monthly_email: boolean }> {
+    return this.fetch('/backup/settings', { method: 'PUT', body: JSON.stringify({ monthly_email: monthlyEmail }) });
   }
 
   async listBackups(): Promise<{ backups: any[] }> {

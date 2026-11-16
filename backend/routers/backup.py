@@ -38,18 +38,19 @@ from routers.price_tracking import rebuild_invoice_price_history
 
 router = APIRouter(prefix="/api")
 
-@router.post("/backup/create")
-@limiter.limit("5/minute")
-async def create_backup(request: Request, current_user: User = Depends(get_current_user)):
+import base64
+import gzip
+import json
+
+# A monthly backup by email: every 30 days, and only while it fits an email.
+BACKUP_EMAIL_DAYS = 30
+BACKUP_EMAIL_MAX_BYTES = 20 * 1024 * 1024
+
+
+async def _backup_document(company_id: Optional[str], scope: dict) -> Dict[str, Any]:
     """A full backup of the whole company's records (services/backup_service:
     every section the business entered, not only invoices, revenue and
     off-book expenses)."""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да прави резервно копие")
-
-    import json
-
-    company_id, scope = await get_company_scope(current_user)
     collections = await backup_service.build_backup(server.db, company_id, scope)
 
     company_data = None
@@ -76,20 +77,94 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
         "collections": collections,
         "statistics": statistics,
     }
+    return backup_data
 
+
+async def _record_backup(user_id: str, backup_data: Dict[str, Any], size_bytes: int, via: str = "download") -> None:
+    statistics = backup_data["statistics"]
     metadata = BackupMetadata(
-        user_id=current_user.user_id,
+        user_id=user_id,
         file_name=f"backup_{now_local().strftime('%Y%m%d_%H%M%S')}.json",
-        size_bytes=len(json.dumps(backup_data, ensure_ascii=False).encode('utf-8')),
+        size_bytes=size_bytes,
         invoice_count=statistics["invoice_count"],
         revenue_count=statistics["revenue_count"],
         expense_count=statistics["expense_count"],
     )
     meta_doc = metadata.model_dump()
     meta_doc["total_records"] = statistics["total_records"]
+    meta_doc["via"] = via
     await server.db.backup_metadata.insert_one(meta_doc)
 
+
+@router.post("/backup/create")
+@limiter.limit("5/minute")
+async def create_backup(request: Request, current_user: User = Depends(get_current_user)):
+    """A full backup of the whole company's records, for the owner to keep."""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да прави резервно копие")
+    company_id, scope = await get_company_scope(current_user)
+    backup_data = await _backup_document(company_id, scope)
+    await _record_backup(current_user.user_id, backup_data, len(json.dumps(backup_data, ensure_ascii=False).encode("utf-8")))
     return backup_data
+
+
+class BackupSettingsUpdate(BaseModel):
+    monthly_email: bool
+
+
+@router.put("/backup/settings")
+async def update_backup_settings(payload: BackupSettingsUpdate, current_user: User = Depends(get_current_user)):
+    """The owner's monthly copy of the data by email - on or off."""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Само титулярят може да прави резервно копие")
+    if payload.monthly_email and not server.EMAIL_FEATURES_ENABLED:
+        raise HTTPException(status_code=503, detail="Изпращането на имейли не е настроено")
+    await server.db.users.update_one({"user_id": current_user.user_id}, {"$set": {"backup_email_monthly": payload.monthly_email}})
+    return {"monthly_email": payload.monthly_email}
+
+
+async def send_monthly_backup_emails() -> int:
+    """Every owner who asked for it gets a backup by email every 30 days
+    (gzip-ed JSON, the same as the one made by hand) - or, too big for an
+    email, a note to make one in the app. Returns how many were sent."""
+    if not server.EMAIL_FEATURES_ENABLED:
+        return 0
+    sent = 0
+    due_before = datetime.now(timezone.utc) - timedelta(days=BACKUP_EMAIL_DAYS)
+    owners = await server.db.users.find(
+        {"backup_email_monthly": True, "role": "owner",
+         "$or": [{"backup_emailed_at": None}, {"backup_emailed_at": {"$lt": due_before}}]},
+        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "company_id": 1},
+    ).to_list(1000)
+    for owner in owners:
+        if not owner.get("email"):
+            continue
+        company_id = owner.get("company_id")
+        scope = await company_data_scope(company_id) if company_id else {"user_id": owner["user_id"]}
+        backup_data = await _backup_document(company_id, scope)
+        raw = json.dumps(backup_data, ensure_ascii=False, default=str).encode("utf-8")
+        packed = gzip.compress(raw)
+        day = now_local().strftime("%Y-%m-%d")
+        if len(packed) <= BACKUP_EMAIL_MAX_BYTES:
+            ok = await server.send_email(
+                owner["email"], f"Месечен архив на данните - Фактура+ ({day})",
+                "<p>Здравейте! Прикачен е месечният архив на данните ви във Фактура+. "
+                "Пазете го - с него данните се възстановяват от екрана „Архив“.</p>",
+                attachments=[{"filename": f"faktura_plus_arhiv_{day}.json.gz",
+                              "content": base64.b64encode(packed).decode("ascii")}],
+            )
+            if ok:
+                await _record_backup(owner["user_id"], backup_data, len(raw), via="email")
+        else:
+            ok = await server.send_email(
+                owner["email"], "Архивът на данните е твърде голям за имейл - Фактура+",
+                "<p>Здравейте! Архивът на данните ви вече е твърде голям, за да се прати по имейл. "
+                "Създайте го от екрана „Архив“ в приложението и го пазете извън него.</p>",
+            )
+        if ok:
+            sent += 1
+            await server.db.users.update_one({"user_id": owner["user_id"]}, {"$set": {"backup_emailed_at": datetime.now(timezone.utc)}})
+    return sent
 
 @router.get("/backup/list")
 async def list_backups(current_user: User = Depends(get_current_user)):
@@ -196,6 +271,11 @@ async def get_backup_status(current_user: User = Depends(get_current_user)):
     ).sort("created_at", -1).limit(1).to_list(1)
     last_backup = latest[0] if latest else None
     
+    owner = await server.db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "backup_email_monthly": 1})
+    email_settings = {
+        "monthly_email": bool(owner.get("backup_email_monthly")) if owner else False,
+        "email_available": server.EMAIL_FEATURES_ENABLED,
+    }
     if last_backup:
         return {
             "has_backup": True,
@@ -206,10 +286,12 @@ async def get_backup_status(current_user: User = Depends(get_current_user)):
                 "revenues": last_backup.get("revenue_count", 0),
                 "expenses": last_backup.get("expense_count", 0),
                 "total": last_backup.get("total_records"),
-            }
+            },
+            **email_settings,
         }
-    
+
     return {
         "has_backup": False,
-        "last_backup_date": None
+        "last_backup_date": None,
+        **email_settings,
     }

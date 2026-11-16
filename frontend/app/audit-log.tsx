@@ -117,12 +117,16 @@ export default function AuditLogScreen() {
       }
       return `${t('auditLog.entityInvoice')}${numberBit}${supplierBit}${amountBit}`;
     }
-    if (entry.entity_type === 'issued_invoice') {
-      // An invoice issued to a customer; an earlier one is cancelled, not deleted.
-      const customerBit = d.customer_name ? ` – ${d.customer_name}` : '';
-      const amountBit = typeof d.total_amount === 'number' ? ` (${d.total_amount.toFixed(2)} €)` : '';
+    if (entry.entity_type === 'issued_invoice' || entry.entity_type === 'issued_credit_note') {
+      // An invoice (or a credit note) issued to a customer; an earlier one is
+      // cancelled, not deleted. A deleted one carries its whole copy.
+      const customer = d.customer_name || d.snapshot?.customer_name;
+      const total = typeof d.total_amount === 'number' ? d.total_amount : d.snapshot?.total_amount;
+      const customerBit = customer ? ` – ${customer}` : '';
+      const amountBit = typeof total === 'number' ? ` (${total.toFixed(2)} €)` : '';
       const cancelledBit = d.cancelled ? ` – ${t('billingDocuments.cancelled')}` : '';
-      return `${t('auditLog.entityIssuedInvoice')} №${d.invoice_number || ''}${customerBit}${amountBit}${cancelledBit}`;
+      const label = entry.entity_type === 'issued_credit_note' ? t('auditLog.entityIssuedCreditNote') : t('auditLog.entityIssuedInvoice');
+      return `${label} №${d.invoice_number || ''}${customerBit}${amountBit}${cancelledBit}`;
     }
     if (entry.entity_type === 'expense') {
       const amountBit = typeof d.amount === 'number' ? ` (${d.amount.toFixed(2)} €)` : '';
@@ -145,7 +149,7 @@ export default function AuditLogScreen() {
   // gated on its own permission since undoing someone else's delete,
   // possibly days later, is a sensitive admin action, not routine invoice
   // work (see restore_deleted_data in ROLE_PERMISSIONS).
-  const RESTORABLE = ['invoice', 'expense', 'payroll'];
+  const RESTORABLE = ['invoice', 'expense', 'payroll', 'issued_invoice', 'issued_credit_note'];
   const canRestore = (entry: AuditLogEntry) =>
     hasPermission('restore_deleted_data') &&
     entry.action === 'delete' &&

@@ -7,6 +7,7 @@ stay correct when server.py's test fixture monkeypatches them."""
 import uuid
 
 from fastapi import APIRouter
+from pymongo.errors import DuplicateKeyError
 from routers.recurring import maintain_quietly
 from server import *
 from server import (
@@ -888,6 +889,43 @@ async def _restore_record(log_entry: dict, details: dict, company_id: str, curre
     return {"message": "Разходът е възстановен" if kind == "expense" else "Ведомостта е възстановена"}
 
 
+async def _restore_issued_document(log_entry: dict, details: dict, company_id: str, scope: dict, current_user: User) -> dict:
+    """An issued invoice or credit note deleted by mistake, back with its
+    own number (while no later document took it) and its receivable; a
+    credit note takes its amount off its invoice again."""
+    from routers.receivables import _apply_credit
+
+    snapshot = dict(details.get("snapshot") or {})
+    if not snapshot.get("id"):
+        raise HTTPException(status_code=400, detail="Няма запазени данни за възстановяване на този документ")
+    if await server.db.billing_documents.find_one({"id": snapshot["id"]}, {"_id": 1}):
+        raise HTTPException(status_code=400, detail="Документът вече съществува")
+    try:
+        await server.db.billing_documents.insert_one(dict(snapshot))
+    except DuplicateKeyError:
+        raise HTTPException(
+            status_code=409,
+            detail=f"№ {snapshot.get('invoice_number')} вече е на нов документ - този не може да се върне със същия номер",
+        )
+    receivable = details.get("receivable_snapshot")
+    if receivable and not await server.db.receivables.find_one({"id": receivable.get("id")}, {"_id": 1}):
+        await server.db.receivables.insert_one(dict(receivable))
+    if snapshot.get("doc_type") == "credit_note" and snapshot.get("credited_document_id") and not snapshot.get("cancelled"):
+        invoice = await server.db.billing_documents.find_one(
+            {"id": snapshot["credited_document_id"], **scope}, {"_id": 0, "id": 1, "receivable_id": 1},
+        )
+        if invoice:
+            await _apply_credit(scope, invoice, abs(float(snapshot.get("total_amount") or 0)))
+    await server.db.audit_logs.update_one({"id": log_entry["id"]}, {"$set": {"details.restored": True}})
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="restore",
+        entity_type=log_entry["entity_type"], entity_id=snapshot["id"], company_id=company_id,
+        details={"invoice_number": snapshot.get("invoice_number"), "customer_name": snapshot.get("customer_name"),
+                 "total_amount": snapshot.get("total_amount")},
+    )
+    return {"message": "Документът е възстановен"}
+
+
 @router.post("/audit-logs/{log_id}/restore")
 async def restore_audit_entry(log_id: str, current_user: User = Depends(get_current_user)):
     """Restores an invoice deleted earlier, from the full snapshot kept on
@@ -904,7 +942,8 @@ async def restore_audit_entry(log_id: str, current_user: User = Depends(get_curr
     log_entry = await server.db.audit_logs.find_one({"id": log_id, "company_id": company_id})
     if not log_entry:
         raise HTTPException(status_code=404, detail="Записът не е намерен")
-    if log_entry.get("action") != "delete" or log_entry.get("entity_type") not in ("invoice", "expense", "payroll"):
+    restorable_types = ("invoice", "expense", "payroll", "issued_invoice", "issued_credit_note")
+    if log_entry.get("action") != "delete" or log_entry.get("entity_type") not in restorable_types:
         raise HTTPException(status_code=400, detail="Това действие не може да бъде възстановено")
 
     details = log_entry.get("details") or {}
@@ -912,6 +951,8 @@ async def restore_audit_entry(log_id: str, current_user: User = Depends(get_curr
         raise HTTPException(status_code=400, detail="Вече е възстановена")
     if log_entry["entity_type"] in ("expense", "payroll"):
         return await _restore_record(log_entry, details, company_id, current_user)
+    if log_entry["entity_type"] in ("issued_invoice", "issued_credit_note"):
+        return await _restore_issued_document(log_entry, details, company_id, scope, current_user)
     snapshot = details.get("invoice_snapshot")
     if not snapshot:
         raise HTTPException(status_code=400, detail="Няма запазени данни за възстановяване на тази фактура")

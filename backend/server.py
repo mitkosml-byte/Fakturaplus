@@ -132,16 +132,22 @@ if STRIPE_SECRET_KEY:
 # to a large negative number the whole time it was off.
 SCAN_CREDITS_ENFORCED = os.environ.get('SCAN_CREDITS_ENFORCED', 'true').strip().lower() != 'false'
 
-async def send_email(to_email: str, subject: str, html_body: str) -> bool:
+async def send_email(to_email: str, subject: str, html_body: str,
+                     attachments: Optional[List[Dict[str, str]]] = None) -> bool:
+    """Sends an email through Resend; attachments are {"filename",
+    "content" (base64)}. False when email is not set up or it failed."""
     if not EMAIL_FEATURES_ENABLED:
         return False
+    payload: Dict[str, Any] = {"from": RESEND_FROM_EMAIL, "to": [to_email], "subject": subject, "html": html_body}
+    if attachments:
+        payload["attachments"] = attachments
     try:
         async with httpx.AsyncClient() as client_http:
             resp = await client_http.post(
                 "https://api.resend.com/emails",
                 headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-                json={"from": RESEND_FROM_EMAIL, "to": [to_email], "subject": subject, "html": html_body},
-                timeout=10.0,
+                json=payload,
+                timeout=60.0 if attachments else 10.0,
             )
             if resp.status_code >= 300:
                 logger.error(f"Resend API error {resp.status_code}: {resp.text}")
@@ -162,6 +168,7 @@ async def lifespan(app: FastAPI):
     await start_budget_alert_loop()
     await start_scan_credit_depletion_loop()
     await start_recurring_expense_loop()
+    await start_backup_email_loop()
     await create_indexes()
     await run_data_migrations()
     yield
@@ -3583,6 +3590,37 @@ async def _signal_receivables(company_id, scope, current_user, visibility) -> Op
     }
 
 
+# The owner's own copy of the data is looked at again after this long.
+BACKUP_REMIND_DAYS = 45
+
+
+async def _signal_backup(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """The owner's own copy of the data (a backup only the owner makes):
+    none yet once there is something to lose, or the last one 45+ days old."""
+    if current_user.role != "owner":
+        return None
+    latest = await db.backup_metadata.find(
+        {"user_id": current_user.user_id}, {"_id": 0, "created_at": 1},
+    ).sort("created_at", -1).limit(1).to_list(1)
+    if latest:
+        last_day = business_day(latest[0].get("created_at"))
+        days = (today_local() - last_day).days if last_day else 0
+        if days < BACKUP_REMIND_DAYS:
+            return None
+        detail = f"Последният архив е отпреди {days} дни. Създай нов и го пази извън приложението."
+        fingerprint = f"backup|{last_day}"
+    else:
+        entered = await db.invoices.count_documents(scope) + await db.daily_revenue.count_documents(scope)
+        if entered < 20:
+            return None
+        detail = "Още нямаш архив на данните си. Създай го и го пази извън приложението - на телефона или в облака."
+        fingerprint = "backup|none"
+    return {
+        "key": "backup", "severity": "info", "priority": 30, "title": "Архив на данните",
+        "detail": detail, "route": "/backup", "fingerprint": fingerprint,
+    }
+
+
 def payment_week(today: date) -> Tuple[date, date, bool]:
     """The days whose payments a week's notice covers: the rest of this
     week through Sunday - or, at the weekend, the week ahead."""
@@ -4182,7 +4220,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
     _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
-    _signal_payments_this_week,
+    _signal_payments_this_week, _signal_backup,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
@@ -5904,6 +5942,23 @@ async def _budget_alert_loop():
 
 async def start_budget_alert_loop():
     asyncio.create_task(_budget_alert_loop())
+
+
+async def _backup_email_loop():
+    while True:
+        try:
+            from routers.backup import send_monthly_backup_emails
+            await send_monthly_backup_emails()
+        except Exception as e:
+            logger.error(f"Backup email loop error: {e}")
+        await asyncio.sleep(3600)
+
+
+async def start_backup_email_loop():
+    """The owner's monthly copy of the data by email, for whoever asked
+    for it (routers/backup)."""
+    if EMAIL_FEATURES_ENABLED:
+        asyncio.create_task(_backup_email_loop())
 
 PERIODIC_REMINDER_FALLBACK = "Отвори Дневния преглед във Фактура+ и виж какво чака действие."
 
