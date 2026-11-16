@@ -549,6 +549,47 @@ class ExportService:
         return buffer.getvalue()
 
     @staticmethod
+    def generate_payroll_excel(entries: List[dict], company_name: str = "", period_label: str = "") -> bytes:
+        """The month's payroll for the accountant: each person's gross, the
+        contributions on both sides, the tax, the net and the whole cost."""
+        if not EXCEL_AVAILABLE:
+            raise ImportError("openpyxl is not installed")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Заплати"
+        ws["A1"] = f"Заплати - {company_name}" if company_name else "Заплати"
+        ws["A1"].font = Font(bold=True, size=14)
+        ws["A2"] = period_label
+        headers = ["Служител", "Бруто", "Осигуровки служител", "Данък", "Нето", "Осигуровки работодател",
+                   "Ваучери", "ДДЗО", "Общо разход"]
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="10B981", end_color="10B981", fill_type="solid")
+        for col, title in enumerate(headers, 1):
+            cell = ws.cell(row=4, column=col, value=title)
+            cell.font = header_font
+            cell.fill = header_fill
+        keys = ["gross_amount", "employee_contributions", "income_tax", "net_amount", "employer_contributions",
+                "food_vouchers", "additional_insurance", "total_employer_cost"]
+        row = 5
+        for entry in entries:
+            ws.cell(row=row, column=1, value=_excel_safe(entry.get("employee_name") or ""))
+            for col, key in enumerate(keys, 2):
+                cell = ws.cell(row=row, column=col, value=round(float(entry.get(key) or 0), 2))
+                cell.number_format = '#,##0.00'
+            row += 1
+        ws.cell(row=row, column=1, value="Общо").font = Font(bold=True)
+        for col, key in enumerate(keys, 2):
+            cell = ws.cell(row=row, column=col, value=round(sum(float(e.get(key) or 0) for e in entries), 2))
+            cell.number_format = '#,##0.00'
+            cell.font = Font(bold=True)
+        ws.column_dimensions["A"].width = 28
+        for col in range(2, len(headers) + 1):
+            ws.column_dimensions[get_column_letter(col)].width = 16
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
+
+    @staticmethod
     def generate_statistics_excel(stats: dict, company_name: str = "") -> bytes:
         """Generate Excel statistics report"""
         if not EXCEL_AVAILABLE:

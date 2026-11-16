@@ -19,6 +19,24 @@ export interface User {
 export type BusinessModule = 'till' | 'billing' | 'team' | 'payroll' | 'assets' | 'wallet';
 export type BusinessModules = Record<BusinessModule, boolean>;
 
+// The month's pack for the accountant (Н4).
+export interface AccountantPack {
+  month: string;
+  label: string;
+  counts: {
+    purchases: number;
+    scanned: number;
+    revenue_days: number;
+    issued_invoices: number;
+    credit_notes: number;
+    payroll_entries: number;
+  };
+  checks: { key: string; severity: 'warning' | 'info'; message: string; items: string[] }[];
+  accountant_email?: string | null;
+  email_available: boolean;
+  last_sent?: { month: string; sent_to: string; sent_at: string; size: number } | null;
+}
+
 // Cash flow for the days ahead (Н1).
 export interface CashFlowEvent {
   date: string;

@@ -252,6 +252,10 @@ export const translations: Translations = {
     bg: 'Направи архив',
     en: 'Make a backup',
   },
+  'briefing.cta.accountant_pack': {
+    bg: 'Виж пакета',
+    en: 'View the pack',
+  },
   'briefing.cta.cash_flow': {
     bg: 'Виж паричния поток',
     en: 'View the cash flow',
@@ -5661,6 +5665,37 @@ export const translations: Translations = {
   'accountSecurity.copyCodes': { bg: 'Копирай', en: 'Copy' },
   'accountSecurity.codesCopied': { bg: 'Кодовете са копирани', en: 'Codes copied' },
   'accountSecurity.savedThem': { bg: 'Записах ги', en: 'I saved them' },
+
+  // The month's pack for the accountant (Н4)
+  'accountantPack.title': { bg: 'Пакет за счетоводителя', en: 'Pack for the accountant' },
+  'accountantPack.exportDesc': {
+    bg: 'Покупки, продажби, издадени фактури, снимки и заплати за месеца - с проверка и изпращане по имейл',
+    en: 'Purchases, sales, issued invoices, scans and payroll for the month - checked and sent by email',
+  },
+  'accountantPack.whatIsIn': { bg: 'Какво съдържа', en: 'What it holds' },
+  'accountantPack.purchases': { bg: 'Покупки (фактури)', en: 'Purchases (invoices)' },
+  'accountantPack.withScans': { bg: '{count} (със снимка: {scanned})', en: '{count} ({scanned} scanned)' },
+  'accountantPack.revenueDays': { bg: 'Дни с оборот', en: 'Days with revenue' },
+  'accountantPack.issued': { bg: 'Издадени фактури', en: 'Invoices issued' },
+  'accountantPack.creditNotes': { bg: 'Кредитни известия', en: 'Credit notes' },
+  'accountantPack.payroll': { bg: 'Заплати (ведомости)', en: 'Payroll entries' },
+  'accountantPack.check': { bg: 'Проверка', en: 'Check' },
+  'accountantPack.allThere': { bg: 'Не липсва нищо', en: 'Nothing is missing' },
+  'accountantPack.send': { bg: 'Изпращане', en: 'Sending' },
+  'accountantPack.lastSent': { bg: 'Изпратен на {date} до {email}.', en: 'Sent on {date} to {email}.' },
+  'accountantPack.emailPlaceholder': { bg: 'Имейл на счетоводителя', en: 'The accountant\'s email' },
+  'accountantPack.enterEmail': { bg: 'Въведете имейла на счетоводителя', en: 'Enter the accountant\'s email' },
+  'accountantPack.emailUnavailable': {
+    bg: 'Изпращането на имейли не е настроено на този сървър - изтеглете пакета и го изпратете сами.',
+    en: 'Sending email is not set up on this server - download the pack and send it yourself.',
+  },
+  'accountantPack.sendButton': { bg: 'Изпрати на счетоводителя', en: 'Send to the accountant' },
+  'accountantPack.sent': { bg: 'Изпратено до {email}', en: 'Sent to {email}' },
+  'accountantPack.download': { bg: 'Изтегли пакета (ZIP)', en: 'Download the pack (ZIP)' },
+  'accountantPack.contents': {
+    bg: 'В пакета: дневник на покупките и продажбите (Excel), издадените фактури и кредитни известия (PDF), снимките на покупките, заплатите (Excel) и справка с проверката.',
+    en: 'In the pack: the purchases and sales ledger (Excel), the invoices and credit notes issued (PDF), the purchase scans, the payroll (Excel) and a summary with the check.',
+  },
 
   // Cash flow (Н1)
   'cashFlow.title': { bg: 'Паричен поток', en: 'Cash flow' },

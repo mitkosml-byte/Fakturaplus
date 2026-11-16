@@ -86,6 +86,18 @@ export default function ExportScreen() {
         <View style={styles.content}>
           <Text style={styles.subtitle}>{t('export.subtitle')}</Text>
 
+          {/* The month's pack for the accountant: everything in one go */}
+          <TouchableOpacity style={styles.exportCard} onPress={() => router.push('/accountant-pack')}>
+            <View style={[styles.iconContainer, { backgroundColor: 'rgba(139, 92, 246, 0.2)' }]}>
+              <Ionicons name="briefcase" size={32} color={COLORS.primary} />
+            </View>
+            <View style={styles.cardContent}>
+              <Text style={styles.cardTitle}>{t('accountantPack.title')}</Text>
+              <Text style={styles.cardDesc}>{t('accountantPack.exportDesc')}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
           {/* VAT Ledger Export */}
           <View style={styles.ledgerCard}>
             <View style={styles.ledgerHeader}>

@@ -3943,6 +3943,12 @@ async def _signal_cash_flow(company_id, scope, current_user, visibility) -> Opti
     }
 
 
+async def _signal_accountant_pack(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Last month's documents for the accountant (routers/accountant_pack)."""
+    from routers.accountant_pack import accountant_pack_signal
+    return await accountant_pack_signal(company_id, scope, current_user)
+
+
 async def _signal_scan_credits(company_id, scope, current_user, visibility) -> Optional[dict]:
     if "manage_invoices" not in set(current_user.permissions or []):
         return None
@@ -4480,6 +4486,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
     _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
     _signal_payments_this_week, _signal_backup, _signal_two_factor, _signal_cash_flow,
+    _signal_accountant_pack,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
@@ -6780,6 +6787,8 @@ from routers import roi_wallet
 app.include_router(roi_wallet.router)
 from routers import cash_flow as cash_flow_router
 app.include_router(cash_flow_router.router)
+from routers import accountant_pack
+app.include_router(accountant_pack.router)
 
 from routers import auth
 app.include_router(auth.router)
