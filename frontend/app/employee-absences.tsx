@@ -22,7 +22,7 @@ import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFile';
-import { Employee, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType } from '../src/types';
+import { Employee, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, PressableScale } from '../src/components';
@@ -52,21 +52,24 @@ export default function EmployeeAbsencesScreen() {
   const [holidays, setHolidays] = useState<PublicHoliday[]>([]);
   const [holidayWork, setHolidayWork] = useState<HolidayWorkEntry[]>([]);
   const [leave, setLeave] = useState<LeaveEntry[]>([]);
+  const [balances, setBalances] = useState<LeaveBalance[]>([]);
 
   const load = useCallback(async () => {
     try {
       const yearStart = `${year}-01-01`;
       const yearEnd = `${year}-12-31`;
-      const [employeesList, holidaysList, holidayWorkList, leaveList] = await Promise.all([
+      const [employeesList, holidaysList, holidayWorkList, leaveList, balanceList] = await Promise.all([
         api.getEmployees(true),
         api.getPublicHolidays(year),
         api.getHolidayWorkEntries({ start_date: yearStart, end_date: yearEnd }),
         api.getLeaveEntries({ start_date: yearStart, end_date: yearEnd }),
+        api.getLeaveBalance(year).catch(() => [] as LeaveBalance[]),
       ]);
       setEmployees(employeesList);
       setHolidays(holidaysList);
       setHolidayWork(holidayWorkList);
       setLeave(leaveList);
+      setBalances(balanceList);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -190,6 +193,57 @@ export default function EmployeeAbsencesScreen() {
     ]);
   };
 
+  // Working days from start to end (paid leave is counted in them): not a
+  // weekend, not an official holiday of the year shown.
+  const holidaySet = useMemo(() => new Set(holidays.map((h) => h.date)), [holidays]);
+  const workingDays = (start: Date, end: Date) => {
+    let count = 0;
+    const day = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    while (day <= last) {
+      if (day.getDay() !== 0 && day.getDay() !== 6 && !holidaySet.has(toDateStr(day))) count += 1;
+      day.setDate(day.getDate() + 1);
+    }
+    return count;
+  };
+  const leaveBalanceOf = (employeeId: string | null) => balances.find((b) => b.employee_id === employeeId);
+
+  // ---- Paid leave settings: days a year, carried into the year shown ----
+  const [settingsFor, setSettingsFor] = useState<LeaveBalance | null>(null);
+  const [settingsDays, setSettingsDays] = useState('');
+  const [settingsCarried, setSettingsCarried] = useState('');
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  const openLeaveSettings = (balance: LeaveBalance) => {
+    setSettingsFor(balance);
+    setSettingsDays(String(balance.annual_leave_days));
+    setSettingsCarried(String(balance.carried_over));
+  };
+
+  const saveLeaveSettings = async () => {
+    if (!settingsFor) return;
+    const days = parseFloat(settingsDays.replace(',', '.'));
+    const carried = parseFloat(settingsCarried.replace(',', '.') || '0');
+    if (isNaN(days) || days < 0 || isNaN(carried) || carried < 0) {
+      Alert.alert(t('common.error'), t('budget.invalidAmount'));
+      return;
+    }
+    setSavingSettings(true);
+    try {
+      await api.updateLeaveSettings(settingsFor.employee_id, {
+        annual_leave_days: days,
+        ...(Math.abs(carried - settingsFor.carried_over) > 0.05 ? { carryover_year: year, carryover_days: carried } : {}),
+      });
+      setSettingsFor(null);
+      Haptics.success();
+      await load();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   // ---- Export ----
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [exportStart, setExportStart] = useState(new Date(new Date().getFullYear(), 0, 1));
@@ -296,7 +350,31 @@ export default function EmployeeAbsencesScreen() {
                     </TouchableOpacity>
                   ))
                 )
-              ) : leave.length === 0 ? (
+              ) : (
+                <>
+                {balances.length > 0 && (
+                  <View style={styles.balanceSection}>
+                    <Text style={styles.balanceTitle}>{t('absences.balanceTitle')} · {year}</Text>
+                    {balances.map((b) => (
+                      <TouchableOpacity key={b.employee_id} style={styles.balanceCard} onPress={() => openLeaveSettings(b)}>
+                        <View style={styles.entryRow}>
+                          <Text style={styles.entryEmployee}>{b.employee_name}</Text>
+                          <Text style={[styles.balanceLeft, b.remaining < 0 && { color: COLORS.danger }]}>
+                            {b.remaining < 0
+                              ? t('absences.balanceOver').replace('{days}', String(Math.abs(b.remaining)))
+                              : t('absences.balanceLeft').replace('{days}', String(b.remaining))}
+                          </Text>
+                        </View>
+                        <Text style={styles.entryNote}>
+                          {t('absences.balanceDetail')
+                            .replace('{entitlement}', String(b.entitlement)).replace('{carried}', String(b.carried_over))
+                            .replace('{used}', String(b.used)).replace('{planned}', String(b.planned))}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                {leave.length === 0 ? (
                 <View style={styles.emptyContainer}>
                   <Ionicons name="airplane-outline" size={48} color={COLORS.border} />
                   <Text style={styles.emptyText}>{t('absences.noLeave')}</Text>
@@ -317,6 +395,8 @@ export default function EmployeeAbsencesScreen() {
                     {!!entry.note && <Text style={styles.entryNote}>{entry.note}</Text>}
                   </TouchableOpacity>
                 ))
+              )}
+                </>
               )}
             </ScrollView>
           )}
@@ -443,6 +523,18 @@ export default function EmployeeAbsencesScreen() {
                 </View>
               </View>
 
+              {leaveType === 'paid' && leaveEmployeeId && toDateStr(leaveEnd) >= toDateStr(leaveStart) && (() => {
+                const days = workingDays(leaveStart, leaveEnd);
+                const balance = leaveBalanceOf(leaveEmployeeId);
+                return (
+                  <Text style={[styles.entryNote, { marginTop: 8 }]}>
+                    {t('absences.leaveDaysPreview')
+                      .replace('{days}', String(days))
+                      .replace('{left}', balance ? String(Math.round((balance.remaining - days) * 10) / 10) : '-')}
+                  </Text>
+                );
+              })()}
+
               <DateTimePickerModal
                 isVisible={leaveStartPickerVisible}
                 mode="date"
@@ -475,6 +567,42 @@ export default function EmployeeAbsencesScreen() {
             </ScrollView>
             <PressableScale style={styles.saveButton} onPress={saveLeave} disabled={savingLeave}>
               {savingLeave ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+            </PressableScale>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Paid leave settings */}
+      <Modal visible={!!settingsFor} animationType="fade" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {t('absences.leaveSettingsTitle').replace('{name}', settingsFor?.employee_name || '')}
+              </Text>
+              <TouchableOpacity onPress={() => setSettingsFor(null)}>
+                <Ionicons name="close" size={26} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.fieldLabel}>{t('absences.annualDays')}</Text>
+            <TextInput
+              style={styles.textInput}
+              value={settingsDays}
+              onChangeText={setSettingsDays}
+              keyboardType="decimal-pad"
+              placeholderTextColor={COLORS.textMuted}
+            />
+            <Text style={styles.fieldLabel}>{t('absences.carriedInto').replace('{year}', String(year))}</Text>
+            <TextInput
+              style={styles.textInput}
+              value={settingsCarried}
+              onChangeText={setSettingsCarried}
+              keyboardType="decimal-pad"
+              placeholderTextColor={COLORS.textMuted}
+            />
+            <Text style={[styles.entryNote, { marginTop: 8 }]}>{t('absences.carriedHint')}</Text>
+            <PressableScale style={styles.saveButton} onPress={saveLeaveSettings} disabled={savingSettings}>
+              {savingSettings ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
             </PressableScale>
           </View>
         </KeyboardAvoidingView>
@@ -618,6 +746,17 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
+  balanceSection: { marginBottom: 14 },
+  balanceTitle: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600', marginBottom: 8 },
+  balanceCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.primary,
+  },
+  balanceLeft: { color: COLORS.success, fontSize: 13, fontWeight: '700' },
   entryRow: {
     flexDirection: 'row',
     alignItems: 'center',

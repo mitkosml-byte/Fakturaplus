@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+import { Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
@@ -1554,6 +1554,14 @@ class ApiService {
     if (params?.end_date) query.set('end_date', params.end_date);
     const qs = query.toString();
     return this.fetch(`/employees/leave${qs ? `?${qs}` : ''}`);
+  }
+
+  async getLeaveBalance(year: number): Promise<LeaveBalance[]> {
+    return this.fetch(`/employees/leave-balance?year=${year}`);
+  }
+
+  async updateLeaveSettings(employeeId: string, settings: { annual_leave_days?: number; carryover_year?: number; carryover_days?: number }): Promise<Employee> {
+    return this.fetch(`/employees/${employeeId}/leave-settings`, { method: 'PUT', body: JSON.stringify(settings) });
   }
 
   async createLeaveEntry(params: { employee_id: string; leave_type: LeaveType; start_date: string; end_date: string; note?: string }): Promise<LeaveEntry> {

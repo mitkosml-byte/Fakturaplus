@@ -1078,7 +1078,24 @@ export interface Employee {
   // CREATED this payroll record. Used by the work-schedule feature to
   // cross-check a shift against this employee's already-recorded leave.
   linked_user_id?: string | null;
+  // Paid annual leave in working days a year, and the unused days carried
+  // into a year (entered once).
+  annual_leave_days?: number;
+  leave_carryover?: { year: number; days: number } | null;
   created_at: string;
+}
+
+// An employee's paid leave in a year, in working days.
+export interface LeaveBalance {
+  employee_id: string;
+  employee_name: string;
+  year: number;
+  annual_leave_days: number;
+  carried_over: number;
+  entitlement: number;
+  used: number;
+  planned: number;
+  remaining: number;
 }
 
 export interface EmployeeCreate {

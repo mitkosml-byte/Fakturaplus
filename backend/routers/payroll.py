@@ -610,6 +610,7 @@ async def create_holiday_work(payload: EmployeeHolidayWorkCreate, current_user: 
 
     entry = EmployeeHolidayWork(
         company_id=company_id or "",
+        user_id=current_user.user_id,
         employee_id=payload.employee_id,
         employee_name=employee["name"],
         date=payload.date,
@@ -653,6 +654,7 @@ async def create_leave(payload: EmployeeLeaveCreate, current_user: User = Depend
 
     entry = EmployeeLeave(
         company_id=company_id or "",
+        user_id=current_user.user_id,
         employee_id=payload.employee_id,
         employee_name=employee["name"],
         leave_type=payload.leave_type,
@@ -662,6 +664,52 @@ async def create_leave(payload: EmployeeLeaveCreate, current_user: User = Depend
     )
     await server.db.employee_leave.insert_one(entry.model_dump())
     return entry
+
+@router.get("/employees/leave-balance")
+async def get_leave_balance(year: Optional[int] = None, current_user: User = Depends(get_current_user)):
+    """Each active employee's paid leave in a year: carried over, the
+    year's own days, used, planned and what remains - in working days."""
+    require_permission(current_user, "manage_budget")
+    _, scope = await get_company_scope(current_user)
+    today = today_local()
+    year = year or today.year
+    employees = await server.db.employees.find({**scope, "active": True}, {"_id": 0}).sort("name", 1).to_list(1000)
+    leave = await server.db.employee_leave.find(
+        {**scope, "leave_type": LeaveType.PAID.value, "start_date": {"$lte": f"{year}-12-31"}}, {"_id": 0},
+    ).to_list(ALL_ROWS)
+    by_employee: Dict[str, List[dict]] = {}
+    for entry in leave:
+        by_employee.setdefault(entry.get("employee_id") or "", []).append(entry)
+    return [employee_leave_balance(e, by_employee.get(e["id"], []), year, today) for e in employees]
+
+
+@router.put("/employees/{employee_id}/leave-settings", response_model=Employee)
+async def update_leave_settings(employee_id: str, payload: LeaveSettingsUpdate, current_user: User = Depends(get_current_user)):
+    """An employee's paid leave days a year, and the unused days carried
+    into a year - by whoever keeps the absences."""
+    require_permission(current_user, "manage_budget")
+    company_id, scope = await get_company_scope(current_user)
+    update: Dict[str, Any] = {}
+    if payload.annual_leave_days is not None:
+        update["annual_leave_days"] = payload.annual_leave_days
+    if payload.carryover_year is not None:
+        update["leave_carryover"] = {"year": payload.carryover_year, "days": payload.carryover_days or 0.0}
+    if not update:
+        raise HTTPException(status_code=400, detail="Няма промени")
+    result = await server.db.employees.update_one({"id": employee_id, **scope}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Служителят не е намерен")
+    employee = await server.db.employees.find_one({"id": employee_id, **scope}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Служителят не е намерен")
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="update", entity_type="employee",
+        entity_id=employee_id, company_id=company_id, details={"name": employee.get("name"), "leave": update},
+    )
+    if "manage_payroll" not in set(current_user.permissions or []):
+        employee.update(base_salary=0, food_vouchers=0, additional_insurance=0)
+    return Employee(**employee)
+
 
 @router.get("/employees/leave", response_model=List[EmployeeLeave])
 async def list_leave(start_date: Optional[str] = None, end_date: Optional[str] = None, current_user: User = Depends(get_current_user)):

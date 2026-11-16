@@ -4660,6 +4660,11 @@ class Employee(BaseModel):
     # doesn't require a login at all (e.g. kitchen staff who never use the
     # app), so this stays optional rather than merging the two identities.
     linked_user_id: Optional[str] = None
+    # Paid annual leave, in working days a year (чл. 155 КТ: at least 20),
+    # and the unused days carried into a year - {"year", "days"} - entered
+    # once; the years after it are worked out (employee_leave_balance).
+    annual_leave_days: float = 20
+    leave_carryover: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class EmployeeCreate(BaseModel):
@@ -4671,6 +4676,7 @@ class EmployeeCreate(BaseModel):
     food_vouchers: float = 0
     additional_insurance: float = 0
     linked_user_id: Optional[str] = None
+    annual_leave_days: float = Field(default=20, ge=0, le=365)
 
 class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
@@ -4682,6 +4688,7 @@ class EmployeeUpdate(BaseModel):
     additional_insurance: Optional[float] = None
     active: Optional[bool] = None
     linked_user_id: Optional[str] = None
+    annual_leave_days: Optional[float] = Field(default=None, ge=0, le=365)
 
 class PayrollRates(BaseModel):
     company_id: str
@@ -5006,6 +5013,8 @@ def _holiday_name_for_date(date_str: str) -> Optional[str]:
 class EmployeeHolidayWork(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     company_id: str
+    # Who entered it - a business with no company record is scoped by it.
+    user_id: Optional[str] = None
     employee_id: str
     employee_name: str  # snapshot - survives the employee being renamed/deactivated later
     date: str  # YYYY-MM-DD, must be an official holiday
@@ -5026,6 +5035,8 @@ class LeaveType(str, Enum):
 class EmployeeLeave(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     company_id: str
+    # Who entered it - a business with no company record is scoped by it.
+    user_id: Optional[str] = None
     employee_id: str
     employee_name: str
     leave_type: LeaveType
@@ -5040,6 +5051,96 @@ class EmployeeLeaveCreate(BaseModel):
     start_date: str
     end_date: str
     note: Optional[str] = None
+
+class LeaveSettingsUpdate(BaseModel):
+    """An employee's paid leave: days a year, and the unused days carried
+    into a year (from the years before the program knew them)."""
+    annual_leave_days: Optional[float] = Field(default=None, ge=0, le=365)
+    carryover_year: Optional[int] = Field(default=None, ge=2000, le=2100)
+    carryover_days: Optional[float] = Field(default=None, ge=0, le=365)
+
+
+def leave_working_days(start: date, end: date) -> int:
+    """Working days from start to end, both included: paid leave is counted
+    in them (Monday to Friday, not an official holiday, its moved days off
+    included)."""
+    holidays: Dict[int, set] = {}
+    count = 0
+    day = start
+    while day <= end:
+        if day.weekday() < 5:
+            if day.year not in holidays:
+                holidays[day.year] = {h["date"] for h in get_bulgarian_public_holidays(day.year)}
+            if day.isoformat() not in holidays[day.year]:
+                count += 1
+        day += timedelta(days=1)
+    return count
+
+
+def _leave_entitlement(employee: dict, year: int) -> float:
+    """The year's paid leave: the days a year, in proportion to the part
+    of the year employed in the year of hiring."""
+    annual = float(employee.get("annual_leave_days", 20) or 0)
+    hired = business_day(employee.get("hire_date")) if employee.get("hire_date") else None
+    if hired is None or hired.year < year:
+        return annual
+    if hired.year > year:
+        return 0.0
+    year_days = (date(year, 12, 31) - date(year, 1, 1)).days + 1
+    employed = (date(year, 12, 31) - hired).days + 1
+    return float(round(annual * employed / year_days))
+
+
+def employee_leave_balance(employee: dict, paid_leave: List[dict], year: int, today: date) -> Dict[str, Any]:
+    """An employee's paid leave in a year: carried over, the year's own
+    days, used (to today), planned (booked later) and what remains. The
+    unused days of a year carry into the next."""
+    def used_in(y: int) -> Dict[str, int]:
+        first, last = date(y, 1, 1), date(y, 12, 31)
+        taken = planned = 0
+        for entry in paid_leave:
+            start, end = business_day(entry.get("start_date")), business_day(entry.get("end_date"))
+            if not start or not end:
+                continue
+            start, end = max(start, first), min(end, last)
+            if start > end:
+                continue
+            if end <= today:
+                taken += leave_working_days(start, end)
+            elif start > today:
+                planned += leave_working_days(start, end)
+            else:
+                taken += leave_working_days(start, today)
+                planned += leave_working_days(today + timedelta(days=1), end)
+        return {"used": taken, "planned": planned}
+
+    # Counted from the year whose carried days were entered - else from the
+    # year the program began keeping this employee (or the hiring, if
+    # later): what was used before it is not known, so nothing is assumed
+    # unused (before, someone hired years ago showed a hundred days left).
+    carry = employee.get("leave_carryover") or {}
+    hired = business_day(employee.get("hire_date")) if employee.get("hire_date") else None
+    created = employee.get("created_at")
+    kept_from = created.year if isinstance(created, datetime) else (
+        int(str(created)[:4]) if str(created or "")[:4].isdigit() else year
+    )
+    first_year = int(carry["year"]) if carry.get("year") else max(kept_from, hired.year if hired else kept_from)
+    carried = float(carry.get("days") or 0) if carry.get("year") else 0.0
+    for y in range(first_year, year):
+        spent = used_in(y)
+        carried = max(carried + _leave_entitlement(employee, y) - spent["used"] - spent["planned"], 0.0)
+    if year < first_year:
+        carried = 0.0
+    entitlement = _leave_entitlement(employee, year)
+    spent = used_in(year)
+    return {
+        "employee_id": employee["id"], "employee_name": employee.get("name"), "year": year,
+        "annual_leave_days": float(employee.get("annual_leave_days", 20) or 0),
+        "carried_over": round(carried, 1), "entitlement": round(entitlement, 1),
+        "used": spent["used"], "planned": spent["planned"],
+        "remaining": round(carried + entitlement - spent["used"] - spent["planned"], 1),
+    }
+
 
 async def _get_employee_for_company(employee_id: str, company_id: Optional[str], current_user: User) -> dict:
     query = simple_scope_query(company_id, current_user.user_id, id=employee_id)
