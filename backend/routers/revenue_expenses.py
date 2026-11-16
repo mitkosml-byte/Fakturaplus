@@ -119,9 +119,17 @@ async def add_pocket_money(payload: PocketMoneyAdd, current_user: User = Depends
     )
     return _revenue_for_viewer(saved, current_user)
 
+def _require_revenue_day_access(current_user: User) -> None:
+    """One day's revenue: for whoever enters it (to correct that day) or may
+    see the company's figures."""
+    if not {"add_revenue", "view_statistics"} & set(current_user.permissions or []):
+        raise HTTPException(status_code=403, detail="Нямате права за тази операция")
+
+
 @router.get("/daily-revenue/today")
 async def get_today_revenue(current_user: User = Depends(get_current_user)):
     """Get today's revenue totals for the whole company"""
+    _require_revenue_day_access(current_user)
     today = today_local().isoformat()
     _, scope = await get_company_scope(current_user)
     existing = await server.db.daily_revenue.find_one({**scope, "date": today}, {"_id": 0})
@@ -147,6 +155,7 @@ async def get_today_revenue(current_user: User = Depends(get_current_user)):
 @router.get("/daily-revenue/by-date/{date}")
 async def get_revenue_by_date(date: str, current_user: User = Depends(get_current_user)):
     """Get revenue for a specific date, for the whole company"""
+    _require_revenue_day_access(current_user)
     _, scope = await get_company_scope(current_user)
     existing = await server.db.daily_revenue.find_one({**scope, "date": date}, {"_id": 0})
     can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
@@ -173,6 +182,12 @@ async def get_daily_revenues(
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
+    # The company's revenue day by day, for any length of time: for who may
+    # see its figures - or, for the pocket money history, its pocket money
+    # alone. Before, anyone in the company could list the till day by day.
+    visibility = get_financial_visibility(current_user)
+    if not (visibility["statistics"] or visibility["pocket_money"]):
+        raise HTTPException(status_code=403, detail="Нямате права за тази операция")
     _, query = await get_company_scope(current_user)
 
     if start_date:
@@ -183,11 +198,13 @@ async def get_daily_revenues(
         else:
             query["date"] = {"$lte": end_date}
 
-    can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
     revenues = await server.db.daily_revenue.find(query, {"_id": 0}).sort("date", -1).to_list(ALL_ROWS)
-    if not can_see_pocket_money:
-        for r in revenues:
+    for r in revenues:
+        if not visibility["pocket_money"]:
             r["pocket_money"] = 0
+        if not visibility["statistics"]:
+            r["fiscal_revenue"] = 0
+            r["card_revenue"] = 0
     return [DailyRevenue(**r) for r in revenues]
 
 async def _refuse_wages(expense_id: str, scope: dict) -> None:
@@ -250,11 +267,22 @@ async def update_expense(expense_id: str, update: NonInvoiceExpenseUpdate, curre
 @router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_expenses")
-    _, scope = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
     await _refuse_wages(expense_id, scope)
+    expense: Dict[str, Any] = dict(await server.db.expenses.find_one({"id": expense_id, **scope}, {"_id": 0}) or {})
     result = await server.db.expenses.delete_one({"id": expense_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Разходът не е намерен")
+    # A trace in the action log, with the whole record so it can be put
+    # back (restore_audit_entry) - before, a deleted expense vanished.
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="delete",
+        entity_type="expense", entity_id=expense_id, company_id=company_id,
+        details={
+            "description": expense.get("description"), "amount": expense.get("amount"),
+            "date": expense.get("date"), "snapshot": expense, "restored": False,
+        },
+    )
     return {"message": "Разходът е изтрит"}
 
 @router.post("/personal-expenses")

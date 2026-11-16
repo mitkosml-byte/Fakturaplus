@@ -597,6 +597,31 @@ async def delete_invoice(invoice_id: str, current_user: User = Depends(get_curre
 
     return {"message": "Фактурата е изтрита"}
 
+async def _restore_record(log_entry: dict, details: dict, company_id: str, current_user: User) -> dict:
+    """Puts back a deleted off-book expense or payroll entry from the full
+    record kept on its delete entry - into the same company, once."""
+    snapshot = details.get("snapshot")
+    if not snapshot or not snapshot.get("id"):
+        raise HTTPException(status_code=400, detail="Няма запазени данни за възстановяване на този запис")
+    kind = log_entry["entity_type"]
+    collection = server.db.expenses if kind == "expense" else server.db.payroll_entries
+    if await collection.find_one({"id": snapshot["id"]}, {"_id": 1}):
+        raise HTTPException(status_code=400, detail="Записът вече съществува")
+    doc = {**snapshot, "company_id": company_id}
+    if kind == "payroll" and await server.db.payroll_entries.find_one({
+        "employee_id": doc.get("employee_id"), "period_year": doc.get("period_year"), "period_month": doc.get("period_month"),
+    }, {"_id": 1}):
+        raise HTTPException(status_code=409, detail="Вече има ведомост за този служител за този месец")
+    await collection.insert_one(dict(doc))
+    await server.db.audit_logs.update_one({"id": log_entry["id"]}, {"$set": {"details.restored": True}})
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="restore",
+        entity_type=kind, entity_id=snapshot["id"], company_id=company_id,
+        details={k: v for k, v in details.items() if k not in ("snapshot", "restored")},
+    )
+    return {"message": "Разходът е възстановен" if kind == "expense" else "Ведомостта е възстановена"}
+
+
 @router.post("/audit-logs/{log_id}/restore")
 async def restore_audit_entry(log_id: str, current_user: User = Depends(get_current_user)):
     """Restores an invoice deleted earlier, from the full snapshot kept on
@@ -613,12 +638,14 @@ async def restore_audit_entry(log_id: str, current_user: User = Depends(get_curr
     log_entry = await server.db.audit_logs.find_one({"id": log_id, "company_id": company_id})
     if not log_entry:
         raise HTTPException(status_code=404, detail="Записът не е намерен")
-    if log_entry.get("action") != "delete" or log_entry.get("entity_type") != "invoice":
+    if log_entry.get("action") != "delete" or log_entry.get("entity_type") not in ("invoice", "expense", "payroll"):
         raise HTTPException(status_code=400, detail="Това действие не може да бъде възстановено")
 
     details = log_entry.get("details") or {}
     if details.get("restored"):
         raise HTTPException(status_code=400, detail="Вече е възстановена")
+    if log_entry["entity_type"] in ("expense", "payroll"):
+        return await _restore_record(log_entry, details, company_id, current_user)
     snapshot = details.get("invoice_snapshot")
     if not snapshot:
         raise HTTPException(status_code=400, detail="Няма запазени данни за възстановяване на тази фактура")

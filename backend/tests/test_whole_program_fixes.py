@@ -601,3 +601,53 @@ def test_f2_card_is_paid_on_the_spot_and_the_method_is_one_of_three(client):
     # The scanner's answer carries the printed method through to the form.
     assert "payment_method" in server.OCRResult.model_fields
     assert "payment_method" in server.ClaudeInvoiceExtraction.model_fields
+
+
+def test_r1_r3_revenue_by_day_and_purchase_prices_need_a_right(client):
+    company_id, _, owner = _company()
+    _, nobody = _user(company_id, "staff", [], "Без права")
+    _, cashier = _user(company_id, "staff", ["add_revenue"], "Касиер")
+    client.post("/api/daily-revenue", headers=owner, json={"date": "2026-11-02", "fiscal_revenue": 1234})
+
+    assert client.get("/api/daily-revenue", headers=nobody).status_code == 403
+    assert client.get("/api/daily-revenue/by-date/2026-11-02", headers=nobody).status_code == 403
+    # Whoever enters revenue sees the day they correct - not the whole history.
+    assert client.get("/api/daily-revenue/by-date/2026-11-02", headers=cashier).json()["fiscal_revenue"] == 1234
+    assert client.get("/api/daily-revenue", headers=cashier).status_code == 403
+    assert client.get("/api/daily-revenue", headers=owner).status_code == 200
+    assert client.get("/api/items/price-alerts", headers=nobody).json() == {"alerts": [], "total": 0, "unread_count": 0}
+
+
+def test_z3_c2_a_deleted_expense_or_payroll_entry_leaves_a_trace_and_comes_back(client):
+    company_id, _, owner = _company()
+    expense = client.post("/api/expenses", headers=owner, json={"description": "Наем склад", "amount": 400, "date": "2026-11-01"}).json()
+    employee = client.post("/api/employees", headers=owner, json={"name": "Петя", "base_salary": 1000}).json()
+    entry = client.post("/api/payroll", headers=owner, json={"employee_id": employee["id"], "period_month": 10, "period_year": 2026}).json()
+
+    assert client.delete(f"/api/expenses/{expense['id']}", headers=owner).status_code == 200
+    assert client.delete(f"/api/payroll/{entry['id']}", headers=owner).status_code == 200
+    logs = asyncio.run(server.db.audit_logs.find(
+        {"company_id": company_id, "action": "delete", "entity_type": {"$in": ["expense", "payroll"]}}, {"_id": 0},
+    ).to_list(None))
+    assert {log["entity_type"] for log in logs} == {"expense", "payroll"}
+    for log in logs:
+        restored = client.post(f"/api/audit-logs/{log['id']}/restore", headers=owner)
+        assert restored.status_code == 200, restored.text
+        assert client.post(f"/api/audit-logs/{log['id']}/restore", headers=owner).status_code == 400  # once
+    assert asyncio.run(server.db.expenses.count_documents({"id": expense["id"]})) == 1
+    assert asyncio.run(server.db.payroll_entries.count_documents({"id": entry["id"]})) == 1
+
+
+def test_i4_importing_the_same_expenses_twice_does_not_double_them(client):
+    company_id, _, owner = _company()
+    rows = [
+        {"description": "Ток", "amount": 120.5, "date": "2026-10-05"},
+        {"description": "Кафе", "amount": 3, "date": "2026-10-06"},
+        {"description": "Кафе", "amount": 3, "date": "2026-10-06"},
+    ]
+    first = client.post("/api/import/expenses/commit", headers=owner, json={"rows": rows}).json()
+    assert first["imported"] == 3
+    second = client.post("/api/import/expenses/commit", headers=owner, json={"rows": rows + [{"description": "Кафе", "amount": 3, "date": "2026-10-06"}]}).json()
+    # The three already there are skipped; a third coffee that day is new.
+    assert second["already_present"] == 3 and second["imported"] == 1
+    assert asyncio.run(server.db.expenses.count_documents({"company_id": company_id})) == 4

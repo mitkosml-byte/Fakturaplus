@@ -289,10 +289,23 @@ async def set_payroll_entry_counted_in_expenses(entry_id: str, request: Request,
 @router.delete("/payroll/{entry_id}")
 async def delete_payroll_entry(entry_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
+    entry: Dict[str, Any] = dict(await server.db.payroll_entries.find_one({"id": entry_id, **scope}, {"_id": 0}) or {})
     result = await server.db.payroll_entries.delete_one({"id": entry_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Записът не е намерен")
+    # Deleting a payroll entry changes every expense figure: it leaves a
+    # trace, with the whole record so it can be put back.
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="delete",
+        entity_type="payroll", entity_id=entry_id, company_id=company_id,
+        details={
+            "employee": entry.get("employee_name"),
+            "period": f"{entry.get('period_month')}/{entry.get('period_year')}",
+            "total_employer_cost": entry.get("total_employer_cost"),
+            "snapshot": entry, "restored": False,
+        },
+    )
     return {"message": "Записът е изтрит"}
 
 # ===================== PAYROLL PDF IMPORT (ведомост от счетоводителя) =====================

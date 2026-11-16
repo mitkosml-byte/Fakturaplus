@@ -454,13 +454,12 @@ async def get_price_alerts(
     current_user: User = Depends(get_current_user)
 ):
     """Връща ценови аларми за фирмата"""
-    # Deliberately NOT gated on view_statistics - invoices.tsx calls this
-    # per-invoice (with invoice_id set) to show "+X% vs last purchase"
-    # badges on line items for ANY user who can view that invoice, not
-    # just users with the advanced-statistics permission.
+    # Purchase prices by supplier: for whoever may see invoices (the badges
+    # on an invoice's lines) or the company's figures - before, any member
+    # could read them. Without either, simply nothing to show.
     company_id, scope = await get_company_scope(current_user)
 
-    if not company_id:
+    if not company_id or not {"manage_invoices", "view_statistics"} & set(current_user.permissions or []):
         return {"alerts": [], "total": 0, "unread_count": 0}
 
     query = dict(scope)

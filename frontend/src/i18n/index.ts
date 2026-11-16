@@ -1872,6 +1872,10 @@ export const translations: Translations = {
     bg: 'Успешно импортирани {imported} реда.',
     en: 'Successfully imported {imported} rows.',
   },
+  'import.alreadyPresentSummary': {
+    bg: '{count} реда вече ги има (същата дата, описание и сума) – не са внесени втори път.',
+    en: '{count} rows are already there (same date, description and amount) – not imported twice.',
+  },
   'import.doneFailedSummary': {
     bg: '{failed} реда не бяха импортирани (напр. вече съществуват) - виж детайлите по-горе.',
     en: '{failed} rows were not imported (e.g. already exist) - see details above.',
@@ -4232,6 +4236,8 @@ export const translations: Translations = {
     bg: 'Експорт',
     en: 'Export',
   },
+  'auditLog.entityExpense': { bg: 'Разход без фактура', en: 'Expense without invoice' },
+  'auditLog.entityPayroll': { bg: 'Ведомост', en: 'Payroll entry' },
   'auditLog.entityInvoice': {
     bg: 'фактура',
     en: 'invoice',

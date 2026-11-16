@@ -1259,6 +1259,8 @@ export interface ImportCommitResult {
   imported: number;
   failed: { index: number; message: string }[];
   total: number;
+  // Expenses already held (same day, description and amount) - not imported again.
+  already_present?: number;
 }
 
 // Team collaboration: shared calendar + messages (owner/manager/accountant)

@@ -49,6 +49,14 @@ from server import _IMPORT_PERMISSIONS
 
 router = APIRouter(prefix="/api")
 
+
+def _expense_key(day: Any, description: Any, amount: Any) -> tuple:
+    try:
+        money = round(float(amount or 0), 2)
+    except (TypeError, ValueError):
+        money = 0.0
+    return (str(day or "")[:10], " ".join(str(description or "").split()).lower(), money)
+
 @router.get("/import/template/{entity}")
 async def get_import_template(entity: str, current_user: User = Depends(get_current_user)):
     if entity not in import_service.ENTITY_TEMPLATES:
@@ -121,8 +129,25 @@ async def import_commit(entity: str, request: Request, payload: ImportCommitRequ
             parts.append(f"{field}: {reason}" if field else reason)
         return "; ".join(parts) or "невалидни данни в реда"
 
+    # Expenses already held - the same day, description and amount - are
+    # not imported again (a file imported twice used to double them all).
+    # Counted, so two identical expenses in a day stay two.
+    already_held: Dict[tuple, int] = {}
+    already_present = 0
+    if entity == "expenses":
+        _, expense_scope = await get_company_scope(current_user)
+        for doc in await server.db.expenses.find({**expense_scope, **NOT_WAGES}, {"_id": 0, "date": 1, "description": 1, "amount": 1}).to_list(ALL_ROWS):
+            key = _expense_key(doc.get("date"), doc.get("description"), doc.get("amount"))
+            already_held[key] = already_held.get(key, 0) + 1
+
     for index, row_data in enumerate(payload.rows):
         try:
+            if entity == "expenses":
+                key = _expense_key(row_data.get("date"), row_data.get("description"), row_data.get("amount"))
+                if already_held.get(key, 0) > 0:
+                    already_held[key] -= 1
+                    already_present += 1
+                    continue
             if entity == "invoices":
                 await create_invoice(invoice=InvoiceCreate(**row_data), background_tasks=bg_tasks, current_user=current_user)
             elif entity == "assets":
@@ -148,4 +173,4 @@ async def import_commit(entity: str, request: Request, payload: ImportCommitRequ
         # was called directly rather than as the request handler.
         await bg_tasks()
 
-    return {"imported": imported, "failed": failed, "total": len(payload.rows)}
+    return {"imported": imported, "failed": failed, "total": len(payload.rows), "already_present": already_present}

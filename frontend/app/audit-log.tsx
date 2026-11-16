@@ -117,6 +117,14 @@ export default function AuditLogScreen() {
       }
       return `${t('auditLog.entityInvoice')}${numberBit}${supplierBit}${amountBit}`;
     }
+    if (entry.entity_type === 'expense') {
+      const amountBit = typeof d.amount === 'number' ? ` (${d.amount.toFixed(2)} €)` : '';
+      return `${t('auditLog.entityExpense')}${d.description ? ` – ${d.description}` : ''}${d.date ? `, ${d.date}` : ''}${amountBit}`;
+    }
+    if (entry.entity_type === 'payroll') {
+      const amountBit = typeof d.total_employer_cost === 'number' ? ` (${d.total_employer_cost.toFixed(2)} €)` : '';
+      return `${t('auditLog.entityPayroll')}${d.employee ? ` – ${d.employee}` : ''}${d.period ? `, ${d.period}` : ''}${amountBit}`;
+    }
     if (entry.action === 'export') {
       const formatLabel = d.format ? d.format.toUpperCase() : '';
       const count = typeof d.count === 'number' ? ` (${d.count} ${t('auditLog.entityInvoices')})` : '';
@@ -130,10 +138,12 @@ export default function AuditLogScreen() {
   // gated on its own permission since undoing someone else's delete,
   // possibly days later, is a sensitive admin action, not routine invoice
   // work (see restore_deleted_data in ROLE_PERMISSIONS).
+  const RESTORABLE = ['invoice', 'expense', 'payroll'];
   const canRestore = (entry: AuditLogEntry) =>
     hasPermission('restore_deleted_data') &&
     entry.action === 'delete' &&
-    entry.entity_type === 'invoice' &&
+    RESTORABLE.includes(entry.entity_type) &&
+    !!(entry.details?.invoice_snapshot || entry.details?.snapshot) &&
     !entry.details?.restored;
 
   const handleRestore = (entry: AuditLogEntry) => {
@@ -262,7 +272,7 @@ export default function AuditLogScreen() {
                       </Text>
                     </TouchableOpacity>
                   )}
-                  {entry.action === 'delete' && entry.entity_type === 'invoice' && entry.details?.restored && (
+                  {entry.action === 'delete' && RESTORABLE.includes(entry.entity_type) && entry.details?.restored && (
                     <Text style={styles.restoredBadge}>{t('auditLog.restored')}</Text>
                   )}
                 </View>
