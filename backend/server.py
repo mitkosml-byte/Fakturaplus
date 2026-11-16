@@ -427,6 +427,13 @@ class Invoice(BaseModel):
     # Set when this is the purchase invoice of a fixed asset (routers/assets):
     # not an expense of its day then - the asset's depreciation is.
     asset_id: Optional[str] = None
+    # A credit note: the invoice it corrects, as printed ("към фактура №")
+    # and, once that invoice is in, the link to it (settle_credited_invoice).
+    credited_invoice_number: Optional[str] = None
+    credited_invoice_id: Optional[str] = None
+    # An invoice: what credit notes to it took off - no longer owed; past
+    # what is left to pay, it is the supplier's to refund or offset.
+    credited_amount: float = 0.0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 # Invoice Item models
@@ -562,6 +569,8 @@ class InvoiceCreate(BaseModel):
     items: Optional[List[InvoiceItemCreate]] = None  # Артикули
     payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = None  # paid on the spot: cash, card
     payment_due_date: Optional[str] = None  # само при bank_transfer; ако липсва се изчислява
+    # Credit note only: the number of the invoice it corrects.
+    credited_invoice_number: Optional[str] = Field(default=None, max_length=50)
 
     @model_validator(mode="after")
     def _signed_amounts(self) -> "InvoiceCreate":
@@ -588,6 +597,8 @@ class InvoiceUpdate(BaseModel):
     is_paid: Optional[bool] = None
     paid_amount: Optional[float] = None  # checked by the route (never below 0 on an invoice)
     items: Optional[List[InvoiceItemUpdate]] = None
+    # Credit note only: the number of the invoice it corrects ("" clears it).
+    credited_invoice_number: Optional[str] = Field(default=None, max_length=50)
 
 class DailyRevenue(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -796,6 +807,7 @@ class OCRResult(BaseModel):
     supplier_eik: Optional[str] = None  # ЕИК на доставчика, ако е видим на фактурата
     invoice_number: str
     document_type: Optional[str] = None  # invoice | credit_note (озаглавен "КРЕДИТНО ИЗВЕСТИЕ")
+    credited_invoice_number: Optional[str] = None  # credit note: "към фактура №"
     amount_without_vat: float
     vat_amount: float
     total_amount: float
@@ -1686,6 +1698,89 @@ async def find_duplicate_invoice(
     return None
 
 
+def invoice_left(invoice: dict) -> float:
+    """What is still owed on a purchase invoice: its total, less what was
+    paid and what credit notes to it took off."""
+    return max(
+        float(invoice.get("total_amount") or 0) - float(invoice.get("paid_amount") or 0)
+        - float(invoice.get("credited_amount") or 0),
+        0.0,
+    )
+
+
+def invoice_refund_due(invoice: dict) -> float:
+    """A credit note to an invoice already paid: what the supplier owes
+    back (refund or offset against the next invoice)."""
+    return max(
+        float(invoice.get("paid_amount") or 0) + float(invoice.get("credited_amount") or 0)
+        - float(invoice.get("total_amount") or 0),
+        0.0,
+    )
+
+
+def same_supplier(a: dict, b: dict) -> bool:
+    """Two documents from the same supplier: the same EIK when both have
+    one, else the same name (case, spacing and punctuation aside)."""
+    eik_a, eik_b = eik_key(a.get("supplier_eik")), eik_key(b.get("supplier_eik"))
+    if eik_a and eik_b:
+        return eik_a == eik_b
+    return bool(_compare_key(a.get("supplier") or "")) and _compare_key(a.get("supplier") or "") == _compare_key(b.get("supplier") or "")
+
+
+async def find_credited_invoice(scope: dict, credit_note: dict) -> Optional[dict]:
+    """The invoice a credit note names ("към фактура №"), from its supplier."""
+    if not (credit_note.get("credited_invoice_number") or "").strip():
+        return None
+    return await find_duplicate_invoice(
+        scope, credit_note.get("supplier") or "", credit_note.get("supplier_eik"),
+        credit_note["credited_invoice_number"], "invoice",
+    )
+
+
+async def settle_credited_invoice(invoice_id: Optional[str], scope: dict) -> None:
+    """Recounts what credit notes took off an invoice - and, for one paid by
+    bank, whether anything is still owed on it."""
+    if not invoice_id:
+        return
+    invoice = await db.invoices.find_one({**scope, "id": invoice_id}, {"_id": 0})
+    if not invoice or invoice.get("document_type") == CREDIT_NOTE:
+        return
+    notes = await db.invoices.find(
+        {**scope, "document_type": CREDIT_NOTE, "credited_invoice_id": invoice_id}, {"_id": 0, "total_amount": 1},
+    ).to_list(ALL_ROWS)
+    credited = round(sum(abs(float(note.get("total_amount") or 0)) for note in notes), 2)
+    update: Dict[str, Any] = {"credited_amount": credited}
+    if invoice.get("payment_method") == "bank_transfer":
+        settled = float(invoice.get("paid_amount") or 0) + credited >= float(invoice.get("total_amount") or 0) - 0.01
+        update["is_paid"] = settled
+        if settled and not invoice.get("paid_at"):
+            update["paid_at"] = datetime.now(timezone.utc)
+        elif not settled:
+            update["paid_at"] = None
+    await db.invoices.update_one({**scope, "id": invoice_id}, {"$set": update})
+
+
+async def link_waiting_credit_notes(scope: dict, invoice: dict) -> None:
+    """An invoice entered after credit notes that name it: they are tied to
+    it now, and what they took off counts."""
+    if invoice.get("document_type") == CREDIT_NOTE:
+        return
+    number = invoice_number_key(invoice.get("invoice_number"))
+    if not number:
+        return
+    waiting = await db.invoices.find(
+        {**scope, "document_type": CREDIT_NOTE, "credited_invoice_id": None, "credited_invoice_number": {"$nin": [None, ""]}},
+        {"_id": 0, "id": 1, "supplier": 1, "supplier_eik": 1, "credited_invoice_number": 1},
+    ).to_list(ALL_ROWS)
+    linked = False
+    for note in waiting:
+        if invoice_number_key(note.get("credited_invoice_number")) == number and same_supplier(note, invoice):
+            await db.invoices.update_one({**scope, "id": note["id"]}, {"$set": {"credited_invoice_id": invoice["id"]}})
+            linked = True
+    if linked:
+        await settle_credited_invoice(invoice["id"], scope)
+
+
 async def normalize_supplier_name(
     supplier: str, company_id: Optional[str] = None, supplier_eik: Optional[str] = None,
 ) -> tuple[str, bool]:
@@ -2106,6 +2201,10 @@ class ClaudeInvoiceExtraction(BaseModel):
         default="invoice",
         description="credit_note, ако документът е озаглавен КРЕДИТНО ИЗВЕСТИЕ (връщане или отстъпка по по-ранна фактура); за всяка друга фактура - invoice",
     )
+    credited_invoice_number: Optional[str] = Field(
+        default=None,
+        description="Само при кредитно известие: номерът на фактурата, към която е издадено (\"към фактура №\"); иначе null",
+    )
     invoice_date: Optional[str] = Field(default=None, description="Дата на издаване, формат YYYY-MM-DD")
     payment_due_date: Optional[str] = Field(default=None, description="Срок/падеж за плащане, формат YYYY-MM-DD, само ако е изрично отпечатан на фактурата")
     amount_without_vat: float = Field(description="Данъчна основа / обща сума без ДДС")
@@ -2142,7 +2241,7 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 Повечето фактури печатат "Начин на плащане" / "Плащане". "В брой" → cash; "По банков път", "Банков превод", "По сметка" → bank_transfer; "С карта", "Карта", "ПОС", "Дебитна/кредитна карта" → card. Ако начинът на плащане не е отпечатан, остави payment_method празно (null) - НЕ гадай: приложението ще попита човека.
 
 КРЕДИТНО ИЗВЕСТИЕ (document_type):
-Ако документът е озаглавен "КРЕДИТНО ИЗВЕСТИЕ" (връщане на стока или отстъпка по по-ранна фактура), върни document_type = "credit_note"; за всяка друга фактура (включително "ДЕБИТНО ИЗВЕСТИЕ") върни "invoice". При кредитно известие връщай сумите така, както са отпечатани, без знак минус - приложението само ги отчита като намаление на покупките. Номерът е собственият номер на известието, а не номерът на фактурата, към която е издадено.
+Ако документът е озаглавен "КРЕДИТНО ИЗВЕСТИЕ" (връщане на стока или отстъпка по по-ранна фактура), върни document_type = "credit_note"; за всяка друга фактура (включително "ДЕБИТНО ИЗВЕСТИЕ") върни "invoice". При кредитно известие връщай сумите така, както са отпечатани, без знак минус - приложението само ги отчита като намаление на покупките. Номерът е собственият номер на известието, а не номерът на фактурата, към която е издадено - него върни отделно в credited_invoice_number.
 
 ОБЩИ ПРАВИЛА:
 - Всички суми в полетата на артикулите и amount_without_vat са БЕЗ ДДС.
@@ -3086,7 +3185,7 @@ async def split_overdue_invoices(scope: dict) -> tuple:
     what stays a money-at-risk warning."""
     unpaid = await db.invoices.find(
         {**scope, "payment_method": "bank_transfer", "is_paid": False},
-        {"_id": 0, "id": 1, "supplier": 1, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1},
+        {"_id": 0, "id": 1, "supplier": 1, "total_amount": 1, "paid_amount": 1, "credited_amount": 1, "payment_due_date": 1},
     ).to_list(ALL_ROWS)
     # Overdue once the due day has passed, on the business's calendar - the
     # same rule as /statistics/summary and the invoice list's filter.
@@ -3107,7 +3206,7 @@ async def split_overdue_invoices(scope: dict) -> tuple:
     return unpaid, really_overdue, likely_paid
 
 def _owed(invoices: List[dict]) -> float:
-    return sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in invoices)
+    return sum(invoice_left(inv) for inv in invoices)
 
 # Where a Home signal leads: the exact tab of Statistics its card is on
 # (prices, reorder and weekday cards live under Items, the forecast under

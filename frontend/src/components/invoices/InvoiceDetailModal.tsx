@@ -61,6 +61,9 @@ type Props = {
   // Invoice or credit note - amounts are edited as printed either way.
   editDocumentType: InvoiceDocumentType;
   onChangeDocumentType: (v: InvoiceDocumentType) => void;
+  // A credit note: the number of the invoice it corrects.
+  editCreditedNumber: string;
+  onChangeCreditedNumber: (v: string) => void;
   editNotes: string;
   onChangeNotes: (v: string) => void;
   // Lets a line item's quantity/unit_price be corrected after the fact -
@@ -93,7 +96,7 @@ export function InvoiceDetailModal({
   isEditDatePickerVisible, onOpenEditDatePicker, onCloseEditDatePicker,
   editAmountWithoutVat, onChangeAmountWithoutVat, editVatAmount, onChangeVatAmount,
   editVatTreatment, onChangeVatTreatment, editPaymentMethod, onChangePaymentMethod,
-  editDocumentType, onChangeDocumentType, editNotes, onChangeNotes,
+  editDocumentType, onChangeDocumentType, editCreditedNumber, onChangeCreditedNumber, editNotes, onChangeNotes,
   editItems, onChangeEditItemField, savingEdit, onSaveEdit,
   selectedInvoiceAlerts, loadingInvoiceAlerts, updatingPayment, onTogglePaid, onOpenPaymentModal,
   scannedPages, loadingScannedPages, onViewPage, onDelete,
@@ -203,6 +206,19 @@ export function InvoiceDetailModal({
                     </TouchableOpacity>
                   ))}
                 </View>
+                {editDocumentType === 'credit_note' && (
+                  <>
+                    <Text style={[styles.inputLabel, { marginTop: 12 }]}>{t('scan.creditedInvoiceNumber')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editCreditedNumber}
+                      onChangeText={onChangeCreditedNumber}
+                      placeholder={t('scan.creditedInvoicePlaceholder')}
+                      placeholderTextColor={COLORS.textMuted}
+                      accessibilityLabel={t('scan.creditedInvoiceNumber')}
+                    />
+                  </>
+                )}
               </View>
 
               <View style={styles.detailRow2}>
@@ -335,6 +351,12 @@ export function InvoiceDetailModal({
                   <View style={{ flex: 1 }}>
                     <Text style={styles.assetBannerTitle}>{t('invoices.creditNote')}</Text>
                     <Text style={styles.assetBannerText}>{t('invoices.creditNoteSettled')}</Text>
+                    {!!invoice.credited_invoice_number && (
+                      <Text style={[styles.assetBannerText, { marginTop: 4 }]}>
+                        {t('invoices.creditedTo').replace('{number}', invoice.credited_invoice_number)}
+                        {!invoice.credited_invoice_id ? ` ${t('invoices.creditedToMissing')}` : ''}
+                      </Text>
+                    )}
                   </View>
                 </View>
               )}
@@ -427,6 +449,25 @@ export function InvoiceDetailModal({
                 <Text style={styles.totalSectionValue}>{invoice.total_amount.toFixed(2)} €</Text>
               </View>
 
+              {/* Credit notes to this invoice: taken off what is owed; past
+                  what was left to pay, the supplier's to refund or offset. */}
+              {!isCreditNote && (invoice.credited_amount || 0) > 0 && (() => {
+                const refund = Math.max(0, invoice.paid_amount + (invoice.credited_amount || 0) - invoice.total_amount);
+                return (
+                  <View style={styles.assetBanner}>
+                    <Ionicons name="return-down-back" size={18} color={COLORS.primary} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.assetBannerTitle}>
+                        {t('invoices.creditedAmount').replace('{amount}', (invoice.credited_amount || 0).toFixed(2))}
+                      </Text>
+                      {refund > 0.005 && (
+                        <Text style={styles.assetBannerText}>{t('invoices.refundDue').replace('{amount}', refund.toFixed(2))}</Text>
+                      )}
+                    </View>
+                  </View>
+                );
+              })()}
+
               {invoice.payment_method && !isCreditNote && (() => {
                 const overdue = !invoice.is_paid && !!invoice.payment_due_date
                   && new Date(invoice.payment_due_date).getTime() < Date.now();
@@ -451,20 +492,25 @@ export function InvoiceDetailModal({
                           </Text>
                         )}
 
-                        {!invoice.is_paid && invoice.paid_amount > 0 && (
+                        {!invoice.is_paid && (invoice.paid_amount > 0 || (invoice.credited_amount || 0) > 0) && (
                           <View style={styles.paymentProgressBox}>
                             <Text style={styles.paymentProgressText}>
                               {t('invoices.paidOfTotal')
                                 .replace('{paid}', invoice.paid_amount.toFixed(2))
                                 .replace('{total}', invoice.total_amount.toFixed(2))}
                             </Text>
+                            {(invoice.credited_amount || 0) > 0 && (
+                              <Text style={styles.paymentProgressText}>
+                                {t('invoices.creditedAmount').replace('{amount}', (invoice.credited_amount || 0).toFixed(2))}
+                              </Text>
+                            )}
                             <Text style={styles.paymentRemainingText}>
-                              {t('invoices.remainingAmount')}: {(invoice.total_amount - invoice.paid_amount).toFixed(2)} €
+                              {t('invoices.remainingAmount')}: {Math.max(0, invoice.total_amount - invoice.paid_amount - (invoice.credited_amount || 0)).toFixed(2)} €
                             </Text>
                             <View style={styles.paymentProgressBar}>
                               <View style={[
                                 styles.paymentProgressBarFill,
-                                { width: `${Math.min(100, (invoice.paid_amount / invoice.total_amount) * 100)}%` }
+                                { width: `${Math.min(100, ((invoice.paid_amount + (invoice.credited_amount || 0)) / invoice.total_amount) * 100)}%` }
                               ]} />
                             </View>
                           </View>

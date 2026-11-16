@@ -85,7 +85,7 @@ async def build_business_chat_digest(current_user: User) -> dict:
     # unpaid is still owed today.
     unpaid_invoices = await server.db.invoices.find(
         {**scope, "payment_method": "bank_transfer", "is_paid": False},
-        {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1},
+        {"_id": 0, "total_amount": 1, "paid_amount": 1, "credited_amount": 1, "payment_due_date": 1},
     ).to_list(ALL_ROWS)
 
     def _is_overdue(inv):
@@ -96,7 +96,7 @@ async def build_business_chat_digest(current_user: User) -> dict:
     unpaid = {
         "count": len(unpaid_invoices),
         "overdue_count": sum(1 for inv in unpaid_invoices if _is_overdue(inv)),
-        "total_unpaid_amount": round(sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in unpaid_invoices), 2),
+        "total_unpaid_amount": round(sum(invoice_left(inv) for inv in unpaid_invoices), 2),
     }
 
     budget = None

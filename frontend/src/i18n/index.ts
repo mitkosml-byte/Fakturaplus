@@ -488,6 +488,30 @@ export const translations: Translations = {
     bg: 'Без да пита. Изключено – на деня пита „Платен ли е?“.',
     en: 'Without asking. Off – on the day it asks “Is it paid?”.',
   },
+  'scan.creditedInvoiceNumber': {
+    bg: 'Към фактура №',
+    en: 'For invoice No.',
+  },
+  'scan.creditedInvoicePlaceholder': {
+    bg: 'Номерът на фактурата, която известието коригира',
+    en: 'The number of the invoice the credit note corrects',
+  },
+  'invoices.creditedTo': {
+    bg: 'Към фактура № {number}.',
+    en: 'For invoice No. {number}.',
+  },
+  'invoices.creditedToMissing': {
+    bg: 'Фактурата още не е въведена – свързва се щом я добавиш.',
+    en: 'That invoice is not in yet – it is linked as soon as you add it.',
+  },
+  'invoices.creditedAmount': {
+    bg: 'Кредитни известия: −{amount} €',
+    en: 'Credit notes: −{amount} €',
+  },
+  'invoices.refundDue': {
+    bg: 'За връщане или прихващане от доставчика: {amount} €',
+    en: 'For the supplier to refund or offset: {amount} €',
+  },
   'briefing.snooze': {
     bg: 'Отложи 3 дни',
     en: 'Snooze 3 days',

@@ -136,6 +136,9 @@ export default function ScanScreen() {
   // down; its amounts are typed as printed and nothing is owed on it.
   const [documentType, setDocumentType] = useState<InvoiceDocumentType>('invoice');
   const isCreditNote = documentType === 'credit_note';
+  // The invoice a credit note corrects ("към фактура №", printed on it):
+  // what it takes off is no longer owed on that invoice.
+  const [creditedInvoiceNumber, setCreditedInvoiceNumber] = useState('');
   const [isDueDatePickerVisible, setDueDatePickerVisible] = useState(false);
 
   // Suggest a VAT treatment from the amounts (mirrors the backend's own
@@ -429,6 +432,7 @@ export default function ScanScreen() {
       const result = await api.scanInvoice(images);
       setOcrResult(result);
       setDocumentType(result.document_type === 'credit_note' ? 'credit_note' : 'invoice');
+      setCreditedInvoiceNumber(result.credited_invoice_number || '');
       setSupplier(result.supplier);
       setSupplierEik(result.supplier_eik || '');
       setInvoiceNumber(result.invoice_number);
@@ -582,6 +586,7 @@ export default function ScanScreen() {
         supplier_eik: supplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
         document_type: documentType,
+        credited_invoice_number: isCreditNote ? creditedInvoiceNumber.trim() || undefined : undefined,
         amount_without_vat: parseFloat(amountWithoutVat) || 0,
         vat_amount: parseFloat(vatAmount) || 0,
         total_amount: parseFloat(totalAmount) || 0,
@@ -826,6 +831,7 @@ export default function ScanScreen() {
     setPaymentMethodMissing(false);
     setPaymentDueDate(null);
     setDocumentType('invoice');
+    setCreditedInvoiceNumber('');
   };
 
   return (
@@ -1076,10 +1082,21 @@ export default function ScanScreen() {
                       ))}
                     </View>
                     {isCreditNote && (
-                      <View style={styles.protocolNote}>
-                        <Ionicons name="return-down-back" size={16} color={COLORS.primary} />
-                        <Text style={styles.protocolNoteText}>{t('scan.creditNoteNote')}</Text>
-                      </View>
+                      <>
+                        <View style={styles.protocolNote}>
+                          <Ionicons name="return-down-back" size={16} color={COLORS.primary} />
+                          <Text style={styles.protocolNoteText}>{t('scan.creditNoteNote')}</Text>
+                        </View>
+                        <Text style={[styles.inputLabel, { marginTop: 12 }]}>{t('scan.creditedInvoiceNumber')}</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={creditedInvoiceNumber}
+                          onChangeText={setCreditedInvoiceNumber}
+                          placeholder={t('scan.creditedInvoicePlaceholder')}
+                          placeholderTextColor={COLORS.textMuted}
+                          accessibilityLabel={t('scan.creditedInvoiceNumber')}
+                        />
+                      </>
                     )}
                   </View>
 

@@ -141,6 +141,15 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     if invoice_dict.get("vat_treatment") == VatTreatment.REVERSE_CHARGE:
         invoice_dict["protocol_number"] = await next_protocol_number(company_id, current_user.user_id, invoice_date.year)
 
+    # A credit note names the invoice it corrects; tied to it when that
+    # invoice is in (otherwise once it is entered - link_waiting_credit_notes).
+    credited_target = None
+    if is_credit_note:
+        invoice_dict["credited_invoice_number"] = (invoice_dict.get("credited_invoice_number") or "").strip() or None
+        credited_target = await find_credited_invoice(scope, invoice_dict)
+    else:
+        invoice_dict["credited_invoice_number"] = None
+
     # Process items and convert to dict format. The invoice id is fixed up
     # front so every price-history row and alert is written already linked
     # to its invoice and line - no after-the-fact backfill that could miss.
@@ -195,9 +204,16 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         paid_amount=paid_amount,
         paid_at=paid_at,
         payment_due_date=payment_due_date,
+        credited_invoice_id=credited_target["id"] if credited_target else None,
         **{k: v for k, v in invoice_dict.items() if k not in ["date", "items", "payment_due_date"]}
     )
     await server.db.invoices.insert_one(invoice_obj.model_dump())
+    # What a credit note took off is no longer owed on its invoice; an
+    # invoice picks up credit notes entered before it.
+    if credited_target:
+        await settle_credited_invoice(credited_target["id"], scope)
+    elif not is_credit_note:
+        await link_waiting_credit_notes(scope, invoice_obj.model_dump())
 
     if company_id and invoice.items:
         if history_rows:
@@ -252,12 +268,14 @@ async def mark_invoices_paid(body: MarkInvoicesPaidRequest, current_user: User =
     now = datetime.now(timezone.utc)
     invoices = await server.db.invoices.find(
         {**scope, "id": {"$in": body.invoice_ids}, "is_paid": False},
-        {"_id": 0, "id": 1, "total_amount": 1, "supplier": 1, "invoice_number": 1},
+        {"_id": 0, "id": 1, "total_amount": 1, "credited_amount": 1, "supplier": 1, "invoice_number": 1},
     ).to_list(len(body.invoice_ids))
     for inv in invoices:
+        # Paid in full is the total less what credit notes took off.
+        paid = max(float(inv.get("total_amount") or 0) - float(inv.get("credited_amount") or 0), 0.0)
         await server.db.invoices.update_one(
             {**scope, "id": inv["id"]},
-            {"$set": {"is_paid": True, "paid_amount": inv.get("total_amount", 0), "paid_at": now}},
+            {"$set": {"is_paid": True, "paid_amount": round(paid, 2), "paid_at": now}},
         )
         await audit_service.log_action(
             user_id=current_user.user_id,
@@ -456,6 +474,9 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
                 detail=f"Вече има {what} с номер {update_data.get('invoice_number', existing.get('invoice_number'))} от този доставчик",
             )
 
+    # Credit notes to this invoice already took this much off what is owed.
+    credited = 0.0 if is_credit_note else float(existing.get("credited_amount") or 0)
+
     explicit_payment = "is_paid" in update_data or "paid_amount" in update_data
     computed_payment = False  # the payment state below was worked out here, not sent
     old_method = existing.get("payment_method")
@@ -501,7 +522,7 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
         elif new_method == "bank_transfer":
             paid_now = min(paid_before, new_total)
             update_data["paid_amount"] = round(paid_now, 2)
-            update_data["is_paid"] = paid_now >= new_total - 0.01
+            update_data["is_paid"] = paid_now + credited >= new_total - 0.01
             if not update_data["is_paid"]:
                 update_data["paid_at"] = None
         explicit_payment = computed_payment = new_method in PAID_ON_THE_SPOT or new_method == "bank_transfer"
@@ -526,7 +547,8 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
         # partial payment (0 < paid_amount < total) always shows is_paid as
         # False with the exact remaining balance recoverable as
         # total_amount - paid_amount (see /statistics/summary's use of it).
-        effective_total = update_data.get("total_amount", existing.get("total_amount", 0))
+        # What can be paid: the total less what credit notes took off.
+        effective_total = max(float(update_data.get("total_amount", existing.get("total_amount", 0))) - credited, 0.0)
         paid_amount = update_data["paid_amount"]
         if paid_amount < 0:
             raise HTTPException(status_code=400, detail="Платената сума не може да е отрицателна")
@@ -546,7 +568,7 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
         # user actually confirmed the payment.
         update_data["paid_at"] = datetime.now(timezone.utc) if update_data["is_paid"] else None
         update_data["paid_amount"] = (
-            update_data.get("total_amount", existing.get("total_amount", 0))
+            round(max(float(update_data.get("total_amount", existing.get("total_amount", 0))) - credited, 0.0), 2)
             if update_data["is_paid"] else 0.0
         )
 
@@ -555,6 +577,24 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
         update_data["paid_amount"] = update_data.get("total_amount", existing.get("total_amount", 0))
         update_data["paid_at"] = existing.get("paid_at") or update_data.get("date", existing["date"])
         update_data["payment_due_date"] = None
+
+    # A credit note's invoice ("към фактура №"), worked out again whenever
+    # its number, supplier or type changes; an invoice names none.
+    old_target = existing.get("credited_invoice_id")
+    if is_credit_note:
+        if {"credited_invoice_number", "supplier", "supplier_eik", "document_type"} & set(update_data):
+            number = update_data.get("credited_invoice_number", existing.get("credited_invoice_number"))
+            update_data["credited_invoice_number"] = (number or "").strip() or None
+            target = await find_credited_invoice(scope, {
+                "supplier": update_data.get("supplier", existing.get("supplier")),
+                "supplier_eik": update_data.get("supplier_eik", existing.get("supplier_eik")),
+                "credited_invoice_number": update_data["credited_invoice_number"],
+            })
+            update_data["credited_invoice_id"] = target["id"] if target else None
+    else:
+        update_data.pop("credited_invoice_number", None)
+        if old_type == CREDIT_NOTE:
+            update_data.update({"credited_invoice_number": None, "credited_invoice_id": None})
 
     # Newly switched to reverse charge and no протокол yet - assign one,
     # same as on create.
@@ -640,6 +680,15 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
 
     invoice = await server.db.invoices.find_one({"id": invoice_id}, {"_id": 0})
 
+    # What credit notes took off, recounted on both sides of any change.
+    if is_credit_note or old_type == CREDIT_NOTE:
+        for target_id in {old_target, (invoice or {}).get("credited_invoice_id")} - {None}:
+            await settle_credited_invoice(target_id, scope)
+    if invoice and not is_credit_note:
+        await settle_credited_invoice(invoice_id, scope)
+        await link_waiting_credit_notes(scope, invoice)
+        invoice = await server.db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+
     # Its lines follow its type: a credit note's never stand as purchase
     # prices; an invoice it was turned back into gets them back.
     if company_id and invoice and new_type != old_type:
@@ -671,6 +720,14 @@ async def delete_invoice(invoice_id: str, current_user: User = Depends(get_curre
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
     if company_id:
         await purge_invoice_price_data(company_id, invoice_id)
+    if invoice and invoice.get("document_type") == CREDIT_NOTE:
+        # Its invoice is owed again what it took off.
+        await settle_credited_invoice(invoice.get("credited_invoice_id"), scope)
+    elif invoice:
+        # Credit notes to it wait for it again (restored, it picks them up).
+        await server.db.invoices.update_many(
+            {**scope, "credited_invoice_id": invoice_id}, {"$set": {"credited_invoice_id": None}},
+        )
     if invoice and invoice.get("asset_id"):
         # The asset stays; it just no longer points at a purchase invoice.
         await server.db.assets.update_one(
@@ -735,7 +792,7 @@ async def restore_audit_entry(log_id: str, current_user: User = Depends(get_curr
     its own permission the owner grants explicitly (see restore_deleted_data
     in ROLE_PERMISSIONS)."""
     require_permission(current_user, "restore_deleted_data")
-    company_id, _ = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="Нямате фирма")
 
@@ -774,6 +831,10 @@ async def restore_audit_entry(log_id: str, current_user: User = Depends(get_curr
             snapshot["asset_id"] = None
     await server.db.invoices.insert_one(dict(snapshot))
     await rebuild_invoice_price_history(company_id, snapshot)
+    if snapshot.get("document_type") == CREDIT_NOTE:
+        await settle_credited_invoice(snapshot.get("credited_invoice_id"), scope)
+    else:
+        await link_waiting_credit_notes(scope, snapshot)
     await server.db.audit_logs.update_one({"id": log_id}, {"$set": {"details.restored": True}})
 
     await audit_service.log_action(

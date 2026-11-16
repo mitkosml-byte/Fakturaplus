@@ -228,7 +228,7 @@ class ChatDataTools:
         start, end = _resolve_range(start_date, end_date)
         invoices = await server.db.invoices.find(
             {**self.scope, "date": Period(start, end).datetime_filter()},
-            {"_id": 0, "supplier": 1, "total_amount": 1, "paid_amount": 1, "is_paid": 1, "payment_method": 1, "date": 1,
+            {"_id": 0, "supplier": 1, "total_amount": 1, "paid_amount": 1, "credited_amount": 1, "is_paid": 1, "payment_method": 1, "date": 1,
              "document_type": 1},
         ).to_list(ALL_ROWS)
         by_supplier: Dict[str, Dict[str, Any]] = {}
@@ -240,7 +240,7 @@ class ChatDataTools:
             entry["credit_notes" if inv.get("document_type") == CREDIT_NOTE else "invoices"] += 1
             entry["total"] += inv.get("total_amount", 0)
             if inv.get("payment_method") == "bank_transfer" and not inv.get("is_paid"):
-                entry["unpaid"] += inv.get("total_amount", 0) - inv.get("paid_amount", 0)
+                entry["unpaid"] += invoice_left(inv)
             day = inv["date"].date().isoformat() if isinstance(inv.get("date"), datetime) else None
             if day:
                 entry["first"] = min(filter(None, [entry["first"], day]))

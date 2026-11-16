@@ -304,6 +304,7 @@ export default function InvoicesScreen() {
   const [editVatTreatment, setEditVatTreatment] = useState<VatTreatment | ''>('');
   const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod | ''>('');
   const [editDocumentType, setEditDocumentType] = useState<InvoiceDocumentType>('invoice');
+  const [editCreditedNumber, setEditCreditedNumber] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -325,6 +326,7 @@ export default function InvoicesScreen() {
     setEditDate(new Date(invoice.date));
     // Amounts are edited as printed; a credit note's sign is its type.
     setEditDocumentType(invoice.document_type === 'credit_note' ? 'credit_note' : 'invoice');
+    setEditCreditedNumber(invoice.credited_invoice_number || '');
     setEditAmountWithoutVat(Math.abs(invoice.amount_without_vat).toFixed(2));
     setEditVatAmount(Math.abs(invoice.vat_amount).toFixed(2));
     setEditVatTreatment(invoice.vat_treatment || '');
@@ -409,6 +411,7 @@ export default function InvoicesScreen() {
         supplier_eik: editSupplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
         document_type: editDocumentType,
+        ...(isCreditNote ? { credited_invoice_number: editCreditedNumber.trim() } : {}),
         date: toApiDate(editDate),
         amount_without_vat: withoutVat,
         vat_amount: vat,
@@ -457,7 +460,8 @@ export default function InvoicesScreen() {
       Alert.alert(t('common.error'), t('budget.invalidAmount'));
       return;
     }
-    if (amount > selectedInvoice.total_amount + 0.01) {
+    // What can be paid: the total less what credit notes took off.
+    if (amount > selectedInvoice.total_amount - (selectedInvoice.credited_amount || 0) + 0.01) {
       Alert.alert(t('common.error'), t('invoices.paidAmountExceedsTotal'));
       return;
     }
@@ -534,7 +538,9 @@ export default function InvoicesScreen() {
     const isCreditNote = item.document_type === 'credit_note';
     const isUnpaid = !isCreditNote && item.payment_method === 'bank_transfer' && !item.is_paid;
     const overdue = isUnpaid && !!item.payment_due_date && new Date(item.payment_due_date).getTime() < Date.now();
-    const isPartial = isUnpaid && item.paid_amount > 0;
+    // Paid in part, or a credit note took part of it off.
+    const credited = item.credited_amount || 0;
+    const isPartial = isUnpaid && (item.paid_amount > 0 || credited > 0);
     const statusLabel = overdue ? t('invoices.overdue') : (isPartial ? t('invoices.partiallyPaid') : t('invoices.unpaid'));
 
     return (
@@ -588,7 +594,7 @@ export default function InvoicesScreen() {
                 <View style={[styles.compactBadge, overdue && styles.overdueBadge]}>
                   <Ionicons name={overdue ? 'alert-circle' : (isPartial ? 'pie-chart-outline' : 'time-outline')} size={11} color={overdue ? COLORS.danger : COLORS.warning} />
                   <Text style={[styles.compactBadgeText, overdue && { color: COLORS.danger }]}>
-                    {statusLabel}{isPartial ? ` (${(item.total_amount - item.paid_amount).toFixed(2)} €)` : ''}
+                    {statusLabel}{isPartial ? ` (${Math.max(0, item.total_amount - item.paid_amount - credited).toFixed(2)} €)` : ''}
                   </Text>
                 </View>
               )}
@@ -961,6 +967,8 @@ export default function InvoicesScreen() {
         onChangeVatTreatment={setEditVatTreatment}
         editDocumentType={editDocumentType}
         onChangeDocumentType={setEditDocumentType}
+        editCreditedNumber={editCreditedNumber}
+        onChangeCreditedNumber={setEditCreditedNumber}
         editPaymentMethod={editPaymentMethod}
         onChangePaymentMethod={setEditPaymentMethod}
         editNotes={editNotes}

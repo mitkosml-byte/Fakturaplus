@@ -137,6 +137,12 @@ export interface Invoice {
   created_at: string;
   // Set when this is a fixed asset's purchase invoice (not an expense of its day).
   asset_id?: string | null;
+  // Credit note: the invoice it corrects ("към фактура №"), linked once entered.
+  credited_invoice_number?: string | null;
+  credited_invoice_id?: string | null;
+  // Invoice: what credit notes to it took off - no longer owed; past what is
+  // left to pay, the supplier's to refund or offset.
+  credited_amount?: number;
 }
 
 export interface DailyRevenue {
@@ -463,6 +469,7 @@ export interface OCRResult {
   supplier_eik?: string;  // ЕИК на доставчика, ако е разпознат
   invoice_number: string;
   document_type?: InvoiceDocumentType | null;  // credit_note, ако е озаглавен "КРЕДИТНО ИЗВЕСТИЕ" (сумите са без минус)
+  credited_invoice_number?: string | null;  // при кредитно известие: "към фактура №"
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;

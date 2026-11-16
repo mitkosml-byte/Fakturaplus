@@ -164,6 +164,7 @@ async def scan_invoice(request: Request, image_base64: Optional[str] = None, cur
             supplier_eik=corrected.get("supplier_eik"),
             invoice_number=corrected.get("invoice_number", ""),
             document_type=CREDIT_NOTE if is_credit_note else "invoice",
+            credited_invoice_number=(corrected.get("credited_invoice_number") or None) if is_credit_note else None,
             amount_without_vat=shown(float(corrected.get("amount_without_vat", 0))),
             vat_amount=shown(float(corrected.get("vat_amount", 0))),
             total_amount=shown(float(corrected.get("total_amount", 0))),

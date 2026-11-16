@@ -74,7 +74,7 @@ async def get_summary(
     # misleading to only surface it while browsing that particular month.
     unpaid_query = {**scope, "payment_method": "bank_transfer", "is_paid": False}
     unpaid_invoices = await server.db.invoices.find(
-        unpaid_query, {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1}
+        unpaid_query, {"_id": 0, "total_amount": 1, "paid_amount": 1, "credited_amount": 1, "payment_due_date": 1}
     ).to_list(ALL_ROWS)
 
     def _is_overdue(inv):
@@ -109,8 +109,8 @@ async def get_summary(
     # The outstanding balance, not the invoice's full amount - a partially
     # paid invoice (paid_amount > 0 but < total_amount, still is_paid=False)
     # should only count what's actually still owed.
-    total_unpaid_amount = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in unpaid_invoices)
-    total_overdue_amount = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in overdue_invoices)
+    total_unpaid_amount = sum(invoice_left(inv) for inv in unpaid_invoices)
+    total_overdue_amount = sum(invoice_left(inv) for inv in overdue_invoices)
 
     # ДДС от фискализиран оборот - по действителната ставка на всеки запис
     # (20% стандартна, 9% намалена, 0% и т.н.). Нито джобчето, нито
