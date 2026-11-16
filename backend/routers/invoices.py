@@ -77,16 +77,18 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     normalized_supplier, _ = await normalize_supplier_name(invoice.supplier, company_id, invoice.supplier_eik)
     invoice.supplier = normalized_supplier
 
+    is_credit_note = invoice.document_type == CREDIT_NOTE
     duplicate = await find_duplicate_invoice(
-        scope, invoice.supplier, invoice.supplier_eik, invoice.invoice_number,
-        getattr(invoice, "document_type", None),
+        scope, invoice.supplier, invoice.supplier_eik, invoice.invoice_number, invoice.document_type,
     )
     if duplicate:
         added_by_user = await server.db.users.find_one({"user_id": duplicate.get("user_id")}, {"_id": 0, "name": 1})
         added_by = f" от {added_by_user['name']}" if added_by_user and added_by_user.get("name") else ""
+        what = "Кредитно известие" if is_credit_note else "Фактура"
+        done = "добавено" if is_credit_note else "добавена"
         raise HTTPException(
             status_code=409,
-            detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече е добавена{added_by}!",
+            detail=f"{what} с номер {invoice.invoice_number} от {invoice.supplier} вече е {done}{added_by}!",
         )
 
     invoice_dict = invoice.model_dump()
@@ -116,7 +118,12 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     paid_amount = 0.0
     paid_at = None
     payment_due_date = None
-    if invoice_dict.get("payment_method") in PAID_ON_THE_SPOT:
+    if is_credit_note:
+        # Nothing is owed on a credit note: settled from its own date.
+        is_paid = True
+        paid_amount = invoice_dict.get("total_amount", 0)
+        paid_at = invoice_date
+    elif invoice_dict.get("payment_method") in PAID_ON_THE_SPOT:
         is_paid = True
         paid_amount = invoice_dict.get("total_amount", 0)
         paid_at = invoice_date
@@ -150,7 +157,9 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
             # Scan-review signals, not part of the stored line.
             applied = item_dict.pop("pack_multiple_applied", None)
             rejected = item_dict.pop("pack_rule_rejected", None)
-            if applied:
+            if is_credit_note:
+                pass  # what went back teaches nothing about how a supplier packs
+            elif applied:
                 pack_lessons.append(("learn", item_dict["name"], applied))
             elif rejected:
                 pack_lessons.append(("forget", item_dict["name"], None))
@@ -164,7 +173,8 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
             item_dict["id"] = str(uuid.uuid4())
             items_list.append(item_dict)
 
-            if company_id and alert_settings:
+            # A credit note's lines are what went back, not purchase prices.
+            if company_id and alert_settings and not is_credit_note:
                 row = await price_history_row(
                     company_id, invoice.supplier, invoice_id, invoice.invoice_number, invoice_date, item_dict
                 )
@@ -402,9 +412,27 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     if not existing:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
 
+    # The document's type after this edit, and its amounts signed for it: a
+    # credit note's below zero, an invoice's never. Switching the type flips
+    # the stored amounts with it, whichever way the form shows them.
+    old_type = existing.get("document_type") or "invoice"
+    new_type = update_data.get("document_type", old_type)
+    is_credit_note = new_type == CREDIT_NOTE
+    amounts = {f: update_data[f] for f in INVOICE_AMOUNT_FIELDS if f in update_data}
+    if new_type != old_type:
+        amounts = {f: abs(float(amounts.get(f, existing.get(f) or 0))) for f in INVOICE_AMOUNT_FIELDS}
+    try:
+        update_data.update(sign_invoice_amounts(new_type, amounts))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    if is_credit_note:
+        # Settled by nature - worked out below, never taken from the form.
+        for field in ("is_paid", "paid_amount", "paid_at", "payment_due_date"):
+            update_data.pop(field, None)
+
     # A corrected supplier or number must not turn it into a copy of
     # another invoice the company already holds.
-    if {"supplier", "supplier_eik", "invoice_number"} & set(update_data):
+    if {"supplier", "supplier_eik", "invoice_number", "document_type"} & set(update_data):
         if "supplier" in update_data:
             update_data["supplier"], _ = await normalize_supplier_name(
                 update_data["supplier"], company_id, update_data.get("supplier_eik", existing.get("supplier_eik")),
@@ -414,19 +442,34 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
             update_data.get("supplier", existing.get("supplier", "")),
             update_data.get("supplier_eik", existing.get("supplier_eik")),
             update_data.get("invoice_number", existing.get("invoice_number", "")),
-            existing.get("document_type"),
+            new_type,
             exclude_id=invoice_id,
         )
         if duplicate:
+            what = "кредитно известие" if is_credit_note else "фактура"
             raise HTTPException(
                 status_code=409,
-                detail=f"Вече има фактура с номер {update_data.get('invoice_number', existing.get('invoice_number'))} от този доставчик",
+                detail=f"Вече има {what} с номер {update_data.get('invoice_number', existing.get('invoice_number'))} от този доставчик",
             )
 
     explicit_payment = "is_paid" in update_data or "paid_amount" in update_data
     computed_payment = False  # the payment state below was worked out here, not sent
     old_method = existing.get("payment_method")
     new_method = update_data.get("payment_method", old_method)
+    # A credit note turned back into an invoice starts as any new invoice
+    # does: paid at the till, or owed (with a due date by bank).
+    if old_type == CREDIT_NOTE and not is_credit_note and not explicit_payment:
+        if new_method in PAID_ON_THE_SPOT:
+            update_data["is_paid"] = True
+            update_data["paid_amount"] = update_data["total_amount"]
+            update_data["paid_at"] = update_data.get("date", existing["date"])
+        else:
+            update_data["is_paid"] = False
+            update_data["paid_amount"] = 0.0
+            update_data["paid_at"] = None
+            if new_method == "bank_transfer" and "payment_due_date" not in update_data:
+                update_data["payment_due_date"] = update_data.get("date", existing["date"]) + timedelta(days=14)
+        explicit_payment = computed_payment = True
     # Switched from paid at the till to a bank transfer: owed until someone
     # says it was paid (the edit form asks) - it used to stay "paid".
     if (
@@ -503,6 +546,12 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
             if update_data["is_paid"] else 0.0
         )
 
+    if is_credit_note:
+        update_data["is_paid"] = True
+        update_data["paid_amount"] = update_data.get("total_amount", existing.get("total_amount", 0))
+        update_data["paid_at"] = existing.get("paid_at") or update_data.get("date", existing["date"])
+        update_data["payment_due_date"] = None
+
     # Newly switched to reverse charge and no протокол yet - assign one,
     # same as on create.
     if update_data.get("vat_treatment") == VatTreatment.REVERSE_CHARGE and not existing.get("protocol_number"):
@@ -555,7 +604,8 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
             # Re-derive this line's price history and its alert from the
             # corrected values - otherwise the wrong per-unit price keeps
             # poisoning every future comparison and its bogus alert stays.
-            if company_id:
+            # (A credit note's lines have no price history to correct.)
+            if company_id and not is_credit_note:
                 await resync_invoice_line(
                     company_id, invoice_id, header["supplier"], header["invoice_number"], header["date"],
                     old_item, merged,
@@ -585,6 +635,14 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     )
 
     invoice = await server.db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+
+    # Its lines follow its type: a credit note's never stand as purchase
+    # prices; an invoice it was turned back into gets them back.
+    if company_id and invoice and new_type != old_type:
+        if is_credit_note:
+            await purge_invoice_price_data(company_id, invoice_id)
+        else:
+            await rebuild_invoice_price_history(company_id, invoice)
 
     await audit_service.log_action(
         user_id=current_user.user_id,

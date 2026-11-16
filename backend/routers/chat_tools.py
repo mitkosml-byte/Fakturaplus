@@ -216,14 +216,16 @@ class ChatDataTools:
         start, end = _resolve_range(start_date, end_date)
         invoices = await server.db.invoices.find(
             {**self.scope, "date": Period(start, end).datetime_filter()},
-            {"_id": 0, "supplier": 1, "total_amount": 1, "paid_amount": 1, "is_paid": 1, "payment_method": 1, "date": 1},
+            {"_id": 0, "supplier": 1, "total_amount": 1, "paid_amount": 1, "is_paid": 1, "payment_method": 1, "date": 1,
+             "document_type": 1},
         ).to_list(ALL_ROWS)
         by_supplier: Dict[str, Dict[str, Any]] = {}
         for inv in invoices:
             name = inv.get("supplier") or "—"
-            entry = by_supplier.setdefault(name, {"supplier": name, "invoices": 0, "total": 0.0, "unpaid": 0.0,
-                                                  "first": None, "last": None})
-            entry["invoices"] += 1
+            entry = by_supplier.setdefault(name, {"supplier": name, "invoices": 0, "credit_notes": 0, "total": 0.0,
+                                                  "unpaid": 0.0, "first": None, "last": None})
+            # A credit note (stored below zero) takes its amount off the total.
+            entry["credit_notes" if inv.get("document_type") == CREDIT_NOTE else "invoices"] += 1
             entry["total"] += inv.get("total_amount", 0)
             if inv.get("payment_method") == "bank_transfer" and not inv.get("is_paid"):
                 entry["unpaid"] += inv.get("total_amount", 0) - inv.get("paid_amount", 0)
@@ -242,7 +244,8 @@ class ChatDataTools:
                 break
             top_items = await self._top_items_for_supplier(entry["supplier"], start, end)
             matches.append({
-                "supplier": entry["supplier"], "invoices": entry["invoices"], "total": round(entry["total"], 2),
+                "supplier": entry["supplier"], "invoices": entry["invoices"], "credit_notes": entry["credit_notes"],
+                "total": round(entry["total"], 2),
                 "unpaid_bank_transfer": round(entry["unpaid"], 2), "first_invoice": entry["first"],
                 "last_invoice": entry["last"], "top_items_by_spend": top_items, "match_score": round(score, 2),
             })

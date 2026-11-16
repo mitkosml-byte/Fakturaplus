@@ -773,3 +773,75 @@ def test_a3_item_statistics_say_how_much_of_the_purchases_they_cover(client):
     # A period with purchases but no read lines still says so.
     empty = client.get("/api/statistics/items?start_date=2026-10-06&end_date=2026-10-06", headers=owner).json()
     assert empty["coverage"]["share"] == 0 and empty["coverage"]["invoices_without_lines"] == 1
+
+
+def test_p4_a_credit_note_takes_purchases_and_vat_credit_down(client):
+    company_id, _, owner = _company()
+    october = "start_date=2026-10-01&end_date=2026-10-31"
+    invoice = client.post("/api/invoices", headers=owner, json={
+        "supplier": "Метро", "invoice_number": "1001", "date": "2026-10-05", "payment_method": "bank_transfer",
+        "amount_without_vat": 100, "vat_amount": 20, "total_amount": 120,
+        "items": [{"name": "Брашно", "quantity": 10, "unit": "кг", "unit_price": 10}],
+    }).json()
+    # Typed as printed, without a minus.
+    note = client.post("/api/invoices", headers=owner, json={
+        "supplier": "Метро", "invoice_number": "1001", "date": "2026-10-08", "document_type": "credit_note",
+        "payment_method": "bank_transfer", "amount_without_vat": 50, "vat_amount": 10, "total_amount": 60,
+        "items": [{"name": "Брашно", "quantity": 5, "unit": "кг", "unit_price": 10}],
+    })
+    assert note.status_code == 200, note.text   # the same number as an invoice is another document
+    note = note.json()
+    assert (note["amount_without_vat"], note["vat_amount"], note["total_amount"]) == (-50, -10, -60)
+    assert note["is_paid"] is True and note["payment_due_date"] is None
+
+    summary = client.get(f"/api/statistics/summary?{october}", headers=owner).json()
+    assert summary["total_invoice_amount"] == 60 and summary["total_invoice_vat"] == 10
+    assert summary["invoice_count"] == 1
+    assert summary["unpaid_invoice_count"] == 1 and summary["total_unpaid_amount"] == 120
+
+    suppliers = client.get(f"/api/statistics/suppliers?{october}", headers=owner).json()
+    metro = next(s for s in suppliers["all_suppliers"] if s["supplier"] == "Метро")
+    assert metro["total_amount"] == 60 and metro["invoice_count"] == 1
+
+    # What went back is not a purchase price.
+    rows = asyncio.run(server.db.item_price_history.find({"company_id": company_id}).to_list(None))
+    assert [r["invoice_id"] for r in rows] == [invoice["id"]]
+
+    again = client.post("/api/invoices", headers=owner, json={
+        "supplier": "Метро", "invoice_number": "1001", "date": "2026-10-09", "document_type": "credit_note",
+        "amount_without_vat": 50, "vat_amount": 10, "total_amount": 60,
+    })
+    assert again.status_code == 409 and "Кредитно известие" in again.json()["detail"]
+    minus_invoice = client.post("/api/invoices", headers=owner, json={
+        "supplier": "Метро", "invoice_number": "1002", "date": "2026-10-09",
+        "amount_without_vat": -50, "vat_amount": -10, "total_amount": -60,
+    })
+    assert minus_invoice.status_code == 422 and "кредитно известие" in minus_invoice.text
+
+    # Turned into an invoice: above zero, owed; back to a credit note: below zero, settled, no price rows.
+    # (As an invoice it would copy invoice 1001 - refused - so it takes its own number.)
+    refused = client.put(f"/api/invoices/{note['id']}", headers=owner, json={"document_type": "invoice"})
+    assert refused.status_code == 409
+    as_invoice = client.put(f"/api/invoices/{note['id']}", headers=owner,
+                            json={"document_type": "invoice", "invoice_number": "1003"})
+    assert as_invoice.status_code == 200, as_invoice.text
+    as_invoice = as_invoice.json()
+    assert as_invoice["total_amount"] == 60 and as_invoice["is_paid"] is False and as_invoice["paid_amount"] == 0
+    assert asyncio.run(server.db.item_price_history.count_documents({"invoice_id": note["id"]})) == 1
+    back = client.put(f"/api/invoices/{note['id']}", headers=owner,
+                      json={"document_type": "credit_note", "total_amount": -60}).json()
+    assert back["total_amount"] == -60 and back["is_paid"] is True and back["paid_amount"] == -60
+    assert asyncio.run(server.db.item_price_history.count_documents({"invoice_id": note["id"]})) == 0
+
+    # Never an asset's purchase invoice.
+    linkable = client.get("/api/assets/linkable-invoices", params={"search": "Метро"}, headers=owner).json()
+    assert [i["id"] for i in linkable] == [invoice["id"]]
+
+    # An imported row below zero is a credit note.
+    imported = client.post("/api/import/invoices/commit", headers=owner, json={"rows": [{
+        "supplier": "Енерго", "invoice_number": "КИ-7", "date": "2026-10-10",
+        "amount_without_vat": -10, "vat_amount": -2, "total_amount": -12,
+    }]}).json()
+    assert imported["imported"] == 1, imported
+    stored = asyncio.run(server.db.invoices.find_one({"company_id": company_id, "invoice_number": "КИ-7"}))
+    assert stored["document_type"] == "credit_note" and stored["total_amount"] == -12

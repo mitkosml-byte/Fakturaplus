@@ -258,7 +258,9 @@ async def purge_invoice_price_data(company_id: str, invoice_id: str) -> None:
 
 async def rebuild_invoice_price_history(company_id: str, invoice_doc: dict) -> None:
     """Re-derives the price history of a restored invoice (no alerts - a
-    restore is not a new purchase)."""
+    restore is not a new purchase). A credit note has none."""
+    if invoice_doc.get("document_type") == CREDIT_NOTE:
+        return
     invoice_date = invoice_doc.get("date")
     if isinstance(invoice_date, str):
         invoice_date = datetime.fromisoformat(invoice_date.replace("Z", "+00:00"))
@@ -695,7 +697,8 @@ async def _item_coverage(current_user: User, start_date: Optional[str], end_date
     for the owner to wonder about.
     """
     _, scope = await get_company_scope(current_user)
-    query: Dict[str, Any] = dict(scope)
+    # Purchases only - a credit note's lines never enter the item figures.
+    query: Dict[str, Any] = {**scope, **NOT_A_CREDIT_NOTE}
     if start_date or end_date:
         query["date"] = Period.parse(start_date, end_date).datetime_filter()
     net_only = {"_id": 0, "amount_without_vat": 1}

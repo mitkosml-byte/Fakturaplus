@@ -8,7 +8,7 @@ import { useRouter } from 'expo-router';
 import DateTimePickerModal from '../AppDateTimePicker';
 import { PressableScale } from '..';
 import { useTranslation } from '../../i18n';
-import { Invoice, PaymentMethod, VatTreatment } from '../../types';
+import { Invoice, PaymentMethod, VatTreatment, InvoiceDocumentType } from '../../types';
 import { Avatar } from '../Avatar';
 import { COLORS } from '../../theme/colors';
 import { useAuth } from '../../contexts/AuthContext';
@@ -58,6 +58,9 @@ type Props = {
   // An invoice saved without one (older ones) can be given one here.
   editPaymentMethod: PaymentMethod | '';
   onChangePaymentMethod: (v: PaymentMethod) => void;
+  // Invoice or credit note - amounts are edited as printed either way.
+  editDocumentType: InvoiceDocumentType;
+  onChangeDocumentType: (v: InvoiceDocumentType) => void;
   editNotes: string;
   onChangeNotes: (v: string) => void;
   // Lets a line item's quantity/unit_price be corrected after the fact -
@@ -89,7 +92,8 @@ export function InvoiceDetailModal({
   editInvoiceNumber, onChangeInvoiceNumber, editDate, onChangeEditDate,
   isEditDatePickerVisible, onOpenEditDatePicker, onCloseEditDatePicker,
   editAmountWithoutVat, onChangeAmountWithoutVat, editVatAmount, onChangeVatAmount,
-  editVatTreatment, onChangeVatTreatment, editPaymentMethod, onChangePaymentMethod, editNotes, onChangeNotes,
+  editVatTreatment, onChangeVatTreatment, editPaymentMethod, onChangePaymentMethod,
+  editDocumentType, onChangeDocumentType, editNotes, onChangeNotes,
   editItems, onChangeEditItemField, savingEdit, onSaveEdit,
   selectedInvoiceAlerts, loadingInvoiceAlerts, updatingPayment, onTogglePaid, onOpenPaymentModal,
   scannedPages, loadingScannedPages, onViewPage, onDelete,
@@ -97,8 +101,10 @@ export function InvoiceDetailModal({
   const { t } = useTranslation();
   const router = useRouter();
   const { hasPermission } = useAuth();
-  // Recording the purchase as a fixed asset needs both screens' rights.
-  const canMakeAsset = hasPermission('manage_budget') && hasPermission('manage_invoices');
+  const isCreditNote = invoice?.document_type === 'credit_note';
+  // Recording the purchase as a fixed asset needs both screens' rights -
+  // and a purchase: a credit note is never an asset's invoice.
+  const canMakeAsset = hasPermission('manage_budget') && hasPermission('manage_invoices') && !isCreditNote;
 
   const formatDate = (dateStr: string) => {
     try {
@@ -182,6 +188,23 @@ export function InvoiceDetailModal({
                 locale={language}
               />
 
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{t('scan.documentType')}</Text>
+                <View style={styles.vatTreatmentGrid}>
+                  {(['invoice', 'credit_note'] as InvoiceDocumentType[]).map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.vatTreatmentChip, editDocumentType === option && styles.vatTreatmentChipActive]}
+                      onPress={() => onChangeDocumentType(option)}
+                    >
+                      <Text style={[styles.vatTreatmentChipText, editDocumentType === option && styles.vatTreatmentChipTextActive]}>
+                        {t(`scan.documentType.${option}`)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
               <View style={styles.detailRow2}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>{t('invoices.withoutVAT')}</Text>
@@ -231,6 +254,7 @@ export function InvoiceDetailModal({
                 </View>
               </View>
 
+              {editDocumentType !== 'credit_note' && (
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
                 <View style={styles.vatTreatmentGrid}>
@@ -247,6 +271,7 @@ export function InvoiceDetailModal({
                   ))}
                 </View>
               </View>
+              )}
 
               {editItems.length > 0 && (
                 <View style={styles.inputGroup}>
@@ -304,6 +329,15 @@ export function InvoiceDetailModal({
 
           {invoice && !editMode && (
             <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
+              {isCreditNote && (
+                <View style={styles.assetBanner}>
+                  <Ionicons name="return-down-back" size={18} color={COLORS.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.assetBannerTitle}>{t('invoices.creditNote')}</Text>
+                    <Text style={styles.assetBannerText}>{t('invoices.creditNoteSettled')}</Text>
+                  </View>
+                </View>
+              )}
               <View style={styles.detailSection}>
                 <Text style={styles.detailSectionLabel}>{t('invoices.supplier')}</Text>
                 <Text style={styles.detailSectionValue}>{invoice.supplier}</Text>
@@ -393,7 +427,7 @@ export function InvoiceDetailModal({
                 <Text style={styles.totalSectionValue}>{invoice.total_amount.toFixed(2)} €</Text>
               </View>
 
-              {invoice.payment_method && (() => {
+              {invoice.payment_method && !isCreditNote && (() => {
                 const overdue = !invoice.is_paid && !!invoice.payment_due_date
                   && new Date(invoice.payment_due_date).getTime() < Date.now();
                 return (

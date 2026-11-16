@@ -228,12 +228,17 @@ def _parse_invoice_row(row: List[Any], table: ParsedTable, _ctx: Dict[str, Any])
         warnings.append("непознато ДДС третиране - ще се определи автоматично")
     if payment_method_raw and not payment_method:
         warnings.append("непознат начин на плащане - оставен непопълнен")
+    # An accounting list shows a credit note as a row below zero.
+    is_credit_note = total_amount is not None and total_amount < 0
+    if is_credit_note:
+        warnings.append("кредитно известие - намалява покупките и ДДС кредита")
 
     data = {
         "date": date_val + "T00:00:00Z",
         "supplier": str(supplier).strip(),
         "supplier_eik": str(eik).strip() if eik else None,
         "invoice_number": str(invoice_number).strip(),
+        "document_type": "credit_note" if is_credit_note else "invoice",
         "amount_without_vat": amount_without_vat,
         "vat_amount": vat_amount,
         "total_amount": total_amount,
@@ -451,7 +456,7 @@ ENTITY_TEMPLATES = {
         "label": "Фактури от доставчици",
         "headers": ["Дата*", "Доставчик*", "ЕИК", "№ Фактура*", "Сума без ДДС", "ДДС", "Обща сума*", "ДДС третиране", "Начин на плащане", "Срок за плащане", "Бележки"],
         "example": ["01.09.2026", "Мелница Добруджа АД", "131071587", "0000001234", "500.00", "100.00", "600.00", "Стандартна 20%", "Банков превод", "15.09.2026", ""],
-        "notes": "Полетата с * са задължителни. ДДС третиране: Стандартна 20% / Намалена 9% / Нулева ставка / Освободена доставка / Обратно начисляване / Извън обхвата на ДДС. Начин на плащане: В брой / Банков превод. Дублирана фактура (същия номер + доставчик) се пропуска.",
+        "notes": "Полетата с * са задължителни. ДДС третиране: Стандартна 20% / Намалена 9% / Нулева ставка / Освободена доставка / Обратно начисляване / Извън обхвата на ДДС. Начин на плащане: В брой / Банков превод. Кредитно известие: сумите с минус. Дублирана фактура (същия номер + доставчик) се пропуска.",
     },
     "assets": {
         "label": "Дълготрайни активи (ДМА)",

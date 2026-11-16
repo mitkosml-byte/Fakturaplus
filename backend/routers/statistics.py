@@ -580,7 +580,8 @@ async def get_supplier_statistics(
         "total_amount": 1,
         "vat_amount": 1,
         "amount_without_vat": 1,
-        "date": 1
+        "date": 1,
+        "document_type": 1,
     }).to_list(ALL_ROWS)
     
     # Group by supplier with detailed data
@@ -599,6 +600,10 @@ async def get_supplier_statistics(
         supplier_data[supplier]["total_amount"] += amount
         supplier_data[supplier]["total_vat"] += inv.get("vat_amount", 0)
         supplier_data[supplier]["total_net"] += inv.get("amount_without_vat", 0)
+        # A credit note takes its amount off the supplier's total; it is not
+        # an invoice, nor a delivery that sets the supplier's rhythm.
+        if inv.get("document_type") == CREDIT_NOTE:
+            continue
         supplier_data[supplier]["invoice_count"] += 1
         
         date_val = inv.get("date")
@@ -683,7 +688,7 @@ async def get_supplier_statistics(
     else:
         reference = min(period.end, today)
         earlier = await server.db.invoices.aggregate([
-            {"$match": {**scope, "date": {"$lt": day_start_utc(period.start)}}},
+            {"$match": {**scope, **NOT_A_CREDIT_NOTE, "date": {"$lt": day_start_utc(period.start)}}},
             {"$group": {"_id": "$supplier", "last": {"$max": "$date"}, "first": {"$min": "$date"}}},
         ]).to_list(ALL_ROWS)
         bought_in_period = set(supplier_data.keys())

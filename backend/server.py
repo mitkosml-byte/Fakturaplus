@@ -8,7 +8,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr, ValidationError
+from pydantic import BaseModel, Field, EmailStr, ValidationError, model_validator
 from typing import Annotated, List, Optional, Dict, Any, Literal
 from enum import Enum
 import uuid
@@ -335,9 +335,43 @@ class VatTreatment(str, Enum):
     REVERSE_CHARGE = "reverse_charge"  # Обратно начисляване / ВОП (протокол чл.117/чл.84)
     OUTSIDE_SCOPE = "outside_scope"    # Извън обхвата на ЗДДС
 
+# A supplier's credit note (кредитно известие - goods returned, or a
+# discount on an earlier invoice) is kept with the invoices, its amounts
+# stored below zero: every sum of purchases, VAT credit and supplier totals
+# then takes it off by itself. Nothing is owed on it, so it is settled from
+# the start, and its lines are what went back, not purchase prices - they
+# never enter the price history.
+CREDIT_NOTE = "credit_note"
+NOT_A_CREDIT_NOTE: Dict[str, Any] = {"document_type": {"$ne": CREDIT_NOTE}}
+InvoiceDocumentType = Literal["invoice", "credit_note"]
+INVOICE_AMOUNT_FIELDS = ("amount_without_vat", "vat_amount", "total_amount")
+
+
+def sign_invoice_amounts(document_type: Optional[str], amounts: Dict[str, Any]) -> Dict[str, Any]:
+    """The amounts as stored: below zero on a credit note whichever way they
+    were typed or printed, never below zero on an invoice (a minus there is
+    a credit note entered as an invoice - said, not stored)."""
+    signed: Dict[str, Any] = {}
+    for field, value in amounts.items():
+        if value is None:
+            signed[field] = value
+            continue
+        number = float(value)
+        if document_type == CREDIT_NOTE:
+            signed[field] = -abs(number) if number else 0.0
+        elif number < 0:
+            raise ValueError("Отрицателна сума е възможна само при кредитно известие - изберете вида на документа")
+        else:
+            signed[field] = number
+    return signed
+
+
 class Invoice(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
+    # None (every invoice before credit notes existed) or "invoice" is an
+    # invoice; "credit_note" is a credit note, its amounts below zero.
+    document_type: Optional[str] = None
     company_id: Optional[str] = None  # Връзка към фирмата
     supplier: str
     supplier_eik: Optional[str] = None  # ЕИК/Булстат на доставчика
@@ -487,9 +521,12 @@ class InvoiceCreate(BaseModel):
     supplier: str
     supplier_eik: Optional[str] = None
     invoice_number: str
-    amount_without_vat: float = Field(ge=0)
-    vat_amount: float = Field(ge=0)
-    total_amount: float = Field(ge=0)
+    document_type: InvoiceDocumentType = "invoice"
+    # As printed: a credit note may be typed with or without a minus, it
+    # is stored below zero either way (sign_invoice_amounts).
+    amount_without_vat: float
+    vat_amount: float
+    total_amount: float
     vat_treatment: Optional[VatTreatment] = None
     date: str
     image_base64: Optional[str] = None  # Legacy - едностранично сканиране
@@ -499,13 +536,22 @@ class InvoiceCreate(BaseModel):
     payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = None  # paid on the spot: cash, card
     payment_due_date: Optional[str] = None  # само при bank_transfer; ако липсва се изчислява
 
+    @model_validator(mode="after")
+    def _signed_amounts(self) -> "InvoiceCreate":
+        signed = sign_invoice_amounts(self.document_type, {f: getattr(self, f) for f in INVOICE_AMOUNT_FIELDS})
+        for field, value in signed.items():
+            setattr(self, field, value)
+        return self
+
 class InvoiceUpdate(BaseModel):
     supplier: Optional[str] = None
     supplier_eik: Optional[str] = None
     invoice_number: Optional[str] = None
-    amount_without_vat: Optional[float] = Field(default=None, ge=0)
-    vat_amount: Optional[float] = Field(default=None, ge=0)
-    total_amount: Optional[float] = Field(default=None, ge=0)
+    document_type: Optional[InvoiceDocumentType] = None
+    # Signed by the route, against the document's type after this edit.
+    amount_without_vat: Optional[float] = None
+    vat_amount: Optional[float] = None
+    total_amount: Optional[float] = None
     vat_treatment: Optional[VatTreatment] = None
     protocol_number: Optional[str] = None
     date: Optional[str] = None
@@ -513,7 +559,7 @@ class InvoiceUpdate(BaseModel):
     payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = None
     payment_due_date: Optional[str] = None
     is_paid: Optional[bool] = None
-    paid_amount: Optional[float] = Field(default=None, ge=0)
+    paid_amount: Optional[float] = None  # checked by the route (never below 0 on an invoice)
     items: Optional[List[InvoiceItemUpdate]] = None
 
 class DailyRevenue(BaseModel):
@@ -718,6 +764,7 @@ class OCRResult(BaseModel):
     supplier: str
     supplier_eik: Optional[str] = None  # ЕИК на доставчика, ако е видим на фактурата
     invoice_number: str
+    document_type: Optional[str] = None  # invoice | credit_note (озаглавен "КРЕДИТНО ИЗВЕСТИЕ")
     amount_without_vat: float
     vat_amount: float
     total_amount: float
@@ -2009,6 +2056,10 @@ class ClaudeInvoiceExtraction(BaseModel):
     supplier: str = Field(description="Пълното име на доставчика (издателя), НЕ на получателя/купувача")
     supplier_eik: Optional[str] = Field(default=None, description="ЕИК/Булстат на доставчика, ако е видим на фактурата")
     invoice_number: str = Field(description="Номер на фактурата")
+    document_type: Literal["invoice", "credit_note"] = Field(
+        default="invoice",
+        description="credit_note, ако документът е озаглавен КРЕДИТНО ИЗВЕСТИЕ (връщане или отстъпка по по-ранна фактура); за всяка друга фактура - invoice",
+    )
     invoice_date: Optional[str] = Field(default=None, description="Дата на издаване, формат YYYY-MM-DD")
     payment_due_date: Optional[str] = Field(default=None, description="Срок/падеж за плащане, формат YYYY-MM-DD, само ако е изрично отпечатан на фактурата")
     amount_without_vat: float = Field(description="Данъчна основа / обща сума без ДДС")
@@ -2043,6 +2094,9 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 
 НАЧИН НА ПЛАЩАНЕ (payment_method):
 Повечето фактури печатат "Начин на плащане" / "Плащане". "В брой" → cash; "По банков път", "Банков превод", "По сметка" → bank_transfer; "С карта", "Карта", "ПОС", "Дебитна/кредитна карта" → card. Ако начинът на плащане не е отпечатан, остави payment_method празно (null) - НЕ гадай: приложението ще попита човека.
+
+КРЕДИТНО ИЗВЕСТИЕ (document_type):
+Ако документът е озаглавен "КРЕДИТНО ИЗВЕСТИЕ" (връщане на стока или отстъпка по по-ранна фактура), върни document_type = "credit_note"; за всяка друга фактура (включително "ДЕБИТНО ИЗВЕСТИЕ") върни "invoice". При кредитно известие връщай сумите така, както са отпечатани, без знак минус - приложението само ги отчита като намаление на покупките. Номерът е собственият номер на известието, а не номерът на фактурата, към която е издадено.
 
 ОБЩИ ПРАВИЛА:
 - Всички суми в полетата на артикулите и amount_without_vat са БЕЗ ДДС.
@@ -2433,14 +2487,17 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
     same numbers."""
     # An invoice for a fixed asset is not an expense of its day - the asset
     # is expensed through its depreciation month by month - but its VAT is
-    # still a credit, and it is still one of the period's invoices.
+    # still a credit, and it is still one of the period's invoices. A credit
+    # note takes its (negative) amounts off every sum and is not counted as
+    # an invoice.
     invoices = await db.invoices.aggregate([
         {"$match": {**scope, "date": period.datetime_filter(), **NOT_AN_ASSET}},
         {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "net": {"$sum": "$amount_without_vat"}}},
     ]).to_list(ALL_ROWS)
     all_invoices = await db.invoices.aggregate([
         {"$match": {**scope, "date": period.datetime_filter()}},
-        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"}, "count": {"$sum": 1}}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
+                    "count": {"$sum": {"$cond": [{"$eq": ["$document_type", CREDIT_NOTE]}, 0, 1]}}}},
     ]).to_list(ALL_ROWS)
     revenue_by_rate = await db.daily_revenue.aggregate([
         {"$match": {**scope, "date": period.text_filter()}},

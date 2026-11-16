@@ -94,6 +94,11 @@ export type VatTreatment =
 // Cash and card are paid at the till; a bank transfer is owed until paid.
 export type PaymentMethod = 'cash' | 'bank_transfer' | 'card';
 
+// A supplier's credit note (goods returned, a discount on an earlier
+// invoice) is kept with the invoices, its amounts stored below zero so it
+// takes purchases and the VAT credit down; nothing is owed on it.
+export type InvoiceDocumentType = 'invoice' | 'credit_note';
+
 export interface Invoice {
   id: string;
   user_id: string;
@@ -101,6 +106,8 @@ export interface Invoice {
   supplier: string;
   supplier_eik?: string;
   invoice_number: string;
+  // null/absent (invoices from before credit notes) or 'invoice' is an invoice.
+  document_type?: InvoiceDocumentType | null;
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;
@@ -348,6 +355,7 @@ export interface OCRResult {
   supplier: string;
   supplier_eik?: string;  // ЕИК на доставчика, ако е разпознат
   invoice_number: string;
+  document_type?: InvoiceDocumentType | null;  // credit_note, ако е озаглавен "КРЕДИТНО ИЗВЕСТИЕ" (сумите са без минус)
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;

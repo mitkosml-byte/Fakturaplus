@@ -50,6 +50,13 @@ from server import _IMPORT_PERMISSIONS
 router = APIRouter(prefix="/api")
 
 
+def _below_zero(value: Any) -> bool:
+    try:
+        return float(value) < 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _expense_key(day: Any, description: Any, amount: Any) -> tuple:
     try:
         money = round(float(amount or 0), 2)
@@ -149,7 +156,11 @@ async def import_commit(entity: str, request: Request, payload: ImportCommitRequ
                     already_present += 1
                     continue
             if entity == "invoices":
-                await create_invoice(invoice=InvoiceCreate(**row_data), background_tasks=bg_tasks, current_user=current_user)
+                invoice_row = dict(row_data)
+                # An accounting list shows a credit note as a row below zero.
+                if not invoice_row.get("document_type") and _below_zero(invoice_row.get("total_amount")):
+                    invoice_row["document_type"] = CREDIT_NOTE
+                await create_invoice(invoice=InvoiceCreate(**invoice_row), background_tasks=bg_tasks, current_user=current_user)
             elif entity == "assets":
                 await create_asset(asset=FixedAssetCreate(**row_data), current_user=current_user)
             elif entity == "budget":

@@ -50,10 +50,13 @@ async def _attach_invoice(scope: dict, asset_id: str, invoice_id: str) -> str:
     NOT_AN_ASSET) - the asset's depreciation is its expense - while its VAT
     stays a credit."""
     invoice = await server.db.invoices.find_one(
-        {"id": invoice_id, **scope}, {"_id": 0, "id": 1, "asset_id": 1, "supplier": 1, "invoice_number": 1},
+        {"id": invoice_id, **scope},
+        {"_id": 0, "id": 1, "asset_id": 1, "supplier": 1, "invoice_number": 1, "document_type": 1},
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+    if invoice.get("document_type") == CREDIT_NOTE:
+        raise HTTPException(status_code=409, detail="Кредитното известие не е покупка - актив се свързва с фактурата, с която е купен")
     if invoice.get("asset_id") and invoice["asset_id"] != asset_id:
         raise HTTPException(status_code=409, detail="Тази фактура вече е свързана с друг актив")
     await server.db.invoices.update_one({"id": invoice_id, **scope}, {"$set": {"asset_id": asset_id}})
@@ -76,12 +79,13 @@ async def get_linkable_invoices(
     require_permission(current_user, "manage_budget")
     require_permission(current_user, "manage_invoices")
     _, scope = await get_company_scope(current_user)
-    query: Dict[str, Any] = dict(scope)
+    # Purchases only - a credit note is never an asset's purchase invoice.
+    query: Dict[str, Any] = {**scope, **NOT_A_CREDIT_NOTE}
     if invoice_id:
-        query = {"$and": [scope, {"id": invoice_id}]}
+        query = {"$and": [scope, NOT_A_CREDIT_NOTE, {"id": invoice_id}]}
     elif search and search.strip():
         pattern = {"$regex": re.escape(search.strip()), "$options": "i"}
-        query = {"$and": [scope, {"$or": [{"supplier": pattern}, {"invoice_number": pattern}]}]}
+        query = {"$and": [scope, NOT_A_CREDIT_NOTE, {"$or": [{"supplier": pattern}, {"invoice_number": pattern}]}]}
     invoices = await server.db.invoices.find(
         query, {"_id": 0, "id": 1, "supplier": 1, "invoice_number": 1, "date": 1, "total_amount": 1,
                 "amount_without_vat": 1, "asset_id": 1, "items": {"$slice": 1}},

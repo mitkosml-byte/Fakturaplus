@@ -23,7 +23,7 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
-import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint, InvoiceDraftCheck, InvoiceDraftFix } from '../../src/types';
+import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint, InvoiceDraftCheck, InvoiceDraftFix, InvoiceDocumentType } from '../../src/types';
 import { detectPackMultiple, formatEur, priceAlertMeaning } from '../../src/utils/priceAlert';
 import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
@@ -132,6 +132,10 @@ export default function ScanScreen() {
   const [paymentMethodFromOcr, setPaymentMethodFromOcr] = useState(false);
   const [paymentMethodMissing, setPaymentMethodMissing] = useState(false);
   const [paymentDueDate, setPaymentDueDate] = useState<Date | null>(null);
+  // A credit note (кредитно известие) takes purchases and the VAT credit
+  // down; its amounts are typed as printed and nothing is owed on it.
+  const [documentType, setDocumentType] = useState<InvoiceDocumentType>('invoice');
+  const isCreditNote = documentType === 'credit_note';
   const [isDueDatePickerVisible, setDueDatePickerVisible] = useState(false);
 
   // Suggest a VAT treatment from the amounts (mirrors the backend's own
@@ -424,6 +428,7 @@ export default function ScanScreen() {
     try {
       const result = await api.scanInvoice(images);
       setOcrResult(result);
+      setDocumentType(result.document_type === 'credit_note' ? 'credit_note' : 'invoice');
       setSupplier(result.supplier);
       setSupplierEik(result.supplier_eik || '');
       setInvoiceNumber(result.invoice_number);
@@ -521,7 +526,7 @@ export default function ScanScreen() {
   };
 
   const handleSaveInvoice = async (confirmed: boolean = false) => {
-    if (!paymentMethod) {
+    if (!isCreditNote && !paymentMethod) {
       // Whether the invoice is owed or already paid decides every payables
       // figure - it is never left to a default.
       setPaymentMethodMissing(true);
@@ -576,6 +581,7 @@ export default function ScanScreen() {
         supplier,
         supplier_eik: supplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
+        document_type: documentType,
         amount_without_vat: parseFloat(amountWithoutVat) || 0,
         vat_amount: parseFloat(vatAmount) || 0,
         total_amount: parseFloat(totalAmount) || 0,
@@ -584,11 +590,13 @@ export default function ScanScreen() {
         image_base64s: capturedImages.length > 0 ? capturedImages : undefined,
         notes: notes || undefined,
         items: itemsPayload.length > 0 ? itemsPayload : undefined,
-        payment_method: paymentMethod || undefined,
-        payment_due_date: paymentMethod === 'bank_transfer' && paymentDueDate ? toApiDate(paymentDueDate) : undefined,
+        payment_method: (!isCreditNote && paymentMethod) || undefined,
+        payment_due_date: !isCreditNote && paymentMethod === 'bank_transfer' && paymentDueDate ? toApiDate(paymentDueDate) : undefined,
       });
       Haptics.success();
-      if (saved.protocol_number) {
+      if (isCreditNote) {
+        Toast.success(t('scan.creditNoteSaved'));
+      } else if (saved.protocol_number) {
         Toast.success(`${t('msg.invoiceSaved')} · ${t('scan.protocolAssigned')} ${saved.protocol_number}`);
       } else {
         Toast.success(t('msg.invoiceSaved'));
@@ -817,6 +825,7 @@ export default function ScanScreen() {
     setPaymentMethodFromOcr(false);
     setPaymentMethodMissing(false);
     setPaymentDueDate(null);
+    setDocumentType('invoice');
   };
 
   return (
@@ -1051,6 +1060,29 @@ export default function ScanScreen() {
                     </>
                   ) : (
                     <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('scan.documentType')}</Text>
+                    <View style={styles.vatTreatmentGrid}>
+                      {(['invoice', 'credit_note'] as InvoiceDocumentType[]).map((option) => (
+                        <TouchableOpacity
+                          key={option}
+                          style={[styles.vatTreatmentChip, documentType === option && styles.vatTreatmentChipActive]}
+                          onPress={() => setDocumentType(option)}
+                        >
+                          <Text style={[styles.vatTreatmentChipText, documentType === option && styles.vatTreatmentChipTextActive]}>
+                            {t(`scan.documentType.${option}`)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    {isCreditNote && (
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="return-down-back" size={16} color={COLORS.primary} />
+                        <Text style={styles.protocolNoteText}>{t('scan.creditNoteNote')}</Text>
+                      </View>
+                    )}
+                  </View>
+
                   <StaggerReveal index={0} style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.supplier')} *</Text>
                     <TextInput
@@ -1208,6 +1240,8 @@ export default function ScanScreen() {
                     )}
                   </StaggerReveal>
 
+                  {/* Nothing is owed on a credit note - no payment to say. */}
+                  {!isCreditNote && (
                   <View style={styles.inputGroup}>
                     <Text style={[styles.inputLabel, paymentMethodMissing && !paymentMethod && { color: COLORS.danger }]}>
                       {t('scan.paymentMethod')} *
@@ -1262,6 +1296,7 @@ export default function ScanScreen() {
                       </TouchableOpacity>
                     )}
                   </View>
+                  )}
 
                   <DateTimePickerModal
                     isVisible={isDueDatePickerVisible}
@@ -1346,7 +1381,8 @@ export default function ScanScreen() {
                               </TouchableOpacity>
                             </View>
                           )}
-                          {itemPriceHints[index] && (() => {
+                          {/* What went back has no purchase price to compare. */}
+                          {!isCreditNote && itemPriceHints[index] && (() => {
                             const hint = itemPriceHints[index];
                             if (hint.kind === 'pack_suspect') {
                               const fix = packFixValues(index);

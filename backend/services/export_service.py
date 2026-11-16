@@ -49,6 +49,13 @@ except ImportError:
 _FORMULA_TRIGGER_CHARS = ('=', '+', '-', '@', '\t', '\r')
 
 
+def _document_number(inv: dict) -> str:
+    """The document's number as a list shows it - a credit note marked as
+    one, so its minus amounts read as what they are."""
+    number = str(inv.get("invoice_number", "") or "")
+    return f"КИ {number}" if inv.get("document_type") == "credit_note" else number
+
+
 def _excel_safe(value):
     if isinstance(value, str) and value.startswith(_FORMULA_TRIGGER_CHARS):
         return "'" + value
@@ -119,7 +126,7 @@ class ExportService:
             data = [
                 date_str,
                 _excel_safe(inv.get('supplier', '')),
-                _excel_safe(inv.get('invoice_number', '')),
+                _excel_safe(_document_number(inv)),
                 amount_without_vat,
                 vat_amount,
                 total,
@@ -273,7 +280,7 @@ class ExportService:
             data.append([
                 date_str,
                 supplier,
-                inv.get('invoice_number', ''),
+                _document_number(inv),
                 f"{amount_without_vat:.2f}",
                 f"{vat_amount:.2f}",
                 f"{total:.2f}"
@@ -518,7 +525,10 @@ class ExportService:
 
             date_val = inv.get("date")
             date_str = date_val.strftime("%d.%m.%Y") if isinstance(date_val, datetime) else str(date_val)[:10]
-            doc_type = "Протокол чл.117" if treatment == "reverse_charge" else "Фактура"
+            if inv.get("document_type") == "credit_note":
+                doc_type = "Кредитно известие"
+            else:
+                doc_type = "Протокол чл.117" if treatment == "reverse_charge" else "Фактура"
 
             protocol_number = ""
             deadline_str = ""

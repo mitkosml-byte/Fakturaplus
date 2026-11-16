@@ -152,13 +152,21 @@ async def scan_invoice(request: Request, image_base64: Optional[str] = None, cur
                 invoice_label=corrected.get("supplier") or None,
             )
 
+        # A credit note is shown for review as printed, without a minus;
+        # the switch on the form says what it is and saving signs it.
+        is_credit_note = corrected.get("document_type") == CREDIT_NOTE
+
+        def shown(value: float) -> float:
+            return abs(value) if is_credit_note else value
+
         return OCRResult(
             supplier=corrected.get("supplier", ""),
             supplier_eik=corrected.get("supplier_eik"),
             invoice_number=corrected.get("invoice_number", ""),
-            amount_without_vat=float(corrected.get("amount_without_vat", 0)),
-            vat_amount=float(corrected.get("vat_amount", 0)),
-            total_amount=float(corrected.get("total_amount", 0)),
+            document_type=CREDIT_NOTE if is_credit_note else "invoice",
+            amount_without_vat=shown(float(corrected.get("amount_without_vat", 0))),
+            vat_amount=shown(float(corrected.get("vat_amount", 0))),
+            total_amount=shown(float(corrected.get("total_amount", 0))),
             invoice_date=corrected.get("invoice_date"),
             payment_due_date=corrected.get("payment_due_date"),
             payment_method=corrected.get("payment_method"),

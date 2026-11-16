@@ -1083,6 +1083,34 @@ export const translations: Translations = {
     bg: 'Издаден протокол по чл.117 №',
     en: 'Issued чл.117 protocol №',
   },
+  'scan.documentType': {
+    bg: 'Вид документ',
+    en: 'Document type',
+  },
+  'scan.documentType.invoice': {
+    bg: 'Фактура',
+    en: 'Invoice',
+  },
+  'scan.documentType.credit_note': {
+    bg: 'Кредитно известие',
+    en: 'Credit note',
+  },
+  'scan.creditNoteNote': {
+    bg: 'Въведете сумите както са отпечатани - известието намалява покупките и ДДС кредита. Нищо не се дължи по него.',
+    en: 'Enter the amounts as printed - the note takes purchases and the VAT credit down. Nothing is owed on it.',
+  },
+  'scan.creditNoteSaved': {
+    bg: 'Кредитното известие е запазено',
+    en: 'Credit note saved',
+  },
+  'invoices.creditNote': {
+    bg: 'Кредитно известие',
+    en: 'Credit note',
+  },
+  'invoices.creditNoteSettled': {
+    bg: 'Намалява покупките - нищо не се дължи',
+    en: 'Takes purchases down - nothing owed',
+  },
   'scan.paymentMethod': {
     bg: 'Начин на плащане',
     en: 'Payment method',

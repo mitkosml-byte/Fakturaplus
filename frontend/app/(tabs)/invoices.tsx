@@ -19,7 +19,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
-import { Invoice, PaymentMethod, VatTreatment } from '../../src/types';
+import { Invoice, PaymentMethod, VatTreatment, InvoiceDocumentType } from '../../src/types';
 import { validateEikFormat } from '../../src/utils/eik';
 import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
@@ -303,6 +303,7 @@ export default function InvoicesScreen() {
   const [editVatAmount, setEditVatAmount] = useState('');
   const [editVatTreatment, setEditVatTreatment] = useState<VatTreatment | ''>('');
   const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod | ''>('');
+  const [editDocumentType, setEditDocumentType] = useState<InvoiceDocumentType>('invoice');
   const [editNotes, setEditNotes] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -322,8 +323,10 @@ export default function InvoicesScreen() {
     setEditSupplierEik(invoice.supplier_eik || '');
     setEditInvoiceNumber(invoice.invoice_number);
     setEditDate(new Date(invoice.date));
-    setEditAmountWithoutVat(invoice.amount_without_vat.toFixed(2));
-    setEditVatAmount(invoice.vat_amount.toFixed(2));
+    // Amounts are edited as printed; a credit note's sign is its type.
+    setEditDocumentType(invoice.document_type === 'credit_note' ? 'credit_note' : 'invoice');
+    setEditAmountWithoutVat(Math.abs(invoice.amount_without_vat).toFixed(2));
+    setEditVatAmount(Math.abs(invoice.vat_amount).toFixed(2));
     setEditVatTreatment(invoice.vat_treatment || '');
     setEditPaymentMethod(invoice.payment_method || '');
     setEditNotes(invoice.notes || '');
@@ -385,7 +388,9 @@ export default function InvoicesScreen() {
       }
     }
     // From paid at the till to a bank transfer: was it already paid?
-    const methodChanged = !!editPaymentMethod && editPaymentMethod !== (selectedInvoice.payment_method || '');
+    // (Nothing is owed on a credit note - no payment to change or ask.)
+    const isCreditNote = editDocumentType === 'credit_note';
+    const methodChanged = !isCreditNote && !!editPaymentMethod && editPaymentMethod !== (selectedInvoice.payment_method || '');
     const fromTillToBank = methodChanged && editPaymentMethod === 'bank_transfer'
       && (selectedInvoice.payment_method === 'cash' || selectedInvoice.payment_method === 'card');
     if (fromTillToBank && checked.paid === undefined) {
@@ -403,6 +408,7 @@ export default function InvoicesScreen() {
         supplier,
         supplier_eik: editSupplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
+        document_type: editDocumentType,
         date: toApiDate(editDate),
         amount_without_vat: withoutVat,
         vat_amount: vat,
@@ -525,7 +531,8 @@ export default function InvoicesScreen() {
 
   const renderInvoice = ({ item }: { item: Invoice }) => {
     const eikIssue = hasEikIssue(item);
-    const isUnpaid = item.payment_method === 'bank_transfer' && !item.is_paid;
+    const isCreditNote = item.document_type === 'credit_note';
+    const isUnpaid = !isCreditNote && item.payment_method === 'bank_transfer' && !item.is_paid;
     const overdue = isUnpaid && !!item.payment_due_date && new Date(item.payment_due_date).getTime() < Date.now();
     const isPartial = isUnpaid && item.paid_amount > 0;
     const statusLabel = overdue ? t('invoices.overdue') : (isPartial ? t('invoices.partiallyPaid') : t('invoices.unpaid'));
@@ -563,8 +570,14 @@ export default function InvoicesScreen() {
             {item.invoice_number} · {formatDate(item.date)}
           </Text>
 
-          {(eikIssue || isUnpaid) && (
+          {(eikIssue || isUnpaid || isCreditNote) && (
             <View style={styles.compactBadgeRow}>
+              {isCreditNote && (
+                <View style={styles.compactBadge}>
+                  <Ionicons name="return-down-back" size={11} color={COLORS.primary} />
+                  <Text style={styles.compactBadgeText}>{t('invoices.creditNote')}</Text>
+                </View>
+              )}
               {eikIssue && (
                 <View style={styles.compactBadge}>
                   <Ionicons name="alert-circle" size={11} color={COLORS.warning} />
@@ -946,6 +959,8 @@ export default function InvoicesScreen() {
         onChangeVatAmount={setEditVatAmount}
         editVatTreatment={editVatTreatment}
         onChangeVatTreatment={setEditVatTreatment}
+        editDocumentType={editDocumentType}
+        onChangeDocumentType={setEditDocumentType}
         editPaymentMethod={editPaymentMethod}
         onChangePaymentMethod={setEditPaymentMethod}
         editNotes={editNotes}
