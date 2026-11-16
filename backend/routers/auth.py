@@ -31,8 +31,71 @@ from server import (
     _team_channel_id,
 )
 import server
+from services import two_factor as tf
 
 router = APIRouter(prefix="/api")
+
+# A login waiting for its second step: good for 10 minutes, 5 tries.
+LOGIN_CHALLENGE_MINUTES = 10
+LOGIN_CHALLENGE_TRIES = 5
+# Wrong second-step codes for one account, across logins: after this many
+# within the pause, no more tries (nor emailed codes) until it passes - so
+# a known password cannot be paired with endless guesses of the code.
+SECOND_STEP_FAILURES = 10
+SECOND_STEP_PAUSE_MINUTES = 15
+
+
+def _second_step_paused(second: Dict[str, Any]) -> bool:
+    failed_at = second.get("failed_at")
+    if not failed_at or int(second.get("failures") or 0) < SECOND_STEP_FAILURES:
+        return False
+    if failed_at.tzinfo is None:
+        failed_at = failed_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - failed_at < timedelta(minutes=SECOND_STEP_PAUSE_MINUTES)
+
+
+SECOND_STEP_PAUSED = HTTPException(
+    status_code=429, detail=f"Твърде много грешни кодове - опитайте отново след {SECOND_STEP_PAUSE_MINUTES} минути",
+)
+
+
+async def _second_step_failed(user_id: str, second: Dict[str, Any]) -> None:
+    """Counts a wrong code - from the first after a quiet pause anew."""
+    failed_at = second.get("failed_at")
+    recent = False
+    if failed_at:
+        if failed_at.tzinfo is None:
+            failed_at = failed_at.replace(tzinfo=timezone.utc)
+        recent = datetime.now(timezone.utc) - failed_at < timedelta(minutes=SECOND_STEP_PAUSE_MINUTES)
+    failures = (int(second.get("failures") or 0) if recent else 0) + 1
+    await server.db.users.update_one({"user_id": user_id}, {"$set": {
+        "two_factor.failures": failures, "two_factor.failed_at": datetime.now(timezone.utc),
+    }})
+
+
+async def _start_session(user_id: str, response: Response) -> Dict[str, Any]:
+    """A new 7-day session for this user, as the cookies and the reply."""
+    session_token = uuid.uuid4().hex
+    now = datetime.now(timezone.utc)
+    await server.db.user_sessions.insert_one({
+        "user_id": user_id, "session_token": session_token,
+        "expires_at": now + timedelta(days=7), "created_at": now,
+    })
+    set_session_cookies(response, session_token)
+    user_doc = await server.db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return {"user": sanitize_user(user_doc or {}), "session_token": session_token}
+
+
+async def _send_login_code(user: dict, code: str) -> bool:
+    return await server.send_email(
+        to_email=user["email"],
+        subject="Код за вход - Фактура+",
+        html_body=(
+            f"<p>Здравейте, {user.get('name', '')}!</p>"
+            f"<p>Кодът за вход във Фактура+ е:</p><h2 style=\"letter-spacing:4px;\">{code}</h2>"
+            f"<p>Валиден е {LOGIN_CHALLENGE_MINUTES} минути. Ако не влизате вие, сменете паролата си.</p>"
+        ),
+    )
 
 @router.get("/auth/me")
 async def get_me(current_user: User = Depends(get_current_user)):
@@ -229,23 +292,206 @@ async def login_user(request: Request, user_data: UserLogin, response: Response)
     # Verify password
     if not pwd_context.verify(user_data.password, user["password_hash"]):
         raise generic_error
-    
-    # Create session
-    session_token = uuid.uuid4().hex
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    session_doc = {
-        "user_id": user["user_id"],
-        "session_token": session_token,
-        "expires_at": expires_at,
-        "created_at": datetime.now(timezone.utc)
+
+    # A second step at login, for whoever turned it on: no session yet -
+    # a short-lived challenge the code (or a recovery code) completes.
+    second = user.get("two_factor") or {}
+    if second.get("method"):
+        if _second_step_paused(second):
+            raise SECOND_STEP_PAUSED
+        challenge: Dict[str, Any] = {
+            "token": uuid.uuid4().hex, "user_id": user["user_id"], "method": second["method"], "tries": 0,
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=LOGIN_CHALLENGE_MINUTES),
+        }
+        reply: Dict[str, Any] = {"two_factor_required": True, "challenge_token": challenge["token"], "method": second["method"]}
+        if second["method"] == "email":
+            code = tf.new_email_code()
+            challenge["code_hash"] = tf.hash_code(code)
+            # Not sent (email not working): the recovery codes still let in.
+            reply["code_sent"] = await _send_login_code(user, code)
+        await server.db.login_challenges.insert_one(challenge)
+        return reply
+
+    return await _start_session(user["user_id"], response)
+
+
+class SecondStepLogin(BaseModel):
+    challenge_token: str
+    code: str = Field(min_length=4, max_length=20)
+
+
+@router.post("/auth/login/2fa")
+@limiter.limit("10/minute")
+async def login_second_step(request: Request, payload: SecondStepLogin, response: Response):
+    """The second step of a login: the code of the authenticator app (or
+    the one sent by email), or one of the recovery codes."""
+    invalid = HTTPException(status_code=401, detail="Невалиден или изтекъл код")
+    challenge = await server.db.login_challenges.find_one({"token": payload.challenge_token}, {"_id": 0})
+    if not challenge:
+        raise invalid
+    expires_at = challenge["expires_at"]
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc) or challenge.get("tries", 0) >= LOGIN_CHALLENGE_TRIES:
+        await server.db.login_challenges.delete_one({"token": payload.challenge_token})
+        raise invalid
+    user = await server.db.users.find_one({"user_id": challenge["user_id"]}, {"_id": 0})
+    second = (user or {}).get("two_factor") or {}
+    if not user or not second.get("method"):
+        raise invalid
+    if _second_step_paused(second):
+        raise SECOND_STEP_PAUSED
+
+    # Each code counts once, even for two tries at the same moment: the app's
+    # time step and a recovery code are claimed in the same write that
+    # checks them, and the challenge itself is spent the same way.
+    accepted = False
+    if second["method"] == "totp":
+        step = tf.verify_app_code(second.get("secret") or "", payload.code, second.get("last_step"))
+        if step is not None:
+            claimed = await server.db.users.update_one(
+                {"user_id": user["user_id"], "$or": [{"two_factor.last_step": None}, {"two_factor.last_step": {"$lt": step}}]},
+                {"$set": {"two_factor.last_step": step}},
+            )
+            accepted = claimed.modified_count == 1
+    elif tf.matches_hash(payload.code, challenge.get("code_hash")):
+        accepted = True
+    if not accepted:
+        hashed = tf.hash_code(payload.code)
+        claimed = await server.db.users.update_one(
+            {"user_id": user["user_id"], "two_factor.recovery_codes": hashed},
+            {"$pull": {"two_factor.recovery_codes": hashed}},
+        )
+        accepted = claimed.modified_count == 1
+    if not accepted:
+        await server.db.login_challenges.update_one({"token": payload.challenge_token}, {"$inc": {"tries": 1}})
+        await _second_step_failed(user["user_id"], second)
+        raise invalid
+    spent = await server.db.login_challenges.delete_one({"token": payload.challenge_token})
+    if spent.deleted_count != 1:
+        raise invalid
+    if second.get("failures"):
+        await server.db.users.update_one({"user_id": user["user_id"]}, {"$unset": {"two_factor.failures": "", "two_factor.failed_at": ""}})
+    return await _start_session(user["user_id"], response)
+
+
+class SecondStepSetup(BaseModel):
+    method: Literal["totp", "email"]
+    # The password again: a session left open on someone else's phone
+    # cannot turn the second step on with an app of theirs.
+    password: Optional[str] = None
+
+
+class SecondStepCode(BaseModel):
+    code: str = Field(min_length=4, max_length=20)
+
+
+class SecondStepOff(BaseModel):
+    password: Optional[str] = None
+    code: Optional[str] = None
+
+
+@router.get("/auth/2fa")
+async def second_step_status(current_user: User = Depends(get_current_user)):
+    user = await server.db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "two_factor": 1})
+    second = (user or {}).get("two_factor") or {}
+    return {
+        "enabled": bool(second.get("method")), "method": second.get("method"),
+        "recovery_codes_left": len(second.get("recovery_codes") or []),
+        "email_available": server.EMAIL_FEATURES_ENABLED,
+        # Recommended for whoever sees the whole business.
+        "recommended": current_user.role in ("owner", "manager"),
     }
-    await server.db.user_sessions.insert_one(session_doc)
-    
-    # Set cookies (session + CSRF double-submit)
-    set_session_cookies(response, session_token)
-    
-    user_doc = await server.db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    return {"user": sanitize_user(user_doc), "session_token": session_token}
+
+
+@router.post("/auth/2fa/setup")
+@limiter.limit("5/minute")
+async def second_step_setup(request: Request, payload: SecondStepSetup, current_user: User = Depends(get_current_user)):
+    """Starts turning the second step on: a secret for the authenticator
+    app (to type in or open as a link), or a code sent by email - either
+    confirmed with a code before it counts."""
+    user = await server.db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Потребителят не е намерен")
+    if (user.get("two_factor") or {}).get("method"):
+        raise HTTPException(status_code=400, detail="Втората стъпка вече е включена")
+    if user.get("password_hash") and not (payload.password and pwd_context.verify(payload.password, user["password_hash"])):
+        raise HTTPException(status_code=401, detail="Грешна парола")
+    expires = datetime.now(timezone.utc) + timedelta(minutes=LOGIN_CHALLENGE_MINUTES)
+    if payload.method == "totp":
+        secret = tf.new_secret()
+        await server.db.users.update_one({"user_id": current_user.user_id}, {"$set": {
+            "two_factor_pending": {"method": "totp", "secret": secret, "expires_at": expires},
+        }})
+        return {"method": "totp", "secret": secret, "otpauth_uri": tf.otpauth_uri(secret, user.get("email") or "")}
+    if not server.EMAIL_FEATURES_ENABLED:
+        raise HTTPException(status_code=503, detail="Изпращането на имейли не е настроено - ползвайте приложение за кодове")
+    code = tf.new_email_code()
+    await server.db.users.update_one({"user_id": current_user.user_id}, {"$set": {
+        "two_factor_pending": {"method": "email", "code_hash": tf.hash_code(code), "expires_at": expires},
+    }})
+    await _send_login_code(user, code)
+    return {"method": "email", "sent_to": user.get("email")}
+
+
+@router.post("/auth/2fa/enable")
+@limiter.limit("10/minute")
+async def second_step_enable(request: Request, payload: SecondStepCode, current_user: User = Depends(get_current_user)):
+    """Turns the second step on once its first code is right - and gives
+    the recovery codes, shown this once."""
+    user = await server.db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    pending = (user or {}).get("two_factor_pending") or {}
+    expires_at = pending.get("expires_at")
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if not pending or not expires_at or expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Започнете отначало - кодът изтече")
+    step = None
+    if pending["method"] == "totp":
+        step = tf.verify_app_code(pending.get("secret") or "", payload.code)
+        if step is None:
+            raise HTTPException(status_code=400, detail="Грешен код - проверете часа на телефона и опитайте пак")
+    elif not tf.matches_hash(payload.code, pending.get("code_hash")):
+        raise HTTPException(status_code=400, detail="Грешен код")
+    recovery = tf.new_recovery_codes()
+    await server.db.users.update_one({"user_id": current_user.user_id}, {
+        "$set": {"two_factor": {
+            "method": pending["method"], "secret": pending.get("secret"), "last_step": step,
+            "recovery_codes": [tf.hash_code(c) for c in recovery], "enabled_at": datetime.now(timezone.utc),
+        }},
+        "$unset": {"two_factor_pending": ""},
+    })
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="update", entity_type="user_security",
+        entity_id=current_user.user_id, company_id=current_user.company_id, details={"two_factor": pending["method"]},
+    )
+    return {"enabled": True, "method": pending["method"], "recovery_codes": recovery}
+
+
+@router.post("/auth/2fa/disable")
+@limiter.limit("5/minute")
+async def second_step_disable(request: Request, payload: SecondStepOff, current_user: User = Depends(get_current_user)):
+    """Turns the second step off - with the password (and, for the app, a
+    code of it or a recovery code), so a borrowed session cannot."""
+    user = await server.db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    second = (user or {}).get("two_factor") or {}
+    if not user or not second.get("method"):
+        raise HTTPException(status_code=400, detail="Втората стъпка не е включена")
+    if user.get("password_hash") and not (payload.password and pwd_context.verify(payload.password, user["password_hash"])):
+        raise HTTPException(status_code=401, detail="Грешна парола")
+    if second["method"] == "totp":
+        good_code = payload.code and (
+            tf.verify_app_code(second.get("secret") or "", payload.code, second.get("last_step")) is not None
+            or tf.hash_code(payload.code) in (second.get("recovery_codes") or [])
+        )
+        if not good_code:
+            raise HTTPException(status_code=400, detail="Въведете код от приложението или резервен код")
+    await server.db.users.update_one({"user_id": current_user.user_id}, {"$unset": {"two_factor": "", "two_factor_pending": ""}})
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="update", entity_type="user_security",
+        entity_id=current_user.user_id, company_id=current_user.company_id, details={"two_factor": "off"},
+    )
+    return {"enabled": False}
 
 @router.put("/auth/change-password")
 async def change_password(data: ChangePassword, current_user: User = Depends(get_current_user)):

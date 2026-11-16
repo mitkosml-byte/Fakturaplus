@@ -73,6 +73,7 @@ const CTA_LABEL: Record<string, string> = {
   payroll_rates_year: 'briefing.cta.payroll_rates_year',
   payments_this_week: 'briefing.cta.payments_this_week',
   backup: 'briefing.cta.backup',
+  two_factor: 'briefing.cta.two_factor',
 };
 
 // Answers that settle a recurring expense's month right here.

@@ -285,6 +285,10 @@ class User(BaseModel):
     password_hash: Optional[str] = None  # За email/password auth
     auth_provider: str = "email"  # "google" or "email"
     has_password: bool = False  # Дали акаунтът има парола (за да предложим "задай парола" на Google потребители)
+    # A second step at login (services/two_factor) - only whether it is on
+    # and how; its secret and codes never leave the server (sanitize_user).
+    two_factor_enabled: bool = False
+    two_factor_method: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserSession(BaseModel):
@@ -937,6 +941,12 @@ def sanitize_user(user_doc: dict) -> dict:
     user_doc = dict(user_doc)
     user_doc["has_password"] = bool(user_doc.get("password_hash"))
     user_doc.pop("password_hash", None)
+    # The second step's secret and codes stay on the server; only whether it
+    # is on, and how, goes out.
+    two_factor = user_doc.pop("two_factor", None) or {}
+    user_doc.pop("two_factor_pending", None)
+    user_doc["two_factor_enabled"] = bool(two_factor.get("method"))
+    user_doc["two_factor_method"] = two_factor.get("method")
     role = user_doc.get("role", "staff")
     if not user_doc.get("permissions"):
         user_doc["permissions"] = resolve_permissions(role, None)
@@ -3621,6 +3631,22 @@ async def _signal_backup(company_id, scope, current_user, visibility) -> Optiona
     }
 
 
+async def _signal_two_factor(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """A second step at login, suggested to whoever sees the whole business
+    (owner, manager) once there is something to protect - dismissed, it
+    does not come back."""
+    if current_user.role not in ("owner", "manager") or current_user.two_factor_enabled:
+        return None
+    entered = await db.invoices.count_documents(scope) + await db.daily_revenue.count_documents(scope)
+    if entered < 20:
+        return None
+    return {
+        "key": "two_factor", "severity": "info", "priority": 28, "title": "Защити входа",
+        "detail": "Включи втора стъпка при вход - код от телефона след паролата. Някой с паролата ти пак няма да влезе.",
+        "route": "/account-security", "fingerprint": "two_factor|off",
+    }
+
+
 def payment_week(today: date) -> Tuple[date, date, bool]:
     """The days whose payments a week's notice covers: the rest of this
     week through Sunday - or, at the weekend, the week ahead."""
@@ -4220,7 +4246,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
     _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
-    _signal_payments_this_week, _signal_backup,
+    _signal_payments_this_week, _signal_backup, _signal_two_factor,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
@@ -6104,6 +6130,11 @@ async def create_indexes():
         await db.item_distinctions.create_index([("company_id", 1), ("a", 1), ("b", 1)], unique=True)
         await db.signal_seen.create_index([("user_id", 1), ("situation", 1)], unique=True)
         await db.signal_seen.create_index("last_seen_at", expireAfterSeconds=90 * 24 * 3600)
+
+        # A login waiting for its second step: found by its token, gone
+        # once expired (the TTL monitor sweeps it; the code checks the time).
+        await db.login_challenges.create_index([("token", 1)], unique=True)
+        await db.login_challenges.create_index("expires_at", expireAfterSeconds=0)
 
         # Users indexes
         await db.users.create_index([("email", 1)], unique=True, sparse=True)

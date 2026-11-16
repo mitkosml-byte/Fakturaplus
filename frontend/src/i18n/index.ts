@@ -67,6 +67,18 @@ export const translations: Translations = {
     bg: 'Парола',
     en: 'Password',
   },
+  'login.twoFactorTitle': { bg: 'Код за вход', en: 'Login code' },
+  'login.twoFactorApp': { bg: 'Въведете 6-цифрения код от приложението за кодове.', en: 'Enter the 6-digit code from your authenticator app.' },
+  'login.twoFactorEmail': { bg: 'Изпратихме код на имейла ви. Въведете го тук.', en: 'We sent a code to your email. Enter it here.' },
+  'login.twoFactorEmailFailed': {
+    bg: 'Имейлът с кода не можа да бъде изпратен. Влезте с един от резервните кодове.',
+    en: 'The email with the code could not be sent. Log in with one of your recovery codes.',
+  },
+  'login.twoFactorRecoveryHint': { bg: 'Нямате телефона? Въведете резервен код (XXXX-XXXX).', en: 'No phone? Enter a recovery code (XXXX-XXXX).' },
+  'login.twoFactorPlaceholder': { bg: 'Код', en: 'Code' },
+  'login.enterCode': { bg: 'Въведете кода', en: 'Enter the code' },
+  'login.confirmCode': { bg: 'Потвърди', en: 'Confirm' },
+  'login.backToLogin': { bg: 'Назад към входа', en: 'Back to login' },
   'login.forgotPassword': {
     bg: 'Забравена парола?',
     en: 'Forgot password?',
@@ -239,6 +251,10 @@ export const translations: Translations = {
   'briefing.cta.backup': {
     bg: 'Направи архив',
     en: 'Make a backup',
+  },
+  'briefing.cta.two_factor': {
+    bg: 'Включи',
+    en: 'Turn it on',
   },
   'briefing.cta.scan_credits': {
     bg: 'Добави сканирания',
@@ -5596,6 +5612,51 @@ export const translations: Translations = {
   },
   'accountSecurity.deleteAccountConfirmButton': { bg: 'Да, изтрий акаунта', en: 'Yes, delete account' },
   'accountSecurity.deleteAccountButton': { bg: 'Изтрий акаунта', en: 'Delete account' },
+  'accountSecurity.twoFactorTitle': { bg: 'Втора стъпка при вход', en: 'Two-step login' },
+  'accountSecurity.twoFactorHint': {
+    bg: 'След паролата - и код, който имате само вие. Някой с паролата ви пак не може да влезе.',
+    en: 'After the password, a code only you have. Someone with your password still cannot log in.',
+  },
+  'accountSecurity.twoFactorRecommended': {
+    bg: 'Препоръчително за собственика и управителя - те виждат целия бизнес.',
+    en: 'Recommended for the owner and the manager - they see the whole business.',
+  },
+  'accountSecurity.twoFactorOnApp': { bg: 'Включена: код от приложение за кодове', en: 'On: a code from an authenticator app' },
+  'accountSecurity.twoFactorOnEmail': { bg: 'Включена: код по имейл', en: 'On: a code by email' },
+  'accountSecurity.recoveryCodesLeft': { bg: 'Оставащи резервни кодове: {count}', en: 'Recovery codes left: {count}' },
+  'accountSecurity.useApp': { bg: 'С приложение за кодове', en: 'With an authenticator app' },
+  'accountSecurity.useAppHint': {
+    bg: 'Google Authenticator, Microsoft Authenticator, Authy и подобни - работи и без интернет.',
+    en: 'Google Authenticator, Microsoft Authenticator, Authy and the like - works offline too.',
+  },
+  'accountSecurity.useEmail': { bg: 'С код по имейл', en: 'With a code by email' },
+  'accountSecurity.emailUnavailable': { bg: 'Изпращането на имейли не е настроено на този сървър.', en: 'Sending email is not set up on this server.' },
+  'accountSecurity.appSetupSteps': {
+    bg: 'Добавете акаунт в приложението - с бутона по-долу или като въведете ключа ръчно. После напишете 6-цифрения код, който то показва.',
+    en: 'Add an account in the app - with the button below or by typing the key. Then enter the 6-digit code it shows.',
+  },
+  'accountSecurity.openInApp': { bg: 'Отвори в приложението', en: 'Open in the app' },
+  'accountSecurity.secretKey': { bg: 'Ключ', en: 'Key' },
+  'accountSecurity.copyKey': { bg: 'Копирай ключа', en: 'Copy the key' },
+  'accountSecurity.keyCopied': { bg: 'Ключът е копиран', en: 'Key copied' },
+  'accountSecurity.emailCodeSent': { bg: 'Изпратихме код на {email}. Въведете го тук.', en: 'We sent a code to {email}. Enter it here.' },
+  'accountSecurity.codePlaceholder': { bg: '6-цифрен код', en: '6-digit code' },
+  'accountSecurity.turnOn': { bg: 'Включи', en: 'Turn on' },
+  'accountSecurity.turnOff': { bg: 'Изключи втората стъпка', en: 'Turn off the second step' },
+  'accountSecurity.turnOffHint': {
+    bg: 'За да я изключите - паролата и код от приложението (или резервен код).',
+    en: 'To turn it off - your password and a code from the app (or a recovery code).',
+  },
+  'accountSecurity.twoFactorOn': { bg: 'Втората стъпка е включена', en: 'Two-step login is on' },
+  'accountSecurity.twoFactorOff': { bg: 'Втората стъпка е изключена', en: 'Two-step login is off' },
+  'accountSecurity.recoveryTitle': { bg: 'Резервни кодове', en: 'Recovery codes' },
+  'accountSecurity.recoveryHint': {
+    bg: 'Запишете ги на сигурно място. Всеки влиза веднъж, ако нямате телефона. Показват се само сега.',
+    en: 'Keep them somewhere safe. Each one logs in once if you do not have your phone. Shown only now.',
+  },
+  'accountSecurity.copyCodes': { bg: 'Копирай кодовете', en: 'Copy the codes' },
+  'accountSecurity.codesCopied': { bg: 'Кодовете са копирани', en: 'Codes copied' },
+  'accountSecurity.savedThem': { bg: 'Записах ги', en: 'I saved them' },
 
   // Join Company screen
   'joinCompany.title': { bg: 'Присъединяване по покана', en: 'Join by Invitation' },

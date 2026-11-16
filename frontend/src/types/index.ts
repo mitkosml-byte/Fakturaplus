@@ -7,7 +7,41 @@ export interface User {
   company_id?: string;
   permissions?: string[];
   has_password?: boolean;
+  // A second step at login (a code from an authenticator app or by email).
+  two_factor_enabled?: boolean;
+  two_factor_method?: TwoFactorMethod | null;
   created_at: string;
+}
+
+export type TwoFactorMethod = 'totp' | 'email';
+
+// The password was right; the login waits for the code (or a recovery code).
+export interface LoginChallenge {
+  two_factor_required: true;
+  challenge_token: string;
+  method: TwoFactorMethod;
+  // Email method only: false when the email could not be sent.
+  code_sent?: boolean;
+}
+
+export interface LoginSession {
+  user: User;
+  session_token: string;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  method: TwoFactorMethod | null;
+  recovery_codes_left: number;
+  email_available: boolean;
+  recommended: boolean;
+}
+
+export interface TwoFactorSetup {
+  method: TwoFactorMethod;
+  secret?: string;
+  otpauth_uri?: string;
+  sent_to?: string;
 }
 
 export interface Company {

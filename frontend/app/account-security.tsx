@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,9 @@ import {
   ScrollView,
   ActivityIndicator,
   ImageBackground,
+  Linking,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -20,6 +22,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import type { TwoFactorMethod, TwoFactorSetup, TwoFactorStatus } from '../src/types';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -200,6 +203,8 @@ export default function AccountSecurityScreen() {
               </Text>
             </View>
 
+            <TwoFactorSection hasPassword={hasPassword} onChanged={refreshUser} />
+
             <View style={styles.dangerSection}>
               <View style={styles.sectionHeader}>
                 <View style={[styles.sectionIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
@@ -265,6 +270,265 @@ export default function AccountSecurityScreen() {
       </View>
     </ImageBackground>
     </ScreenEnter>
+  );
+}
+
+// The second step at login: turned on with a first right code (from an
+// authenticator app, or sent by email), then the recovery codes shown once;
+// turned off with the password and a code.
+function TwoFactorSection({ hasPassword, onChanged }: { hasPassword: boolean; onChanged: () => Promise<void> | void }) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<TwoFactorStatus | null>(null);
+  const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  const [code, setCode] = useState('');
+  const [onPassword, setOnPassword] = useState('');
+  const [offPassword, setOffPassword] = useState('');
+  const [offCode, setOffCode] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await api.getTwoFactor());
+    } catch {
+      setStatus(null);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const start = async (method: TwoFactorMethod) => {
+    if (hasPassword && !onPassword.trim()) {
+      Alert.alert(t('common.error'), t('accountSecurity.enterCurrentPassword'));
+      return;
+    }
+    setBusy(true);
+    try {
+      setSetup(await api.setupTwoFactor(method, onPassword || undefined));
+      setOnPassword('');
+      setCode('');
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const turnOn = async () => {
+    if (!code.trim()) {
+      Alert.alert(t('common.error'), t('login.enterCode'));
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api.enableTwoFactor(code.trim());
+      setRecoveryCodes(result.recovery_codes);
+      setSetup(null);
+      setCode('');
+      Haptics.success();
+      await load();
+      await onChanged();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const turnOff = async () => {
+    if (hasPassword && !offPassword.trim()) {
+      Alert.alert(t('common.error'), t('accountSecurity.enterCurrentPassword'));
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.disableTwoFactor(offPassword || undefined, offCode.trim() || undefined);
+      setOffPassword('');
+      setOffCode('');
+      Toast.success(t('accountSecurity.twoFactorOff'));
+      await load();
+      await onChanged();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openInApp = async (uri: string, secret: string) => {
+    try {
+      await Linking.openURL(uri);
+    } catch {
+      // No app that takes the link here (a computer, say): the key, typed in.
+      await Clipboard.setStringAsync(secret);
+      Toast.success(t('accountSecurity.keyCopied'));
+    }
+  };
+
+  if (!status) return null;
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+          <Ionicons name={status.enabled ? 'shield-checkmark' : 'shield-outline'} size={24} color={COLORS.success} />
+        </View>
+        <View style={styles.sectionTitleContainer}>
+          <Text style={styles.sectionTitle}>{t('accountSecurity.twoFactorTitle')}</Text>
+          <Text style={styles.sectionSubtitle}>
+            {status.enabled
+              ? (status.method === 'email' ? t('accountSecurity.twoFactorOnEmail') : t('accountSecurity.twoFactorOnApp'))
+              : t('accountSecurity.twoFactorHint')}
+          </Text>
+        </View>
+      </View>
+
+      {recoveryCodes && (
+        <View style={styles.recoveryBox}>
+          <Text style={styles.recoveryTitle}>{t('accountSecurity.recoveryTitle')}</Text>
+          <Text style={styles.inputHint}>{t('accountSecurity.recoveryHint')}</Text>
+          <View style={styles.recoveryGrid}>
+            {recoveryCodes.map((c) => (
+              <Text key={c} selectable style={styles.recoveryCode}>{c}</Text>
+            ))}
+          </View>
+          <View style={styles.twoFactorRow}>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={async () => {
+                await Clipboard.setStringAsync(recoveryCodes.join('\n'));
+                Toast.success(t('accountSecurity.codesCopied'));
+              }}
+            >
+              <Text style={styles.secondaryButtonText}>{t('accountSecurity.copyCodes')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.primarySmallButton} onPress={() => setRecoveryCodes(null)}>
+              <Text style={styles.saveButtonText}>{t('accountSecurity.savedThem')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {status.enabled && !recoveryCodes && (
+        <View style={styles.inputContainer}>
+          <Text style={styles.inputHint}>
+            {t('accountSecurity.recoveryCodesLeft').replace('{count}', String(status.recovery_codes_left))}
+          </Text>
+          <Text style={[styles.inputHint, { marginBottom: 8 }]}>{t('accountSecurity.turnOffHint')}</Text>
+          {hasPassword && (
+            <TextInput
+              style={[styles.passwordInput, styles.fullWidthInput, { marginBottom: 8 }]}
+              value={offPassword}
+              onChangeText={setOffPassword}
+              secureTextEntry
+              placeholder={t('accountSecurity.currentPassword')}
+              placeholderTextColor={COLORS.textMuted}
+            />
+          )}
+          {status.method === 'totp' && (
+            <TextInput
+              style={[styles.passwordInput, styles.fullWidthInput, { marginBottom: 8 }]}
+              value={offCode}
+              onChangeText={(v) => setOffCode(v.toUpperCase())}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={9}
+              placeholder={t('accountSecurity.codePlaceholder')}
+              placeholderTextColor={COLORS.textMuted}
+            />
+          )}
+          <TouchableOpacity style={[styles.deleteButton, busy && styles.saveButtonDisabled]} onPress={turnOff} disabled={busy}>
+            <Text style={styles.deleteButtonText}>{t('accountSecurity.turnOff')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!status.enabled && !setup && (
+        <View style={styles.inputContainer}>
+          {status.recommended && (
+            <Text style={[styles.inputHint, { marginTop: 0, marginBottom: 12 }]}>{t('accountSecurity.twoFactorRecommended')}</Text>
+          )}
+          {hasPassword && (
+            <TextInput
+              style={[styles.passwordInput, styles.fullWidthInput, { marginBottom: 8 }]}
+              value={onPassword}
+              onChangeText={setOnPassword}
+              secureTextEntry
+              placeholder={t('accountSecurity.currentPassword')}
+              placeholderTextColor={COLORS.textMuted}
+            />
+          )}
+          <TouchableOpacity style={styles.methodButton} onPress={() => start('totp')} disabled={busy}>
+            <Ionicons name="phone-portrait-outline" size={22} color={COLORS.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.methodTitle}>{t('accountSecurity.useApp')}</Text>
+              <Text style={styles.sectionSubtitle}>{t('accountSecurity.useAppHint')}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.methodButton, !status.email_available && styles.saveButtonDisabled]}
+            onPress={() => start('email')}
+            disabled={busy || !status.email_available}
+          >
+            <Ionicons name="mail-outline" size={22} color={COLORS.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.methodTitle}>{t('accountSecurity.useEmail')}</Text>
+              {!status.email_available && (
+                <Text style={styles.sectionSubtitle}>{t('accountSecurity.emailUnavailable')}</Text>
+              )}
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!status.enabled && setup && (
+        <View style={styles.inputContainer}>
+          {setup.method === 'totp' && setup.secret && setup.otpauth_uri ? (
+            <>
+              <Text style={[styles.inputHint, { marginTop: 0, marginBottom: 12 }]}>{t('accountSecurity.appSetupSteps')}</Text>
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => openInApp(setup.otpauth_uri!, setup.secret!)}>
+                <Text style={styles.secondaryButtonText}>{t('accountSecurity.openInApp')}</Text>
+              </TouchableOpacity>
+              <Text style={[styles.inputLabel, { marginTop: 12 }]}>{t('accountSecurity.secretKey')}</Text>
+              <Text selectable style={styles.secretKey}>{setup.secret.match(/.{1,4}/g)?.join(' ')}</Text>
+              <TouchableOpacity
+                onPress={async () => {
+                  await Clipboard.setStringAsync(setup.secret!);
+                  Toast.success(t('accountSecurity.keyCopied'));
+                }}
+              >
+                <Text style={styles.linkText}>{t('accountSecurity.copyKey')}</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={[styles.inputHint, { marginTop: 0, marginBottom: 12 }]}>
+              {t('accountSecurity.emailCodeSent').replace('{email}', setup.sent_to || '')}
+            </Text>
+          )}
+          <TextInput
+            style={[styles.passwordInput, styles.fullWidthInput, styles.codeField]}
+            value={code}
+            onChangeText={(v) => setCode(v.replace(/\D/g, ''))}
+            keyboardType="number-pad"
+            maxLength={6}
+            textContentType="oneTimeCode"
+            autoComplete="one-time-code"
+            placeholder={t('accountSecurity.codePlaceholder')}
+            placeholderTextColor={COLORS.textMuted}
+          />
+          <View style={styles.twoFactorRow}>
+            <TouchableOpacity style={styles.secondaryButton} onPress={() => { setSetup(null); setCode(''); }}>
+              <Text style={styles.secondaryButtonText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.primarySmallButton, busy && styles.saveButtonDisabled]} onPress={turnOn} disabled={busy}>
+              {busy ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('accountSecurity.turnOn')}</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -374,4 +638,66 @@ const styles = StyleSheet.create({
   },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  methodButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  methodTitle: { fontSize: 15, fontWeight: '600', color: 'white' },
+  secretKey: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 1,
+    fontFamily: 'monospace',
+    backgroundColor: COLORS.background,
+    borderRadius: 10,
+    padding: 12,
+    overflow: 'hidden',
+  },
+  linkText: { color: COLORS.primary, fontSize: 13, fontWeight: '500', marginTop: 8, marginBottom: 12 },
+  codeField: { textAlign: 'center', letterSpacing: 6, fontWeight: '600', marginBottom: 12 },
+  twoFactorRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  secondaryButton: {
+    flex: 1,
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  secondaryButtonText: { color: COLORS.primary, fontSize: 15, fontWeight: '600' },
+  primarySmallButton: {
+    flex: 1,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+  },
+  recoveryBox: {
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.success,
+  },
+  recoveryTitle: { fontSize: 15, fontWeight: '700', color: 'white' },
+  recoveryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 12 },
+  recoveryCode: {
+    width: '47%',
+    color: 'white',
+    fontSize: 15,
+    fontFamily: 'monospace',
+    textAlign: 'center',
+    paddingVertical: 6,
+    backgroundColor: COLORS.surface,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
 });
