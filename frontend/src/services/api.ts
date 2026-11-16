@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
-PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence } from '../types';
+PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -565,15 +565,19 @@ class ApiService {
   }
 
   // Customers (lightweight - see Customer type's own note)
-  async createCustomer(customer: { name: string; phone?: string; email?: string; notes?: string }): Promise<Customer> {
+  async createCustomer(customer: CustomerInput): Promise<Customer> {
     return this.fetch('/customers', { method: 'POST', body: JSON.stringify(customer) });
+  }
+
+  async getCustomerCard(id: string): Promise<CustomerCard> {
+    return this.fetch(`/customers/${id}/card`);
   }
 
   async getCustomers(search?: string): Promise<Customer[]> {
     return this.fetch(`/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`);
   }
 
-  async updateCustomer(id: string, update: Partial<{ name: string; phone: string; email: string; notes: string }>): Promise<Customer> {
+  async updateCustomer(id: string, update: Partial<CustomerInput>): Promise<Customer> {
     return this.fetch(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(update) });
   }
 

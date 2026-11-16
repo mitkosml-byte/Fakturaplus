@@ -177,7 +177,53 @@ export interface Customer {
   phone?: string | null;
   email?: string | null;
   notes?: string | null;
+  // What an invoice to them names.
+  eik?: string | null;
+  vat_number?: string | null;
+  address?: string | null;
   created_at: string;
+}
+
+export interface CustomerInput {
+  name: string;
+  eik?: string | null;
+  vat_number?: string | null;
+  address?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+}
+
+// One customer at a glance: invoiced, owed and overdue now, their last
+// documents and open debts.
+export interface CustomerCard {
+  customer: Customer;
+  totals: {
+    invoiced: number;
+    invoice_count: number;
+    last_invoice_date: string | null;
+    owed: number;
+    overdue: number;
+    paid: number;
+  };
+  documents: {
+    id: string;
+    doc_type: BillingDocumentType;
+    invoice_number?: string | null;
+    issue_date: string;
+    total_amount: number;
+    cancelled?: boolean;
+    external?: boolean;
+    in_till?: boolean;
+  }[];
+  open_receivables: {
+    id: string;
+    description?: string | null;
+    amount: number;
+    left: number;
+    due_date?: string | null;
+    overdue: boolean;
+  }[];
 }
 
 export interface Receivable {

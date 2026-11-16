@@ -36,11 +36,29 @@ from pymongo.errors import DuplicateKeyError
 
 router = APIRouter(prefix="/api")
 
+def _clean_customer_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Trimmed, and an emptied field is cleared (None), not kept as ""."""
+    return {k: (v.strip() or None) if isinstance(v, str) else v for k, v in data.items()}
+
+
+async def _refuse_duplicate_eik(scope: dict, eik: Optional[str], exclude_id: Optional[str] = None) -> None:
+    """One customer per EIK: a second would split their invoices and debts."""
+    if not eik_key(eik):
+        return
+    for other in await server.db.customers.find(scope, {"_id": 0, "id": 1, "name": 1, "eik": 1}).to_list(ALL_ROWS):
+        if other["id"] != exclude_id and eik_key(other.get("eik")) == eik_key(eik):
+            raise HTTPException(status_code=409, detail=f"Вече има клиент с ЕИК {eik}: {other.get('name')}")
+
+
 @router.post("/customers", response_model=Customer)
 async def create_customer(payload: CustomerCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
-    company_id, _ = await get_company_scope(current_user)
-    customer = Customer(user_id=current_user.user_id, company_id=company_id, **payload.model_dump())
+    company_id, scope = await get_company_scope(current_user)
+    data = _clean_customer_fields(payload.model_dump())
+    if not data.get("name"):
+        raise HTTPException(status_code=400, detail="Името на клиента е задължително")
+    await _refuse_duplicate_eik(scope, data.get("eik"))
+    customer = Customer(user_id=current_user.user_id, company_id=company_id, **data)
     await server.db.customers.insert_one(customer.model_dump())
     return customer
 
@@ -57,7 +75,11 @@ async def get_customers(search: Optional[str] = None, current_user: User = Depen
 async def update_customer(customer_id: str, payload: CustomerUpdate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     _, scope = await get_company_scope(current_user)
-    update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    update_data = _clean_customer_fields(payload.model_dump(exclude_unset=True))
+    if "name" in update_data and not update_data["name"]:
+        raise HTTPException(status_code=400, detail="Името на клиента е задължително")
+    if update_data.get("eik"):
+        await _refuse_duplicate_eik(scope, update_data["eik"], exclude_id=customer_id)
     if update_data:
         result = await server.db.customers.update_one({"id": customer_id, **scope}, {"$set": update_data})
         if result.matched_count == 0:
@@ -74,13 +96,68 @@ async def delete_customer(customer_id: str, current_user: User = Depends(get_cur
     result = await server.db.customers.delete_one({"id": customer_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Клиентът не е намерен")
+    # Their documents and debts stay, under the name they were issued to.
+    for collection in (server.db.billing_documents, server.db.receivables):
+        await collection.update_many({**scope, "customer_id": customer_id}, {"$set": {"customer_id": None}})
     return {"message": "Клиентът е изтрит"}
+
+
+@router.get("/customers/{customer_id}/card")
+async def get_customer_card(customer_id: str, current_user: User = Depends(get_current_user)):
+    """One customer at a glance: invoiced, owed and overdue now, their last
+    documents and open debts. Documents from before they were tied to the
+    customer count by the name they were issued to."""
+    require_permission(current_user, "add_revenue")
+    _, scope = await get_company_scope(current_user)
+    customer = await server.db.customers.find_one({"id": customer_id, **scope}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Клиентът не е намерен")
+    name_key = _compare_key(customer.get("name") or "")
+
+    def theirs(doc: dict) -> bool:
+        if doc.get("customer_id"):
+            return doc["customer_id"] == customer_id
+        return _compare_key(doc.get("customer_name") or "") == name_key
+
+    who = {"$or": [{"customer_id": customer_id}, {"customer_id": None}, {"customer_id": {"$exists": False}}]}
+    documents = [d for d in await server.db.billing_documents.find(
+        {**scope, **who}, {"_id": 0, "items": 0},
+    ).to_list(ALL_ROWS) if theirs(d)]
+    receivables = [r for r in await server.db.receivables.find({**scope, **who}, {"_id": 0}).to_list(ALL_ROWS) if theirs(r)]
+
+    invoices = [d for d in documents if d.get("doc_type") == "invoice" and not d.get("cancelled")]
+    today = today_local().isoformat()
+    open_debts = [r for r in receivables if not r.get("is_paid") and receivable_left(r) > 0]
+    documents.sort(key=lambda d: (str(d.get("issue_date") or ""), str(d.get("invoice_number") or "")), reverse=True)
+    return {
+        "customer": Customer(**customer),
+        "totals": {
+            "invoiced": round(sum(float(d.get("total_amount") or 0) for d in invoices), 2),
+            "invoice_count": len(invoices),
+            "last_invoice_date": max((str(d.get("issue_date")) for d in invoices), default=None),
+            "owed": round(sum(receivable_left(r) for r in open_debts), 2),
+            "overdue": round(sum(receivable_left(r) for r in open_debts if r.get("due_date") and str(r["due_date"]) < today), 2),
+            "paid": round(sum(float(r.get("paid_amount") or 0) for r in receivables), 2),
+        },
+        "documents": [
+            {k: d.get(k) for k in ("id", "doc_type", "invoice_number", "issue_date", "total_amount", "cancelled", "external", "in_till")}
+            for d in documents[:15]
+        ],
+        "open_receivables": [
+            {"id": r["id"], "description": r.get("description"), "amount": r.get("amount"), "left": round(receivable_left(r), 2),
+             "due_date": r.get("due_date"), "overdue": bool(r.get("due_date") and str(r["due_date"]) < today)}
+            for r in sorted(open_debts, key=lambda r: str(r.get("due_date") or ""))
+        ],
+    }
 
 @router.post("/receivables", response_model=Receivable)
 async def create_receivable(payload: ReceivableCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
-    company_id, _ = await get_company_scope(current_user)
-    receivable = Receivable(user_id=current_user.user_id, company_id=company_id, **payload.model_dump())
+    company_id, scope = await get_company_scope(current_user)
+    data = payload.model_dump()
+    if not data.get("customer_id"):
+        data["customer_id"] = await remember_customer(company_id, scope, current_user.user_id, data.get("customer_name"))
+    receivable = Receivable(user_id=current_user.user_id, company_id=company_id, **data)
     await server.db.receivables.insert_one(receivable.model_dump())
     return receivable
 
@@ -199,6 +276,23 @@ async def _latest_invoice_number(scope: dict) -> Optional[str]:
     return latest[0]["invoice_number"] if latest else None
 
 
+async def _customer_for(company_id: Optional[str], scope: dict, user_id: str, payload: BillingDocumentCreate) -> Optional[str]:
+    """The customer a document is to: the one picked (if it is this
+    company's - its missing EIK/address filled in), else one remembered by
+    EIK or name."""
+    if payload.customer_id:
+        picked = await server.db.customers.find_one({"id": payload.customer_id, **scope}, {"_id": 0, "id": 1, "eik": 1, "address": 1})
+        if picked:
+            missing = {
+                field: value.strip() for field, value in (("eik", payload.customer_eik), ("address", payload.customer_address))
+                if value and value.strip() and not picked.get(field)
+            }
+            if missing:
+                await server.db.customers.update_one({"id": picked["id"]}, {"$set": missing})
+            return picked["id"]
+    return await remember_customer(company_id, scope, user_id, payload.customer_name, payload.customer_eik, payload.customer_address)
+
+
 async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: User) -> BillingDocument:
     """An invoice to a customer: the next number in sequence (or the one the
     business continues from), VAT by rate, revenue and VAT on its issue
@@ -215,6 +309,8 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
     if not vat_registered:
         payload.items = [item.model_copy(update={"vat_rate": 0}) for item in payload.items]
     amounts = invoice_vat_breakdown(payload.items)
+    # The customer is remembered (or picked): the next invoice to them is a pick.
+    payload.customer_id = await _customer_for(company_id, scope, current_user.user_id, payload)
     paid_when_issued = payload.payment_method in ("cash", "card")
     # Paid in cash or by card it went through the till (a fiscal receipt),
     # unless the business says otherwise or keeps no till here: then its
@@ -284,7 +380,8 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
     require_permission(current_user, "add_revenue")
     if payload.doc_type == BillingDocumentType.INVOICE:
         return await _create_issued_invoice(payload, current_user)
-    company_id, _ = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
+    payload.customer_id = await _customer_for(company_id, scope, current_user.user_id, payload)
     total_amount = round(sum(item.quantity * item.unit_price for item in payload.items), 2)
     issue_date = payload.issue_date or today_local().isoformat()
     due_date = None

@@ -564,6 +564,122 @@ export const translations: Translations = {
     bg: 'от друга програма',
     en: 'other program',
   },
+  'customers.title': {
+    bg: 'Клиенти',
+    en: 'Customers',
+  },
+  'customers.add': {
+    bg: 'Нов клиент',
+    en: 'New customer',
+  },
+  'customers.edit': {
+    bg: 'Данни на клиента',
+    en: 'Customer details',
+  },
+  'customers.search': {
+    bg: 'Търси по име, ЕИК или имейл',
+    en: 'Search by name, EIK or email',
+  },
+  'customers.empty': {
+    bg: 'Още няма клиенти',
+    en: 'No customers yet',
+  },
+  'customers.emptyHint': {
+    bg: 'Добави ги тук или просто издай фактура – клиентът се запомня сам, със своя ЕИК и адрес.',
+    en: 'Add them here or just issue an invoice – the customer is remembered with their EIK and address.',
+  },
+  'customers.noMatch': {
+    bg: 'Няма клиент с такова име или ЕИК',
+    en: 'No customer with that name or EIK',
+  },
+  'customers.noDetails': {
+    bg: 'Без ЕИК и адрес',
+    en: 'No EIK or address',
+  },
+  'customers.name': {
+    bg: 'Име',
+    en: 'Name',
+  },
+  'customers.eik': {
+    bg: 'ЕИК/Булстат',
+    en: 'EIK/Bulstat',
+  },
+  'customers.vatNumber': {
+    bg: 'ДДС номер',
+    en: 'VAT number',
+  },
+  'customers.address': {
+    bg: 'Адрес',
+    en: 'Address',
+  },
+  'customers.email': {
+    bg: 'Имейл',
+    en: 'Email',
+  },
+  'customers.phone': {
+    bg: 'Телефон',
+    en: 'Phone',
+  },
+  'customers.notes': {
+    bg: 'Бележки',
+    en: 'Notes',
+  },
+  'customers.eikShort': {
+    bg: 'ЕИК',
+    en: 'EIK',
+  },
+  'customers.vatShort': {
+    bg: 'ДДС №',
+    en: 'VAT No.',
+  },
+  'customers.nameRequired': {
+    bg: 'Името на клиента е задължително.',
+    en: 'The customer name is required.',
+  },
+  'customers.saved': {
+    bg: 'Клиентът е записан',
+    en: 'Customer saved',
+  },
+  'customers.deleteConfirm': {
+    bg: 'Да изтрия ли „{name}“? Документите и дълговете остават с името, на което са издадени.',
+    en: 'Delete “{name}”? Their documents and debts stay under the name they were issued to.',
+  },
+  'customers.invoiced': {
+    bg: 'Фактурирано',
+    en: 'Invoiced',
+  },
+  'customers.invoiceCount': {
+    bg: '{count} фактури',
+    en: '{count} invoices',
+  },
+  'customers.owed': {
+    bg: 'Дължи сега',
+    en: 'Owes now',
+  },
+  'customers.overdue': {
+    bg: '{amount} просрочени',
+    en: '{amount} overdue',
+  },
+  'customers.lastInvoice': {
+    bg: 'Последна фактура: {date}',
+    en: 'Last invoice: {date}',
+  },
+  'customers.openDebts': {
+    bg: 'Неплатени',
+    en: 'Unpaid',
+  },
+  'customers.documents': {
+    bg: 'Последни документи',
+    en: 'Recent documents',
+  },
+  'customers.noDocuments': {
+    bg: 'Още няма документи към този клиент.',
+    en: 'No documents to this customer yet.',
+  },
+  'customers.toDocuments': {
+    bg: 'Към сметки и фактури',
+    en: 'To bills and invoices',
+  },
   'briefing.snooze': {
     bg: 'Отложи 3 дни',
     en: 'Snooze 3 days',

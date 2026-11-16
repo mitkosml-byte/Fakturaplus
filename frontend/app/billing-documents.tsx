@@ -20,7 +20,7 @@ import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
 import { downloadAndShareFile } from '../src/utils/downloadFile';
 import { api } from '../src/services/api';
-import { BillingDocument, BillingDocumentItem, BillingDocumentType } from '../src/types';
+import { BillingDocument, BillingDocumentItem, BillingDocumentType, Customer } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow } from '../src/components';
@@ -54,6 +54,10 @@ export default function BillingDocumentsScreen() {
   const [formPaymentMethod, setFormPaymentMethod] = useState<PaymentMethod>('bank_transfer');
   const [formStartNumber, setFormStartNumber] = useState('');
   const [formCustomerName, setFormCustomerName] = useState('');
+  // A customer picked from the list: the document is tied to them (and their
+  // EIK/address filled in). Typing another name unties it.
+  const [formCustomerId, setFormCustomerId] = useState<string | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [formNotes, setFormNotes] = useState('');
   const [formItems, setFormItems] = useState<FormItem[]>([emptyFormItem()]);
   const [customerNameError, setCustomerNameError] = useState(false);
@@ -75,11 +79,13 @@ export default function BillingDocumentsScreen() {
       return;
     }
     try {
-      const [docs, defaults] = await Promise.all([
+      const [docs, defaults, knownCustomers] = await Promise.all([
         api.getBillingDocuments(),
         api.getInvoiceDefaults().catch(() => null),
+        api.getCustomers().catch(() => [] as Customer[]),
       ]);
       setDocuments(docs);
+      setCustomers(knownCustomers);
       setVatRegistered(defaults?.vat_registered !== false);
       setLogsTill(!!defaults?.logs_till);
     } catch (error: any) {
@@ -105,6 +111,7 @@ export default function BillingDocumentsScreen() {
     setFormInTill(logsTill);
     setFormStartNumber('');
     setFormCustomerName('');
+    setFormCustomerId(null);
     setFormNotes('');
     setFormItems([emptyFormItem()]);
     setCustomerNameError(false);
@@ -153,6 +160,25 @@ export default function BillingDocumentsScreen() {
   };
 
   const isInvoice = docType === 'invoice';
+  // Known customers matching what is typed (or the most recent few while
+  // the field is empty) - one tap fills the name, EIK and address.
+  const customerMatches = useMemo(() => {
+    if (formCustomerId) return [];
+    const query = formCustomerName.trim().toLowerCase();
+    const found = query
+      ? customers.filter((c) => c.name.toLowerCase().includes(query) || (c.eik || '').includes(query))
+      : customers;
+    return found.filter((c) => c.name !== formCustomerName).slice(0, 5);
+  }, [customers, formCustomerName, formCustomerId]);
+
+  const pickCustomer = (customer: Customer) => {
+    setFormCustomerName(customer.name);
+    setFormCustomerEik(customer.eik || '');
+    setFormCustomerAddress(customer.address || '');
+    setFormCustomerId(customer.id);
+    setCustomerNameError(false);
+  };
+
   // The first invoice issued here may continue the business's own numbering.
   const hasIssuedInvoices = documents.some((doc) => doc.doc_type === 'invoice');
   const formNet = formItems.reduce((sum, it) => {
@@ -189,6 +215,7 @@ export default function BillingDocumentsScreen() {
       const saved = await api.createBillingDocument({
         doc_type: docType,
         customer_name: formCustomerName.trim(),
+        customer_id: formCustomerId || undefined,
         items: validItems,
         notes: formNotes.trim() || undefined,
         ...(isInvoice ? {
@@ -267,6 +294,9 @@ export default function BillingDocumentsScreen() {
               <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
             <Text style={styles.title}>{t('billingDocuments.title')}</Text>
+            <TouchableOpacity onPress={() => router.push('/customers')} style={styles.backButton} accessibilityLabel={t('customers.title')}>
+              <Ionicons name="people-outline" size={22} color="white" />
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => { resetForm(); setModalVisible(true); }}
               style={styles.backButton}
@@ -370,10 +400,22 @@ export default function BillingDocumentsScreen() {
                 <TextInput
                   style={[styles.input, customerNameError && styles.inputErrorBorder]}
                   value={formCustomerName}
-                  onChangeText={(v) => { setFormCustomerName(v); setCustomerNameError(false); }}
+                  onChangeText={(v) => { setFormCustomerName(v); setFormCustomerId(null); setCustomerNameError(false); }}
                   placeholder={t('receivables.customerNamePlaceholder')}
                   placeholderTextColor={COLORS.textMuted}
                 />
+                {customerMatches.length > 0 && (
+                  <View style={styles.customerChips}>
+                    {customerMatches.map((customer) => (
+                      <TouchableOpacity key={customer.id} style={styles.customerChip} onPress={() => pickCustomer(customer)}>
+                        <Ionicons name="person-outline" size={12} color={COLORS.primary} />
+                        <Text style={styles.customerChipText} numberOfLines={1}>
+                          {customer.name}{customer.eik ? ` · ${customer.eik}` : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
                 <Expandable expanded={customerNameError}>
                   <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
                 </Expandable>
@@ -556,6 +598,12 @@ export default function BillingDocumentsScreen() {
 }
 
 const styles = StyleSheet.create({
+  customerChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  customerChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14,
+    borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface, maxWidth: 220,
+  },
+  customerChipText: { fontSize: 12, color: COLORS.textSecondary, flexShrink: 1 },
   tillRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10, marginBottom: 6 },
   tillLabel: { color: 'white', fontSize: 14, fontWeight: '600' },
   vatExemptNote: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6 },

@@ -2433,19 +2433,62 @@ class Customer(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     notes: Optional[str] = None
+    # What an invoice to them names: EIK/Bulstat, VAT number, address.
+    eik: Optional[str] = None
+    vat_number: Optional[str] = None
+    address: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class CustomerCreate(BaseModel):
-    name: str
-    phone: Optional[str] = None
-    email: Optional[str] = None
-    notes: Optional[str] = None
+    name: str = Field(min_length=1, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=200)
+    notes: Optional[str] = Field(default=None, max_length=1000)
+    eik: Optional[str] = Field(default=None, max_length=20)
+    vat_number: Optional[str] = Field(default=None, max_length=20)
+    address: Optional[str] = Field(default=None, max_length=300)
 
 class CustomerUpdate(BaseModel):
-    name: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
-    notes: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=200)
+    notes: Optional[str] = Field(default=None, max_length=1000)
+    eik: Optional[str] = Field(default=None, max_length=20)
+    vat_number: Optional[str] = Field(default=None, max_length=20)
+    address: Optional[str] = Field(default=None, max_length=300)
+
+
+async def remember_customer(
+    company_id: Optional[str], scope: dict, user_id: str, name: Optional[str],
+    eik: Optional[str] = None, address: Optional[str] = None,
+) -> Optional[str]:
+    """The customer a document is to: found by EIK (else by name, case and
+    punctuation aside), its missing EIK or address filled in from the
+    document - never overwritten; or saved as a new customer, so the next
+    invoice to them is a pick, not typing again."""
+    name = (name or "").strip()
+    if not company_id or not name:
+        return None
+    eik = (eik or "").strip() or None
+    address = (address or "").strip() or None
+    customers = await db.customers.find(scope, {"_id": 0, "id": 1, "name": 1, "eik": 1, "address": 1}).to_list(ALL_ROWS)
+    found = None
+    if eik:
+        found = next((c for c in customers if eik_key(c.get("eik")) and eik_key(c.get("eik")) == eik_key(eik)), None)
+    if not found:
+        key = _compare_key(name)
+        found = next(
+            (c for c in customers if _compare_key(c.get("name") or "") == key and (not eik or not c.get("eik"))),
+            None,
+        )
+    if found:
+        missing = {field: value for field, value in (("eik", eik), ("address", address)) if value and not found.get(field)}
+        if missing:
+            await db.customers.update_one({"id": found["id"]}, {"$set": missing})
+        return found["id"]
+    customer = Customer(user_id=user_id, company_id=company_id, name=name, eik=eik, address=address)
+    await db.customers.insert_one(customer.model_dump())
+    return customer.id
 
 class Receivable(BaseModel):
     """The mirror image of an unpaid bank-transfer invoice (what the

@@ -250,6 +250,9 @@ export default function ReceivablesScreen() {
               <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
             <Text style={styles.title}>{t('receivables.title')}</Text>
+            <TouchableOpacity onPress={() => router.push('/customers')} style={styles.backButton} accessibilityLabel={t('customers.title')}>
+              <Ionicons name="people-outline" size={22} color="white" />
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => { resetForm(); setModalVisible(true); }}
               style={styles.backButton}
