@@ -51,9 +51,17 @@ async def export_statistics_pdf(
 ):
     """Export a one-page financial report (summary + top suppliers/items) as PDF"""
     require_permission(current_user, "export_data")
-    stats = await get_summary(start_date=start_date, end_date=end_date, current_month_only=not (start_date or end_date), current_user=current_user)
-    suppliers_data = await get_supplier_statistics(start_date=start_date, end_date=end_date, current_user=current_user)
-    items_data = await get_item_statistics(start_date=start_date, end_date=end_date, top_n=10, current_user=current_user)
+    # One period for every part of the sheet - the one chosen on screen, or
+    # this month - and it is printed on it. Before, the summary was this
+    # month, the top lists were for all time, and nothing said which.
+    try:
+        period = Period.parse(start_date, end_date) if (start_date or end_date) else Period.current_month()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Невалиден период")
+    start_text, end_text = period.start_text, period.end_text
+    stats = await get_summary(start_date=start_text, end_date=end_text, current_user=current_user)
+    suppliers_data = await get_supplier_statistics(start_date=start_text, end_date=end_text, current_user=current_user)
+    items_data = await get_item_statistics(start_date=start_text, end_date=end_text, top_n=10, current_user=current_user)
 
     company_id, _ = await get_company_scope(current_user)
     company_name = ""
@@ -61,9 +69,10 @@ async def export_statistics_pdf(
         company = await server.db.companies.find_one({"id": company_id})
         company_name = company.get("name", "") if company else ""
 
-    period_label = ""
-    if start_date and end_date:
-        period_label = f"Период: {start_date[:10]} - {end_date[:10]}"
+    counted = counted_period(period)
+    period_label = f"Период: {period.start:%d.%m.%Y} – {period.end:%d.%m.%Y}"
+    if counted.end < period.end:
+        period_label += f" (до {counted.end:%d.%m.%Y} включително)"
 
     try:
         pdf_data = await asyncio.to_thread(

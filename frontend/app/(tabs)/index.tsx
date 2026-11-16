@@ -31,6 +31,7 @@ import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, Celebrat
 import Animated from 'react-native-reanimated';
 import { PeriodState, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
+import { restrictedDataNote } from '../../src/utils/visibilityNote';
 import { PersonalExpenseModal } from '../../src/components/home/PersonalExpenseModal';
 import { RevenueModal } from '../../src/components/home/RevenueModal';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
@@ -613,6 +614,11 @@ export default function HomeScreen() {
   // average. While the period runs, its expected end comes with it.
   const pace = summary?.pace ?? null;
   const avgDailyTurnover = pace?.avg_per_revenue_day ?? 0;
+  // Which totals - and so which profit - this viewer sees; the "no
+  // statistics at all" case has a note of its own further up.
+  const restrictedNote = summary?.financial_visibility?.statistics === false
+    ? null
+    : restrictedDataNote(summary?.financial_visibility, t);
 
   // Home is hidden from the tab bar for a viewer without view_statistics
   // (see (tabs)/_layout.tsx's showHomeTab), but hiding a tab alone never
@@ -855,7 +861,7 @@ export default function HomeScreen() {
         {summary?.financial_visibility?.statistics === false && (
           <View style={styles.restrictedNote}>
             <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
-            <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+            <Text style={styles.restrictedNoteText}>{t('visibility.noStatistics')}</Text>
           </View>
         )}
 
@@ -917,15 +923,10 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {summary?.financial_visibility && (
-          summary.financial_visibility.statistics === false ||
-          summary.financial_visibility.pocket_money === false ||
-          summary.financial_visibility.off_book_expenses === false ||
-          summary.financial_visibility.profit === false
-        ) && (
+        {restrictedNote && (
           <View style={styles.restrictedNote}>
             <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
-            <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+            <Text style={styles.restrictedNoteText}>{restrictedNote}</Text>
           </View>
         )}
 

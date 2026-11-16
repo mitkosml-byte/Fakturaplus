@@ -687,6 +687,30 @@ async def get_item_price_history(
         }
     }
 
+async def _item_coverage(current_user: User, start_date: Optional[str], end_date: Optional[str]) -> Dict[str, Any]:
+    """How much of the period's purchases (without VAT) the items stand for.
+
+    Invoices whose lines were never read have no items, so the items add up
+    to less than the suppliers do - said with a number instead of being left
+    for the owner to wonder about.
+    """
+    _, scope = await get_company_scope(current_user)
+    query: Dict[str, Any] = dict(scope)
+    if start_date or end_date:
+        query["date"] = Period.parse(start_date, end_date).datetime_filter()
+    net_only = {"_id": 0, "amount_without_vat": 1}
+    purchases = await server.db.invoices.find(query, net_only).to_list(ALL_ROWS)
+    with_lines = await server.db.invoices.find({**query, "items.0": {"$exists": True}}, net_only).to_list(ALL_ROWS)
+    purchases_net = sum(float(p.get("amount_without_vat") or 0) for p in purchases)
+    with_lines_net = sum(float(p.get("amount_without_vat") or 0) for p in with_lines)
+    return {
+        "purchases_without_vat": round(purchases_net, 2),
+        "with_lines_without_vat": round(with_lines_net, 2),
+        "share": round(with_lines_net / purchases_net, 3) if purchases_net > 0 else None,
+        "invoices_without_lines": len(purchases) - len(with_lines),
+    }
+
+
 @router.get("/statistics/items")
 async def get_item_statistics(
     start_date: Optional[str] = None,
@@ -724,6 +748,7 @@ async def get_item_statistics(
     if not history:
         return {
             "totals": {"total_items": 0, "total_value": 0, "unique_items": 0},
+            "coverage": await _item_coverage(current_user, start_date, end_date),
             "top_by_quantity": [],
             "top_by_value": [],
             "top_by_frequency": [],
@@ -831,13 +856,14 @@ async def get_item_statistics(
     # Totals
     total_quantity = sum(i["quantity"] for i in items_list)
     total_value = sum(i["total_value"] for i in items_list)
-    
+
     return {
         "totals": {
             "total_items": round(total_quantity, 2),
             "total_value": round(total_value, 2),
             "unique_items": len(items_list)
         },
+        "coverage": await _item_coverage(current_user, start_date, end_date),
         "top_by_quantity": top_by_quantity,
         "top_by_quantity_by_unit": top_by_quantity_by_unit,
         "top_by_value": top_by_value,

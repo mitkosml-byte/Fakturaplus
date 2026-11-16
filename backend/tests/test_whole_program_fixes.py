@@ -736,3 +736,40 @@ def test_r2_payroll_is_its_own_right(client):
     legacy = {"Authorization": f"Bearer {token}"}
     assert "manage_payroll" in client.get("/api/auth/me", headers=legacy).json()["permissions"]
     assert client.get("/api/payroll", headers=legacy).status_code == 200
+
+
+def test_i5_the_statistics_pdf_is_for_one_printed_period(client, monkeypatch):
+    _, _, owner = _company()
+    seen = {}
+
+    def fake_pdf(**kwargs):
+        seen.update(kwargs)
+        return b"%PDF-1.4"
+    monkeypatch.setattr(server.ExportService, "generate_statistics_pdf", staticmethod(fake_pdf))
+    r = client.get("/api/export/statistics/pdf?start_date=2026-09-01&end_date=2026-09-30", headers=owner)
+    assert r.status_code == 200
+    assert seen["period_label"] == "Период: 01.09.2026 – 30.09.2026"
+    r = client.get("/api/export/statistics/pdf", headers=owner)
+    assert r.status_code == 200 and seen["period_label"].startswith("Период: 01.")
+
+
+def test_a3_item_statistics_say_how_much_of_the_purchases_they_cover(client):
+    _, _, owner = _company()
+    with_lines = {
+        "supplier": "Метро", "invoice_number": "A3-1", "date": "2026-10-05",
+        "amount_without_vat": 300, "vat_amount": 60, "total_amount": 360,
+        "items": [{"name": "Брашно", "quantity": 10, "unit": "кг", "unit_price": 30, "total_price": 300}],
+    }
+    without_lines = {
+        "supplier": "Енерго", "invoice_number": "A3-2", "date": "2026-10-06",
+        "amount_without_vat": 100, "vat_amount": 20, "total_amount": 120,
+    }
+    for body in (with_lines, without_lines):
+        assert client.post("/api/invoices", json=body, headers=owner).status_code == 200
+    stats = client.get("/api/statistics/items?start_date=2026-10-01&end_date=2026-10-31", headers=owner).json()
+    assert stats["coverage"] == {
+        "purchases_without_vat": 400, "with_lines_without_vat": 300, "share": 0.75, "invoices_without_lines": 1,
+    }
+    # A period with purchases but no read lines still says so.
+    empty = client.get("/api/statistics/items?start_date=2026-10-06&end_date=2026-10-06", headers=owner).json()
+    assert empty["coverage"]["share"] == 0 and empty["coverage"]["invoices_without_lines"] == 1

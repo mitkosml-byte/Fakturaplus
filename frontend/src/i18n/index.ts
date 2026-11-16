@@ -496,9 +496,33 @@ export const translations: Translations = {
     bg: 'Добавени {amount} € от сканирана издадена фактура към сумата за деня.',
     en: 'Added {amount} € from a scanned issued invoice to the day\'s total.',
   },
-  'home.restrictedDataNote': {
-    bg: 'Част от данните са скрити за вашия достъп - показаните суми са изчислени без тях.',
-    en: 'Some data is hidden for your access level - the figures shown are calculated without it.',
+  'visibility.noStatistics': {
+    bg: 'Общите суми на фирмата са скрити за вашия достъп.',
+    en: 'The company totals are hidden for your access level.',
+  },
+  'visibility.pocketMoney': {
+    bg: 'джобчето',
+    en: 'pocket money',
+  },
+  'visibility.offBookExpenses': {
+    bg: 'разходите без фактура',
+    en: 'expenses without an invoice',
+  },
+  'visibility.and': {
+    bg: ' и ',
+    en: ' and ',
+  },
+  'visibility.totalsWithout': {
+    bg: 'Сумите са без {items} - скрити са за вашия достъп.',
+    en: 'The totals leave out {items} - hidden for your access level.',
+  },
+  'visibility.profitHidden': {
+    bg: 'Печалбата е скрита за вашия достъп.',
+    en: 'Profit is hidden for your access level.',
+  },
+  'visibility.profitWithout': {
+    bg: 'Сумите и печалбата са без {items} (скрити за вашия достъп) - това не е действителната печалба на фирмата.',
+    en: 'The totals and profit leave out {items} (hidden for your access level) - this is not the company\'s actual profit.',
   },
   'home.dailyRevenue': {
     bg: 'Дневен оборот',
@@ -2733,6 +2757,14 @@ export const translations: Translations = {
     bg: 'Артикули',
     en: 'Items',
   },
+  'stats.top3WithVat': {
+    bg: 'с ДДС',
+    en: 'incl. VAT',
+  },
+  'stats.top3WithoutVat': {
+    bg: 'без ДДС',
+    en: 'excl. VAT',
+  },
   'stats.forecastTitle': {
     bg: 'Прогноза за следващия месец',
     en: 'Forecast for next month',
@@ -3506,8 +3538,12 @@ export const translations: Translations = {
     en: 'Unique Items',
   },
   'stats.totalValue': {
-    bg: 'Обща стойност',
-    en: 'Total Value',
+    bg: 'Обща стойност без ДДС',
+    en: 'Total value excl. VAT',
+  },
+  'stats.itemsCoverage': {
+    bg: 'Артикулите покриват {percent}% от покупките за периода (без ДДС) - {count} фактури са без прочетени редове.',
+    en: 'Items cover {percent}% of the period\'s purchases (excl. VAT) - {count} invoices have no read lines.',
   },
   'stats.alertThreshold': {
     bg: 'Праг за аларма',

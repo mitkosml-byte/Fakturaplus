@@ -40,6 +40,7 @@ import { PriceInflationCard } from '../../src/components/stats/PriceInflationCar
 import { AlertSettingsModal } from '../../src/components/stats/AlertSettingsModal';
 import { SupplierCompareModal } from '../../src/components/stats/SupplierCompareModal';
 import { COLORS } from '../../src/theme/colors';
+import { restrictedDataNote } from '../../src/utils/visibilityNote';
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, interpolate, Extrapolation } from 'react-native-reanimated';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -355,7 +356,9 @@ export default function StatsScreen() {
 
   const handleExportStatisticsPdf = async () => {
     try {
-      await downloadAndShareFile('/api/export/statistics/pdf', `statistics_${new Date().toISOString().slice(0, 10)}.pdf`);
+      // The period chosen on screen - the sheet prints it.
+      const query = new URLSearchParams({ start_date: periodStart, end_date: periodEnd }).toString();
+      await downloadAndShareFile(`/api/export/statistics/pdf?${query}`, `statistics_${periodStart}_${periodEnd}.pdf`);
     } catch (error) {
       Alert.alert(t('common.error'), t('invoices.downloadError'));
     }
@@ -598,6 +601,7 @@ export default function StatsScreen() {
 
   // Quantity is ranked within one unit at a time - the units on offer, most
   // common first, and the one currently shown.
+  const restrictedNote = restrictedDataNote(summary?.financial_visibility, t);
   const quantityUnits: string[] = Object.keys(itemStats?.top_by_quantity_by_unit || {});
   const activeQuantityUnit = quantityUnit && quantityUnits.includes(quantityUnit) ? quantityUnit : quantityUnits[0] ?? null;
 
@@ -1161,14 +1165,10 @@ export default function StatsScreen() {
                 </View>
                 )}
 
-                {summary?.financial_visibility && (
-                  summary.financial_visibility.pocket_money === false ||
-                  summary.financial_visibility.off_book_expenses === false ||
-                  summary.financial_visibility.profit === false
-                ) && (
+                {restrictedNote && (
                   <View style={styles.restrictedNote}>
                     <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
-                    <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+                    <Text style={styles.restrictedNoteText}>{restrictedNote}</Text>
                   </View>
                 )}
 
@@ -1391,7 +1391,10 @@ export default function StatsScreen() {
                     <Text style={styles.sectionTitle}>{t('stats.top3Title')}</Text>
                     <View style={styles.top3Row}>
                       <View style={styles.top3Column}>
-                        <Text style={styles.top3ColumnTitle}>{t('stats.topSuppliers')}</Text>
+                        {/* Suppliers are whole invoices (with VAT); items are
+                            invoice lines, read without VAT - said, so the two
+                            columns are never compared as if alike. */}
+                        <Text style={styles.top3ColumnTitle}>{t('stats.topSuppliers')} · {t('stats.top3WithVat')}</Text>
                         {topSuppliers.length > 0 ? (
                           topSuppliers.map((s, idx) => (
                             <View key={s.supplier} style={styles.top3Item}>
@@ -1405,7 +1408,7 @@ export default function StatsScreen() {
                         )}
                       </View>
                       <View style={styles.top3Column}>
-                        <Text style={styles.top3ColumnTitle}>{t('stats.topItems')}</Text>
+                        <Text style={styles.top3ColumnTitle}>{t('stats.topItems')} · {t('stats.top3WithoutVat')}</Text>
                         {topItems.length > 0 ? (
                           topItems.map((item, idx) => (
                             <View key={item.item_name} style={styles.top3Item}>
@@ -1890,6 +1893,16 @@ export default function StatsScreen() {
                             <Text style={styles.supplierTotalLabel}>{t('stats.totalValue')}</Text>
                           </View>
                         </View>
+                        {/* Invoices whose lines were never read add nothing
+                            here, so the items fall short of the suppliers -
+                            by how much is said, not left to guess. */}
+                        {itemStats.coverage?.share != null && itemStats.coverage.invoices_without_lines > 0 && (
+                          <Text style={styles.itemsCoverageText}>
+                            {t('stats.itemsCoverage')
+                              .replace('{percent}', String(Math.round(itemStats.coverage.share * 100)))
+                              .replace('{count}', String(itemStats.coverage.invoices_without_lines))}
+                          </Text>
+                        )}
                       </View>
                     )}
 
@@ -2722,6 +2735,12 @@ const styles = StyleSheet.create({
   },
   top3Column: {
     flex: 1,
+  },
+  itemsCoverageText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 10,
+    textAlign: 'center',
   },
   top3ColumnTitle: {
     fontSize: 12,
