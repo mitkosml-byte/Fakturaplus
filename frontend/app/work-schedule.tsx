@@ -504,18 +504,30 @@ export default function WorkScheduleScreen() {
       {
         text: t('schedule.markPaid'),
         onPress: async () => {
-          setPayingBusy(true);
-          try {
-            const payment = await api.createSchedulePayment({
-              user_id: selectedUserId, period_start: monthStart, period_end: monthEnd,
-            });
-            setSchedulePayment(payment);
-            Haptics.success();
-          } catch (error: any) {
-            Alert.alert(t('common.error'), error.message || t('schedule.markPaidError'));
-          } finally {
-            setPayingBusy(false);
-          }
+          const pay = async (confirmDoublePay: boolean) => {
+            setPayingBusy(true);
+            try {
+              const payment = await api.createSchedulePayment({
+                user_id: selectedUserId, period_start: monthStart, period_end: monthEnd,
+                confirm_double_pay: confirmDoublePay,
+              });
+              setSchedulePayment(payment);
+              Haptics.success();
+            } catch (error: any) {
+              if (error.status === 428 && !confirmDoublePay) {
+                // Already on formal payroll for the month - only on a yes.
+                Alert.alert(t('payRun.doublePayTitle'), error.message, [
+                  { text: t('common.cancel'), style: 'cancel' },
+                  { text: t('payRun.payAnyway'), style: 'destructive', onPress: () => { pay(true); } },
+                ]);
+              } else {
+                Alert.alert(t('common.error'), error.message || t('schedule.markPaidError'));
+              }
+            } finally {
+              setPayingBusy(false);
+            }
+          };
+          await pay(false);
         },
       },
     ]);

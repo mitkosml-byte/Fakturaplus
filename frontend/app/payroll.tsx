@@ -248,7 +248,7 @@ export default function PayrollScreen() {
     }
   };
 
-  const savePayrollEntry = async () => {
+  const savePayrollEntry = async (confirmDoublePay = false) => {
     if (!payrollEmployee) return;
     setSaving(true);
     try {
@@ -260,6 +260,7 @@ export default function PayrollScreen() {
         bonus_amount: parseFloat(bonusAmount) || 0,
         notes: payrollNotes || undefined,
         image_base64: payrollImage || undefined,
+        confirm_double_pay: confirmDoublePay,
       };
       if (payrollEmployee.agreement_type === 'net') {
         params.net_target = amount;
@@ -270,7 +271,15 @@ export default function PayrollScreen() {
       setPayrollModalVisible(false);
       await loadData();
     } catch (error: any) {
-      Alert.alert(t('common.error'), error.message);
+      if (error.status === 428 && !confirmDoublePay) {
+        // Already paid for days of this month through Work Schedule.
+        Alert.alert(t('payRun.doublePayTitle'), error.message, [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('payRun.payAnyway'), style: 'destructive', onPress: () => { savePayrollEntry(true); } },
+        ]);
+      } else {
+        Alert.alert(t('common.error'), error.message);
+      }
     } finally {
       setSaving(false);
     }
@@ -665,7 +674,7 @@ export default function PayrollScreen() {
                 <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setPayrollModalVisible(false)}>
                   <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.modalSaveBtn} onPress={savePayrollEntry} disabled={saving}>
+                <TouchableOpacity style={styles.modalSaveBtn} onPress={() => savePayrollEntry()} disabled={saving}>
                   {saving ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
                 </TouchableOpacity>
               </View>

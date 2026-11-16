@@ -4471,6 +4471,9 @@ export const translations: Translations = {
 
   // Pay run - one action for everyone due this month, mixing fixed
   // salary (formal payroll) and hourly (Work Schedule) team members.
+  'payRun.doublePayTitle': { bg: 'Вече е платено за този месец', en: 'Already paid for this month' },
+  'payRun.payAnyway': { bg: 'Плати и това', en: 'Pay this too' },
+  'payRun.payAnywayCount': { bg: 'Плати и тях ({count}) – отделни плащания са', en: 'Pay them too ({count}) – they are separate payments' },
   'payRun.title': { bg: 'Плащане на екипа', en: 'Pay the team' },
   'payRun.allPaid': { bg: 'Всички са платени за този месец', en: 'Everyone is paid for this month' },
   'payRun.fixedSalary': { bg: 'Фиксирана заплата', en: 'Fixed salary' },

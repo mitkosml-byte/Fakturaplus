@@ -147,6 +147,34 @@ export default function PayRunScreen() {
     }
   };
 
+  // People already paid for the month the other way (payroll vs schedule)
+  // are paid only after an explicit yes.
+  const toConfirm = (results || []).filter((r) => r.needs_confirmation && r.ref);
+  const handleConfirmDoublePay = async () => {
+    setProcessing(true);
+    try {
+      const response = await api.batchPay({
+        payroll_entries: toConfirm.filter((r) => r.kind === 'payroll').map((r) => ({
+          employee_id: r.ref as string, period_month: periodMonth, period_year: periodYear, confirm_double_pay: true,
+        })),
+        schedule_payments: toConfirm.filter((r) => r.kind === 'schedule').map((r) => ({
+          user_id: r.ref as string, period_start: monthStart, period_end: monthEnd, confirm_double_pay: true,
+        })),
+      });
+      const confirmed = new Set(toConfirm.map((r) => `${r.kind}:${r.ref}`));
+      setResults((prev) => [
+        ...(prev || []).filter((r) => !confirmed.has(`${r.kind}:${r.ref}`)),
+        ...response.results,
+      ]);
+      if (response.results.every((r) => r.success)) Haptics.success();
+      await loadData();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message || t('payRun.processError'));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   if (!canManage) return <AccessDenied />;
 
   const totalSelectedAmount =
@@ -200,6 +228,14 @@ export default function PayRunScreen() {
                       )}
                     </View>
                   ))}
+                  {toConfirm.length > 0 && (
+                    <TouchableOpacity style={styles.confirmDoubleButton} onPress={handleConfirmDoublePay} disabled={processing}>
+                      <Ionicons name="alert-circle-outline" size={16} color={COLORS.warning} />
+                      <Text style={styles.confirmDoubleText}>
+                        {t('payRun.payAnywayCount').replace('{count}', String(toConfirm.length))}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
 
@@ -318,6 +354,12 @@ const styles = StyleSheet.create({
   },
   rowName: { fontSize: 14, fontWeight: '600', color: 'white' },
   rowMeta: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  confirmDoubleButton: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    marginTop: 10, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10,
+    borderWidth: 1, borderColor: COLORS.warning,
+  },
+  confirmDoubleText: { color: COLORS.warning, fontSize: 13, fontWeight: '600' },
   resultsCard: { backgroundColor: COLORS.surface, borderRadius: 14, padding: 14, marginBottom: 16 },
   resultsTitle: { fontSize: 14, fontWeight: '700', color: 'white', marginBottom: 10 },
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },

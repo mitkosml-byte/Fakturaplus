@@ -135,7 +135,7 @@ async def _roi_month_data(
             month["invoices"].append((inv_day.day, inv.get("supplier") or "—", inv.get("total_amount", 0)))
     if visibility["off_book_expenses"]:
         expenses = await server.db.expenses.find(
-            {**scope, "date": {"$gte": first_start, "$lt": last_end}}, {"_id": 0, "date": 1, "amount": 1},
+            {**scope, **NOT_WAGES, "date": {"$gte": first_start, "$lt": last_end}}, {"_id": 0, "date": 1, "amount": 1},
         ).to_list(ROI_MAX_ROWS)
         for exp in expenses:
             date_str = exp.get("date")

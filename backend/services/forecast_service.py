@@ -529,11 +529,15 @@ class ForecastService:
             {**scope, "date": Period(month.start, today).datetime_filter(), "asset_id": None}, {"_id": 0, "total_amount": 1},
         ).to_list(None)
         variable = sum(float(i.get("total_amount", 0)) for i in invoices)
-        if include_off_book_expenses:
-            expenses = await self.db.expenses.find(
-                {**scope, "date": Period(month.start, today).text_filter()}, {"_id": 0, "amount": 1},
-            ).to_list(None)
-            variable += sum(float(e.get("amount", 0)) for e in expenses)
+        # Off-book expenses only for who may see them; wages paid through
+        # Work Schedule are payroll - always counted.
+        expenses = await self.db.expenses.find(
+            {**scope, "date": Period(month.start, today).text_filter()}, {"_id": 0, "amount": 1, "kind": 1},
+        ).to_list(None)
+        variable += sum(
+            float(e.get("amount", 0)) for e in expenses
+            if include_off_book_expenses or e.get("kind") == "schedule_wages"
+        )
 
         async def _payroll(year: int, mon: int) -> Optional[float]:
             entries = await self.db.payroll_entries.find(
@@ -575,11 +579,14 @@ class ForecastService:
             {"_id": 0, "date": 1, "total_amount": 1}
         ).to_list(None)
 
-        # Get non-invoice expenses (date is stored as a "YYYY-MM-DD" string)
+        # Non-invoice expenses (date is stored as a "YYYY-MM-DD" string):
+        # off-book ones only for who may see them; wages paid through Work
+        # Schedule are payroll - always counted.
         expenses = await self.db.expenses.find(
             {**scope, "date": {"$gte": window_start_str, "$lt": window_end_str}},
-            {"_id": 0, "date": 1, "amount": 1}
-        ).to_list(None) if include_off_book_expenses else []
+            {"_id": 0, "date": 1, "amount": 1, "kind": 1}
+        ).to_list(None)
+        expenses = [e for e in expenses if include_off_book_expenses or e.get("kind") == "schedule_wages"]
 
         # Payroll cost (gross + employer contributions + benefits) - usually
         # the most stable, predictable expense a business has

@@ -923,6 +923,8 @@ export interface SchedulePaymentCreate {
   user_id: string;
   period_start: string;
   period_end: string;
+  // The person's formal payroll already covers the month: pay anyway.
+  confirm_double_pay?: boolean;
 }
 
 export interface SchedulePayment {
@@ -946,6 +948,7 @@ export interface BatchPayrollItem {
   employee_id: string;
   period_month: number;
   period_year: number;
+  confirm_double_pay?: boolean;
 }
 
 export interface BatchPayRequest {
@@ -959,6 +962,9 @@ export interface BatchPayResultItem {
   success: boolean;
   error?: string | null;
   amount?: number | null;
+  // Already paid for the month the other way - pay only after a yes.
+  needs_confirmation?: boolean;
+  ref?: string | null;
 }
 
 // Manager-only team member profile (opened from an avatar tap, e.g. the

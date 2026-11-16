@@ -27,6 +27,10 @@ class BatchPayResultItem(BaseModel):
     success: bool
     error: Optional[str] = None
     amount: Optional[float] = None
+    # The same person is already paid for this month the other way (formal
+    # payroll vs Work Schedule): sent again with confirm_double_pay to pay.
+    needs_confirmation: bool = False
+    ref: Optional[str] = None  # employee_id (payroll) or user_id (schedule)
 
 
 class BatchPayRequest(BaseModel):
@@ -73,7 +77,10 @@ async def batch_pay(payload: BatchPayRequest, current_user: User = Depends(get_c
                 kind="payroll", label=entry["employee_name"], success=True, amount=entry["total_employer_cost"],
             ))
         except HTTPException as e:
-            results.append(BatchPayResultItem(kind="payroll", label=label, success=False, error=str(e.detail)))
+            results.append(BatchPayResultItem(
+                kind="payroll", label=label, success=False, error=str(e.detail),
+                needs_confirmation=e.status_code == 428, ref=item.employee_id,
+            ))
 
     for sched_item in payload.schedule_payments:
         label = member_names.get(sched_item.user_id, sched_item.user_id)
@@ -83,6 +90,9 @@ async def batch_pay(payload: BatchPayRequest, current_user: User = Depends(get_c
                 kind="schedule", label=schedule_payment.user_name, success=True, amount=schedule_payment.amount,
             ))
         except HTTPException as e:
-            results.append(BatchPayResultItem(kind="schedule", label=label, success=False, error=str(e.detail)))
+            results.append(BatchPayResultItem(
+                kind="schedule", label=label, success=False, error=str(e.detail),
+                needs_confirmation=e.status_code == 428, ref=sched_item.user_id,
+            ))
 
     return {"results": results}

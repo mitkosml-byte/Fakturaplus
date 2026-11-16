@@ -198,6 +198,17 @@ async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = D
     if existing:
         raise HTTPException(status_code=409, detail="Вече има ведомост за този служител за този месец")
 
+    if company_id and not entry.confirm_double_pay:
+        from routers.schedule import schedule_paid_months
+        if await schedule_paid_months(company_id, employee, entry.period_year, entry.period_month):
+            raise HTTPException(
+                status_code=428,
+                detail=(
+                    f"{employee['name']} вече е платен(а) по график за дни от {entry.period_month:02d}.{entry.period_year}. "
+                    "Ведомостта ще се добави към това плащане - потвърди, само ако наистина са две отделни плащания."
+                ),
+            )
+
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": current_user.user_id,

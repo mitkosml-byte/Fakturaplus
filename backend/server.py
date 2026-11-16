@@ -545,6 +545,12 @@ class PocketMoneyAdd(BaseModel):
     date: str
     amount: float = Field(gt=0)
 
+# An expense record that is wages paid by Work Schedule (one per day
+# worked): counted with payroll, never as an off-book expense, and managed
+# only through its schedule payment.
+SCHEDULE_WAGES = "schedule_wages"
+NOT_WAGES: Dict[str, Any] = {"kind": {"$ne": SCHEDULE_WAGES}}
+
 class NonInvoiceExpense(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -552,6 +558,8 @@ class NonInvoiceExpense(BaseModel):
     description: str
     amount: float
     date: str
+    kind: Optional[str] = None  # SCHEDULE_WAGES, or None for an ordinary off-book expense
+    schedule_payment_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class NonInvoiceExpenseCreate(BaseModel):
@@ -2407,7 +2415,7 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
     ]).to_list(ALL_ROWS)
     revenue_days = await db.daily_revenue.distinct("date", {**scope, "date": period.text_filter()})
     expenses = await db.expenses.aggregate([
-        {"$match": {**scope, "date": period.text_filter()}},
+        {"$match": {**scope, "date": period.text_filter(), **NOT_WAGES}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
     ]).to_list(ALL_ROWS)
 
@@ -2460,11 +2468,13 @@ async def monthly_costs_by_day(company_id: Optional[str], user_id: str, period: 
     for year, month in period.months():
         whole = Period.month(year, month)
         per_month[(year, month)] = (
-            await get_payroll_cost_for_period(company_id, user_id, whole.start, whole.end)
+            await get_payroll_cost_for_period(company_id, user_id, whole.start, whole.end, include_wages=False)
             + await get_depreciation_cost_for_period(company_id, user_id, whole.start, whole.end)
         )
+    # Wages paid by Work Schedule fall on the days that were worked.
+    wages = await schedule_wages_by_day(company_id, user_id, period)
     return {
-        day.isoformat(): per_month[(day.year, day.month)] / days_in_month(day.year, day.month)
+        day.isoformat(): per_month[(day.year, day.month)] / days_in_month(day.year, day.month) + wages.get(day.isoformat(), 0.0)
         for day in period.iter_days()
     }
 
@@ -2645,7 +2655,7 @@ async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: 
 
     if visibility["off_book_expenses"]:
         expenses = await db.expenses.find(
-            {**scope, "date": period.text_filter()}, {"_id": 0, "amount": 1, "description": 1}
+            {**scope, "date": period.text_filter(), **NOT_WAGES}, {"_id": 0, "amount": 1, "description": 1}
         ).to_list(ALL_ROWS)
         by_desc: Dict[str, float] = defaultdict(float)
         for exp in expenses:
@@ -4048,6 +4058,9 @@ class PayrollEntryCreate(BaseModel):
     bonus_amount: float = Field(default=0, ge=0)
     notes: Optional[str] = None
     image_base64: Optional[str] = None
+    # A month already paid to this person through Work Schedule needs an
+    # explicit yes (answered 428 otherwise).
+    confirm_double_pay: bool = False
 
 def calculate_payroll(
     base_amount: float,
@@ -4171,7 +4184,9 @@ PAYROLL_IMPORT_SYSTEM_PROMPT = """Ти си експертен AI асистен
 
 
 
-async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, start_date: Any, end_date: Any) -> float:
+async def get_payroll_cost_for_period(
+    company_id: Optional[str], user_id: str, start_date: Any, end_date: Any, include_wages: bool = True,
+) -> float:
     """Employer cost (total_employer_cost) of the payroll entries for the
     period - used by period_totals, so by /statistics/summary, the budget,
     the chat and the forecast. A payroll entry is the cost of its whole
@@ -4195,7 +4210,27 @@ async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, s
         share = period.month_share(int(e["period_year"]), int(e["period_month"]))
         if share:
             total += (e.get("total_employer_cost") or 0) * share
+    if include_wages:
+        total += await schedule_wages_for_period(company_id, user_id, period)
     return total
+
+
+async def schedule_wages_for_period(company_id: Optional[str], user_id: str, period: Period) -> float:
+    """Wages paid through Work Schedule for the days of the period - on the
+    days actually worked, not spread like a monthly salary."""
+    rows = await db.expenses.aggregate([
+        {"$match": {**simple_scope_query(company_id, user_id), "kind": SCHEDULE_WAGES, "date": period.text_filter()}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(ALL_ROWS)
+    return float(rows[0].get("total") or 0) if rows else 0.0
+
+
+async def schedule_wages_by_day(company_id: Optional[str], user_id: str, period: Period) -> Dict[str, float]:
+    rows = await db.expenses.aggregate([
+        {"$match": {**simple_scope_query(company_id, user_id), "kind": SCHEDULE_WAGES, "date": period.text_filter()}},
+        {"$group": {"_id": "$date", "total": {"$sum": "$amount"}}},
+    ]).to_list(ALL_ROWS)
+    return {str(row["_id"])[:10]: float(row.get("total") or 0) for row in rows if row.get("_id")}
 
 # ===================== OFFICIAL HOLIDAYS / РАБОТА НА ПРАЗНИЦИ И ОТПУСКИ =====================
 # Tracks which employees worked on an official Bulgarian public holiday
@@ -4477,6 +4512,9 @@ class SchedulePaymentCreate(BaseModel):
     user_id: str
     period_start: str  # "YYYY-MM-DD"
     period_end: str
+    # Paying hours to someone whose formal payroll already covers the same
+    # month needs an explicit yes (answered 428 otherwise).
+    confirm_double_pay: bool = False
 
 class SchedulePayment(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -4487,7 +4525,9 @@ class SchedulePayment(BaseModel):
     period_end: str
     total_hours: float
     amount: float
-    expense_id: str  # the resulting db.expenses record - deleting the payment removes this too
+    expense_id: str  # the first of the resulting db.expenses records (older payments: the only one)
+    # One wages record per day worked; deleting the payment removes them all.
+    expense_ids: List[str] = []
     paid_by: str
     paid_by_name: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -5313,6 +5353,26 @@ async def dedupe_revenue_days_and_payroll() -> dict:
     return result
 
 
+async def mark_schedule_wages() -> dict:
+    """Expenses that schedule payments created before wages were their own
+    kind: marked as wages (counted with payroll, not as off-book expenses)
+    and tied to their payment."""
+    marker = "schedule_wages_kind_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    marked = 0
+    async for payment in db.schedule_payments.find({}, {"_id": 0, "id": 1, "expense_id": 1}):
+        if not payment.get("expense_id"):
+            continue
+        result = await db.expenses.update_one(
+            {"id": payment["expense_id"], "kind": {"$ne": SCHEDULE_WAGES}},
+            {"$set": {"kind": SCHEDULE_WAGES, "schedule_payment_id": payment["id"]}},
+        )
+        marked += result.modified_count
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), "marked": marked})
+    return {"marked": marked}
+
+
 async def ensure_unique_records():
     """After dedupe_revenue_days_and_payroll: one revenue record per company
     and day, one payroll record per employee and month."""
@@ -5358,6 +5418,12 @@ async def run_data_migrations():
     except Exception:
         logger.exception("Revenue/payroll dedupe failed")
     await ensure_unique_records()
+    try:
+        result = await mark_schedule_wages()
+        if result and not result.get("skipped"):
+            logger.info(f"Schedule payments' expenses marked as wages: {result}")
+    except Exception:
+        logger.exception("Schedule wages migration failed")
 
 # ===================== HEALTH CHECK =====================
 

@@ -486,8 +486,9 @@ def test_p3_an_asset_bought_on_an_invoice_is_expensed_once(client):
     assert round(after["total_expense"], 2) == round(before["total_expense"] - 6000 + depreciation, 2)
     assert depreciation < 6000
     assert after["vat_to_pay"] == before["vat_to_pay"]
-    chart = client.get(f"/api/statistics/chart?{month}", headers=owner).json()
-    assert all(point["expense"] < 6000 for point in (chart if isinstance(chart, list) else chart.get("data", [])))
+    chart = client.get(f"/api/statistics/chart-data?{month}", headers=owner).json()
+    assert isinstance(chart, list) and len(chart) == 30
+    assert all(point["expense"] < 6000 for point in chart)
 
     # Another asset cannot take the same invoice; deleting the asset gives
     # the expense back to its day.
@@ -499,3 +500,90 @@ def test_p3_an_asset_bought_on_an_invoice_is_expensed_once(client):
     assert client.delete(f"/api/assets/{asset['id']}", headers=owner).status_code == 200
     again = client.get(f"/api/statistics/summary?{month}", headers=owner).json()
     assert round(again["total_expense"], 2) == round(before["total_expense"], 2)
+
+
+def test_z1_z2_p5_schedule_wages_are_payroll_on_the_days_worked_and_double_pay_asks(client):
+    company_id, owner_id, owner = _company()
+    worker_id, _ = _user(company_id, "staff", [], "Работник")
+    # A manager who may not see off-book expenses still sees wages - they are payroll.
+    _, manager = _user(company_id, "manager", sorted(set(server.ROLE_PERMISSIONS["manager"]) - {"view_off_book_expenses"}), "Управител")
+    for day in ("2026-12-01", "2026-12-08", "2026-12-15"):
+        client.post("/api/schedule/shifts", headers=owner, json={
+            "user_id": worker_id, "date": day, "start_time": "09:00", "end_time": "17:00", "hourly_rate": 12,
+        })
+    december = "start_date=2026-12-01&end_date=2026-12-31"
+    before = client.get(f"/api/statistics/summary?{december}", headers=owner).json()
+
+    paid = client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": worker_id, "period_start": "2026-12-01", "period_end": "2026-12-31",
+    })
+    assert paid.status_code == 200, paid.text
+    payment = paid.json()
+    wages = asyncio.run(server.db.expenses.find({"schedule_payment_id": payment["id"]}, {"_id": 0}).to_list(None))
+    assert sorted((w["date"], w["amount"], w["kind"]) for w in wages) == [
+        ("2026-12-01", 96, "schedule_wages"), ("2026-12-08", 96, "schedule_wages"), ("2026-12-15", 96, "schedule_wages")]
+
+    after = client.get(f"/api/statistics/summary?{december}", headers=owner).json()
+    assert round(after["total_payroll_cost"] - before["total_payroll_cost"], 2) == 288
+    assert after["total_non_invoice_expenses"] == before["total_non_invoice_expenses"]
+    seen_by_manager = client.get(f"/api/statistics/summary?{december}", headers=manager).json()
+    assert round(seen_by_manager["total_expense"], 2) == round(after["total_expense"] - after["total_non_invoice_expenses"], 2)
+    # The chart's days carry them on the days worked (December is still
+    # ahead, so read the chart's day costs directly).
+    by_day = asyncio.run(server.monthly_costs_by_day(company_id, owner_id, Period.parse("2026-12-01", "2026-12-31")))
+    assert round(by_day["2026-12-08"] - by_day["2026-12-09"], 2) == 96
+    assert round(sum(by_day.values()), 2) == round(after["total_payroll_cost"] + after["total_depreciation_expense"], 2)
+
+    # Not an off-book expense to list, edit or delete on its own.
+    listed = client.get("/api/expenses?start_date=2026-12-01&end_date=2026-12-31", headers=owner).json()
+    assert not any(e.get("kind") == "schedule_wages" for e in listed)
+    assert client.delete(f"/api/expenses/{wages[0]['id']}", headers=owner).status_code == 409
+    # Undoing the payment removes every day of it.
+    assert client.delete(f"/api/schedule/payments/{payment['id']}", headers=owner).status_code == 200
+    assert asyncio.run(server.db.expenses.count_documents({"schedule_payment_id": payment["id"]})) == 0
+
+    # The same person on formal payroll for December: paying the schedule
+    # too needs a yes, and so does a payroll month already paid by schedule.
+    employee = client.post("/api/employees", headers=owner, json={
+        "name": "Работник", "base_salary": 1100, "linked_user_id": worker_id,
+    }).json()
+    assert client.post("/api/payroll", headers=owner, json={
+        "employee_id": employee["id"], "period_month": 12, "period_year": 2026,
+    }).status_code == 200
+    asked = client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": worker_id, "period_start": "2026-12-01", "period_end": "2026-12-31",
+    })
+    assert asked.status_code == 428 and "12.2026" in asked.json()["detail"]
+    confirmed = client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": worker_id, "period_start": "2026-12-01", "period_end": "2026-12-31", "confirm_double_pay": True,
+    })
+    assert confirmed.status_code == 200
+    january_paid = client.post("/api/schedule/shifts", headers=owner, json={
+        "user_id": worker_id, "date": "2027-01-05", "start_time": "09:00", "end_time": "13:00", "hourly_rate": 12,
+    })
+    assert january_paid.status_code == 200
+    client.post("/api/schedule/payments", headers=owner, json={
+        "user_id": worker_id, "period_start": "2027-01-01", "period_end": "2027-01-31",
+    })
+    payroll_asked = client.post("/api/payroll", headers=owner, json={
+        "employee_id": employee["id"], "period_month": 1, "period_year": 2027,
+    })
+    assert payroll_asked.status_code == 428
+    assert client.post("/api/payroll", headers=owner, json={
+        "employee_id": employee["id"], "period_month": 1, "period_year": 2027, "confirm_double_pay": True,
+    }).status_code == 200
+
+
+def test_p5_an_older_schedule_payment_expense_becomes_wages(monkeypatch):
+    from mongomock_motor import AsyncMongoMockClient
+    monkeypatch.setattr(server, "db", AsyncMongoMockClient()[f"wages_{uuid.uuid4().hex[:6]}"])
+
+    async def run():
+        await server.db.expenses.insert_one({"id": "e-old", "company_id": "c1", "user_id": "u1",
+                                             "description": "Възнаграждение по график - Х", "amount": 300, "date": "2026-10-31"})
+        await server.db.schedule_payments.insert_one({"id": "p-old", "company_id": "c1", "expense_id": "e-old"})
+        result = await server.mark_schedule_wages()
+        return result, await server.db.expenses.find_one({"id": "e-old"}, {"_id": 0})
+
+    result, expense = asyncio.run(run())
+    assert result["marked"] == 1 and expense["kind"] == "schedule_wages" and expense["schedule_payment_id"] == "p-old"

@@ -1392,7 +1392,7 @@ class ApiService {
     return this.fetch('/payroll/preview', { method: 'POST', body: JSON.stringify(params) });
   }
 
-  async createPayrollEntry(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number; notes?: string; image_base64?: string }): Promise<PayrollEntry> {
+  async createPayrollEntry(params: { employee_id: string; period_month: number; period_year: number; gross_amount?: number; net_target?: number; bonus_amount?: number; notes?: string; image_base64?: string; confirm_double_pay?: boolean }): Promise<PayrollEntry> {
     return this.fetch('/payroll', { method: 'POST', body: JSON.stringify(params) });
   }
 

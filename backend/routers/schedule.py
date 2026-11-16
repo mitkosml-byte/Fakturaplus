@@ -36,6 +36,7 @@ from server import (
     _leave_conflict_for,
 )
 import server
+import uuid
 
 from routers.payroll import list_leave
 
@@ -88,6 +89,39 @@ async def create_shift(payload: WorkShiftCreate, current_user: User = Depends(ge
         },
     )
     return shift
+
+
+async def formal_payroll_months(company_id: str, user_id: str, start: str, end: str) -> List[str]:
+    """The months between start and end for which this team member (as the
+    employee linked to their account) already has a counted payroll entry -
+    "MM.YYYY" each. Paying the same month again through the schedule is a
+    double payment unless it really is a separate one."""
+    employee = await server.db.employees.find_one(
+        {"company_id": company_id, "linked_user_id": user_id}, {"_id": 0, "id": 1},
+    )
+    if not employee:
+        return []
+    period = Period.parse(start, end)
+    months = list(period.months())
+    entries = await server.db.payroll_entries.find(
+        {"employee_id": employee["id"], "$or": [{"period_year": y, "period_month": m} for y, m in months]},
+        {"_id": 0, "period_year": 1, "period_month": 1, "counted_in_expenses": 1},
+    ).to_list(100) if months else []
+    return sorted({
+        f"{int(e['period_month']):02d}.{e['period_year']}" for e in entries if e.get("counted_in_expenses") is not False
+    })
+
+
+async def schedule_paid_months(company_id: str, employee: dict, year: int, month: int) -> bool:
+    """Whether the employee's linked team member was already paid through
+    Work Schedule for days of this month."""
+    if not employee.get("linked_user_id"):
+        return False
+    whole = Period.month(year, month)
+    return bool(await server.db.schedule_payments.find_one({
+        "company_id": company_id, "user_id": employee["linked_user_id"],
+        "period_start": {"$lte": whole.end_text}, "period_end": {"$gte": whole.start_text},
+    }, {"_id": 1}))
 
 
 def payable_totals(occurrences: List[dict]) -> tuple:
@@ -417,16 +451,46 @@ async def create_schedule_payment(payload: SchedulePaymentCreate, current_user: 
     if total_hours <= 0 or amount <= 0:
         raise HTTPException(status_code=400, detail="Няма отработени часове с положителна сума за този период")
 
-    expense = NonInvoiceExpense(
-        user_id=current_user.user_id,
-        company_id=company_id,
-        description=f"Възнаграждение по график - {member['name']} ({payload.period_start} - {payload.period_end})",
-        amount=amount,
-        date=payload.period_end,
-    )
-    await server.db.expenses.insert_one(expense.model_dump())
+    if not payload.confirm_double_pay:
+        covered = await formal_payroll_months(company_id, payload.user_id, payload.period_start, payload.period_end)
+        if covered:
+            raise HTTPException(
+                status_code=428,
+                detail=(
+                    f"{member['name']} вече има ведомост за {', '.join(covered)}. Плащането по график ще се "
+                    "добави към нея - потвърди, само ако наистина са две отделни плащания."
+                ),
+            )
+
+    # The wages fall on the days that were worked - one record per day -
+    # so every report puts them where they belong (and a period across two
+    # months splits between them), counted with payroll, not off-book.
+    pay_by_day: Dict[str, float] = {}
+    for occ in occurrences:
+        if occ.get("payable", True):
+            pay_by_day[occ["date"]] = pay_by_day.get(occ["date"], 0.0) + occ["hours"] * (occ["hourly_rate"] or 0)
+    payment_id = str(uuid.uuid4())
+    expenses = [
+        NonInvoiceExpense(
+            user_id=current_user.user_id,
+            company_id=company_id,
+            description=f"Заплата по график - {member['name']}",
+            amount=round(day_amount, 2),
+            date=day,
+            kind=SCHEDULE_WAGES,
+            schedule_payment_id=payment_id,
+        )
+        for day, day_amount in sorted(pay_by_day.items()) if round(day_amount, 2) > 0
+    ]
+    # Rounding per day never changes the total paid.
+    drift = round(amount - sum(e.amount for e in expenses), 2)
+    if expenses and drift:
+        expenses[-1].amount = round(expenses[-1].amount + drift, 2)
+    if expenses:
+        await server.db.expenses.insert_many([e.model_dump() for e in expenses])
 
     payment = SchedulePayment(
+        id=payment_id,
         company_id=company_id,
         user_id=payload.user_id,
         user_name=member["name"],
@@ -434,7 +498,8 @@ async def create_schedule_payment(payload: SchedulePaymentCreate, current_user: 
         period_end=payload.period_end,
         total_hours=total_hours,
         amount=amount,
-        expense_id=expense.id,
+        expense_id=expenses[0].id if expenses else "",
+        expense_ids=[e.id for e in expenses],
         paid_by=current_user.user_id,
         paid_by_name=current_user.name,
     )
@@ -484,7 +549,9 @@ async def delete_schedule_payment(payment_id: str, current_user: User = Depends(
     payment = await server.db.schedule_payments.find_one({"id": payment_id, "company_id": company_id}, {"_id": 0})
     if not payment:
         raise HTTPException(status_code=404, detail="Записът не е намерен")
-    await server.db.expenses.delete_one({"id": payment["expense_id"], "company_id": company_id})
+    await server.db.expenses.delete_many({"schedule_payment_id": payment_id, "company_id": company_id})
+    if payment.get("expense_id"):  # a payment from before wages were split by day
+        await server.db.expenses.delete_one({"id": payment["expense_id"], "company_id": company_id})
     await server.db.schedule_payments.delete_one({"id": payment_id})
     await audit_service.log_action(
         user_id=current_user.user_id,

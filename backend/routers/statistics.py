@@ -228,8 +228,10 @@ async def get_chart_data(
         {**scope, "date": shown.text_filter()},
         {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1},
     ).to_list(ALL_ROWS)
+    # Off-book expenses only - wages paid by Work Schedule come with the
+    # day's fixed costs (monthly_costs_by_day), visible like any payroll.
     expenses = await server.db.expenses.find(
-        {**scope, "date": shown.text_filter()}, {"_id": 0, "date": 1, "amount": 1}
+        {**scope, "date": shown.text_filter(), **NOT_WAGES}, {"_id": 0, "date": 1, "amount": 1}
     ).to_list(ALL_ROWS) if visibility["off_book_expenses"] else []
     fixed_by_day = await monthly_costs_by_day(company_id, current_user.user_id, shown)
 

@@ -190,6 +190,13 @@ async def get_daily_revenues(
             r["pocket_money"] = 0
     return [DailyRevenue(**r) for r in revenues]
 
+async def _refuse_wages(expense_id: str, scope: dict) -> None:
+    """A wages record lives and dies with its schedule payment."""
+    doc = await server.db.expenses.find_one({"id": expense_id, **scope}, {"_id": 0, "kind": 1})
+    if doc and doc.get("kind") == SCHEDULE_WAGES:
+        raise HTTPException(status_code=409, detail="Това е заплата по график - промени или отмени плащането от Графика")
+
+
 @router.post("/expenses", response_model=NonInvoiceExpense)
 async def create_expense(expense: NonInvoiceExpenseCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_expenses")
@@ -219,6 +226,9 @@ async def get_expenses(
         else:
             query["date"] = {"$lte": end_date}
 
+    # Wages paid through Work Schedule are payroll, managed from the
+    # schedule - not off-book expenses.
+    query.update(NOT_WAGES)
     expenses = await server.db.expenses.find(query, {"_id": 0}).sort("date", -1).to_list(ALL_ROWS)
     return [NonInvoiceExpense(**e) for e in expenses]
 
@@ -226,6 +236,7 @@ async def get_expenses(
 async def update_expense(expense_id: str, update: NonInvoiceExpenseUpdate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_expenses")
     _, scope = await get_company_scope(current_user)
+    await _refuse_wages(expense_id, scope)
     update_data = {k: v for k, v in update.model_dump(exclude_unset=True).items()}
     if update_data:
         result = await server.db.expenses.update_one({"id": expense_id, **scope}, {"$set": update_data})
@@ -240,6 +251,7 @@ async def update_expense(expense_id: str, update: NonInvoiceExpenseUpdate, curre
 async def delete_expense(expense_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_expenses")
     _, scope = await get_company_scope(current_user)
+    await _refuse_wages(expense_id, scope)
     result = await server.db.expenses.delete_one({"id": expense_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Разходът не е намерен")
