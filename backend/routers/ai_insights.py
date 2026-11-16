@@ -118,9 +118,16 @@ async def build_business_chat_digest(current_user: User) -> dict:
         receivables = await _business_digest_receivables(scope)
 
     # VAT due this period - role-invariant (see _business_digest_vat_due).
+    # A business outside VAT registration owes none, so the assistant gets
+    # null and the flag rather than a "VAT to pay" figure to talk about.
+    vat_registered = company_vat_registered(
+        await server.db.companies.find_one(
+            {"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1}
+        ) if company_id else None
+    )
     vat_due_this_month = await _business_digest_vat_due(
         company_id, scope, current_user.user_id, this_month_start, this_month_end
-    )
+    ) if vat_registered else None
 
     # Next-month forecast - reuses the real, already-visibility-correct
     # endpoints rather than calling ForecastService a second time here.
@@ -231,6 +238,7 @@ async def build_business_chat_digest(current_user: User) -> dict:
         "last_month": {"label": last_month_start[:7], **last_month},
         "top_expenses_this_month": top_expenses,
         "unpaid_invoices": unpaid,
+        "vat_registered": vat_registered,
         "vat_due_this_month": vat_due_this_month,
         "forecast": forecast,
         "budget": budget,
@@ -291,6 +299,8 @@ async def ask_my_numbers(
         "извън данните на фирмата (НАП, данъчни декларации, конкуренти, обща информация), кажи ясно, че не "
         "разполагаш с такава информация, вместо да гадаеш. forecast.*.trend == 'insufficient_data' означава "
         "под 4 месеца история - next_month_predicted е просто средното, не истинска тенденция; кажи го изрично. "
+        "vat_registered == false означава, че фирмата не е регистрирана по ЗДДС: няма ДДС за внасяне "
+        "(vat_due_this_month е null), а издадените й фактури са без ДДС - не й смятай и не й препоръчвай ДДС. "
         "forecast.*.method == 'year_back' означава, че месеците на тази фирма следват миналогодишните: прогнозата "
         "е същият месец миналата година (same_month_last_year) при сегашното ниво спрямо миналата година "
         "(vs_last_year_percent) - тогава сравнявай с миналата година, а trend не е спад или ръст. "

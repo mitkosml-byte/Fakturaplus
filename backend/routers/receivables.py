@@ -208,6 +208,12 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
     issued = business_day(payload.issue_date) if payload.issue_date else today_local()
     if issued is None:
         raise HTTPException(status_code=400, detail="Невалидна дата на издаване")
+    # A business not registered for VAT issues invoices without VAT, and
+    # the invoice says on what basis.
+    company = await server.db.companies.find_one({"id": company_id}, {"_id": 0}) if company_id else None
+    vat_registered = company_vat_registered(company)
+    if not vat_registered:
+        payload.items = [item.model_copy(update={"vat_rate": 0}) for item in payload.items]
     amounts = invoice_vat_breakdown(payload.items)
     paid_when_issued = payload.payment_method in ("cash", "card")
     due_date = None
@@ -233,6 +239,7 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
         customer_address=(payload.customer_address or "").strip() or None, payment_method=payload.payment_method,
         amount_without_vat=amounts["amount_without_vat"], vat_amount=amounts["vat_amount"],
         total_amount=amounts["total_amount"], vat_by_rate=amounts["by_rate"],
+        vat_exempt_basis=None if vat_registered else VAT_EXEMPT_BASIS,
     )
     if not paid_when_issued:
         receivable = Receivable(

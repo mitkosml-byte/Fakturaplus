@@ -22,6 +22,9 @@ export interface Company {
   email?: string;
   bank_name?: string;
   bank_iban?: string;
+  // Registered for VAT, as the owner set it; null/absent = not answered
+  // yet (the app then behaves as registered and asks once).
+  vat_registered?: boolean | null;
   // Weekdays the business is normally closed (0=Monday..6=Sunday) - excluded
   // from "average per day" statistics instead of counting as zero-revenue.
   closed_weekdays?: number[];
@@ -228,6 +231,8 @@ export interface BillingDocument {
   amount_without_vat?: number;
   vat_amount?: number;
   vat_by_rate?: { rate: number; base: number; vat: number }[];
+  // Not registered for VAT: the invoice carries none and says why.
+  vat_exempt_basis?: string | null;
   // A cancelled invoice keeps its number and counts for nothing.
   cancelled?: boolean;
   created_at: string;
@@ -291,7 +296,9 @@ export interface BusinessChatDigest {
     total_overdue: number;
     overdue_count: number;
   } | null;
-  vat_due_this_month: number;
+  // null when the business is not registered for VAT (vat_registered false).
+  vat_registered?: boolean;
+  vat_due_this_month: number | null;
   forecast: {
     revenue: BusinessChatForecastSummary | null;
     expenses: BusinessChatForecastSummary | null;
@@ -405,6 +412,8 @@ export interface Summary {
   total_fiscal_revenue: number | null;
   // Invoices issued to customers in the period (with VAT) - part of income.
   total_issued_invoices?: number | null;
+  // false: the business is not registered for VAT - no VAT cards.
+  vat_registered?: boolean;
   issued_invoice_count?: number | null;
   issued_invoice_vat?: number | null;
   total_pocket_money: number | null;

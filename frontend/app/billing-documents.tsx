@@ -59,6 +59,9 @@ export default function BillingDocumentsScreen() {
   const [itemsError, setItemsError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  // A business not registered under the VAT Act issues invoices without
+  // VAT (чл. 113, ал. 9 ЗДДС); the server applies it, the form mirrors it.
+  const [vatRegistered, setVatRegistered] = useState(true);
 
   const loadData = useCallback(async () => {
     if (!canManage) {
@@ -66,7 +69,12 @@ export default function BillingDocumentsScreen() {
       return;
     }
     try {
-      setDocuments(await api.getBillingDocuments());
+      const [docs, company] = await Promise.all([
+        api.getBillingDocuments(),
+        api.getCompany().catch(() => null),
+      ]);
+      setDocuments(docs);
+      setVatRegistered(company?.vat_registered !== false);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -144,8 +152,9 @@ export default function BillingDocumentsScreen() {
     const price = parseFloat(it.unit_price) || 0;
     return sum + qty * price;
   }, 0);
+  const vatExempt = isInvoice && !vatRegistered;
   // VAT on each rate's whole base, as the invoice prints it.
-  const formVat = isInvoice
+  const formVat = isInvoice && !vatExempt
     ? Object.entries(formItems.reduce<Record<string, number>>((acc, it) => {
         const base = (parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0);
         const rate = it.vat_rate.trim() === '' ? '20' : it.vat_rate.trim();
@@ -161,7 +170,7 @@ export default function BillingDocumentsScreen() {
       .filter((it) => it.name.trim() && parseFloat(it.unit_price) >= 0 && parseFloat(it.quantity) > 0)
       .map((it) => ({
         name: it.name.trim(), quantity: parseFloat(it.quantity), unit: it.unit || 'бр.', unit_price: parseFloat(it.unit_price),
-        ...(isInvoice ? { vat_rate: Math.min(100, Math.max(0, parseFloat(it.vat_rate) || 0)) } : {}),
+        ...(isInvoice ? { vat_rate: vatExempt ? 0 : Math.min(100, Math.max(0, parseFloat(it.vat_rate) || 0)) } : {}),
       }));
     setCustomerNameError(missingName);
     setItemsError(validItems.length === 0);
@@ -452,7 +461,7 @@ export default function BillingDocumentsScreen() {
                         placeholder={isInvoice ? t('billingDocuments.priceWithoutVat') : t('scan.pricePlaceholder')}
                         placeholderTextColor={COLORS.textMuted}
                       />
-                      {isInvoice && (
+                      {isInvoice && !vatExempt && (
                         <TextInput
                           style={[styles.input, styles.itemSmallInput]}
                           value={item.vat_rate}
@@ -474,6 +483,9 @@ export default function BillingDocumentsScreen() {
                 <Expandable expanded={itemsError}>
                   <Text style={styles.fieldErrorText}>{t('billingDocuments.itemsRequired')}</Text>
                 </Expandable>
+                {vatExempt && (
+                  <Text style={styles.vatExemptNote}>{t('billingDocuments.vatExemptNote')}</Text>
+                )}
                 <TouchableOpacity style={styles.addItemButton} onPress={addFormItem}>
                   <Ionicons name="add-circle-outline" size={18} color={COLORS.primary} />
                   <Text style={styles.addItemButtonText}>{t('billingDocuments.addItem')}</Text>
@@ -512,6 +524,7 @@ export default function BillingDocumentsScreen() {
 }
 
 const styles = StyleSheet.create({
+  vatExemptNote: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6 },
   backgroundImage: { flex: 1 },
   overlay: { flex: 1, backgroundColor: 'rgba(10, 15, 28, 0.88)' },
   container: { flex: 1 },

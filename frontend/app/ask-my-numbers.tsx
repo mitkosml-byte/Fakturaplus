@@ -225,9 +225,11 @@ export default function AskMyNumbersScreen() {
                             </Text>
                           )}
 
-                          <Text style={styles.digestRow}>
-                            {t('askMyNumbers.vatDue').replace('{amount}', d.vat_due_this_month.toFixed(2))}
-                          </Text>
+                          {d.vat_due_this_month !== null && d.vat_due_this_month !== undefined && (
+                            <Text style={styles.digestRow}>
+                              {t('askMyNumbers.vatDue').replace('{amount}', d.vat_due_this_month.toFixed(2))}
+                            </Text>
+                          )}
 
                           {d.forecast.revenue && (
                             <Text style={styles.digestRow}>

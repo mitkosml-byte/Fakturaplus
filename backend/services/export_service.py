@@ -511,6 +511,8 @@ class ExportService:
         method = document.get("payment_method")
         method_text = {"cash": "В брой", "card": "С карта", "bank_transfer": "По банков път"}.get(method or "", "По банков път")
         elements.append(Paragraph(f"Дата на данъчното събитие: {day_text(document.get('issue_date'))}", normal_style))
+        if document.get("vat_exempt_basis"):
+            elements.append(Paragraph(f"Основание за неначисляване на ДДС: {text(document.get('vat_exempt_basis'))}", normal_style))
         elements.append(Paragraph(f"Начин на плащане: {method_text}", normal_style))
         if method not in ("cash", "card"):
             if company.get("bank_iban"):
@@ -560,7 +562,8 @@ class ExportService:
             ("Общо приходи", stats.get('total_income', 0)),
             ("Общо разходи", stats.get('total_expense', 0)),
             ("Печалба", stats.get('profit', 0)),
-            ("ДДС за плащане", stats.get('vat_to_pay', 0)),
+            # A business outside VAT registration has no VAT to pay.
+            *([] if stats.get('vat_registered') is False else [("ДДС за плащане", stats.get('vat_to_pay', 0))]),
             ("Брой фактури", stats.get('invoice_count', 0)),
         ]
         
@@ -911,7 +914,8 @@ class ExportService:
             ["Общо приходи", _money_or_hidden(stats.get('total_income'))],
             ["Общо разходи", _money_or_hidden(stats.get('total_expense'))],
             ["Печалба", _money_or_hidden(stats.get('profit'))],
-            ["ДДС за плащане", _money_or_hidden(stats.get('vat_to_pay'))],
+            # A business outside VAT registration has no VAT to pay.
+            *([] if stats.get('vat_registered') is False else [["ДДС за плащане", _money_or_hidden(stats.get('vat_to_pay'))]]),
             ["Брой фактури", "скрито" if stats.get('invoice_count') is None else str(stats.get('invoice_count'))],
         ]
         summary_table = Table(summary_rows, colWidths=[90*mm, 60*mm])

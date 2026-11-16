@@ -917,6 +917,10 @@ export const translations: Translations = {
     bg: 'Цена без ДДС',
     en: 'Price excl. VAT',
   },
+  'billingDocuments.vatExemptNote': {
+    bg: 'Фирмата не е регистрирана по ЗДДС: фактурата се издава без ДДС, с основание чл. 113, ал. 9 ЗДДС.',
+    en: 'The business is not registered for VAT: the invoice is issued without VAT, citing Art. 113(9) VAT Act.',
+  },
   'billingDocuments.vatRate': {
     bg: 'ДДС %',
     en: 'VAT %',
@@ -2399,6 +2403,18 @@ export const translations: Translations = {
   'company.vatNumber': {
     bg: 'ДДС номер',
     en: 'VAT Number',
+  },
+  'company.vatRegistered': {
+    bg: 'Регистрирана по ЗДДС',
+    en: 'Registered for VAT',
+  },
+  'company.vatRegisteredHint': {
+    bg: 'Фактурите се издават с ДДС и програмата показва ДДС за внасяне. Прагът за регистрация следи счетоводителят.',
+    en: 'Invoices carry VAT and the app shows the VAT to pay. Your accountant tracks the registration threshold.',
+  },
+  'company.vatNotRegisteredHint': {
+    bg: 'Фактурите се издават без ДДС (чл. 113, ал. 9 ЗДДС) и картите за ДДС се скриват. Прагът за регистрация следи счетоводителят.',
+    en: 'Invoices are issued without VAT (Art. 113(9) VAT Act) and the VAT cards are hidden. Your accountant tracks the registration threshold.',
   },
   'company.mol': {
     bg: 'МОЛ',

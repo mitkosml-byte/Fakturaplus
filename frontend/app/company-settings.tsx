@@ -47,6 +47,9 @@ export default function CompanySettingsScreen() {
   const [email, setEmail] = useState('');
   const [bankName, setBankName] = useState('');
   const [bankIban, setBankIban] = useState('');
+  // Registered for VAT: decides the VAT cards and the VAT on issued
+  // invoices. null = not answered yet (a VAT number implies "yes").
+  const [vatRegistered, setVatRegistered] = useState<boolean | null>(null);
 
   const loadCompany = useCallback(async () => {
     try {
@@ -63,6 +66,7 @@ export default function CompanySettingsScreen() {
         setEmail(data.email || '');
         setBankName(data.bank_name || '');
         setBankIban(data.bank_iban || '');
+        setVatRegistered(typeof data.vat_registered === 'boolean' ? data.vat_registered : (data.vat_number ? true : null));
 
         // The backend only blocks an EIK change once teammates have joined
         // (it would silently change their company's tax ID too). Mirror
@@ -116,6 +120,7 @@ export default function CompanySettingsScreen() {
         email: email.trim() || undefined,
         bank_name: bankName.trim() || undefined,
         bank_iban: bankIban.trim() || undefined,
+        ...(vatRegistered !== null ? { vat_registered: vatRegistered } : {}),
       });
       setCompany(savedCompany);
       Haptics.success();
@@ -249,6 +254,30 @@ export default function CompanySettingsScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('company.vatRegistered')}</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {([true, false] as const).map((value) => (
+                      <TouchableOpacity
+                        key={String(value)}
+                        onPress={() => setVatRegistered(value)}
+                        style={[
+                          styles.vatChoice,
+                          vatRegistered === value && { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+                        ]}
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.vatChoiceText, vatRegistered === value && { color: 'white' }]}>
+                          {value ? t('common.yes') : t('common.no')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.inputHint}>
+                    {vatRegistered === false ? t('company.vatNotRegisteredHint') : t('company.vatRegisteredHint')}
+                  </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>{t('company.mol')}</Text>
                   <TextInput
                     style={styles.input}
@@ -358,6 +387,15 @@ export default function CompanySettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  vatChoice: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+  },
+  vatChoiceText: { color: COLORS.textSecondary, fontWeight: '600' },
   backgroundImage: {
     flex: 1,
   },

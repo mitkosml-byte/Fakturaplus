@@ -691,6 +691,7 @@ class ApiService {
     email?: string;
     bank_name?: string;
     bank_iban?: string;
+    vat_registered?: boolean;
   }): Promise<Company> {
     return this.fetch('/company', {
       method: 'POST',

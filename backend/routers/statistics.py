@@ -179,6 +179,11 @@ async def get_summary(
         "total_overdue_amount": _redact(round(total_overdue_amount, 2)),
         "overdue_invoice_count": _redact(len(overdue_invoices)),
         "financial_visibility": visibility,
+        # Not registered for VAT: no VAT to pay or deduct - the screens hide it.
+        "vat_registered": company_vat_registered(
+            await server.db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1})
+            if company_id else None
+        ),
         # The exact days these totals cover, and on how many of them
         # revenue was entered - what "the period" means, stated, not implied.
         "period": {

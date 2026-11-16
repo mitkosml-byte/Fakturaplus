@@ -993,3 +993,53 @@ def test_x10_c2_the_statistics_pdf_says_what_is_hidden_instead_of_failing(client
     assert seen["stats"]["profit"] is None and "Печалбата е скрита" in seen["visibility_note"]
     _, export_only = _user(company_id, "manager", ["export_data"], "Само експорт")
     assert client.get("/api/export/statistics/pdf", headers=export_only).status_code == 403
+
+
+def test_x10_d3_vat_registration_is_asked_once_and_followed(client, monkeypatch):
+    company_id, owner_id, owner = _company()
+    asyncio.run(server.db.companies.update_one({"id": company_id}, {"$set": {"eik": "131071587"}}))
+    october = "start_date=2026-10-01&end_date=2026-10-31"
+    keys = lambda: [s["key"] for s in client.get("/api/proactive/signals", headers=owner).json().get("signals", [])]
+    # Not answered, no VAT number: as before (registered), and asked once.
+    assert client.get(f"/api/statistics/summary?{october}", headers=owner).json()["vat_registered"] is True
+    assert "vat_registration" in keys()
+
+    assert client.put("/api/company", headers=owner, json={"vat_registered": False}).status_code == 200
+    assert client.get(f"/api/statistics/summary?{october}", headers=owner).json()["vat_registered"] is False
+    assert "vat_registration" not in keys()
+    issued = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "invoice", "customer_name": "Клиент", "issue_date": "2026-10-10", "payment_method": "cash",
+        "items": [{"name": "Услуга", "quantity": 1, "unit_price": 100, "vat_rate": 20}],
+    }).json()
+    assert (issued["vat_amount"], issued["total_amount"]) == (0, 100)
+    assert issued["vat_exempt_basis"] == "чл. 113, ал. 9 от ЗДДС"
+    assert client.get(f"/api/billing-documents/{issued['id']}/pdf", headers=owner).status_code == 200
+
+    # No "VAT to pay" for the assistant or in the report either.
+    from routers.ai_insights import build_business_chat_digest
+    owner_user = server.User(user_id=owner_id, email=f"{owner_id}@test.com", name="Собственик", role="owner",
+                             company_id=company_id, permissions=list(server.ROLE_PERMISSIONS["owner"]))
+    digest = asyncio.run(build_business_chat_digest(owner_user))
+    assert digest["vat_registered"] is False and digest["vat_due_this_month"] is None
+    import services.export_service as export_service
+    tables = []
+    real_table = export_service.Table
+
+    def recording_table(rows, *args, **kwargs):
+        tables.append(rows)
+        return real_table(rows, *args, **kwargs)
+    monkeypatch.setattr(export_service, "Table", recording_table)
+    assert client.get(f"/api/export/statistics/pdf?{october}", headers=owner).status_code == 200
+    labels = [row[0] for rows in tables for row in rows]
+    assert "Печалба" in labels and "ДДС за плащане" not in labels
+
+    assert client.put("/api/company", headers=owner, json={"vat_registered": True}).status_code == 200
+    with_vat = client.post("/api/billing-documents", headers=owner, json={
+        "doc_type": "invoice", "customer_name": "Клиент", "issue_date": "2026-10-11", "payment_method": "cash",
+        "items": [{"name": "Услуга", "quantity": 1, "unit_price": 100, "vat_rate": 20}],
+    }).json()
+    assert with_vat["total_amount"] == 120 and with_vat["vat_exempt_basis"] is None
+    assert asyncio.run(build_business_chat_digest(owner_user))["vat_due_this_month"] is not None
+    tables.clear()
+    client.get(f"/api/export/statistics/pdf?{october}", headers=owner)
+    assert "ДДС за плащане" in [row[0] for rows in tables for row in rows]

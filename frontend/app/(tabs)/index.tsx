@@ -766,6 +766,9 @@ export default function HomeScreen() {
             </>
             )}
 
+        {/* Not registered for VAT: no VAT to pay or deduct */}
+        {summary?.vat_registered !== false && (
+        <>
         {/* VAT Card */}
         <View style={styles.vatCard}>
           <View style={styles.vatHeader}>
@@ -800,6 +803,8 @@ export default function HomeScreen() {
             </View>
           </View>
         </View>
+        </>
+        )}
             </Animated.View>
 
         {/* Unpaid supplier invoices reminder - company-wide, not scoped to

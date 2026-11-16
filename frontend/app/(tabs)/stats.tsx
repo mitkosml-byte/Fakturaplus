@@ -1304,6 +1304,9 @@ export default function StatsScreen() {
                   )}
                 </View>
 
+                {/* Not registered for VAT: no VAT breakdown */}
+                {summary?.vat_registered !== false && (
+                <>
                 {/* VAT Breakdown */}
                 <View style={styles.vatBreakdown}>
                   <Text style={styles.sectionTitle}>{t('stats.vatBreakdown')}</Text>
@@ -1330,6 +1333,8 @@ export default function StatsScreen() {
                     </Text>
                   </View>
                 </View>
+                </>
+                )}
 
                 {/* Additional Stats */}
                 <View style={styles.additionalStats}>

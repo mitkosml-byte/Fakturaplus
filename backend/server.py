@@ -203,6 +203,9 @@ class Company(BaseModel):
     email: Optional[str] = None  # Имейл
     bank_name: Optional[str] = None  # Банка
     bank_iban: Optional[str] = None  # IBAN
+    # Регистрирана по ЗДДС: None = по ДДС номера в профила (company_vat_registered).
+    # Прагът и регистрацията са работа на счетоводството - тук е само фактът.
+    vat_registered: Optional[bool] = None
     # Дни от седмицата, в които фирмата обичайно е затворена (0=понеделник
     # ... 6=неделя, Python date.weekday() конвенция) - изключват се от
     # статистиките за среден дневен оборот вместо да се броят за дни с
@@ -223,6 +226,7 @@ class CompanyCreate(BaseModel):
     email: Optional[str] = None
     bank_name: Optional[str] = None
     bank_iban: Optional[str] = None
+    vat_registered: Optional[bool] = None
     closed_weekdays: Optional[List[int]] = None
 
 class CompanyUpdate(BaseModel):
@@ -236,7 +240,29 @@ class CompanyUpdate(BaseModel):
     email: Optional[str] = None
     bank_name: Optional[str] = None
     bank_iban: Optional[str] = None
+    vat_registered: Optional[bool] = None
     closed_weekdays: Optional[List[int]] = None
+
+def company_vat_registered(company: Optional[dict]) -> bool:
+    """Whether the business charges and deducts VAT, as the owner set it.
+    Not answered yet: as the app always was - registered - and the owner is
+    asked once (vat_registration_unanswered) instead of the VAT cards
+    vanishing for a registered business that never typed its VAT number."""
+    if not company:
+        return True
+    flag = company.get("vat_registered")
+    return flag if isinstance(flag, bool) else True
+
+
+def vat_registration_unanswered(company: Optional[dict]) -> bool:
+    """Not set, and no VAT number to say so - worth one question."""
+    if not company:
+        return False
+    return not isinstance(company.get("vat_registered"), bool) and not str(company.get("vat_number") or "").strip()
+
+# Printed on an invoice of a business not registered for VAT.
+VAT_EXEMPT_BASIS = "чл. 113, ал. 9 от ЗДДС"
+
 
 class User(BaseModel):
     user_id: str
@@ -2442,6 +2468,9 @@ class BillingDocument(BaseModel):
     amount_without_vat: float = 0
     vat_amount: float = 0
     vat_by_rate: List[Dict[str, Any]] = []
+    # Set when the business is not registered for VAT: the invoice carries
+    # no VAT and says why.
+    vat_exempt_basis: Optional[str] = None
     cancelled: bool = False
     cancelled_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -3603,6 +3632,25 @@ def _bg_day_list(dates: List[str]) -> str:
     joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " и " + parts[-1]
     return joined + suffix
 
+async def _signal_vat_registration(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """One question for whoever runs the company profile: is the business
+    registered for VAT? The VAT cards and the VAT on its invoices follow
+    the answer - asked, never guessed from an empty VAT number field."""
+    if not company_id or "manage_company" not in set(current_user.permissions or []):
+        return None
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1})
+    if not vat_registration_unanswered(company):
+        return None
+    return {
+        "key": "vat_registration", "severity": "info", "priority": 30,
+        "title": "Регистрирана ли е фирмата по ЗДДС?",
+        "detail": (
+            "От отговора зависи дали програмата показва ДДС за плащане и дали издадените фактури са с ДДС. "
+            "Отбележи го в настройките на фирмата - прагът и регистрацията остават работа на счетоводителя."
+        ),
+        "route": "/company-settings",
+    }
+
 async def _signal_missing_revenue(company_id, scope, current_user, visibility) -> Optional[dict]:
     """Open days of the last two weeks with no revenue entered, for a
     company that otherwise logs its days. Those days are now left out of
@@ -3637,6 +3685,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_budget, _signal_price_alerts, _signal_reorder, _signal_forecast,
     _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
+    _signal_vat_registration,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
