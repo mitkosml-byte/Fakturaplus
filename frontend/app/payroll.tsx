@@ -77,6 +77,9 @@ export default function PayrollScreen() {
     min_insurance_income: '',
     max_insurance_income: '',
   });
+  // From which month the rates apply ("YYYY-MM"): a payroll of an earlier
+  // month keeps the rates of its own time.
+  const [ratesFrom, setRatesFrom] = useState('');
 
   const periodMonth = selectedMonth.getMonth() + 1;
   const periodYear = selectedMonth.getFullYear();
@@ -318,8 +321,14 @@ export default function PayrollScreen() {
   };
 
   // ---- Rates ----
+  const thisMonthKey = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  };
+
   const openRates = () => {
     if (!rates) return;
+    setRatesFrom(thisMonthKey());
     setRatesForm({
       employee_rate_percent: String(rates.employee_rate_percent),
       employer_rate_percent: String(rates.employer_rate_percent),
@@ -332,7 +341,12 @@ export default function PayrollScreen() {
 
   const saveRates = async () => {
     try {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ratesFrom.trim())) {
+        Alert.alert(t('common.error'), t('payroll.ratesFromInvalid'));
+        return;
+      }
       const updated = await api.updatePayrollRates({
+        effective_from: ratesFrom.trim(),
         employee_rate_percent: parseFloat(ratesForm.employee_rate_percent),
         employer_rate_percent: parseFloat(ratesForm.employer_rate_percent),
         income_tax_percent: parseFloat(ratesForm.income_tax_percent),
@@ -344,6 +358,23 @@ export default function PayrollScreen() {
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     }
+  };
+
+  const removeRatesVersion = (effectiveFrom: string) => {
+    Alert.alert(t('common.confirm'), t('payroll.ratesDeleteConfirm').replace('{month}', effectiveFrom), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setRates(await api.deletePayrollRatesVersion(effectiveFrom));
+          } catch (error: any) {
+            Alert.alert(t('common.error'), error.message);
+          }
+        },
+      },
+    ]);
   };
 
   if (!hasPermission('manage_payroll')) {
@@ -689,6 +720,34 @@ export default function PayrollScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t('payroll.rates')}</Text>
             <Text style={styles.ratesDisclaimer}>{t('payroll.ratesDisclaimer')}</Text>
+
+            <Text style={styles.inputLabel}>{t('payroll.ratesFrom')}</Text>
+            <TextInput
+              style={styles.input}
+              value={ratesFrom}
+              onChangeText={setRatesFrom}
+              placeholder="2027-01"
+              placeholderTextColor={COLORS.textMuted}
+              autoCapitalize="none"
+            />
+            <Text style={styles.ratesDisclaimer}>{t('payroll.ratesFromHint')}</Text>
+            {(rates?.versions || []).length > 1 && (
+              <View style={{ marginBottom: 8 }}>
+                {(rates?.versions || []).map((version) => (
+                  <View key={version.effective_from} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 }}>
+                    <Text style={[styles.ratesDisclaimer, { flex: 1, marginBottom: 0 }]}>
+                      {version.effective_from === '2000-01'
+                        ? t('payroll.ratesFromStart')
+                        : t('payroll.ratesVersion').replace('{month}', version.effective_from)}
+                      {` · ${version.min_insurance_income}–${version.max_insurance_income} €`}
+                    </Text>
+                    <TouchableOpacity onPress={() => removeRatesVersion(version.effective_from)} hitSlop={8}>
+                      <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
 
             <Text style={styles.inputLabel}>{t('payroll.employeeRate')}</Text>
             <TextInput

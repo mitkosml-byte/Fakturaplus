@@ -38,28 +38,76 @@ from pymongo.errors import DuplicateKeyError
 router = APIRouter(prefix="/api")
 
 @router.get("/payroll/rates")
-async def get_payroll_rates(current_user: User = Depends(get_current_user)):
+async def get_payroll_rates(
+    year: Optional[int] = None, month: Optional[int] = None, current_user: User = Depends(get_current_user),
+):
+    """The rates in effect in a month (this month unless given), with every
+    dated version."""
     require_permission(current_user, "manage_payroll")
     company_id, _ = await get_company_scope(current_user)
-    return await get_payroll_rates_dict(company_id)
+    if month is not None and not 1 <= month <= 12:
+        raise HTTPException(status_code=400, detail="Невалиден месец")
+    return await get_payroll_rates_dict(company_id, year, month)
 
 @router.put("/payroll/rates")
 async def update_payroll_rates(request: Request, current_user: User = Depends(get_current_user)):
+    """Saves the rates from a month on ("effective_from", "YYYY-MM"; this
+    month unless given): a payroll of an earlier month keeps the rates of
+    its own time. Saving the same month again corrects that version."""
     require_permission(current_user, "manage_payroll")
     company_id, _ = await get_company_scope(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="Нямате фирма")
 
     body = await request.json()
-    update_data = {k: float(v) for k, v in body.items() if k in DEFAULT_PAYROLL_RATES}
+    try:
+        update_data = {k: float(v) for k, v in body.items() if k in DEFAULT_PAYROLL_RATES}
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Невалидна стойност на ставка")
+    if any(value < 0 for value in update_data.values()):
+        raise HTTPException(status_code=400, detail="Ставките не може да са отрицателни")
+    effective_from = str(body.get("effective_from") or today_local().strftime("%Y-%m"))
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", effective_from):
+        raise HTTPException(status_code=400, detail="Невалиден месец „в сила от“")
 
-    existing = await server.db.payroll_rates.find_one({"company_id": company_id})
+    existing = await server.db.payroll_rates.find_one({"company_id": company_id}, {"_id": 0})
+    # Never saved before: the built-in rates stand for every month until now.
+    known = payroll_rate_versions(existing) or [{**DEFAULT_PAYROLL_RATES, "effective_from": RATES_FROM_THE_START}]
+    versions = [v for v in known if v["effective_from"] != effective_from]
+    # A new version starts from the one in effect then, with what was changed.
+    base = rates_in_effect(known, effective_from)
+    new_version = {**{k: base.get(k, DEFAULT_PAYROLL_RATES[k]) for k in DEFAULT_PAYROLL_RATES}, **update_data,
+                   "effective_from": effective_from}
+    versions = sorted(versions + [new_version], key=lambda version: version["effective_from"])
+    current = rates_in_effect(versions, today_local().strftime("%Y-%m"))
+    stored = {**{k: current[k] for k in DEFAULT_PAYROLL_RATES}, "versions": versions}
     if existing:
-        await server.db.payroll_rates.update_one({"company_id": company_id}, {"$set": update_data})
+        await server.db.payroll_rates.update_one({"company_id": company_id}, {"$set": stored})
     else:
-        rates = PayrollRates(company_id=company_id, **{**DEFAULT_PAYROLL_RATES, **update_data})
-        await server.db.payroll_rates.insert_one(rates.model_dump())
+        await server.db.payroll_rates.insert_one({"company_id": company_id, **stored})
+    await audit_service.log_action(
+        user_id=current_user.user_id, user_name=current_user.name, action="update", entity_type="payroll_rates",
+        entity_id=company_id, company_id=company_id, details={"effective_from": effective_from, **update_data},
+    )
+    return await get_payroll_rates_dict(company_id)
 
+
+@router.delete("/payroll/rates/{effective_from}")
+async def delete_payroll_rates_version(effective_from: str, current_user: User = Depends(get_current_user)):
+    """Removes a dated version entered by mistake - never the only one."""
+    require_permission(current_user, "manage_payroll")
+    company_id, _ = await get_company_scope(current_user)
+    existing = await server.db.payroll_rates.find_one({"company_id": company_id}, {"_id": 0}) if company_id else None
+    versions = payroll_rate_versions(existing)
+    left = [v for v in versions if v["effective_from"] != effective_from]
+    if len(left) == len(versions):
+        raise HTTPException(status_code=404, detail="Няма ставки в сила от този месец")
+    if not left:
+        raise HTTPException(status_code=400, detail="Това са единствените ставки - промени ги, вместо да ги триеш")
+    current = rates_in_effect(left, today_local().strftime("%Y-%m"))
+    await server.db.payroll_rates.update_one(
+        {"company_id": company_id}, {"$set": {**{k: current[k] for k in DEFAULT_PAYROLL_RATES}, "versions": left}},
+    )
     return await get_payroll_rates_dict(company_id)
 
 async def _validate_linked_user_id(linked_user_id: Optional[str], company_id: Optional[str], scope: dict) -> None:
@@ -165,7 +213,7 @@ async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depend
     if not employee:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
 
-    rates = await get_payroll_rates_dict(company_id)
+    rates = await get_payroll_rates_dict(company_id, entry.period_year, entry.period_month)
 
     base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
 
@@ -186,7 +234,7 @@ async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = D
     if not employee:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
 
-    rates = await get_payroll_rates_dict(company_id)
+    rates = await get_payroll_rates_dict(company_id, entry.period_year, entry.period_month)
 
     base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
 

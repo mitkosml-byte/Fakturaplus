@@ -70,6 +70,7 @@ const CTA_LABEL: Record<string, string> = {
   missing_revenue: 'briefing.cta.missing_revenue',
   recurring_invoice_missing: 'briefing.cta.recurring_invoice_missing',
   recurring_replaced: 'briefing.cta.recurring',
+  payroll_rates_year: 'briefing.cta.payroll_rates_year',
 };
 
 // Answers that settle a recurring expense's month right here.

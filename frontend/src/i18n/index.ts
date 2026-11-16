@@ -680,6 +680,34 @@ export const translations: Translations = {
     bg: 'Към сметки и фактури',
     en: 'To bills and invoices',
   },
+  'payroll.ratesFrom': {
+    bg: 'В сила от (месец, ГГГГ-ММ)',
+    en: 'In effect from (month, YYYY-MM)',
+  },
+  'payroll.ratesFromHint': {
+    bg: 'Ведомостите от по-ранни месеци остават със ставките от своето време.',
+    en: 'Payrolls of earlier months keep the rates of their own time.',
+  },
+  'payroll.ratesFromInvalid': {
+    bg: 'Въведи месеца като ГГГГ-ММ, например 2027-01.',
+    en: 'Enter the month as YYYY-MM, e.g. 2027-01.',
+  },
+  'payroll.ratesVersion': {
+    bg: 'В сила от {month}',
+    en: 'In effect from {month}',
+  },
+  'payroll.ratesFromStart': {
+    bg: 'Първоначални ставки',
+    en: 'Initial rates',
+  },
+  'payroll.ratesDeleteConfirm': {
+    bg: 'Да изтрия ли ставките в сила от {month}? Месеците след това минават на предишните.',
+    en: 'Delete the rates in effect from {month}? The months after go back to the previous ones.',
+  },
+  'briefing.cta.payroll_rates_year': {
+    bg: 'Провери ставките',
+    en: 'Check the rates',
+  },
   'briefing.snooze': {
     bg: 'Отложи 3 дни',
     en: 'Snooze 3 days',

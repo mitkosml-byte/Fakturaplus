@@ -3871,6 +3871,30 @@ async def _signal_missing_revenue(company_id, scope, current_user, visibility) -
         "fingerprint": missing[-1],
     }
 
+async def _signal_payroll_rates_year(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """A new year: the minimum and maximum insurance income usually change
+    on 1 January. Asked in the first quarter of whoever keeps payroll, for a
+    business that does payroll, until rates dated this year are saved."""
+    if not company_id or "manage_payroll" not in set(current_user.permissions or []):
+        return None
+    today = today_local()
+    if today.month > 3:
+        return None
+    if not await db.employees.find_one({"company_id": company_id}, {"_id": 1}):
+        return None
+    stored = await db.payroll_rates.find_one({"company_id": company_id}, {"_id": 0})
+    if any(version["effective_from"] >= f"{today.year}-01" for version in payroll_rate_versions(stored)):
+        return None
+    return {
+        "key": "payroll_rates_year", "severity": "info", "priority": 34, "route": "/payroll",
+        "fingerprint": f"payroll_rates_{today.year}",
+        "title": f"Осигурителните ставки за {today.year}",
+        "detail": (
+            "В началото на годината обикновено се променят минималният и максималният осигурителен доход. "
+            "Провери ставките и ги запиши „в сила от“ януари - ведомостите от миналата година остават със своите."
+        ),
+    }
+
 async def _signal_recurring_expenses(company_id, scope, current_user, visibility) -> List[dict]:
     """Questions about the recurring expenses - see routers/recurring.py
     (imported at the bottom of this module, resolved at call time)."""
@@ -3881,7 +3905,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_budget, _signal_price_alerts, _signal_reorder, _signal_forecast,
     _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
-    _signal_vat_registration, _signal_recurring_expenses,
+    _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
@@ -4570,13 +4594,51 @@ def calculate_payroll(
         "total_employer_cost": round(total_employer_cost, 2),
     }
 
-async def get_payroll_rates_dict(company_id: Optional[str]) -> dict:
-    if not company_id:
-        return dict(DEFAULT_PAYROLL_RATES)
-    rates = await db.payroll_rates.find_one({"company_id": company_id}, {"_id": 0})
-    if not rates:
-        return dict(DEFAULT_PAYROLL_RATES)
-    return {**DEFAULT_PAYROLL_RATES, **rates}
+# The rates before any version was dated: they count from the start.
+RATES_FROM_THE_START = "2000-01"
+
+
+def payroll_rate_versions(stored: Optional[dict]) -> List[dict]:
+    """The company's payroll rates as dated versions, oldest first: each
+    {"effective_from": "YYYY-MM", <the five rates>}. Rates saved before
+    versions existed are one version that counts from the start."""
+    if not stored:
+        return []
+    versions = [
+        {**DEFAULT_PAYROLL_RATES, **{k: v for k, v in version.items() if k in DEFAULT_PAYROLL_RATES},
+         "effective_from": str(version.get("effective_from") or RATES_FROM_THE_START)}
+        for version in (stored.get("versions") or []) if isinstance(version, dict)
+    ]
+    if not versions:
+        versions = [{**DEFAULT_PAYROLL_RATES, **{k: v for k, v in stored.items() if k in DEFAULT_PAYROLL_RATES},
+                     "effective_from": RATES_FROM_THE_START}]
+    return sorted(versions, key=lambda version: version["effective_from"])
+
+
+def rates_in_effect(versions: List[dict], month_key: str) -> dict:
+    """The version in effect in a month: the last one dated on or before
+    it - or, for a month before every version, the earliest."""
+    if not versions:
+        return {**DEFAULT_PAYROLL_RATES, "effective_from": None}
+    chosen = versions[0]
+    for version in versions:
+        if version["effective_from"] <= month_key:
+            chosen = version
+    return dict(chosen)
+
+
+async def get_payroll_rates_dict(company_id: Optional[str], year: Optional[int] = None, month: Optional[int] = None) -> dict:
+    """The payroll rates in effect in a month (this month unless given) -
+    a payroll for last December is worked out with December's rates, not
+    with the ones that took effect in January."""
+    if year is None or month is None:
+        today = today_local()
+        year, month = today.year, today.month
+    stored = await db.payroll_rates.find_one({"company_id": company_id}, {"_id": 0}) if company_id else None
+    versions = payroll_rate_versions(stored)
+    rates = rates_in_effect(versions, f"{year}-{month:02d}")
+    rates["versions"] = versions
+    return rates
 
 # ===================== PAYROLL PDF IMPORT (ведомост от счетоводителя) =====================
 # calculate_payroll above is an ESTIMATE (see its own docstring) - useful

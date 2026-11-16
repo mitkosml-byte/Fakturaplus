@@ -1229,12 +1229,18 @@ export interface ScheduleLeaveEntry {
   note?: string | null;
 }
 
-export interface PayrollRates {
+export interface PayrollRateValues {
   employee_rate_percent: number;
   employer_rate_percent: number;
   income_tax_percent: number;
   min_insurance_income: number;
   max_insurance_income: number;
+}
+
+// The rates in effect in a month, and every dated version ("в сила от").
+export interface PayrollRates extends PayrollRateValues {
+  effective_from?: string | null;  // "YYYY-MM" of the version in effect
+  versions?: (PayrollRateValues & { effective_from: string })[];
 }
 
 export interface PayrollBreakdown {

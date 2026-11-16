@@ -112,3 +112,42 @@ def test_e1_issuing_invoices_is_its_own_right_and_only_the_owner_or_manager_canc
     # Someone who issued invoices before the right existed keeps it.
     asyncio.run(server.db.users.update_one({"user_id": cashier_id}, {"$set": {"permissions_schema_version": 6}}))
     assert client.post("/api/billing-documents", headers=cashier, json=invoice).status_code == 200
+
+
+def test_e2_a_payroll_is_worked_out_with_the_rates_of_its_own_month(client, monkeypatch):
+    from datetime import date
+    company_id, _, owner = _company()
+    employee = client.post("/api/employees", headers=owner, json={"name": "Иван", "base_salary": 500}).json()
+
+    def preview(year, month):
+        r = client.post("/api/payroll/preview", headers=owner, json={
+            "employee_id": employee["id"], "period_year": year, "period_month": month, "gross_amount": 500,
+        })
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    before = preview(2026, 12)
+    # From January the minimum insurance income is higher: December keeps its own.
+    saved = client.put("/api/payroll/rates", headers=owner, json={"effective_from": "2027-01", "min_insurance_income": 620})
+    assert saved.status_code == 200, saved.text
+    assert [v["effective_from"] for v in saved.json()["versions"]] == ["2000-01", "2027-01"]
+    assert preview(2026, 12) == before
+    january = preview(2027, 1)
+    assert january["employee_contributions"] > before["employee_contributions"]
+    in_december = client.get("/api/payroll/rates?year=2026&month=12", headers=owner).json()
+    assert in_december["min_insurance_income"] == 550.71 and in_december["effective_from"] == "2000-01"
+    in_january = client.get("/api/payroll/rates?year=2027&month=3", headers=owner).json()
+    assert in_january["min_insurance_income"] == 620 and in_january["effective_from"] == "2027-01"
+    assert client.put("/api/payroll/rates", headers=owner, json={"effective_from": "2027-13"}).status_code == 400
+
+    # A version entered by mistake goes; the last one never does.
+    assert client.delete("/api/payroll/rates/2027-01", headers=owner).status_code == 200
+    assert preview(2027, 1) == preview(2026, 12)
+    assert client.delete("/api/payroll/rates/2000-01", headers=owner).status_code == 400
+
+    # In the first months of a year, until its rates are saved, it asks once.
+    monkeypatch.setattr(server, "today_local", lambda: date(2027, 1, 12))
+    keys = lambda: [s["key"] for s in client.get("/api/proactive/signals", headers=owner).json()["signals"]]
+    assert "payroll_rates_year" in keys()
+    client.put("/api/payroll/rates", headers=owner, json={"effective_from": "2027-01", "min_insurance_income": 620})
+    assert "payroll_rates_year" not in keys()
