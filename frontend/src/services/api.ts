@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { BillingOverview, BusinessModules, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+import { BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
@@ -749,6 +749,18 @@ class ApiService {
 
   async updateModules(modules: Partial<BusinessModules>): Promise<{ modules: BusinessModules; can_edit: boolean }> {
     return this.fetch('/company/modules', { method: 'PUT', body: JSON.stringify({ modules }) });
+  }
+
+  async getCashFlow(days = 30): Promise<CashFlow> {
+    return this.fetch(`/cash-flow?days=${days}`);
+  }
+
+  async setCashPosition(cash: number, bank: number): Promise<{ id: string; date: string; cash: number; bank: number }> {
+    return this.fetch('/cash-flow/position', { method: 'POST', body: JSON.stringify({ cash, bank }) });
+  }
+
+  async setCashFlowSettings(payDay: number | null): Promise<{ pay_day: number | null }> {
+    return this.fetch('/cash-flow/settings', { method: 'PUT', body: JSON.stringify({ pay_day: payDay }) });
   }
 
   async getBillingOverview(startDate?: string, endDate?: string): Promise<BillingOverview> {

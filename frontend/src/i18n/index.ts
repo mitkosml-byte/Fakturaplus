@@ -252,6 +252,10 @@ export const translations: Translations = {
     bg: 'Направи архив',
     en: 'Make a backup',
   },
+  'briefing.cta.cash_flow': {
+    bg: 'Виж паричния поток',
+    en: 'View the cash flow',
+  },
   'briefing.cta.two_factor': {
     bg: 'Включи',
     en: 'Turn it on',
@@ -5657,6 +5661,53 @@ export const translations: Translations = {
   'accountSecurity.copyCodes': { bg: 'Копирай', en: 'Copy' },
   'accountSecurity.codesCopied': { bg: 'Кодовете са копирани', en: 'Codes copied' },
   'accountSecurity.savedThem': { bg: 'Записах ги', en: 'I saved them' },
+
+  // Cash flow (Н1)
+  'cashFlow.title': { bg: 'Паричен поток', en: 'Cash flow' },
+  'cashFlow.moneyNow': { bg: 'Пари сега', en: 'Money now' },
+  'cashFlow.enterMoneyNow': {
+    bg: 'Колко пари има бизнесът сега - в брой и в банката? Прогнозата тръгва от тях.',
+    en: 'How much money does the business have now - in cash and in the bank? The forecast starts from it.',
+  },
+  'cashFlow.enteredOn': { bg: 'Въведено на {date}. Обновявайте го, за да е точна прогнозата.', en: 'Entered on {date}. Keep it current for an accurate forecast.' },
+  'cashFlow.cash': { bg: 'В брой', en: 'Cash' },
+  'cashFlow.bank': { bg: 'В банката', en: 'In the bank' },
+  'cashFlow.saveMoneyNow': { bg: 'Запази', en: 'Save' },
+  'cashFlow.enterAmounts': { bg: 'Въведете сумите', en: 'Enter the amounts' },
+  'cashFlow.positionSaved': { bg: 'Наличността е запазена', en: 'Money now saved' },
+  'cashFlow.days': { bg: '{days} дни', en: '{days} days' },
+  'cashFlow.runsShort': {
+    bg: 'Около {date} парите може да не стигнат: най-ниско {amount} на {lowest}.',
+    en: 'Around {date} the money may run short: lowest {amount} on {lowest}.',
+  },
+  'cashFlow.inDays': { bg: 'След {days} дни', en: 'In {days} days' },
+  'cashFlow.lowest': { bg: 'Най-ниско ({date})', en: 'Lowest ({date})' },
+  'cashFlow.comesIn': { bg: 'Идва', en: 'In' },
+  'cashFlow.goesOut': { bg: 'Излиза', en: 'Out' },
+  'cashFlow.usualRevenue': {
+    bg: 'Обичаен оборот: средно {amount} на ден, общо {total} в периода.',
+    en: 'Usual revenue: {amount} a day on average, {total} in the period.',
+  },
+  'cashFlow.overdueReceivables': {
+    bg: 'Просрочени вземания {amount} не са в прогнозата - ако бъдат платени, ще има повече.',
+    en: 'Overdue receivables of {amount} are not in the forecast - if paid, there will be more.',
+  },
+  'cashFlow.whatComesAndGoes': { bg: 'Какво идва и излиза', en: 'What comes and goes' },
+  'cashFlow.nothingAhead': { bg: 'Няма плащания и постъпления напред.', en: 'Nothing to pay or receive ahead.' },
+  'cashFlow.overdue': { bg: 'Просрочено - за плащане сега', en: 'Overdue - to pay now' },
+  'cashFlow.kind.receivable': { bg: 'Вземане', en: 'Receivable' },
+  'cashFlow.kind.revenue': { bg: 'Оборот', en: 'Revenue' },
+  'cashFlow.kind.invoice': { bg: 'Фактура', en: 'Invoice' },
+  'cashFlow.kind.recurring': { bg: 'Периодичен', en: 'Recurring' },
+  'cashFlow.kind.payroll': { bg: 'Заплати', en: 'Payroll' },
+  'cashFlow.kind.vat': { bg: 'ДДС', en: 'VAT' },
+  'cashFlow.payDay': { bg: 'Ден за заплати', en: 'Pay day' },
+  'cashFlow.payDayHint': {
+    bg: 'На кое число плащате заплатите (31 = последният ден на месеца).',
+    en: 'Which day of the month salaries are paid (31 = the last day of the month).',
+  },
+  'cashFlow.payDayInvalid': { bg: 'Въведете число от 1 до 31', en: 'Enter a number from 1 to 31' },
+  'cashFlow.payDaySaved': { bg: 'Денят за заплати е запазен', en: 'Pay day saved' },
 
   // What the business uses ("Какво ползвам")
   'modules.title': { bg: 'Какво ползва бизнесът', en: 'What the business uses' },

@@ -3736,6 +3736,213 @@ async def _signal_payments_this_week(company_id, scope, current_user, visibility
                        + "|" + ",".join(sorted(f"{i}:{y}-{m}" for i, y, m in seen_items)),
     }
 
+# The till revenue a usual weekday brings: the last 8 weeks of it.
+CASH_FLOW_REVENUE_WEEKS = 8
+CASH_FLOW_MAX_DAYS = 90
+
+
+def sees_cash_flow(current_user: User) -> bool:
+    """The money ahead puts everything together (payroll, VAT, profit-level
+    totals): for whoever sees the statistics and the profit."""
+    visibility = get_financial_visibility(current_user)
+    return bool(visibility.get("statistics") and visibility.get("profit"))
+
+
+async def latest_cash_position(company_id: Optional[str]) -> Optional[dict]:
+    if not company_id:
+        return None
+    rows = await db.cash_positions.find({"company_id": company_id}, {"_id": 0}).sort(
+        [("date", -1), ("created_at", -1)]
+    ).limit(1).to_list(1)
+    return rows[0] if rows else None
+
+
+async def _cash_flow_pay_day(company: Optional[dict], scope: dict) -> int:
+    """The day salaries are paid: as the owner set it, else the usual day
+    payroll was recorded on in the last half year, else the month's end."""
+    chosen = ((company or {}).get("cash_flow") or {}).get("pay_day")
+    if isinstance(chosen, int) and 1 <= chosen <= 31:
+        return chosen
+    since = datetime.now(timezone.utc) - timedelta(days=183)
+    recorded = await db.payroll_entries.find({**scope, "created_at": {"$gte": since}}, {"_id": 0, "created_at": 1}).to_list(ALL_ROWS)
+    days_of_month = [day.day for row in recorded if (day := business_day(row.get("created_at"))) is not None]
+    return cash_flow_service.usual_pay_day(days_of_month) or 31
+
+
+async def cash_flow_projection(company_id: Optional[str], scope: dict, current_user: User, days: int = 30) -> dict:
+    """Will the money last? The days ahead from the money the business has
+    now (services/cash_flow), each thing counted once: what customers owe by
+    its due date and the usual till revenue; the supplier invoices by their
+    due date (an overdue one today), the recurring expenses still to pay,
+    the month's payroll on its pay day and the VAT by the 14th."""
+    days = max(7, min(int(days or 30), CASH_FLOW_MAX_DAYS))
+    today = today_local()
+    end = today + timedelta(days=days - 1)
+    visibility = get_financial_visibility(current_user)
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0}) if company_id else None
+    modules = company_modules(company)
+    months = sorted({((today + timedelta(days=i)).year, (today + timedelta(days=i)).month) for i in range(days)})
+    events: List[cash_flow_service.CashEvent] = []
+    notes: List[str] = []
+
+    # What customers owe, by its due date; an overdue debt is money that may
+    # come - shown apart, never counted as coming.
+    overdue_receivables = 0.0
+    no_due_receivables = 0.0
+    receivables = await db.receivables.find(
+        {**scope, "is_paid": False}, {**RECEIVABLE_BALANCE_FIELDS, "customer_name": 1},
+    ).to_list(ALL_ROWS)
+    for receivable in receivables:
+        left = receivable_left(receivable)
+        if left <= 0:
+            continue
+        due = business_day(receivable.get("due_date"))
+        if due is None:
+            no_due_receivables += left
+        elif due < today:
+            overdue_receivables += left
+        else:
+            events.append(cash_flow_service.CashEvent(due, left, cash_flow_service.RECEIVABLE, receivable.get("customer_name") or "Клиент"))
+
+    # Supplier invoices still to pay, by their due date - an overdue one (or
+    # one without a date) is to pay now.
+    unpaid, _, _ = await split_overdue_invoices(scope)
+    for invoice in unpaid:
+        left = invoice_left(invoice)
+        if left <= 0:
+            continue
+        due = business_day(invoice["payment_due_date"]) if isinstance(invoice.get("payment_due_date"), datetime) else None
+        events.append(cash_flow_service.CashEvent(
+            due or today, -left, cash_flow_service.INVOICE, invoice.get("supplier") or "Доставчик", overdue=due is not None and due < today,
+        ))
+
+    # Recurring expenses still to pay in the months ahead (an invoice that
+    # already came for one is the invoice above, not this).
+    items = await recurring_service.active_items(db, company_id)
+    for year, month in months if items else []:
+        records = await recurring_service.load_month_records(db, scope, [item["id"] for item in items], year, month)
+        occurrences = recurring_service.resolve_month(items, year, month, records)
+        for item in items:
+            occurrence = occurrences.get(item["id"])
+            if not occurrence or occurrence["state"] not in recurring_service.UNPAID_STATES:
+                continue
+            if recurring_service.item_kind(item) != recurring_service.INVOICE and not visibility.get("off_book_expenses"):
+                continue
+            due = business_day(occurrence["due_date"])
+            if due is not None:
+                events.append(cash_flow_service.CashEvent(
+                    due, -float(occurrence["expected_amount"]), cash_flow_service.RECURRING,
+                    str(item.get("description") or "Периодичен разход").strip(), overdue=due < today,
+                ))
+
+    # The month's payroll on its pay day - unless that month's is recorded.
+    pay_day = await _cash_flow_pay_day(company, scope)
+    if modules["payroll"]:
+        employees = await db.employees.find({**scope, "active": True}, {"_id": 0}).to_list(ALL_ROWS)
+        if employees:
+            for year, month in months:
+                rates = await get_payroll_rates_dict(company_id, year, month)
+                monthly = sum(
+                    calculate_payroll(
+                        float(e.get("base_salary") or 0), e.get("agreement_type") or "gross", rates, 0,
+                        float(e.get("food_vouchers") or 0), float(e.get("additional_insurance") or 0),
+                    )["total_employer_cost"]
+                    for e in employees
+                )
+                day = date(year, month, min(pay_day, days_in_month(year, month)))
+                if monthly <= 0 or not (today <= day <= end):
+                    continue
+                if await db.payroll_entries.find_one({**scope, "period_year": year, "period_month": month}, {"_id": 1}):
+                    continue
+                events.append(cash_flow_service.CashEvent(day, -round(monthly, 2), cash_flow_service.PAYROLL, "Заплати и осигуровки"))
+
+    # VAT for a month is paid by the 14th of the next one.
+    if company_vat_registered(company):
+        for year, month in months:
+            day = date(year, month, 14)
+            if not (today <= day <= end):
+                continue
+            prev_year, prev_month = (year, month - 1) if month > 1 else (year - 1, 12)
+            totals = await period_totals(company_id, scope, current_user.user_id, counted_period(Period.month(prev_year, prev_month)))
+            vat = round(float(totals.get("fiscal_vat") or 0) - float(totals.get("invoice_vat") or 0), 2)
+            if vat > 0:
+                so_far = " (досега)" if Period.month(prev_year, prev_month).contains(today) else ""
+                events.append(cash_flow_service.CashEvent(day, -vat, cash_flow_service.VAT, f"ДДС за {_MONTHS_BG_GENITIVE[prev_month - 1]}{so_far}"))
+
+    # The usual till revenue of each weekday, on the days the business works.
+    weekday_revenue: Dict[int, float] = {}
+    revenue_from = today
+    if modules["till"]:
+        since = (today - timedelta(weeks=CASH_FLOW_REVENUE_WEEKS)).isoformat()
+        rows = await db.daily_revenue.find(
+            {**scope, "date": {"$gte": since, "$lt": today.isoformat()}}, {"_id": 0, "date": 1, "fiscal_revenue": 1},
+        ).to_list(ALL_ROWS)
+        weekday_revenue = cash_flow_service.weekday_averages(rows)
+        if not weekday_revenue and rows:
+            notes.append("Още няма достатъчно дни с оборот за обичайния оборот - въведете още няколко.")
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+
+    position = await latest_cash_position(company_id)
+    start_balance = float(position["cash"] or 0) + float(position["bank"] or 0) if position else 0.0
+    if position:
+        position_day = business_day(position.get("date")) or today
+        # Entered today: today's money so far is in it - the usual revenue starts tomorrow.
+        if position_day >= today or await db.daily_revenue.find_one({**scope, "date": today.isoformat()}, {"_id": 1}):
+            revenue_from = today + timedelta(days=1)
+        age = (today - position_day).days
+        if age > 7:
+            notes.append(f"Наличността е от {position_day.strftime('%d.%m')} - обновете я за по-точна прогноза.")
+    else:
+        notes.append("Въведете колко пари имате сега (в брой и в банка) - прогнозата тръгва от тях.")
+    if modules["billing"]:
+        notes.append("Бъдещи фактури към клиенти не са в прогнозата - само вземанията, които вече са записани.")
+
+    result = cash_flow_service.project(
+        start_balance, today, days, events, weekday_revenue,
+        lambda day: is_date_closed(day.isoformat(), closed_weekdays, exceptions_map), revenue_from,
+    )
+    result.update({
+        "position": {
+            "cash": round(float(position["cash"] or 0), 2), "bank": round(float(position["bank"] or 0), 2),
+            "date": position.get("date"), "age_days": (today - (business_day(position.get("date")) or today)).days,
+        } if position else None,
+        "overdue_receivables": round(overdue_receivables, 2),
+        "receivables_without_due_date": round(no_due_receivables, 2),
+        "usual_revenue_by_weekday": {str(k): round(v, 2) for k, v in sorted(weekday_revenue.items())},
+        "pay_day": pay_day,
+        "notes": notes,
+    })
+    return result
+
+
+async def _signal_cash_flow(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Will the money last the next 30 days? Weeks before it runs short:
+    the day it goes below zero, how low, and the biggest payments before it.
+    Only once the owner said how much money there is."""
+    if not sees_cash_flow(current_user) or not await latest_cash_position(company_id):
+        return None
+    flow = await cash_flow_projection(company_id, scope, current_user, 30)
+    if not flow["first_negative"]:
+        return None
+    first = date.fromisoformat(flow["first_negative"])
+    lowest = flow["lowest"]
+    biggest = sorted(
+        (e for e in flow["events"] if e["amount"] < 0 and e["date"] <= flow["lowest"]["date"]), key=lambda e: e["amount"],
+    )[:2]
+    before = ", ".join(f"{e['label']} {abs(e['amount']):.2f} €" for e in biggest)
+    days_left = (first - today_local()).days
+    detail = (
+        f"Около {first.strftime('%d.%m')} парите може да не стигнат: най-ниско "
+        f"{lowest['balance']:.2f} € на {date.fromisoformat(lowest['date']).strftime('%d.%m')}."
+        + (f" Най-големите плащания дотогава: {before}." if before else "")
+    )
+    return {
+        "key": "cash_flow", "severity": "critical" if days_left <= 7 else "warning",
+        "priority": 88 if days_left <= 7 else 70, "title": "Паричен поток", "detail": detail,
+        "route": "/cash-flow", "fingerprint": f"cash_flow|{flow['first_negative']}",
+    }
+
+
 async def _signal_scan_credits(company_id, scope, current_user, visibility) -> Optional[dict]:
     if "manage_invoices" not in set(current_user.permissions or []):
         return None
@@ -4272,7 +4479,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
     _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
-    _signal_payments_this_week, _signal_backup, _signal_two_factor,
+    _signal_payments_this_week, _signal_backup, _signal_two_factor, _signal_cash_flow,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
@@ -4702,6 +4909,7 @@ from services.export_service import ExportService
 from services.audit_service import AuditService
 from services.forecast_service import ForecastService
 from services import recurring_service
+from services import cash_flow as cash_flow_service
 from services import import_service
 from services import push_service
 
@@ -6173,6 +6381,9 @@ async def create_indexes():
         await db.signal_seen.create_index([("user_id", 1), ("situation", 1)], unique=True)
         await db.signal_seen.create_index("last_seen_at", expireAfterSeconds=90 * 24 * 3600)
 
+        # The money the business said it has, latest first.
+        await db.cash_positions.create_index([("company_id", 1), ("date", -1), ("created_at", -1)])
+
         # A login waiting for its second step: found by its token, gone
         # once expired (the TTL monitor sweeps it; the code checks the time).
         await db.login_challenges.create_index([("token", 1)], unique=True)
@@ -6567,6 +6778,8 @@ from routers import receivables
 app.include_router(receivables.router)
 from routers import roi_wallet
 app.include_router(roi_wallet.router)
+from routers import cash_flow as cash_flow_router
+app.include_router(cash_flow_router.router)
 
 from routers import auth
 app.include_router(auth.router)

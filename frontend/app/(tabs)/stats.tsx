@@ -1071,6 +1071,12 @@ export default function StatsScreen() {
                     <Text style={styles.quickLinkChipText}>{t('profile.budget')}</Text>
                   </TouchableOpacity>
                 )}
+                {hasPermission('view_profit') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/cash-flow')}>
+                    <Ionicons name="trending-up-outline" size={15} color={COLORS.success} />
+                    <Text style={styles.quickLinkChipText}>{t('cashFlow.title')}</Text>
+                  </TouchableOpacity>
+                )}
                 {uses('assets') && hasPermission('manage_budget') && (
                   <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/assets')}>
                     <Ionicons name="business-outline" size={15} color={COLORS.warning} />

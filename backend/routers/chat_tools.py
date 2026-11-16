@@ -264,6 +264,29 @@ class ChatDataTools:
         return {"from": start.isoformat(), "to": end.isoformat(), "query": supplier, "matches": matches,
                 "note": None if matches else "No supplier with a similar name has invoices in this period."}
 
+    def sees_cash_flow(self) -> bool:
+        """The money ahead: as in the app, for whoever sees the statistics
+        and the profit."""
+        return sees_cash_flow(self.user)
+
+    async def cash_flow(self, days: int = 30) -> dict:
+        """Will the money last: the money now as entered, the lowest point
+        ahead and its day, the first day below zero, and what comes and goes
+        - each payment and expected sum, without the day-by-day series."""
+        flow = await cash_flow_projection(self.company_id, self.scope, self.user, days)
+        weekly = [row for i, row in enumerate(flow["series"]) if i % 7 == 6 or i == len(flow["series"]) - 1]
+        return {
+            "from": flow["from"], "to": flow["to"], "money_now": flow["position"],
+            "start_balance": flow["start_balance"], "end_balance": flow["end_balance"],
+            "lowest": flow["lowest"], "first_day_below_zero": flow["first_negative"],
+            "money_in": flow["total_in"], "money_out": flow["total_out"],
+            "usual_till_revenue_in_it": flow["usual_revenue_total"],
+            "overdue_from_customers_not_counted": flow["overdue_receivables"],
+            "balance_each_week": [{"date": row["date"], "balance": row["balance"]} for row in weekly],
+            "payments_and_receipts": flow["events"][:40],
+            "pay_day": flow["pay_day"], "notes": flow["notes"],
+        }
+
     def sees_customers(self) -> bool:
         """Customers and the documents to them: as in the app, for whoever
         enters revenue or issues invoices."""
@@ -517,8 +540,30 @@ def build_chat_tools(data: ChatDataTools) -> list:
     async def customer_sales(customer: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
         return _dump(await data.customer_sales(customer, start_date, end_date))
 
+    @beta_async_tool(
+        name="cash_flow",
+        description=(
+            "Cash flow for the days ahead: will the money last. From the money the business has now (as the owner "
+            "entered it, with its date): customer debts by due date and the usual till revenue coming in; supplier "
+            "invoices by due date, recurring expenses, payroll on its pay day and VAT by the 14th going out. Gives the "
+            "lowest point and its day, the first day below zero, the balance each week and every payment. Call it for "
+            "'ще ми стигнат ли парите', 'колко пари ще имам в края на месеца', 'кога ще съм на минус'. days: 7-90."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"days": {"type": "integer", "minimum": 7, "maximum": 90, "description": "How many days ahead (default 30)"}},
+            "required": [],
+            "additionalProperties": False,
+        },
+    )
+    async def cash_flow(days: int = 30) -> str:
+        return _dump(await data.cash_flow(days))
+
     tools = [period_totals, revenue_breakdown, top_expenses, item_purchases, supplier_purchases]
     # Customers: only for whoever may see them in the app.
     if data.sees_customers():
         tools.append(customer_sales)
+    # The money ahead: likewise.
+    if data.sees_cash_flow():
+        tools.append(cash_flow)
     return tools

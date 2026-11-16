@@ -19,6 +19,44 @@ export interface User {
 export type BusinessModule = 'till' | 'billing' | 'team' | 'payroll' | 'assets' | 'wallet';
 export type BusinessModules = Record<BusinessModule, boolean>;
 
+// Cash flow for the days ahead (Н1).
+export interface CashFlowEvent {
+  date: string;
+  amount: number; // money in above zero, out below
+  kind: 'receivable' | 'revenue' | 'invoice' | 'recurring' | 'payroll' | 'vat';
+  label: string;
+  overdue: boolean;
+}
+
+export interface CashFlowDay {
+  date: string;
+  in: number;
+  out: number;
+  revenue: number;
+  balance: number;
+}
+
+export interface CashFlow {
+  from: string;
+  to: string;
+  days: number;
+  start_balance: number;
+  end_balance: number;
+  lowest: { date: string; balance: number };
+  first_negative: string | null;
+  total_in: number;
+  total_out: number;
+  usual_revenue_total: number;
+  series: CashFlowDay[];
+  events: CashFlowEvent[];
+  position: { cash: number; bank: number; date: string; age_days: number } | null;
+  overdue_receivables: number;
+  receivables_without_due_date: number;
+  usual_revenue_by_weekday: Record<string, number>;
+  pay_day: number;
+  notes: string[];
+}
+
 // Home's cards for a business that invoices.
 export interface BillingOverview {
   issued_count: number;
