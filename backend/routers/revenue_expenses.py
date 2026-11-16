@@ -32,6 +32,7 @@ from server import (
 )
 import server
 from pymongo.errors import DuplicateKeyError
+from services import revenue_vat
 
 router = APIRouter(prefix="/api")
 
@@ -90,6 +91,41 @@ async def _save_revenue_day(company_id: Optional[str], scope: dict, current_user
     return saved
 
 
+def _apply_vat_groups(revenue: DailyRevenueCreate, changes: Dict[str, Any], held_groups: List[dict]) -> None:
+    """The day's till revenue by VAT rate, as its save says it. Groups
+    sent: the till total is their sum (a total sent beside them must be the
+    same), and a single rate left is the whole day at that rate. One rate
+    sent: the whole day is at it. A new total with neither, on a day split
+    by rate: refused - the split would no longer add up to it, and which
+    rate's sales changed only the person knows."""
+    changes.pop("vat_groups", None)
+    if revenue.vat_groups:
+        groups = revenue_vat.normalize_groups(revenue.vat_groups)
+        total = round(sum(g["amount"] for g in groups), 2)
+        if revenue.fiscal_revenue is not None and abs(revenue.fiscal_revenue - total) > 0.01:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Сборът по ставки ДДС ({total:.2f} €) не е равен на фискализирания оборот ({revenue.fiscal_revenue:.2f} €)",
+            )
+        changes["fiscal_revenue"] = total
+        changes["vat_groups"] = groups if len(groups) > 1 else []
+        if groups:
+            # The rate of most of the day's sales - the one shown if the
+            # day is later entered at a single rate.
+            changes["vat_rate_percent"] = max(groups, key=lambda g: g["amount"])["rate_percent"]
+        return
+    if revenue.vat_groups is not None or revenue.vat_rate_percent is not None:
+        changes["vat_groups"] = []
+        return
+    if held_groups and "fiscal_revenue" in changes:
+        held_total = round(sum(float(g.get("amount") or 0) for g in held_groups if isinstance(g, dict)), 2)
+        if abs(changes["fiscal_revenue"] - held_total) > 0.01:
+            raise HTTPException(
+                status_code=400,
+                detail="Оборотът за деня е разделен по ставки ДДС - въведете го по ставки или с една ставка за целия ден",
+            )
+
+
 @router.post("/daily-revenue", response_model=DailyRevenue)
 async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User = Depends(get_current_user)):
     """Записва оборота за деня - заменя въведените стойности, не ги
@@ -100,10 +136,16 @@ async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User =
     изтрил с всяко запазване."""
     require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
+    day = _revenue_day(revenue.date)
     changes = {k: v for k, v in revenue.model_dump(exclude={"date"}).items() if v is not None}
     if not get_financial_visibility(current_user)["pocket_money"]:
         changes.pop("pocket_money", None)
-    saved = await _save_revenue_day(company_id, scope, current_user, _revenue_day(revenue.date), changes)
+    held_groups: List[dict] = []
+    if revenue.vat_groups is None and revenue.vat_rate_percent is None and "fiscal_revenue" in changes:
+        held = await server.db.daily_revenue.find_one({**scope, "date": day}, {"_id": 0, "vat_groups": 1})
+        held_groups = list(held.get("vat_groups") or []) if held else []
+    _apply_vat_groups(revenue, changes, held_groups)
+    saved = await _save_revenue_day(company_id, scope, current_user, day, changes)
     return _revenue_for_viewer(saved, current_user)
 
 
@@ -166,14 +208,16 @@ async def get_revenue_by_date(date: str, current_user: User = Depends(get_curren
             "fiscal_revenue": existing.get("fiscal_revenue", 0),
             "pocket_money": existing.get("pocket_money", 0) if can_see_pocket_money else 0,
             "card_revenue": existing.get("card_revenue", 0),
-            "vat_rate_percent": existing.get("vat_rate_percent", 20.0)
+            "vat_rate_percent": existing.get("vat_rate_percent", 20.0),
+            "vat_groups": existing.get("vat_groups") or [],
         }
     return {
         "date": date,
         "fiscal_revenue": 0,
         "pocket_money": 0,
         "card_revenue": 0,
-        "vat_rate_percent": 20.0
+        "vat_rate_percent": 20.0,
+        "vat_groups": [],
     }
 
 @router.get("/daily-revenue", response_model=List[DailyRevenue])

@@ -35,6 +35,7 @@ _eik_check_digit,
 )
 import server
 from services.business_calendar import GROUPS, bucket_label, bucket_of, buckets
+from services import revenue_vat
 
 router = APIRouter(prefix="/api")
 
@@ -245,7 +246,7 @@ async def get_chart_data(
     ).to_list(ALL_ROWS)
     revenues = await server.db.daily_revenue.find(
         {**scope, "date": shown.text_filter()},
-        {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1},
+        {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1, "vat_groups": 1},
     ).to_list(ALL_ROWS)
     # Off-book expenses only - wages paid by Work Schedule come with the
     # day's fixed costs (monthly_costs_by_day), visible like any payroll.
@@ -273,9 +274,7 @@ async def get_chart_data(
         pocket_money = rev.get("pocket_money", 0) if visibility["pocket_money"] else 0
         days[date_str]["income"] += rev.get("fiscal_revenue", 0) + pocket_money
         days[date_str]["has_revenue"] = True
-        rate = rev.get("vat_rate_percent", 20.0)
-        if rate and rate > 0:
-            days[date_str]["vat"] += rev.get("fiscal_revenue", 0) * rate / (100 + rate)  # ДДС от продажби
+        days[date_str]["vat"] += revenue_vat.vat_in(rev)  # ДДС от продажби, всяка ставка поотделно
     for exp in expenses:
         date_str = exp["date"][:10] if isinstance(exp.get("date"), str) else None
         if date_str in days:

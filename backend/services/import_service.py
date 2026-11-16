@@ -37,10 +37,19 @@ class ParsedTable:
     both as plain Python lists - all a spreadsheet import needs, without a
     dependency any heavier than what's already required to write one."""
 
-    def __init__(self, headers: List[str], rows: List[List[Any]]):
+    def __init__(self, headers: List[str], rows: List[List[Any]], header_row_number: int = 1):
         self.headers = headers
         self.rows = rows
-        self.column_index = {h.strip().lower(): i for i, h in enumerate(headers)}
+        # The file's own row number of the header row - so a row's number
+        # in the preview is the one the person sees in their spreadsheet.
+        self.header_row_number = header_row_number
+        self.column_index = {_header_key(h): i for i, h in enumerate(headers)}
+
+
+def _header_key(name: Any) -> str:
+    """A column name as matched: case, spaces and the template's * that
+    marks a required column aside."""
+    return str(name or "").strip().rstrip("*").strip().lower()
 
 
 # ===================== reading the uploaded file =====================
@@ -65,15 +74,20 @@ def _read_csv_bytes(content: bytes) -> ParsedTable:
         dialect = csv.excel
 
     reader = csv.reader(io.StringIO(text), dialect)
-    all_rows = [row for row in reader if any(cell.strip() for cell in row)]
-    if not all_rows:
-        raise ImportFileError("Файлът не съдържа никакви редове с данни.")
+    return _table_from_rows([list(row) for row in reader])
 
-    headers = [str(c).strip() for c in all_rows[0]]
-    data_rows = all_rows[1:]
-    if not data_rows:
+
+def _table_from_rows(all_rows: List[List[Any]]) -> ParsedTable:
+    """The first row with anything in it is the header; empty rows stay in
+    place (the preview skips them), so each row keeps its number."""
+    filled = [i for i, row in enumerate(all_rows) if any(not _is_blank(cell) for cell in row)]
+    if not filled:
+        raise ImportFileError("Файлът не съдържа никакви редове с данни.")
+    first = filled[0]
+    headers = [str(c).strip() if c is not None else "" for c in all_rows[first]]
+    if len(filled) < 2:
         raise ImportFileError("Файлът съдържа само заглавен ред, без данни.")
-    return ParsedTable(headers, data_rows)
+    return ParsedTable(headers, all_rows[first + 1:], header_row_number=first + 1)
 
 
 def _read_xlsx_bytes(content: bytes) -> ParsedTable:
@@ -86,15 +100,7 @@ def _read_xlsx_bytes(content: bytes) -> ParsedTable:
     except Exception:
         raise ImportFileError("Файлът не изглежда да е валиден Excel файл.")
 
-    all_rows = [row for row in all_rows if any(not _is_blank(cell) for cell in row)]
-    if not all_rows:
-        raise ImportFileError("Файлът не съдържа никакви редове с данни.")
-
-    headers = [str(c).strip() if c is not None else "" for c in all_rows[0]]
-    data_rows = all_rows[1:]
-    if not data_rows:
-        raise ImportFileError("Файлът съдържа само заглавен ред, без данни.")
-    return ParsedTable(headers, data_rows)
+    return _table_from_rows(all_rows)
 
 
 def read_uploaded_table(content: bytes, filename: str) -> ParsedTable:
@@ -114,7 +120,7 @@ def _is_blank(v: Any) -> bool:
 
 def _get(row: List[Any], table: ParsedTable, *names: str) -> Optional[Any]:
     for name in names:
-        idx = table.column_index.get(name.strip().lower())
+        idx = table.column_index.get(_header_key(name))
         if idx is not None and idx < len(row):
             val = row[idx]
             if not _is_blank(val):
@@ -320,21 +326,34 @@ def _parse_budget_row(row: List[Any], table: ParsedTable, _ctx: Dict[str, Any]) 
     return data, [], []
 
 
+# The day's sales by VAT rate, as the till's daily report gives them.
+REVENUE_VAT_GROUP_COLUMNS = (("Оборот 20%", 20.0), ("Оборот 9%", 9.0), ("Оборот 0%", 0.0))
+
+
 def _parse_daily_revenue_row(row: List[Any], table: ParsedTable, _ctx: Dict[str, Any]) -> Tuple[Optional[dict], List[str], List[str]]:
     errors: List[str] = []
     date_val = _parse_date(_get(row, table, "Дата"))
     fiscal_revenue = _parse_float(_get(row, table, "Фискализиран оборот", "Оборот"))
+    vat_groups = []
+    for header, rate in REVENUE_VAT_GROUP_COLUMNS:
+        amount = _parse_float(_get(row, table, header))
+        if amount is not None:
+            vat_groups.append({"rate_percent": rate, "amount": amount})
 
     if not date_val:
         errors.append("невалидна или липсваща дата")
-    if fiscal_revenue is None:
+    if fiscal_revenue is None and not vat_groups:
         errors.append("липсва или невалиден фискализиран оборот")
+    if fiscal_revenue is not None and vat_groups and abs(fiscal_revenue - sum(g["amount"] for g in vat_groups)) > 0.01:
+        errors.append("сборът на оборота по ставки не е равен на фискализирания оборот")
     if errors:
         return None, errors, []
 
     # An empty cell leaves what the day already holds - a till export
     # with no "Джобче" column never wipes out pocket money entered by hand.
-    data = {"date": date_val, "fiscal_revenue": fiscal_revenue}
+    data: Dict[str, Any] = {"date": date_val}
+    if fiscal_revenue is not None:
+        data["fiscal_revenue"] = fiscal_revenue
     pocket_money = _parse_float(_get(row, table, "Джобче"))
     card_revenue = _parse_float(_get(row, table, "От тях - платено с карта", "Платено с карта"))
     vat_rate = _parse_float(_get(row, table, "ДДС ставка %", "ДДС ставка"))
@@ -342,7 +361,10 @@ def _parse_daily_revenue_row(row: List[Any], table: ParsedTable, _ctx: Dict[str,
         data["pocket_money"] = pocket_money
     if card_revenue is not None:
         data["card_revenue"] = card_revenue
-    if vat_rate is not None:
+    # The day by rate when its row gives it so, else at its one rate.
+    if vat_groups:
+        data["vat_groups"] = vat_groups
+    elif vat_rate is not None:
         data["vat_rate_percent"] = vat_rate
     warnings = ["заменя въведените за тази дата стойности; празните клетки не променят записаното"]
     return data, [], warnings
@@ -418,21 +440,45 @@ _PARSERS = {
 }
 
 
+def _from_header_row(entity: str, table: ParsedTable) -> ParsedTable:
+    """The table from its own row of column names: a file made from the
+    downloaded template starts with the template's title and notes, and
+    its first row is no header."""
+    known = {_header_key(h) for h in ENTITY_TEMPLATES.get(entity, {}).get("headers", [])}
+    if len(known & set(table.column_index)) >= 2:
+        return table
+    for i, row in enumerate(table.rows[:10]):
+        names = [str(c).strip() if c is not None else "" for c in row]
+        if len(known & {_header_key(n) for n in names}) >= 2:
+            return ParsedTable(names, table.rows[i + 1:], header_row_number=table.header_row_number + i + 1)
+    return table
+
+
+def _is_template_example(entity: str, row: List[Any]) -> bool:
+    """The template's sample row, left in by mistake - never imported as
+    data."""
+    example = ENTITY_TEMPLATES.get(entity, {}).get("example") or []
+    cells = [str(c).strip() if c is not None else "" for c in row[:len(example)]]
+    cells += [""] * (len(example) - len(cells))
+    return bool(example) and cells == [str(v).strip() for v in example]
+
+
 def preview_rows(entity: str, table: ParsedTable, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     parser = _PARSERS.get(entity)
     if not parser:
         raise ImportFileError("Непознат тип за импорт.")
 
+    table = _from_header_row(entity, table)
     ctx = context or {}
     results = []
     valid_count = 0
 
     for i, row in enumerate(table.rows):
-        if all(_is_blank(v) for v in row):
+        if all(_is_blank(v) for v in row) or _is_template_example(entity, row):
             continue
         data, errors, warnings = parser(row, table, ctx)
         results.append({
-            "row_number": i + 2,  # +1 for the header row, +1 for 1-based counting
+            "row_number": table.header_row_number + i + 1,  # the row's own number in the file
             "status": "error" if errors else "ok",
             "data": data,
             "errors": errors,
@@ -472,9 +518,10 @@ ENTITY_TEMPLATES = {
     },
     "daily_revenue": {
         "label": "Дневен оборот (назад във времето)",
-        "headers": ["Дата*", "Фискализиран оборот*", "Джобче", "От тях - платено с карта", "ДДС ставка %"],
-        "example": ["01.09.2026", "450.00", "20.00", "150.00", "20"],
-        "notes": "Ако вече има въведен оборот за дадена дата, попълнените клетки го ЗАМЕСТВАТ (не се сумират), а празните не го променят.",
+        "headers": ["Дата*", "Фискализиран оборот*", "Джобче", "От тях - платено с карта", "ДДС ставка %",
+                    "Оборот 20%", "Оборот 9%", "Оборот 0%"],
+        "example": ["01.09.2026", "450.00", "20.00", "150.00", "20", "", "", ""],
+        "notes": "Ако вече има въведен оборот за дадена дата, попълнените клетки го ЗАМЕСТВАТ (не се сумират), а празните не го променят. Ден с продажби по различни ставки ДДС: попълнете „Оборот 20%“, „Оборот 9%“ и „Оборот 0%“ както са в дневния отчет на касата - сборът им е фискализираният оборот, а „ДДС ставка %“ не е нужна.",
     },
     "expenses": {
         "label": "Разходи \"в канала\" (без фактура)",

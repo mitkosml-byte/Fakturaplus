@@ -10,7 +10,18 @@ import { BottomSheet, PressableScale } from '..';
 
 // Extracted from index.tsx (Module 1 audit finding #4). Edit-in-place form
 // for a single day's revenue (fiscal, card-paid portion, VAT rate, pocket money).
-const VAT_RATES = [20, 9, 0];
+export const VAT_RATES = [20, 9, 0];
+
+// The rates a day's split shows: the usual three, and any other its
+// groups hold, highest first.
+export function ratesShown(rateAmounts: Record<number, string>): number[] {
+  return Array.from(new Set([...VAT_RATES, ...Object.keys(rateAmounts).map(Number)])).sort((a, b) => b - a);
+}
+
+// The day's till total from its amounts by rate.
+export function rateAmountsTotal(rateAmounts: Record<number, string>): number {
+  return Object.values(rateAmounts).reduce((sum, value) => sum + (Math.round((parseFloat(value) || 0) * 100) / 100), 0);
+}
 
 type Props = {
   visible: boolean;
@@ -29,6 +40,11 @@ type Props = {
   onChangeCardRevenue: (value: string) => void;
   vatRate: number;
   onChangeVatRate: (rate: number) => void;
+  // The day's sales by VAT rate, as the till's daily report gives them.
+  splitByRate: boolean;
+  onToggleSplitByRate: () => void;
+  rateAmounts: Record<number, string>;
+  onChangeRateAmount: (rate: number, value: string) => void;
   pocketMoney: string;
   onChangePocketMoney: (value: string) => void;
   // Hidden for someone who may not see pocket money - they would only see
@@ -43,7 +59,8 @@ type Props = {
 export function RevenueModal({
   visible, onClose, date, onChangeDate, isDatePickerVisible, onOpenDatePicker, onCloseDatePicker,
   dateLocale, language, ocrAdditionNote, fiscalRevenue, onChangeFiscalRevenue, cardRevenue,
-  onChangeCardRevenue, vatRate, onChangeVatRate, pocketMoney, onChangePocketMoney, showPocketMoney, isSubmitting, onSubmit,
+  onChangeCardRevenue, vatRate, onChangeVatRate, splitByRate, onToggleSplitByRate, rateAmounts, onChangeRateAmount,
+  pocketMoney, onChangePocketMoney, showPocketMoney, isSubmitting, onSubmit,
   onCopyYesterday, copyingYesterday,
 }: Props) {
   const { t } = useTranslation();
@@ -112,18 +129,69 @@ export function RevenueModal({
             </View>
           )}
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>{t('home.fiscalRevenueLabel')} (€)</Text>
-            <TextInput
-              style={styles.input}
-              value={fiscalRevenue}
-              onChangeText={onChangeFiscalRevenue}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={COLORS.textMuted}
-            />
-            <Text style={styles.inputHint}>{t('home.includesVAT')}</Text>
-          </View>
+          {splitByRate ? (
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>{t('home.vatByRate')} (€)</Text>
+              {ratesShown(rateAmounts).map((rate) => (
+                <View key={rate} style={styles.rateAmountRow}>
+                  <Text style={styles.rateAmountLabel}>{t('home.vatRateAmount').replace('{rate}', String(rate))}</Text>
+                  <TextInput
+                    style={[styles.input, styles.rateAmountInput]}
+                    value={rateAmounts[rate] || ''}
+                    onChangeText={(value) => onChangeRateAmount(rate, value)}
+                    keyboardType="decimal-pad"
+                    placeholder="0.00"
+                    placeholderTextColor={COLORS.textMuted}
+                  />
+                </View>
+              ))}
+              <Text style={styles.rateTotal}>
+                {t('home.vatByRateTotal').replace('{amount}', rateAmountsTotal(rateAmounts).toFixed(2))}
+              </Text>
+              <Text style={styles.inputHint}>{t('home.vatByRateHint')}</Text>
+              <TouchableOpacity style={styles.splitToggle} onPress={onToggleSplitByRate}>
+                <Ionicons name="remove-circle-outline" size={16} color={COLORS.primaryLight} />
+                <Text style={styles.splitToggleText}>{t('home.vatOneRate')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{t('home.fiscalRevenueLabel')} (€)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={fiscalRevenue}
+                  onChangeText={onChangeFiscalRevenue}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor={COLORS.textMuted}
+                />
+                <Text style={styles.inputHint}>{t('home.includesVAT')}</Text>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{t('home.vatRate')}</Text>
+                <View style={styles.vatRateRow}>
+                  {VAT_RATES.map((rate) => (
+                    <TouchableOpacity
+                      key={rate}
+                      style={[styles.vatRateChip, vatRate === rate && styles.vatRateChipActive]}
+                      onPress={() => onChangeVatRate(rate)}
+                    >
+                      <Text style={[styles.vatRateChipText, vatRate === rate && styles.vatRateChipTextActive]}>
+                        {rate}%
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.inputHint}>{t('home.vatRateHint')}</Text>
+                <TouchableOpacity style={styles.splitToggle} onPress={onToggleSplitByRate}>
+                  <Ionicons name="git-branch-outline" size={16} color={COLORS.primaryLight} />
+                  <Text style={styles.splitToggleText}>{t('home.vatSplitAction')}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
 
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>{t('home.cardRevenueLabel')} (€)</Text>
@@ -136,24 +204,6 @@ export function RevenueModal({
               placeholderTextColor={COLORS.textMuted}
             />
             <Text style={styles.inputHint}>{t('home.cardRevenueHint')}</Text>
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>{t('home.vatRate')}</Text>
-            <View style={styles.vatRateRow}>
-              {VAT_RATES.map((rate) => (
-                <TouchableOpacity
-                  key={rate}
-                  style={[styles.vatRateChip, vatRate === rate && styles.vatRateChipActive]}
-                  onPress={() => onChangeVatRate(rate)}
-                >
-                  <Text style={[styles.vatRateChipText, vatRate === rate && styles.vatRateChipTextActive]}>
-                    {rate}%
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <Text style={styles.inputHint}>{t('home.vatRateHint')}</Text>
           </View>
 
           {showPocketMoney && (
@@ -300,6 +350,38 @@ const styles = StyleSheet.create({
   vatRateChipTextActive: {
     color: 'white',
     fontWeight: '600',
+  },
+  rateAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  rateAmountLabel: {
+    width: 110,
+    fontSize: 14,
+    color: 'white',
+  },
+  rateAmountInput: {
+    flex: 1,
+  },
+  rateTotal: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+    marginTop: 4,
+  },
+  splitToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 10,
+  },
+  splitToggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primaryLight,
   },
   submitButton: {
     backgroundColor: COLORS.primary,

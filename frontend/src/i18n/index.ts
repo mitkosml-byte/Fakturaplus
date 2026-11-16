@@ -1108,6 +1108,30 @@ export const translations: Translations = {
     bg: 'Изберете 9% за намалена ставка (хотели, ресторанти...) или 0% за нулева/освободена. По подразбиране 20%.',
     en: 'Choose 9% for the reduced rate (hotels, restaurants...) or 0% for zero-rate/exempt. Defaults to 20%.',
   },
+  'home.vatSplitAction': {
+    bg: 'Денят е с продажби по различни ставки',
+    en: 'The day has sales at different rates',
+  },
+  'home.vatByRate': {
+    bg: 'Фискализиран оборот по ставки ДДС',
+    en: 'Fiscal revenue by VAT rate',
+  },
+  'home.vatByRateHint': {
+    bg: 'Както е в дневния отчет на касата - групите с еднаква ставка се събират.',
+    en: "As the till's daily report shows it - groups with the same rate are added together.",
+  },
+  'home.vatRateAmount': {
+    bg: 'Оборот {rate}%',
+    en: 'Revenue at {rate}%',
+  },
+  'home.vatByRateTotal': {
+    bg: 'Общо фискализиран оборот: {amount} €',
+    en: 'Fiscal revenue in total: {amount} €',
+  },
+  'home.vatOneRate': {
+    bg: 'Една ставка за целия ден',
+    en: 'One rate for the whole day',
+  },
   'home.save': {
     bg: 'Запиши',
     en: 'Save',

@@ -52,6 +52,7 @@ from services.business_calendar import (
     BUSINESS_TZ, OPEN_END, OPEN_START, Period, business_day, day_start_utc, days_in_month, is_stored_day,
     now_local, stored_day, today_local,
 )
+from services import revenue_vat
 
 ROOT_DIR = Path(__file__).parent
 
@@ -601,6 +602,13 @@ class InvoiceUpdate(BaseModel):
     # Credit note only: the number of the invoice it corrects ("" clears it).
     credited_invoice_number: Optional[str] = Field(default=None, max_length=50)
 
+class VatGroupAmount(BaseModel):
+    """One VAT group of the till's daily report: its rate and its sales
+    (with VAT)."""
+    rate_percent: float = Field(ge=0, le=100)
+    amount: float = Field(ge=0)
+
+
 class DailyRevenue(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -610,6 +618,10 @@ class DailyRevenue(BaseModel):
     pocket_money: float = 0  # "джобче" - не влиза в ДДС
     card_revenue: float = 0  # Частта от fiscal_revenue, платена с карта (остатъкът се приема за в брой)
     vat_rate_percent: float = 20.0  # Ставката на фискализирания оборот (20% стандартна, 9% намалена, 0%)
+    # The day's till revenue by VAT rate, as the fiscal device's daily
+    # report gives it (they add up to fiscal_revenue); empty when the whole
+    # day is at vat_rate_percent (services/revenue_vat).
+    vat_groups: List[VatGroupAmount] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class DailyRevenueCreate(BaseModel):
@@ -622,6 +634,9 @@ class DailyRevenueCreate(BaseModel):
     pocket_money: Optional[float] = Field(default=None, ge=0)
     card_revenue: Optional[float] = Field(default=None, ge=0)
     vat_rate_percent: Optional[float] = Field(default=None, ge=0, le=100)
+    # The day by VAT rate, as the till's daily report gives it: the till
+    # total is then their sum. An empty list: the whole day at one rate.
+    vat_groups: Optional[List[VatGroupAmount]] = None
 
 
 class PocketMoneyAdd(BaseModel):
@@ -2787,10 +2802,21 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
         {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
                     "count": {"$sum": {"$cond": [{"$eq": ["$document_type", CREDIT_NOTE]}, 0, 1]}}}},
     ]).to_list(ALL_ROWS)
-    revenue_by_rate = await db.daily_revenue.aggregate([
+    revenue = await db.daily_revenue.aggregate([
         {"$match": {**scope, "date": period.text_filter()}},
-        {"$group": {"_id": "$vat_rate_percent", "fiscal": {"$sum": "$fiscal_revenue"},
+        {"$group": {"_id": None, "fiscal": {"$sum": "$fiscal_revenue"},
                     "pocket": {"$sum": "$pocket_money"}, "card": {"$sum": "$card_revenue"}}},
+    ]).to_list(ALL_ROWS)
+    # The till's sales by VAT rate: a day split by the groups of its daily
+    # report counts each group at its own rate, any other day whole at its
+    # one rate (services/revenue_vat).
+    revenue_by_rate = await db.daily_revenue.aggregate([
+        {"$match": {**scope, "date": period.text_filter(), "vat_groups.0": {"$exists": False}}},
+        {"$group": {"_id": "$vat_rate_percent", "fiscal": {"$sum": "$fiscal_revenue"}}},
+    ]).to_list(ALL_ROWS) + await db.daily_revenue.aggregate([
+        {"$match": {**scope, "date": period.text_filter(), "vat_groups.0": {"$exists": True}}},
+        {"$unwind": "$vat_groups"},
+        {"$group": {"_id": "$vat_groups.rate_percent", "fiscal": {"$sum": "$vat_groups.amount"}}},
     ]).to_list(ALL_ROWS)
     revenue_days = await db.daily_revenue.distinct("date", {**scope, "date": period.text_filter()})
     expenses = await db.expenses.aggregate([
@@ -2810,20 +2836,19 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
         method = row.get("_id") if row.get("_id") in issued_by_method else "bank_transfer"
         issued_by_method[method] += float(row.get("total") or 0)
 
-    # VAT inside fiscal revenue at each record's own rate (20% unless set,
+    # VAT inside fiscal revenue at each part's own rate (20% unless set,
     # 9%, 0%...) - summed per rate, which is the same sum record by record.
-    fiscal_vat = 0.0
-    for row in revenue_by_rate:
-        rate = row["_id"] if isinstance(row["_id"], (int, float)) else 20.0
-        if rate > 0:
-            fiscal_vat += (row.get("fiscal") or 0) * rate / (100 + rate)
+    fiscal_vat = sum(
+        revenue_vat.vat_of(revenue_vat.rate_of(row["_id"]), float(row.get("fiscal") or 0)) for row in revenue_by_rate
+    )
+    till = revenue[0] if revenue else {}
     invoice = invoices[0] if invoices else {}
     every_invoice = all_invoices[0] if all_invoices else {}
     return {
         "period": period,
-        "fiscal_revenue": float(sum(row.get("fiscal") or 0 for row in revenue_by_rate)),
-        "pocket_money": float(sum(row.get("pocket") or 0 for row in revenue_by_rate)),
-        "card_revenue": float(sum(row.get("card") or 0 for row in revenue_by_rate)),
+        "fiscal_revenue": float(till.get("fiscal") or 0),
+        "pocket_money": float(till.get("pocket") or 0),
+        "card_revenue": float(till.get("card") or 0),
         "fiscal_vat": fiscal_vat,
         "invoice_total": float(invoice.get("total") or 0),
         "invoice_vat": float(every_invoice.get("vat") or 0),

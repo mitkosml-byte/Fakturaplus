@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 import json
 from xml.sax.saxutils import escape as _xml_escape
 
+from services.revenue_vat import vat_parts
+
 try:
     import openpyxl
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -750,16 +752,17 @@ class ExportService:
         def _till_row(rev: dict) -> tuple:
             fiscal_revenue = rev.get("fiscal_revenue", 0) or 0
             pocket_money = rev.get("pocket_money", 0) or 0
-            rate = rev.get("vat_rate_percent", 20.0) or 0.0
+            # Each VAT group of the day's till report at its own rate (or
+            # the whole day at its one rate).
             base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
-            if rate and abs(rate - 20.0) < 0.01:
-                base_20 = round(fiscal_revenue * 100 / (100 + rate), 2)
-                vat_20 = round(fiscal_revenue - base_20, 2)
-            elif rate and abs(rate - 9.0) < 0.01:
-                base_9 = round(fiscal_revenue * 100 / (100 + rate), 2)
-                vat_9 = round(fiscal_revenue - base_9, 2)
-            else:
-                base_0 = fiscal_revenue
+            for rate, amount in vat_parts(rev):
+                base = round(amount * 100 / (100 + rate), 2)
+                if rate and abs(rate - 20.0) < 0.01:
+                    base_20, vat_20 = base_20 + base, vat_20 + round(amount - base, 2)
+                elif rate and abs(rate - 9.0) < 0.01:
+                    base_9, vat_9 = base_9 + base, vat_9 + round(amount - base, 2)
+                else:
+                    base_0 += amount
             day = str(rev.get("date", ""))[:10]
             kind = "Отчет за извършени продажби (81)"
             invoiced = invoiced_at_till.pop(day, None)

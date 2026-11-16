@@ -145,6 +145,12 @@ export interface Invoice {
   credited_amount?: number;
 }
 
+// One VAT group of the till's daily report: its rate and its sales (with VAT).
+export interface VatGroupAmount {
+  rate_percent: number;
+  amount: number;
+}
+
 export interface DailyRevenue {
   id: string;
   user_id: string;
@@ -154,6 +160,9 @@ export interface DailyRevenue {
   pocket_money: number;
   card_revenue: number;
   vat_rate_percent: number;
+  // The day by VAT rate (adding up to fiscal_revenue); empty when the
+  // whole day is at vat_rate_percent.
+  vat_groups?: VatGroupAmount[];
   created_at: string;
 }
 

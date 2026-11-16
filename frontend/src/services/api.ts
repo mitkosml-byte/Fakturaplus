@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Invoice, DailyRevenue, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+import { Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
@@ -521,7 +521,7 @@ class ApiService {
 
   // A field left out keeps what the day already holds (pocket money for
   // someone who may not see it, an empty import cell).
-  async createDailyRevenue(revenue: { date: string; fiscal_revenue?: number; pocket_money?: number; card_revenue?: number; vat_rate_percent?: number }): Promise<DailyRevenue> {
+  async createDailyRevenue(revenue: { date: string; fiscal_revenue?: number; pocket_money?: number; card_revenue?: number; vat_rate_percent?: number; vat_groups?: VatGroupAmount[] }): Promise<DailyRevenue> {
     return this.fetch('/daily-revenue', {
       method: 'POST',
       body: JSON.stringify(revenue),
@@ -795,6 +795,7 @@ class ApiService {
     pocket_money: number;
     card_revenue: number;
     vat_rate_percent: number;
+    vat_groups?: VatGroupAmount[];
   }> {
     return this.fetch(`/daily-revenue/by-date/${date}`);
   }

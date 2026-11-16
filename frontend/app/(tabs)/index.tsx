@@ -33,7 +33,8 @@ import { PeriodState, getPeriodBounds, toApiDate } from '../../src/utils/periodR
 import { COLORS } from '../../src/theme/colors';
 import { restrictedDataNote } from '../../src/utils/visibilityNote';
 import { PersonalExpenseModal } from '../../src/components/home/PersonalExpenseModal';
-import { RevenueModal } from '../../src/components/home/RevenueModal';
+import { RevenueModal, rateAmountsTotal } from '../../src/components/home/RevenueModal';
+import type { VatGroupAmount } from '../../src/types';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 import { getDescriptionSuggestions } from '../../src/utils/expenseSuggestions';
 
@@ -110,6 +111,10 @@ export default function HomeScreen() {
   const [pocketMoney, setPocketMoney] = useState('');
   const [cardRevenue, setCardRevenue] = useState('');
   const [revenueVatRate, setRevenueVatRate] = useState(20);
+  // The day's till sales by VAT rate (rate -> typed amount), as the till's
+  // daily report gives them - used instead of one total at one rate.
+  const [revenueSplitByRate, setRevenueSplitByRate] = useState(false);
+  const [revenueRateAmounts, setRevenueRateAmounts] = useState<Record<number, string>>({});
   const [revenueDate, setRevenueDate] = useState(new Date());
   // Shared across the revenue/expense/personal-expense modals below - only
   // one is ever open at a time, and this guards against a rapid double-tap
@@ -187,6 +192,19 @@ export default function HomeScreen() {
   // opening the form for a date with nothing logged yet leaves it at 0.
   // Returns what it found (or null) so callers - like the OCR hand-off
   // below - can react to whether the day already had something logged.
+  // A day's VAT split into the form: by rate when the day has its groups,
+  // else one total at one rate.
+  const showRevenueVat = useCallback((groups: VatGroupAmount[] | undefined, rate: number | undefined) => {
+    setRevenueVatRate(rate ?? 20);
+    if (groups && groups.length > 0) {
+      setRevenueSplitByRate(true);
+      setRevenueRateAmounts(Object.fromEntries(groups.map((g) => [g.rate_percent, g.amount.toFixed(2)])));
+    } else {
+      setRevenueSplitByRate(false);
+      setRevenueRateAmounts({});
+    }
+  }, []);
+
   const loadCurrentDayRevenue = useCallback(async (date: Date) => {
     try {
       const dateStr = format(date, 'yyyy-MM-dd');
@@ -194,16 +212,34 @@ export default function HomeScreen() {
       setFiscalRevenue(data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
       setPocketMoney(data.pocket_money > 0 ? data.pocket_money.toString() : '');
       setCardRevenue(data.card_revenue > 0 ? data.card_revenue.toString() : '');
-      setRevenueVatRate(data.vat_rate_percent || 20);
+      showRevenueVat(data.vat_groups, data.vat_rate_percent);
       return data;
     } catch (error) {
       setFiscalRevenue('');
       setPocketMoney('');
       setCardRevenue('');
-      setRevenueVatRate(20);
+      showRevenueVat([], 20);
       return null;
     }
-  }, []);
+  }, [showRevenueVat]);
+
+  // Switches the form between one rate and the day by rate, keeping what
+  // is typed: the total goes to its rate, or the split adds up to the
+  // total at the rate of most of it.
+  const toggleRevenueSplitByRate = () => {
+    if (revenueSplitByRate) {
+      const amounts = Object.entries(revenueRateAmounts).map(([rate, value]) => [Number(rate), parseFloat(value) || 0] as const);
+      const total = rateAmountsTotal(revenueRateAmounts);
+      const largest = amounts.reduce((best, item) => (item[1] > best[1] ? item : best), [revenueVatRate, 0] as const);
+      setFiscalRevenue(total > 0 ? total.toFixed(2) : '');
+      setRevenueVatRate(largest[0]);
+      setRevenueRateAmounts({});
+      setRevenueSplitByRate(false);
+    } else {
+      setRevenueRateAmounts(fiscalRevenue ? { [revenueVatRate]: fiscalRevenue } : {});
+      setRevenueSplitByRate(true);
+    }
+  };
 
   // One-tap "copy yesterday's split forward" for a steady-traffic day -
   // reuses the same getRevenueByDate call loadCurrentDayRevenue already
@@ -222,7 +258,7 @@ export default function HomeScreen() {
       setFiscalRevenue(data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
       setPocketMoney(data.pocket_money > 0 ? data.pocket_money.toString() : '');
       setCardRevenue(data.card_revenue > 0 ? data.card_revenue.toString() : '');
-      setRevenueVatRate(data.vat_rate_percent || 20);
+      showRevenueVat(data.vat_groups, data.vat_rate_percent);
       Haptics.success();
       Toast.success(t('home.sameAsYesterdayApplied'));
     } catch {
@@ -274,8 +310,19 @@ export default function HomeScreen() {
       const pending = pendingOcrRevenueRef.current;
       if (pending) {
         const existingFiscal = existing?.fiscal_revenue || 0;
-        setFiscalRevenue((existingFiscal + pending.amount).toFixed(2));
-        if (!existing || existingFiscal === 0) {
+        const existingRate = existing?.vat_rate_percent ?? 20;
+        const existingGroups = existing?.vat_groups || [];
+        if (existingGroups.length > 0 || (existingFiscal > 0 && existingRate !== pending.vatRate)) {
+          // A sale at another rate than the rest of the day: the day by
+          // rate, the sale added to its own rate's sales.
+          const amounts: Record<number, number> = existingGroups.length > 0
+            ? Object.fromEntries(existingGroups.map((g) => [g.rate_percent, g.amount]))
+            : { [existingRate]: existingFiscal };
+          amounts[pending.vatRate] = (amounts[pending.vatRate] || 0) + pending.amount;
+          setRevenueRateAmounts(Object.fromEntries(Object.entries(amounts).map(([rate, amount]) => [rate, amount.toFixed(2)])));
+          setRevenueSplitByRate(true);
+        } else {
+          setFiscalRevenue((existingFiscal + pending.amount).toFixed(2));
           setRevenueVatRate(pending.vatRate);
         }
         setOcrAdditionNote(
@@ -524,28 +571,35 @@ export default function HomeScreen() {
   const canSeePocketMoney = hasPermission('view_pocket_money');
 
   const handleAddRevenue = async () => {
-    if (!fiscalRevenue && !pocketMoney) {
+    const fiscalTotal = revenueSplitByRate ? rateAmountsTotal(revenueRateAmounts) : parseFloat(fiscalRevenue) || 0;
+    if (!fiscalTotal && !pocketMoney) {
       Alert.alert(t('common.error'), t('msg.enterAtLeastOne'));
       return;
     }
     if (isSubmittingForm) return;
 
+    // By rate, the till total is the sum of the rates (the server adds them
+    // up); else one total at one rate.
+    const vatGroups = Object.entries(revenueRateAmounts)
+      .map(([rate, value]) => ({ rate_percent: Number(rate), amount: Math.round((parseFloat(value) || 0) * 100) / 100 }))
+      .filter((group) => group.amount > 0);
     setIsSubmittingForm(true);
     try {
       await api.createDailyRevenue({
         date: format(revenueDate, 'yyyy-MM-dd'),
-        fiscal_revenue: parseFloat(fiscalRevenue) || 0,
+        ...(revenueSplitByRate && vatGroups.length > 0
+          ? { vat_groups: vatGroups }
+          : { fiscal_revenue: fiscalTotal, vat_rate_percent: revenueVatRate, vat_groups: [] }),
         // Only someone who sees pocket money sets it - for anyone else the
         // field is hidden and the day keeps what it holds.
         ...(canSeePocketMoney ? { pocket_money: parseFloat(pocketMoney) || 0 } : {}),
         card_revenue: parseFloat(cardRevenue) || 0,
-        vat_rate_percent: revenueVatRate,
       });
       setRevenueModalVisible(false);
       setFiscalRevenue('');
       setPocketMoney('');
       setCardRevenue('');
-      setRevenueVatRate(20);
+      showRevenueVat([], 20);
       setRevenueDate(getDefaultActionDate());
       loadData();
       Haptics.success();
@@ -1243,6 +1297,10 @@ export default function HomeScreen() {
         onChangeCardRevenue={setCardRevenue}
         vatRate={revenueVatRate}
         onChangeVatRate={setRevenueVatRate}
+        splitByRate={revenueSplitByRate}
+        onToggleSplitByRate={toggleRevenueSplitByRate}
+        rateAmounts={revenueRateAmounts}
+        onChangeRateAmount={(rate, value) => setRevenueRateAmounts((prev) => ({ ...prev, [rate]: value }))}
         pocketMoney={pocketMoney}
         onChangePocketMoney={setPocketMoney}
         showPocketMoney={canSeePocketMoney}
