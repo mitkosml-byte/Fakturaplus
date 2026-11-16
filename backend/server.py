@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
+import math
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -2799,10 +2800,15 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
     # Invoices issued to customers: revenue and VAT on their issue date.
     issued_rows = await db.billing_documents.aggregate([
         {"$match": {**scope, **ISSUED_INVOICE_REVENUE, "issue_date": period.text_filter()}},
-        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
+        {"$group": {"_id": "$payment_method", "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
                     "net": {"$sum": "$amount_without_vat"}, "count": {"$sum": 1}}},
     ]).to_list(ALL_ROWS)
-    issued = issued_rows[0] if issued_rows else {}
+    issued = {field: sum(float(row.get(field) or 0) for row in issued_rows) for field in ("total", "vat", "net", "count")}
+    # How the money of those invoices came: cash, card, or by bank (owed until paid).
+    issued_by_method: Dict[str, float] = {"cash": 0.0, "card": 0.0, "bank_transfer": 0.0}
+    for row in issued_rows:
+        method = row.get("_id") if row.get("_id") in issued_by_method else "bank_transfer"
+        issued_by_method[method] += float(row.get("total") or 0)
 
     # VAT inside fiscal revenue at each record's own rate (20% unless set,
     # 9%, 0%...) - summed per rate, which is the same sum record by record.
@@ -2829,10 +2835,26 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
         "issued_invoice_vat": float(issued.get("vat") or 0),
         "issued_invoice_net": float(issued.get("net") or 0),
         "issued_invoice_count": int(issued.get("count") or 0),
+        "issued_by_method": issued_by_method,
         "payroll_cost": await get_payroll_cost_for_period(company_id, user_id, period.start, period.end),
         "depreciation_cost": await get_depreciation_cost_for_period(company_id, user_id, period.start, period.end),
         "revenue_days": sorted(d for d in revenue_days if isinstance(d, str)),
     }
+
+
+def round_to_cents_keeping_total(values: List[float]) -> List[float]:
+    """Amounts rounded to the cent so that together they make exactly the
+    rounded total (largest remainder): the cents a day's share loses go to
+    the days that lost the most, never a sum off by a few cents."""
+    if not values:
+        return []
+    exact = [float(value or 0) * 100 for value in values]
+    floors = [math.floor(cents) for cents in exact]
+    missing = int(round(sum(exact))) - sum(floors)
+    order = sorted(range(len(exact)), key=lambda i: exact[i] - floors[i], reverse=True)
+    for i in order[:max(0, missing)]:
+        floors[i] += 1
+    return [round(cents / 100, 2) for cents in floors]
 
 
 def period_income_expense(totals: Dict[str, Any], visibility: Optional[dict] = None) -> tuple:

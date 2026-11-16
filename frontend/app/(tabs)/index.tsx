@@ -729,7 +729,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Cash vs Card breakdown of the fiscalized revenue */}
+        {/* How the income came: cash, card and - for invoices paid by bank - bank */}
         <View style={styles.summaryContainer}>
           <View style={[styles.summaryCard, styles.cashCard]}>
             <View style={styles.cardIcon}>
@@ -763,6 +763,21 @@ export default function HomeScreen() {
             )}
           </View>
         </View>
+        {(summary.total_bank_revenue || 0) > 0 && (
+          <View style={styles.summaryContainer}>
+            <View style={[styles.summaryCard, styles.bankCard]}>
+              <View style={styles.cardIcon}>
+                <Ionicons name="business-outline" size={24} color={COLORS.primary} />
+              </View>
+              <Text style={styles.cardLabel}>{t('home.bankRevenue')}</Text>
+              <CountUp
+                value={summary.total_bank_revenue || 0}
+                formatter={(n) => `${n.toFixed(2)} €`}
+                style={[styles.cardValue, { color: COLORS.primary }]}
+              />
+            </View>
+          </View>
+        )}
             </>
             )}
 
@@ -1377,6 +1392,10 @@ const styles = StyleSheet.create({
   cardCard: {
     borderLeftWidth: 4,
     borderLeftColor: COLORS.info,
+  },
+  bankCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.primary,
   },
   unpaidCard: {
     backgroundColor: COLORS.surface,

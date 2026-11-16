@@ -569,6 +569,8 @@ export interface Summary {
   invoice_count: number | null;
   total_cash_revenue: number | null;
   total_card_revenue: number | null;
+  // Invoices issued and paid by bank: with cash and card, the whole income.
+  total_bank_revenue?: number | null;
   total_unpaid_amount: number | null;
   unpaid_invoice_count: number | null;
   total_overdue_amount: number | null;
@@ -708,6 +710,8 @@ export interface SupplierOverviewResponse {
     total_net: number;
     supplier_count: number;
     invoice_count: number;
+    // Fixed-asset purchases in the total (not the day's expense).
+    assets_total?: number;
   };
   top_by_amount: SupplierStats[];
   top_by_frequency: SupplierStats[];
@@ -747,6 +751,11 @@ export interface SupplierDetailedResponse {
     total_vat: number;
     total_net: number;
     invoice_count: number;
+    // Credit notes apart (they take their amount off the total), and the
+    // fixed-asset purchases included in it (depreciated, not a day's expense).
+    credit_note_count?: number;
+    credit_note_total?: number;
+    assets_total?: number;
     avg_invoice: number;
     first_delivery?: string;
     last_delivery?: string;
@@ -772,6 +781,8 @@ export interface SupplierDetailedResponse {
     date: string;
     total_amount: number;
     vat_amount: number;
+    document_type?: 'invoice' | 'credit_note';
+    is_asset?: boolean;
   }[];
 }
 

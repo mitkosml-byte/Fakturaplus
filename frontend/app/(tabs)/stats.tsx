@@ -845,6 +845,18 @@ export default function StatsScreen() {
                   <Text style={styles.detailLabel}>{t('stats.vat')}</Text>
                 </View>
               </View>
+              {(supplierDetail.overview?.credit_note_count || 0) > 0 && (
+                <Text style={styles.detailNote}>
+                  {t('stats.creditNotesLine')
+                    .replace('{count}', String(supplierDetail.overview?.credit_note_count || 0))
+                    .replace('{amount}', (supplierDetail.overview?.credit_note_total || 0).toFixed(2))}
+                </Text>
+              )}
+              {(supplierDetail.overview?.assets_total || 0) > 0 && (
+                <Text style={styles.detailNote}>
+                  {t('stats.assetsIncluded').replace('{amount}', (supplierDetail.overview?.assets_total || 0).toFixed(2))}
+                </Text>
+              )}
               
               <View style={styles.detailDates}>
                 <View style={styles.detailDateItem}>
@@ -971,10 +983,21 @@ export default function StatsScreen() {
                 {supplierDetail.recent_invoices.map((invoice, index) => (
                   <View key={index} style={styles.recentInvoiceItem}>
                     <View>
-                      <Text style={styles.recentInvoiceNumber}>№{invoice.invoice_number}</Text>
+                      <View style={styles.recentInvoiceTitleRow}>
+                        <Text style={styles.recentInvoiceNumber}>№{invoice.invoice_number}</Text>
+                        {invoice.document_type === 'credit_note' && (
+                          <Text style={styles.recentInvoiceBadge}>{t('stats.badgeCreditNote')}</Text>
+                        )}
+                        {invoice.is_asset && (
+                          <Text style={styles.recentInvoiceBadge}>{t('stats.badgeAsset')}</Text>
+                        )}
+                      </View>
                       <Text style={styles.recentInvoiceDate}>{invoice.date}</Text>
                     </View>
-                    <Text style={styles.recentInvoiceAmount}>{invoice.total_amount.toFixed(2)} €</Text>
+                    <Text style={[
+                      styles.recentInvoiceAmount,
+                      invoice.document_type === 'credit_note' && { color: COLORS.danger },
+                    ]}>{invoice.total_amount.toFixed(2)} €</Text>
                   </View>
                 ))}
               </View>
@@ -1583,6 +1606,11 @@ export default function StatsScreen() {
                           <Text style={styles.supplierTotalLabel}>{t('stats.invoiceCount')}</Text>
                         </View>
                       </View>
+                      {(supplierOverview.totals.assets_total || 0) > 0 && (
+                        <Text style={styles.detailNote}>
+                          {t('stats.assetsIncluded').replace('{amount}', (supplierOverview.totals.assets_total || 0).toFixed(2))}
+                        </Text>
+                      )}
                     </View>
 
                     {/* Chart Type & Ranking Selectors */}
@@ -2540,6 +2568,11 @@ const styles = StyleSheet.create({
     marginTop: -6,
     marginBottom: 10,
   },
+  detailNote: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 8,
+  },
   seriesLegendRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3391,6 +3424,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: 'white',
+  },
+  recentInvoiceTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  recentInvoiceBadge: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    overflow: 'hidden',
   },
   recentInvoiceDate: {
     fontSize: 11,

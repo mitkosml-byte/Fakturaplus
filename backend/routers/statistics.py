@@ -100,11 +100,14 @@ async def get_summary(
     # real numbers with one line item merely blanked in the UI.
     effective_pocket_money = total_pocket_money if visibility["pocket_money"] else 0
 
-    # Card portion of the fiscalized revenue; everything else (the rest of
-    # fiscal_revenue plus all of pocket_money, which is cash by definition)
-    # counts as cash.
-    total_card_revenue = totals["card_revenue"]
-    total_cash_revenue = total_fiscal_revenue - total_card_revenue + effective_pocket_money
+    # How the income came: the till's card part; cash - the rest of the
+    # till plus pocket money (cash by definition); and the invoices issued
+    # (not rung up at the till) by how each was paid - cash, card or bank.
+    # The three add up to the income.
+    by_method = totals.get("issued_by_method") or {}
+    total_card_revenue = totals["card_revenue"] + by_method.get("card", 0.0)
+    total_cash_revenue = total_fiscal_revenue - totals["card_revenue"] + effective_pocket_money + by_method.get("cash", 0.0)
+    total_bank_revenue = by_method.get("bank_transfer", 0.0)
 
     # The outstanding balance, not the invoice's full amount - a partially
     # paid invoice (paid_amount > 0 but < total_amount, still is_paid=False)
@@ -174,6 +177,7 @@ async def get_summary(
         "invoice_count": _redact(totals["invoice_count"]),
         "total_cash_revenue": _redact(round(total_cash_revenue, 2)),
         "total_card_revenue": _redact(round(total_card_revenue, 2)),
+        "total_bank_revenue": _redact(round(total_bank_revenue, 2)),
         "total_unpaid_amount": _redact(round(total_unpaid_amount, 2)),
         "unpaid_invoice_count": _redact(len(unpaid_invoices)),
         "total_overdue_amount": _redact(round(total_overdue_amount, 2)),
@@ -285,20 +289,29 @@ async def get_chart_data(
     def _point(key: str, label: str, values: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
         return {
             "date": key, "label": label,
-            "income": round(values["income"], 2),
-            "expense": round(values["expense"] + values["fixed"], 2),
-            "fixed_costs": round(values["fixed"], 2),
-            "vat": round(values["vat"], 2),
+            "income": values["income"],
+            "expense": values["expense"] + values["fixed"],
+            "fixed_costs": values["fixed"],
+            "vat": values["vat"],
             **extra,
         }
 
+    def _to_cents(points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Each series in cents that add up to the period's own total -
+        rounding every bar by itself made the chart's sum differ from the
+        summary (a month's salary spread as 46.03 € a day)."""
+        for field in ("income", "expense", "fixed_costs", "vat"):
+            for point, value in zip(points, round_to_cents_keeping_total([p[field] for p in points])):
+                point[field] = value
+        return points
+
     if shown.days <= CHART_DAY_BUCKETS_MAX:
-        return [
+        return _to_cents([
             _point(date_str, f"{date_str[8:10]}.{date_str[5:7]}", values,
                    is_closed=is_date_closed(date_str, closed_weekdays, exceptions_map),
                    has_revenue=values["has_revenue"], bucket="day")
             for date_str, values in days.items()
-        ]
+        ])
 
     months: Dict[str, Dict[str, Any]] = defaultdict(
         lambda: {"income": 0.0, "expense": 0.0, "fixed": 0.0, "vat": 0.0, "revenue_days": 0, "open_days": 0}
@@ -309,11 +322,11 @@ async def get_chart_data(
             month[field] += values[field]
         month["revenue_days"] += 1 if values["has_revenue"] else 0
         month["open_days"] += 0 if is_date_closed(date_str, closed_weekdays, exceptions_map) else 1
-    return [
+    return _to_cents([
         _point(key, f"{key[5:7]}.{key[:4]}", values, is_closed=False, has_revenue=values["revenue_days"] > 0,
                revenue_days=values["revenue_days"], open_days=values["open_days"], bucket="month")
         for key, values in sorted(months.items())
-    ]
+    ])
 
 # Minimum distinct weeks of data required before calling any per-weekday
 # pattern "established" rather than noise - a single unusually quiet
@@ -602,7 +615,12 @@ async def get_supplier_statistics(
         "amount_without_vat": 1,
         "date": 1,
         "document_type": 1,
+        "asset_id": 1,
     }).to_list(ALL_ROWS)
+    # Purchases of fixed assets are in the suppliers' totals but not in the
+    # day's expenses (their depreciation is) - said, so the two can be read
+    # side by side.
+    assets_total = sum(float(inv.get("total_amount") or 0) for inv in invoices if inv.get("asset_id"))
     
     # Group by supplier with detailed data
     supplier_data: Dict[str, Any] = defaultdict(lambda: {
@@ -765,7 +783,8 @@ async def get_supplier_statistics(
             "total_vat": round(total_vat, 2),
             "total_net": round(total_net, 2),
             "supplier_count": len(suppliers_list),
-            "invoice_count": total_invoices
+            "invoice_count": total_invoices,
+            "assets_total": round(assets_total, 2),
         },
         "top_by_amount": top_by_amount,
         "top_by_frequency": top_by_frequency,
@@ -859,6 +878,10 @@ async def get_detailed_supplier_stats(
     is_active = days_inactive <= 30
 
     total_amount = sum(inv.get("total_amount", 0) for inv in invoices)
+    # Credit notes take their amount off the total but are no invoice of a
+    # delivery: counted apart, and never an "unusually large invoice".
+    purchases = [inv for inv in invoices if inv.get("document_type") != CREDIT_NOTE]
+    credit_notes = [inv for inv in invoices if inv.get("document_type") == CREDIT_NOTE]
     span_start = period.start if period else first_delivery
     span_end = min(period.end, today) if period else today
     span = Period(span_start, span_end) if span_start and span_start <= span_end else None
@@ -866,14 +889,14 @@ async def get_detailed_supplier_stats(
     _, months = _invoice_series(invoices, span, "month")
 
     # Unusually large invoices - more than two standard deviations above the mean.
-    amounts = [inv.get("total_amount", 0) for inv in invoices]
+    amounts = [inv.get("total_amount", 0) for inv in purchases]
     anomalies = []
     if len(amounts) >= 3:
         mean_amount = sum(amounts) / len(amounts)
         std_dev = (sum((x - mean_amount) ** 2 for x in amounts) / len(amounts)) ** 0.5
         threshold = mean_amount + (2 * std_dev)
         for inv, inv_day in zip(invoices, days):
-            if inv.get("total_amount", 0) > threshold:
+            if inv.get("document_type") != CREDIT_NOTE and inv.get("total_amount", 0) > threshold:
                 anomalies.append({
                     "date": inv_day.isoformat() if inv_day else None,
                     "amount": inv.get("total_amount", 0),
@@ -886,6 +909,7 @@ async def get_detailed_supplier_stats(
             "id": inv.get("id"), "invoice_number": inv.get("invoice_number"),
             "date": inv_day.isoformat() if inv_day else None,
             "total_amount": inv.get("total_amount", 0), "vat_amount": inv.get("vat_amount", 0),
+            "document_type": inv.get("document_type") or "invoice", "is_asset": bool(inv.get("asset_id")),
         }
         for inv, inv_day in list(zip(invoices, days))[-10:][::-1]
     ]
@@ -898,8 +922,11 @@ async def get_detailed_supplier_stats(
             "total_amount": round(total_amount, 2),
             "total_vat": round(sum(inv.get("vat_amount", 0) for inv in invoices), 2),
             "total_net": round(sum(inv.get("amount_without_vat", 0) for inv in invoices), 2),
-            "invoice_count": len(invoices),
-            "avg_invoice": round(total_amount / len(invoices), 2) if invoices else 0,
+            "invoice_count": len(purchases),
+            "credit_note_count": len(credit_notes),
+            "credit_note_total": round(sum(abs(float(inv.get("total_amount") or 0)) for inv in credit_notes), 2),
+            "assets_total": round(sum(float(inv.get("total_amount") or 0) for inv in purchases if inv.get("asset_id")), 2),
+            "avg_invoice": round(sum(inv.get("total_amount", 0) for inv in purchases) / len(purchases), 2) if purchases else 0,
             "first_delivery": first_delivery.isoformat() if first_delivery else None,
             "last_delivery": (last_ever.isoformat() if last_ever else None),
             "is_active": is_active,

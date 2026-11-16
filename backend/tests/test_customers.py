@@ -151,3 +151,46 @@ def test_e2_a_payroll_is_worked_out_with_the_rates_of_its_own_month(client, monk
     assert "payroll_rates_year" in keys()
     client.put("/api/payroll/rates", headers=owner, json={"effective_from": "2027-01", "min_insurance_income": 620})
     assert "payroll_rates_year" not in keys()
+
+
+def test_c3_to_c6_chart_cents_payment_split_and_supplier_detail(client):
+    company_id, _, owner = _company()
+    october = "start_date=2026-10-01&end_date=2026-10-31"
+    employee = client.post("/api/employees", headers=owner, json={"name": "Мария", "base_salary": 1100}).json()
+    assert client.post("/api/payroll", headers=owner, json={
+        "employee_id": employee["id"], "period_year": 2026, "period_month": 10, "gross_amount": 1100,
+    }).status_code == 200
+    client.post("/api/daily-revenue", headers=owner, json={"date": "2026-10-05", "fiscal_revenue": 1000.01, "card_revenue": 300, "pocket_money": 50})
+    client.post("/api/daily-revenue", headers=owner, json={"date": "2026-10-06", "fiscal_revenue": 999.99})
+    _issue(client, owner, payment_method="cash", issue_date="2026-10-07")   # rung up at the till: this business keeps one
+    _issue(client, owner, payment_method="bank_transfer", issue_date="2026-10-08")
+
+    def doc(number, total, kind="invoice"):
+        return {"supplier": "Метро ЕООД", "supplier_eik": "BG131071587", "invoice_number": number, "document_type": kind,
+                "date": "2026-10-09", "amount_without_vat": round(total / 1.2, 2), "vat_amount": round(total - total / 1.2, 2),
+                "total_amount": total, "payment_method": "cash"}
+    for number, total in (("1", 120), ("2", 240)):
+        assert client.post("/api/invoices", headers=owner, json=doc(number, total)).status_code == 200
+    asset = client.post("/api/invoices", headers=owner, json=doc("3", 6000)).json()
+    asyncio.run(server.db.invoices.update_one({"id": asset["id"]}, {"$set": {"asset_id": "asset-1"}}))
+    assert client.post("/api/invoices", headers=owner, json=doc("CN-1", 24, "credit_note")).status_code == 200
+
+    summary = client.get(f"/api/statistics/summary?{october}", headers=owner).json()
+    chart = client.get(f"/api/statistics/chart-data?{october}", headers=owner).json()
+    assert len(chart) == 31
+    # Ч3: the bars add up to the summary, to the cent.
+    assert round(sum(p["expense"] for p in chart), 2) == summary["total_expense"]
+    assert round(sum(p["income"] for p in chart), 2) == summary["total_income"]
+    # Ч4: cash + card + bank is the income (the cash invoice is at the till here).
+    split = summary["total_cash_revenue"] + summary["total_card_revenue"] + summary["total_bank_revenue"]
+    assert round(split, 2) == summary["total_income"] and summary["total_bank_revenue"] == 120
+
+    # Ч5: a credit note is no invoice of a delivery; Ч6: the asset is said.
+    detail = client.get(f"/api/statistics/supplier/Метро ЕООД/detailed?{october}", headers=owner).json()
+    overview = detail["overview"]
+    assert (overview["invoice_count"], overview["credit_note_count"], overview["credit_note_total"]) == (3, 1, 24)
+    assert overview["assets_total"] == 6000
+    assert {i["document_type"] for i in detail["recent_invoices"]} == {"invoice", "credit_note"}
+    assert any(i["is_asset"] for i in detail["recent_invoices"])
+    suppliers = client.get(f"/api/statistics/suppliers?{october}", headers=owner).json()
+    assert suppliers["totals"]["assets_total"] == 6000

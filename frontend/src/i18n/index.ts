@@ -708,6 +708,26 @@ export const translations: Translations = {
     bg: 'Провери ставките',
     en: 'Check the rates',
   },
+  'home.bankRevenue': {
+    bg: 'Приход по банка (фактури)',
+    en: 'Income by bank (invoices)',
+  },
+  'stats.creditNotesLine': {
+    bg: 'Кредитни известия: {count} (−{amount} €)',
+    en: 'Credit notes: {count} (−{amount} €)',
+  },
+  'stats.assetsIncluded': {
+    bg: 'вкл. покупки на активи {amount} € - те не са разход на деня си, а се амортизират',
+    en: 'incl. asset purchases {amount} € - not an expense of their day, they are depreciated',
+  },
+  'stats.badgeCreditNote': {
+    bg: 'КИ',
+    en: 'CN',
+  },
+  'stats.badgeAsset': {
+    bg: 'актив',
+    en: 'asset',
+  },
   'briefing.snooze': {
     bg: 'Отложи 3 дни',
     en: 'Snooze 3 days',
@@ -1037,12 +1057,12 @@ export const translations: Translations = {
     en: 'The rest of the fiscal revenue is treated as cash',
   },
   'home.cashRevenue': {
-    bg: 'Оборот в брой',
-    en: 'Cash Turnover',
+    bg: 'Приход в брой',
+    en: 'Cash income',
   },
   'home.cardRevenue': {
-    bg: 'Оборот с карта',
-    en: 'Card Turnover',
+    bg: 'Приход с карта',
+    en: 'Card income',
   },
   'home.unpaidInvoices': {
     bg: 'Неплатени фактури',
