@@ -50,6 +50,8 @@ export default function ReceivablesScreen() {
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Owed on an invoice: its amount and customer are the invoice's.
+  const [editingLinked, setEditingLinked] = useState(false);
   const [formCustomerName, setFormCustomerName] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formAmount, setFormAmount] = useState('');
@@ -89,12 +91,13 @@ export default function ReceivablesScreen() {
   };
 
   const isOverdue = useCallback((r: Receivable) => {
-    if (r.is_paid || !r.due_date) return false;
+    if (r.is_paid || r.cancelled || !r.due_date) return false;
     return r.due_date < format(new Date(), 'yyyy-MM-dd');
   }, []);
 
   const resetForm = () => {
     setEditingId(null);
+    setEditingLinked(false);
     setFormCustomerName('');
     setFormDescription('');
     setFormAmount('');
@@ -105,6 +108,7 @@ export default function ReceivablesScreen() {
 
   const openEdit = (r: Receivable) => {
     setEditingId(r.id);
+    setEditingLinked(!!r.billing_document_id);
     setFormCustomerName(r.customer_name);
     setFormDescription(r.description || '');
     setFormAmount(String(r.amount));
@@ -159,7 +163,8 @@ export default function ReceivablesScreen() {
   const [payMethod, setPayMethod] = useState<'cash' | 'bank_transfer' | 'card'>('cash');
   const [paySaving, setPaySaving] = useState(false);
 
-  const leftToPay = (r: Receivable) => Math.max(r.amount - (r.paid_amount || 0), 0);
+  const leftToPay = (r: Receivable) =>
+    r.left_amount ?? Math.max(r.amount - (r.paid_amount || 0) - (r.credited_amount || 0), 0);
 
   const handleMarkPaid = (r: Receivable) => {
     setPayingReceivable(r);
@@ -315,7 +320,7 @@ export default function ReceivablesScreen() {
                   <SwipeableRow
                     key={r.id}
                     leftAction={!r.is_paid ? { label: t('receivables.paidLabel'), icon: 'checkmark-circle-outline', color: COLORS.success, onPress: () => handleMarkPaid(r) } : undefined}
-                    rightAction={{ label: t('common.delete'), icon: 'trash-outline', color: COLORS.danger, onPress: () => handleDelete(r) }}
+                    rightAction={r.billing_document_id ? undefined : { label: t('common.delete'), icon: 'trash-outline', color: COLORS.danger, onPress: () => handleDelete(r) }}
                   >
                   <TouchableOpacity
                     style={[styles.card, overdue && styles.cardOverdue]}
@@ -330,10 +335,22 @@ export default function ReceivablesScreen() {
                         {t('receivables.paidSoFar').replace('{paid}', r.paid_amount.toFixed(2)).replace('{left}', leftToPay(r).toFixed(2))}
                       </Text>
                     )}
+                    {(r.credited_amount || 0) > 0 && (
+                      <Text style={styles.description}>
+                        {t('receivables.creditedLine').replace('{amount}', (r.credited_amount || 0).toFixed(2))}
+                      </Text>
+                    )}
+                    {(r.refund_due || 0) > 0 && (
+                      <Text style={[styles.description, { color: COLORS.warning }]}>
+                        {t('receivables.refundDue').replace('{amount}', (r.refund_due || 0).toFixed(2))}
+                      </Text>
+                    )}
                     {r.description ? <Text style={styles.description} numberOfLines={1}>{r.description}</Text> : null}
                     <View style={styles.rowBottom}>
                       <Text style={[styles.dueDate, overdue && styles.dueDateOverdue]}>
-                        {r.is_paid
+                        {r.cancelled
+                          ? t('receivables.cancelledLabel')
+                          : r.is_paid
                           ? t('receivables.paidLabel')
                           : r.due_date
                             ? `${t('receivables.dueLabel')}: ${format(new Date(r.due_date), 'd MMM yyyy', { locale: dateLocale })}`
@@ -345,9 +362,11 @@ export default function ReceivablesScreen() {
                             <Ionicons name="checkmark-circle-outline" size={18} color={COLORS.success} />
                           </TouchableOpacity>
                         )}
-                        <TouchableOpacity onPress={() => handleDelete(r)} hitSlop={8}>
-                          <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
-                        </TouchableOpacity>
+                        {!r.billing_document_id && (
+                          <TouchableOpacity onPress={() => handleDelete(r)} hitSlop={8}>
+                            <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+                          </TouchableOpacity>
+                        )}
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -413,8 +432,9 @@ export default function ReceivablesScreen() {
 
                 <Text style={styles.inputLabel}>{t('receivables.customerName')}</Text>
                 <TextInput
-                  style={[styles.input, customerNameError && styles.inputErrorBorder]}
+                  style={[styles.input, customerNameError && styles.inputErrorBorder, editingLinked && styles.inputLocked]}
                   value={formCustomerName}
+                  editable={!editingLinked}
                   onChangeText={(v) => { setFormCustomerName(v); setCustomerNameError(false); }}
                   placeholder={t('receivables.customerNamePlaceholder')}
                   placeholderTextColor={COLORS.textMuted}
@@ -425,13 +445,15 @@ export default function ReceivablesScreen() {
 
                 <Text style={styles.inputLabel}>{t('receivables.amount')} (€)</Text>
                 <TextInput
-                  style={[styles.input, amountError && styles.inputErrorBorder]}
+                  style={[styles.input, amountError && styles.inputErrorBorder, editingLinked && styles.inputLocked]}
                   value={formAmount}
+                  editable={!editingLinked}
                   onChangeText={(v) => { setFormAmount(v); setAmountError(false); }}
                   keyboardType="decimal-pad"
                   placeholder="0.00"
                   placeholderTextColor={COLORS.textMuted}
                 />
+                {editingLinked && <Text style={styles.lockedNote}>{t('receivables.lockedByInvoice')}</Text>}
                 <Expandable expanded={amountError}>
                   <Text style={styles.fieldErrorText}>{t('budget.invalidAmount')}</Text>
                 </Expandable>
@@ -557,6 +579,8 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   inputErrorBorder: { borderColor: COLORS.danger },
+  inputLocked: { opacity: 0.6 },
+  lockedNote: { color: COLORS.textMuted, fontSize: 12, marginTop: 4 },
   fieldErrorText: { color: COLORS.danger, fontSize: 12, marginTop: 4 },
   saveButton: {
     backgroundColor: COLORS.primary,

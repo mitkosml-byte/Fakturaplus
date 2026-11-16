@@ -253,6 +253,14 @@ export interface Receivable {
   // so a payment on it is never offered as new revenue.
   billing_document_id?: string | null;
   revenue_counted?: boolean;
+  // Taken off by credit notes to its invoice.
+  credited_amount?: number;
+  // Its document was cancelled after money came in: nothing is owed, what
+  // was paid is the customer's to get back.
+  cancelled?: boolean;
+  // As shown: still owed, and to give back.
+  left_amount?: number;
+  refund_due?: number;
   created_at: string;
 }
 
@@ -304,6 +312,11 @@ export interface BillingDocument {
   // Paid in cash or by card through the till: its money is in that day's
   // till revenue already - not counted again as income or VAT.
   in_till?: boolean;
+  // Where a bill's or an invoice's money stands (as listed).
+  payment_status?: 'paid' | 'partly_paid' | 'owed' | 'overdue' | 'credited' | null;
+  paid_amount?: number | null;
+  amount_left?: number | null;
+  refund_due?: number | null;
   created_at: string;
 }
 

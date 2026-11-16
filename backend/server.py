@@ -2549,7 +2549,22 @@ class Receivable(BaseModel):
     # coming in, never new revenue to log.
     billing_document_id: Optional[str] = None
     revenue_counted: bool = False
+    # Taken off what is owed by credit notes to its invoice - not money in.
+    credited_amount: float = 0
+    # Its document was cancelled (or deleted) after money came in: nothing
+    # is owed any more, and what was paid is the customer's to get back.
+    cancelled: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ReceivableView(Receivable):
+    """A receivable as shown: what is still owed and what is to give back."""
+    left_amount: float = 0
+    refund_due: float = 0
+
+
+def receivable_view(r: dict) -> "ReceivableView":
+    return ReceivableView(**{**r, "left_amount": round(receivable_left(r), 2), "refund_due": round(receivable_refund_due(r), 2)})
 
 class ReceivableCreate(BaseModel):
     customer_id: Optional[str] = None
@@ -2676,6 +2691,37 @@ class BillingDocument(BaseModel):
     # never counted a second time as income or VAT (ISSUED_INVOICE_REVENUE).
     in_till: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class BillingDocumentView(BillingDocument):
+    """A bill or an invoice as listed, with where its money stands: paid,
+    partly_paid, owed, overdue or credited (settled by credit notes) - from
+    its receivable, or paid when issued in cash or by card."""
+    payment_status: Optional[str] = None
+    paid_amount: Optional[float] = None
+    amount_left: Optional[float] = None
+    refund_due: Optional[float] = None
+
+
+def billing_payment_of(doc: dict, receivable: Optional[dict], today: str) -> Dict[str, Any]:
+    """Where a document's money stands (see BillingDocumentView)."""
+    if doc.get("doc_type") not in ("bill", "invoice") or doc.get("cancelled"):
+        return {}
+    if receivable:
+        left = receivable_left(receivable)
+        paid = float(receivable.get("paid_amount") or 0)
+        if left <= 0.005:
+            status = "paid" if paid > 0 else "credited"
+        elif receivable.get("due_date") and str(receivable["due_date"]) < today:
+            status = "overdue"
+        else:
+            status = "partly_paid" if paid > 0 else "owed"
+        return {"payment_status": status, "paid_amount": round(paid, 2), "amount_left": round(left, 2),
+                "refund_due": round(receivable_refund_due(receivable), 2)}
+    if doc.get("payment_method") in ("cash", "card"):
+        return {"payment_status": "paid", "paid_amount": round(float(doc.get("total_amount") or 0), 2),
+                "amount_left": 0.0, "refund_due": 0.0}
+    return {}
 
 class BillingDocumentCreate(BaseModel):
     doc_type: BillingDocumentType = BillingDocumentType.BILL
@@ -3126,8 +3172,42 @@ async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: 
     return items[:limit]
 
 def receivable_left(r: dict) -> float:
-    """What is still owed on a receivable - its amount less what was paid in parts."""
-    return max(float(r.get("amount") or 0) - float(r.get("paid_amount") or 0), 0.0)
+    """What is still owed on a receivable - its amount less what was paid
+    in parts and what credit notes took off; nothing once its document is
+    cancelled."""
+    if r.get("cancelled"):
+        return 0.0
+    owed = float(r.get("amount") or 0) - float(r.get("paid_amount") or 0) - float(r.get("credited_amount") or 0)
+    return max(owed, 0.0)
+
+
+def receivable_refund_due(r: dict) -> float:
+    """What the business is to give back on a receivable: paid beyond what
+    the credit notes left owed - or all that was paid once its document is
+    cancelled."""
+    paid = float(r.get("paid_amount") or 0)
+    if r.get("cancelled"):
+        return paid
+    return max(paid + float(r.get("credited_amount") or 0) - float(r.get("amount") or 0), 0.0)
+
+
+# What a receivable's balance is read from.
+RECEIVABLE_BALANCE_FIELDS = {"_id": 0, "amount": 1, "paid_amount": 1, "credited_amount": 1, "cancelled": 1, "due_date": 1}
+
+
+async def receivables_summary_for(scope: dict) -> dict:
+    """What customers owe now and what of it is overdue - one count for the
+    receivables screen, the signal and the assistant."""
+    now_str = today_local().isoformat()
+    unpaid = await db.receivables.find({**scope, "is_paid": False}, RECEIVABLE_BALANCE_FIELDS).to_list(ALL_ROWS)
+    still_owed = [r for r in unpaid if receivable_left(r) > 0]
+    overdue = [r for r in still_owed if r.get("due_date") and r["due_date"] < now_str]
+    return {
+        "total_owed": round(sum(receivable_left(r) for r in still_owed), 2),
+        "unpaid_count": len(still_owed),
+        "total_overdue": round(sum(receivable_left(r) for r in overdue), 2),
+        "overdue_count": len(overdue),
+    }
 
 
 async def _business_digest_receivables(scope: dict) -> dict:
@@ -3137,17 +3217,7 @@ async def _business_digest_receivables(scope: dict) -> dict:
     Same aggregation as GET /receivables/summary, kept in sync by hand
     since that endpoint lives in routers/receivables.py (star-imported
     from here, not the other way around)."""
-    now_str = today_local().isoformat()
-    unpaid = await db.receivables.find({**scope, "is_paid": False}, {"_id": 0, "amount": 1, "paid_amount": 1, "due_date": 1}).to_list(ALL_ROWS)
-    total_owed = sum(receivable_left(r) for r in unpaid)
-    overdue = [r for r in unpaid if r.get("due_date") and r["due_date"] < now_str]
-    total_overdue = sum(receivable_left(r) for r in overdue)
-    return {
-        "total_owed": round(total_owed, 2),
-        "unpaid_count": len(unpaid),
-        "total_overdue": round(total_overdue, 2),
-        "overdue_count": len(overdue),
-    }
+    return await receivables_summary_for(scope)
 
 async def _business_digest_vat_due(
     company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str

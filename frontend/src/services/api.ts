@@ -644,7 +644,7 @@ class ApiService {
 
   // An issued invoice that is not the last one is cancelled, not deleted
   // (cancelled: true) - its number stays and it counts for nothing.
-  async deleteBillingDocument(id: string): Promise<{ receivable: 'deleted' | 'kept' | null; cancelled?: boolean }> {
+  async deleteBillingDocument(id: string): Promise<{ receivable: 'deleted' | 'kept' | null; cancelled?: boolean; refund_due?: number }> {
     return this.fetch(`/billing-documents/${id}`, { method: 'DELETE' });
   }
 

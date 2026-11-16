@@ -259,6 +259,23 @@ export default function BillingDocumentsScreen() {
     }
   };
 
+  // Where a bill's or an invoice's money stands, said on its card.
+  const paymentLabel = (doc: BillingDocument) => {
+    const left = (doc.amount_left || 0).toFixed(2);
+    switch (doc.payment_status) {
+      case 'paid': return t('billingDocuments.statusPaid');
+      case 'partly_paid':
+        return t('billingDocuments.statusPartlyPaid').replace('{paid}', (doc.paid_amount || 0).toFixed(2)).replace('{left}', left);
+      case 'overdue': return t('billingDocuments.statusOverdue').replace('{left}', left);
+      case 'credited': return t('billingDocuments.statusCredited');
+      default: return t('billingDocuments.statusOwed');
+    }
+  };
+  const paymentBadgeStyle = (status: BillingDocument['payment_status']) =>
+    status === 'paid' ? styles.paymentPaid
+      : status === 'overdue' ? styles.paymentOverdue
+        : status === 'credited' ? styles.paymentCredited : styles.paymentOwed;
+
   const handleDelete = (doc: BillingDocument) => {
     const confirmText = doc.doc_type === 'invoice' ? t('billingDocuments.invoiceDeleteConfirm') : t('billingDocuments.deleteConfirm');
     Alert.alert(t('common.delete'), confirmText, [
@@ -271,7 +288,14 @@ export default function BillingDocumentsScreen() {
             const result = await api.deleteBillingDocument(doc.id);
             // Its receivable goes with it unless something was already paid on
             // it; an earlier invoice is cancelled, keeping its number.
-            if (result?.cancelled) {
+            if ((result?.refund_due || 0) > 0) {
+              // Money came in on it: nothing is owed now, and what was paid
+              // is the customer's to get back.
+              Alert.alert(
+                result?.cancelled ? t('billingDocuments.invoiceCancelled') : t('billingDocuments.deleted'),
+                t('billingDocuments.refundAfterCancel').replace('{amount}', (result?.refund_due || 0).toFixed(2)),
+              );
+            } else if (result?.cancelled) {
               Toast.success(t('billingDocuments.invoiceCancelled'));
             } else {
               Toast.success(result?.receivable === 'kept' ? t('billingDocuments.deletedReceivableKept') : t('billingDocuments.deleted'));
@@ -357,6 +381,18 @@ export default function BillingDocumentsScreen() {
                     <Text style={[styles.amount, doc.cancelled && { textDecorationLine: 'line-through' }]}>{doc.total_amount.toFixed(2)} €</Text>
                   </View>
                   <Text style={styles.customerName} numberOfLines={1}>{doc.customer_name}</Text>
+                  {doc.payment_status && (
+                    <View style={styles.paymentRow}>
+                      <View style={[styles.paymentBadge, paymentBadgeStyle(doc.payment_status)]}>
+                        <Text style={styles.typeBadgeText}>{paymentLabel(doc)}</Text>
+                      </View>
+                      {(doc.refund_due || 0) > 0 && (
+                        <Text style={styles.refundText}>
+                          {t('billingDocuments.refundDue').replace('{amount}', (doc.refund_due || 0).toFixed(2))}
+                        </Text>
+                      )}
+                    </View>
+                  )}
                   <View style={styles.rowBottom}>
                     <Text style={styles.date}>{format(new Date(doc.issue_date), 'd MMM yyyy', { locale: dateLocale })}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -641,6 +677,13 @@ const styles = StyleSheet.create({
   typeBadgeBill: { backgroundColor: 'rgba(16, 185, 129, 0.2)' },
   typeBadgeInvoice: { backgroundColor: 'rgba(59, 130, 246, 0.25)' },
   typeBadgeCancelled: { backgroundColor: 'rgba(239, 68, 68, 0.3)' },
+  paymentRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' },
+  paymentBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 20 },
+  paymentPaid: { backgroundColor: 'rgba(16, 185, 129, 0.3)' },
+  paymentOwed: { backgroundColor: 'rgba(245, 158, 11, 0.3)' },
+  paymentOverdue: { backgroundColor: 'rgba(239, 68, 68, 0.35)' },
+  paymentCredited: { backgroundColor: 'rgba(148, 163, 184, 0.3)' },
+  refundText: { fontSize: 12, color: COLORS.warning },
   invoiceHint: { fontSize: 12, color: COLORS.textSecondary, marginTop: 6, lineHeight: 17 },
   subtotalPreview: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6, textAlign: 'right' },
   typeBadgeText: { fontSize: 11, fontWeight: '700', color: 'white' },

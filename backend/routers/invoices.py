@@ -347,8 +347,10 @@ async def get_invoices(
     if invoice_number:
         query["invoice_number"] = {"$regex": re.escape(invoice_number), "$options": "i"}
     if search:
+        # Next to the company's own scope (itself an $or), never in its
+        # place - before, a search listed every company's invoices.
         pattern = {"$regex": re.escape(search), "$options": "i"}
-        query["$or"] = [{"supplier": pattern}, {"invoice_number": pattern}]
+        query = {"$and": [query, {"$or": [{"supplier": pattern}, {"invoice_number": pattern}]}]}
     if start_date or end_date:
         # Whole business days, whatever form the bounds came in (a day, or
         # a device's local midnight sent as a UTC moment) - the same days

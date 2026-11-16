@@ -1299,6 +1299,27 @@ export const translations: Translations = {
   'receivables.paymentDate': { bg: 'Дата на плащане', en: 'Payment date' },
   'receivables.recordPayment': { bg: 'Запиши плащането', en: 'Record payment' },
   'receivables.leftToPay': { bg: 'остават {left} €', en: '{left} € left' },
+  'receivables.creditedLine': { bg: 'Кредитни известия: −{amount} €', en: 'Credit notes: −{amount} €' },
+  'receivables.refundDue': { bg: 'За връщане на клиента: {amount} €', en: 'To give back to the customer: {amount} €' },
+  'receivables.cancelledLabel': { bg: 'Анулирана', en: 'Cancelled' },
+  'receivables.lockedByInvoice': {
+    bg: 'Сумата и клиентът са по фактурата - променят се с кредитно известие или анулиране.',
+    en: "The amount and customer are the invoice's - a credit note or cancelling it changes them.",
+  },
+  'billingDocuments.statusPaid': { bg: 'Платена', en: 'Paid' },
+  'billingDocuments.statusPartlyPaid': { bg: 'Платени {paid} · остават {left} €', en: '{paid} paid · {left} € left' },
+  'billingDocuments.statusOwed': { bg: 'Дължима', en: 'Owed' },
+  'billingDocuments.statusOverdue': { bg: 'Просрочена · {left} €', en: 'Overdue · {left} €' },
+  'billingDocuments.statusCredited': { bg: 'Кредитирана', en: 'Credited' },
+  'billingDocuments.refundDue': { bg: 'За връщане {amount} €', en: 'To give back {amount} €' },
+  'billingDocuments.deletedReceivableKept': {
+    bg: 'Сметката е изтрита. По вземането вече има плащане, затова то остава.',
+    en: 'Bill deleted. Its receivable already has a payment, so it stays.',
+  },
+  'billingDocuments.refundAfterCancel': {
+    bg: 'По нея вече е платено {amount} €. Нищо не се дължи повече, а платеното е за връщане на клиента (или прихващане) - вижда се във Вземания.',
+    en: '{amount} € was already paid on it. Nothing is owed any more, and what was paid is the customer\'s to get back (or offset) - see Receivables.',
+  },
   'receivables.paidSoFar': { bg: 'Платени {paid} € · остават {left} €', en: '{paid} € paid · {left} € left' },
   'receivables.partPaid': { bg: 'Частичното плащане е записано', en: 'Part payment recorded' },
   'receivables.logAsRevenueHintDay': {
@@ -1436,10 +1457,6 @@ export const translations: Translations = {
   'billingDocuments.quoteSaved': {
     bg: 'Офертата е записана',
     en: 'Quote saved',
-  },
-  'billingDocuments.deletedReceivableKept': {
-    bg: 'Сметката е изтрита. По вземането вече има плащане, затова то остава.',
-    en: 'Bill deleted. Its receivable already has a payment, so it stays.',
   },
   'billingDocuments.deleted': {
     bg: 'Документът е изтрит',

@@ -119,11 +119,13 @@ async def get_customer_card(customer_id: str, current_user: User = Depends(get_c
             return doc["customer_id"] == customer_id
         return _compare_key(doc.get("customer_name") or "") == name_key
 
-    who = {"$or": [{"customer_id": customer_id}, {"customer_id": None}, {"customer_id": {"$exists": False}}]}
+    # Theirs within this company only: the company scope is itself an $or,
+    # so the two go side by side (merged, this one replaced it).
+    who = {"$and": [scope, {"$or": [{"customer_id": customer_id}, {"customer_id": None}, {"customer_id": {"$exists": False}}]}]}
     documents = [d for d in await server.db.billing_documents.find(
-        {**scope, **who}, {"_id": 0, "items": 0},
+        who, {"_id": 0, "items": 0},
     ).to_list(ALL_ROWS) if theirs(d)]
-    receivables = [r for r in await server.db.receivables.find({**scope, **who}, {"_id": 0}).to_list(ALL_ROWS) if theirs(r)]
+    receivables = [r for r in await server.db.receivables.find(who, {"_id": 0}).to_list(ALL_ROWS) if theirs(r)]
 
     invoices = [d for d in documents if d.get("doc_type") == "invoice" and not d.get("cancelled")]
     today = today_local().isoformat()
@@ -138,6 +140,7 @@ async def get_customer_card(customer_id: str, current_user: User = Depends(get_c
             "owed": round(sum(receivable_left(r) for r in open_debts), 2),
             "overdue": round(sum(receivable_left(r) for r in open_debts if r.get("due_date") and str(r["due_date"]) < today), 2),
             "paid": round(sum(float(r.get("paid_amount") or 0) for r in receivables), 2),
+            "to_refund": round(sum(receivable_refund_due(r) for r in receivables), 2),
         },
         "documents": [
             {k: d.get(k) for k in ("id", "doc_type", "invoice_number", "issue_date", "total_amount", "cancelled", "external", "in_till")}
@@ -161,7 +164,7 @@ async def create_receivable(payload: ReceivableCreate, current_user: User = Depe
     await server.db.receivables.insert_one(receivable.model_dump())
     return receivable
 
-@router.get("/receivables", response_model=List[Receivable])
+@router.get("/receivables", response_model=List[ReceivableView])
 async def get_receivables(
     status: Optional[str] = None,  # unpaid | overdue | paid
     current_user: User = Depends(get_current_user),
@@ -180,26 +183,26 @@ async def get_receivables(
     # always shown regardless of when they were created - a receivable
     # from two months ago that's still unpaid is still owed today.
     receivables = await server.db.receivables.find(query, {"_id": 0}).sort("due_date", 1).to_list(ALL_ROWS)
-    return [Receivable(**r) for r in receivables]
+    return [receivable_view(r) for r in receivables]
 
 @router.get("/receivables/summary")
 async def get_receivables_summary(current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     _, query = await get_company_scope(current_user)
-    now_str = today_local().isoformat()
-    unpaid = await server.db.receivables.find({**query, "is_paid": False}, {"_id": 0, "amount": 1, "paid_amount": 1, "due_date": 1}).to_list(ALL_ROWS)
     # What is still owed: less whatever was already paid in parts.
-    total_owed = sum(receivable_left(r) for r in unpaid)
-    overdue = [r for r in unpaid if r.get("due_date") and r["due_date"] < now_str]
-    total_overdue = sum(receivable_left(r) for r in overdue)
-    return {
-        "total_owed": round(total_owed, 2),
-        "unpaid_count": len(unpaid),
-        "total_overdue": round(total_overdue, 2),
-        "overdue_count": len(overdue),
-    }
+    return await receivables_summary_for(query)
 
-@router.put("/receivables/{receivable_id}", response_model=Receivable)
+
+async def _document_label(scope: dict, document_id: str) -> str:
+    document = await server.db.billing_documents.find_one(
+        {"id": document_id, **scope}, {"_id": 0, "doc_type": 1, "invoice_number": 1},
+    )
+    if document and document.get("doc_type") == "invoice":
+        return f"фактура № {document.get('invoice_number')}"
+    return "издадения документ"
+
+
+@router.put("/receivables/{receivable_id}", response_model=ReceivableView)
 async def update_receivable(receivable_id: str, payload: ReceivableUpdate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     _, scope = await get_company_scope(current_user)
@@ -208,20 +211,34 @@ async def update_receivable(receivable_id: str, payload: ReceivableUpdate, curre
         raise HTTPException(status_code=404, detail="Записът не е намерен")
 
     update_data = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if existing.get("billing_document_id"):
+        # Owed on an invoice: its amount and customer are the invoice's - a
+        # credit note or cancelling the invoice changes them, never an edit
+        # here (before, an invoice of 1 200 € could be "owed" as 900 €).
+        label = await _document_label(scope, existing["billing_document_id"])
+        if "amount" in update_data and abs(float(update_data["amount"]) - float(existing.get("amount") or 0)) > 0.005:
+            raise HTTPException(status_code=400, detail=f"Сумата е по {label} - променя се с кредитно известие или с анулиране")
+        if "customer_name" in update_data and update_data["customer_name"].strip() != existing.get("customer_name"):
+            raise HTTPException(status_code=400, detail=f"Клиентът е по {label} и не се променя тук")
+        if "paid_amount" in update_data or update_data.get("is_paid") is False:
+            raise HTTPException(status_code=400, detail="Плащанията по фактура се въвеждат едно по едно, с датата си")
+        update_data.pop("amount", None)
+        update_data.pop("customer_name", None)
     if update_data.get("is_paid") is True and not existing.get("is_paid"):
         # "Paid in full" today: whatever was left is the last payment.
         left = receivable_left(existing)
         update_data["paid_at"] = datetime.now(timezone.utc)
-        update_data.setdefault("paid_amount", existing.get("amount", 0))
+        update_data.setdefault("paid_amount", round(float(existing.get("paid_amount") or 0) + left, 2))
         if left > 0:
             update_data["payments"] = [*(existing.get("payments") or []), {
                 "id": str(uuid.uuid4()), "amount": round(left, 2), "date": today_local().isoformat(), "method": None,
             }]
-    await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$set": update_data})
+    if update_data:
+        await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$set": update_data})
     receivable = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
-    return Receivable(**receivable)
+    return receivable_view(receivable)
 
-@router.post("/receivables/{receivable_id}/payments", response_model=Receivable)
+@router.post("/receivables/{receivable_id}/payments", response_model=ReceivableView)
 async def add_receivable_payment(
     receivable_id: str, payload: ReceivablePaymentCreate, current_user: User = Depends(get_current_user),
 ):
@@ -243,7 +260,7 @@ async def add_receivable_payment(
     if day is None:
         raise HTTPException(status_code=400, detail="Невалидна дата")
     paid = round(float(existing.get("paid_amount") or 0) + payload.amount, 2)
-    fully = paid >= float(existing.get("amount") or 0) - 0.01
+    fully = receivable_left({**existing, "paid_amount": paid}) <= 0.01
     update: Dict[str, Any] = {
         "paid_amount": paid,
         "is_paid": fully,
@@ -255,13 +272,18 @@ async def add_receivable_payment(
         update["paid_at"] = day_start_utc(day)
     await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$set": update})
     receivable = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
-    return Receivable(**receivable)
+    return receivable_view(receivable)
 
 
 @router.delete("/receivables/{receivable_id}")
 async def delete_receivable(receivable_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_revenue")
     _, scope = await get_company_scope(current_user)
+    linked = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0, "billing_document_id": 1})
+    if linked and linked.get("billing_document_id"):
+        # Owed on an invoice: it goes only with the invoice (cancelled).
+        label = await _document_label(scope, linked["billing_document_id"])
+        raise HTTPException(status_code=400, detail=f"Вземането е по {label} - маха се само с анулиране на фактурата")
     result = await server.db.receivables.delete_one({"id": receivable_id, **scope})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Записът не е намерен")
@@ -427,21 +449,36 @@ async def get_invoice_defaults(current_user: User = Depends(get_current_user)):
     return {"vat_registered": company_vat_registered(company), "logs_till": await company_logs_till(scope)}
 
 
-@router.get("/billing-documents", response_model=List[BillingDocument])
+async def _with_payment(scope: dict, docs: List[dict]) -> List[BillingDocumentView]:
+    """The documents with where their money stands, from their receivables."""
+    ids = [d["receivable_id"] for d in docs if d.get("receivable_id")]
+    receivables = {
+        r["id"]: r for r in await server.db.receivables.find(
+            {**scope, "id": {"$in": ids}}, {**RECEIVABLE_BALANCE_FIELDS, "id": 1},
+        ).to_list(ALL_ROWS)
+    } if ids else {}
+    today = today_local().isoformat()
+    return [
+        BillingDocumentView(**d, **billing_payment_of(d, receivables.get(d.get("receivable_id") or ""), today))
+        for d in docs
+    ]
+
+
+@router.get("/billing-documents", response_model=List[BillingDocumentView])
 async def get_billing_documents(current_user: User = Depends(get_current_user)):
     require_sales_access(current_user)
     _, query = await get_company_scope(current_user)
     docs = await server.db.billing_documents.find(query, {"_id": 0}).sort("created_at", -1).to_list(ALL_ROWS)
-    return [BillingDocument(**d) for d in docs]
+    return await _with_payment(query, docs)
 
-@router.get("/billing-documents/{document_id}", response_model=BillingDocument)
+@router.get("/billing-documents/{document_id}", response_model=BillingDocumentView)
 async def get_billing_document(document_id: str, current_user: User = Depends(get_current_user)):
     require_sales_access(current_user)
     _, scope = await get_company_scope(current_user)
     document = await server.db.billing_documents.find_one({"id": document_id, **scope}, {"_id": 0})
     if not document:
         raise HTTPException(status_code=404, detail="Документът не е намерен")
-    return BillingDocument(**document)
+    return (await _with_payment(scope, [document]))[0]
 
 @router.get("/billing-documents/{document_id}/pdf")
 async def export_billing_document_pdf(document_id: str, current_user: User = Depends(get_current_user)):
@@ -526,14 +563,28 @@ async def delete_billing_document(document_id: str, current_user: User = Depends
     # deleted bill left the customer "owing" it for ever. Once money came
     # in, the receivable (and what was paid) stays.
     receivable_status = None
+    refund_due = 0.0
     receivable_id = document.get("receivable_id")
     if receivable_id:
-        receivable = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0, "paid_amount": 1})
+        receivable = await server.db.receivables.find_one(
+            {"id": receivable_id, **scope}, {"_id": 0, "paid_amount": 1, "description": 1},
+        )
         if receivable and float(receivable.get("paid_amount") or 0) <= 0:
             await server.db.receivables.delete_one({"id": receivable_id, **scope})
             receivable_status = "deleted"
+        elif receivable and document.get("doc_type") == "invoice":
+            # Money came in on an invoice now void: the record stays, closed
+            # - nothing is owed on it any more, and what was paid is the
+            # customer's to get back (before, the rest stayed "owed" on a
+            # cancelled invoice). A bill is only paper: its debt stays.
+            refund_due = round(float(receivable.get("paid_amount") or 0), 2)
+            await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$set": {
+                "cancelled": True, "is_paid": True,
+                "description": f"{receivable.get('description') or ''} - анулирана".strip(" -"),
+            }})
+            receivable_status = "kept"
         elif receivable:
             receivable_status = "kept"
     if cancelled:
-        return {"message": "Фактурата е анулирана", "cancelled": True, "receivable": receivable_status}
-    return {"message": "Документът е изтрит", "cancelled": False, "receivable": receivable_status}
+        return {"message": "Фактурата е анулирана", "cancelled": True, "receivable": receivable_status, "refund_due": refund_due}
+    return {"message": "Документът е изтрит", "cancelled": False, "receivable": receivable_status, "refund_due": refund_due}
