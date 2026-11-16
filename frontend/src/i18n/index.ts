@@ -1932,6 +1932,19 @@ export const translations: Translations = {
   },
   
   // Invoice details
+  'invoices.linesMismatchTitle': { bg: 'Редовете не дават сумата', en: 'The lines do not add up' },
+  'invoices.linesMismatchText': {
+    bg: 'Сборът на редовете е {lines} €, а сумата без ДДС е {base} €. Провери количествата и цените – или запази така.',
+    en: 'The lines add up to {lines} €, but the amount without VAT is {base} €. Check quantities and prices – or save as it is.',
+  },
+  'invoices.saveAnyway': { bg: 'Запази така', en: 'Save anyway' },
+  'invoices.alreadyPaidTitle': { bg: 'Вече платена ли е?', en: 'Already paid?' },
+  'invoices.alreadyPaidText': {
+    bg: 'Фактурата става по банков път. Ако още не е платена, ще се води като задължение до плащането.',
+    en: 'The invoice becomes a bank transfer. If it is not paid yet, it will count as owed until paid.',
+  },
+  'invoices.notPaidYet': { bg: 'Не, дължи се', en: 'No, it is owed' },
+  'invoices.alreadyPaid': { bg: 'Да, платена е', en: 'Yes, it is paid' },
   'invoices.isAssetTitle': { bg: 'Дълготраен актив', en: 'Fixed asset' },
   'invoices.isAssetText': {
     bg: 'Не се брои като разход в деня си – брои се амортизацията на актива. ДДС остава кредит.',

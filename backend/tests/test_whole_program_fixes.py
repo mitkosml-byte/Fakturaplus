@@ -651,3 +651,27 @@ def test_i4_importing_the_same_expenses_twice_does_not_double_them(client):
     # The three already there are skipped; a third coffee that day is new.
     assert second["already_present"] == 3 and second["imported"] == 1
     assert asyncio.run(server.db.expenses.count_documents({"company_id": company_id})) == 4
+
+
+def test_f3_f4_payment_follows_a_corrected_total_and_a_changed_method(client):
+    _, _, owner = _company()
+    base = {"supplier": "Доставки ЕООД", "date": "2026-11-04", "amount_without_vat": 100, "vat_amount": 20, "total_amount": 120}
+    cash = client.post("/api/invoices", headers=owner, json={**base, "invoice_number": "P-1", "payment_method": "cash"}).json()
+    fixed = client.put(f"/api/invoices/{cash['id']}", headers=owner, json={"amount_without_vat": 1000, "vat_amount": 200, "total_amount": 1200}).json()
+    assert (fixed["is_paid"], fixed["paid_amount"]) == (True, 1200)   # paid at the till: follows the total
+
+    bank = client.post("/api/invoices", headers=owner, json={**base, "invoice_number": "P-2", "payment_method": "bank_transfer"}).json()
+    paid = client.put(f"/api/invoices/{bank['id']}", headers=owner, json={"is_paid": True}).json()
+    assert paid["paid_amount"] == 120
+    corrected = client.put(f"/api/invoices/{bank['id']}", headers=owner, json={"amount_without_vat": 1000, "vat_amount": 200, "total_amount": 1200}).json()
+    assert (corrected["is_paid"], corrected["paid_amount"]) == (False, 120)   # by bank: 120 paid of 1 200
+
+    # From cash to a bank transfer: owed, unless the edit says it was paid.
+    switched = client.put(f"/api/invoices/{cash['id']}", headers=owner, json={"payment_method": "bank_transfer"}).json()
+    assert (switched["is_paid"], switched["paid_amount"]) == (False, 0) and switched["payment_due_date"]
+    other = client.post("/api/invoices", headers=owner, json={**base, "invoice_number": "P-3", "payment_method": "card"}).json()
+    kept = client.put(f"/api/invoices/{other['id']}", headers=owner, json={"payment_method": "bank_transfer", "is_paid": True}).json()
+    assert kept["is_paid"] is True and kept["paid_amount"] == 120
+    # A part payment typed in still works as before.
+    part = client.put(f"/api/invoices/{bank['id']}", headers=owner, json={"paid_amount": 1200}).json()
+    assert part["is_paid"] is True

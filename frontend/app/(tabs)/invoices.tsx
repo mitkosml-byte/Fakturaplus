@@ -19,7 +19,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
-import { Invoice, VatTreatment } from '../../src/types';
+import { Invoice, PaymentMethod, VatTreatment } from '../../src/types';
 import { validateEikFormat } from '../../src/utils/eik';
 import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
@@ -302,6 +302,7 @@ export default function InvoicesScreen() {
   const [editAmountWithoutVat, setEditAmountWithoutVat] = useState('');
   const [editVatAmount, setEditVatAmount] = useState('');
   const [editVatTreatment, setEditVatTreatment] = useState<VatTreatment | ''>('');
+  const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod | ''>('');
   const [editNotes, setEditNotes] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -324,6 +325,7 @@ export default function InvoicesScreen() {
     setEditAmountWithoutVat(invoice.amount_without_vat.toFixed(2));
     setEditVatAmount(invoice.vat_amount.toFixed(2));
     setEditVatTreatment(invoice.vat_treatment || '');
+    setEditPaymentMethod(invoice.payment_method || '');
     setEditNotes(invoice.notes || '');
     setEditItems(
       (invoice.items || []).map((it) => ({
@@ -337,7 +339,7 @@ export default function InvoicesScreen() {
     setEditItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, [field]: value } : it)));
   };
 
-  const handleSaveEditedInvoice = async () => {
+  const handleSaveEditedInvoice = async (checked: { lines?: boolean; paid?: boolean | null } = {}) => {
     if (!selectedInvoice) return;
     const supplier = editSupplier.trim();
     const invoiceNumber = editInvoiceNumber.trim();
@@ -356,9 +358,48 @@ export default function InvoicesScreen() {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;
     }
+    // The corrected lines are checked against the total, as at scan.
+    if (!checked.lines && parsedItems.length > 0) {
+      try {
+        const check = await api.checkInvoiceDraft({
+          amount_without_vat: withoutVat, vat_amount: vat, total_amount: withoutVat + vat,
+          items: editItems.map((it, i) => ({
+            name: it.name, quantity: parsedItems[i].quantity, unit_price: parsedItems[i].unit_price, printed_total: null,
+          })),
+        });
+        if (check.lines && !check.lines.ok) {
+          Alert.alert(
+            t('invoices.linesMismatchTitle'),
+            t('invoices.linesMismatchText')
+              .replace('{lines}', check.lines.sum.toFixed(2))
+              .replace('{base}', check.lines.base.toFixed(2)),
+            [
+              { text: t('common.cancel'), style: 'cancel' },
+              { text: t('invoices.saveAnyway'), onPress: () => { handleSaveEditedInvoice({ ...checked, lines: true }); } },
+            ],
+          );
+          return;
+        }
+      } catch {
+        // The check is a help, never a block.
+      }
+    }
+    // From paid at the till to a bank transfer: was it already paid?
+    const methodChanged = !!editPaymentMethod && editPaymentMethod !== (selectedInvoice.payment_method || '');
+    const fromTillToBank = methodChanged && editPaymentMethod === 'bank_transfer'
+      && (selectedInvoice.payment_method === 'cash' || selectedInvoice.payment_method === 'card');
+    if (fromTillToBank && checked.paid === undefined) {
+      Alert.alert(t('invoices.alreadyPaidTitle'), t('invoices.alreadyPaidText'), [
+        { text: t('invoices.notPaidYet'), onPress: () => { handleSaveEditedInvoice({ ...checked, paid: false }); } },
+        { text: t('invoices.alreadyPaid'), onPress: () => { handleSaveEditedInvoice({ ...checked, paid: true }); } },
+      ]);
+      return;
+    }
     setSavingEdit(true);
     try {
       const updated = await api.updateInvoice(selectedInvoice.id, {
+        ...(methodChanged ? { payment_method: editPaymentMethod as PaymentMethod } : {}),
+        ...(fromTillToBank && checked.paid ? { is_paid: true } : {}),
         supplier,
         supplier_eik: editSupplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
@@ -905,12 +946,14 @@ export default function InvoicesScreen() {
         onChangeVatAmount={setEditVatAmount}
         editVatTreatment={editVatTreatment}
         onChangeVatTreatment={setEditVatTreatment}
+        editPaymentMethod={editPaymentMethod}
+        onChangePaymentMethod={setEditPaymentMethod}
         editNotes={editNotes}
         onChangeNotes={setEditNotes}
         editItems={editItems}
         onChangeEditItemField={updateEditItemField}
         savingEdit={savingEdit}
-        onSaveEdit={handleSaveEditedInvoice}
+        onSaveEdit={() => handleSaveEditedInvoice()}
         selectedInvoiceAlerts={selectedInvoiceAlerts}
         loadingInvoiceAlerts={loadingInvoiceAlerts}
         updatingPayment={updatingPayment}

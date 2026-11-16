@@ -8,7 +8,7 @@ import { useRouter } from 'expo-router';
 import DateTimePickerModal from '../AppDateTimePicker';
 import { PressableScale } from '..';
 import { useTranslation } from '../../i18n';
-import { Invoice, VatTreatment } from '../../types';
+import { Invoice, PaymentMethod, VatTreatment } from '../../types';
 import { Avatar } from '../Avatar';
 import { COLORS } from '../../theme/colors';
 import { useAuth } from '../../contexts/AuthContext';
@@ -55,6 +55,9 @@ type Props = {
   onChangeVatAmount: (v: string) => void;
   editVatTreatment: VatTreatment | '';
   onChangeVatTreatment: (v: VatTreatment) => void;
+  // An invoice saved without one (older ones) can be given one here.
+  editPaymentMethod: PaymentMethod | '';
+  onChangePaymentMethod: (v: PaymentMethod) => void;
   editNotes: string;
   onChangeNotes: (v: string) => void;
   // Lets a line item's quantity/unit_price be corrected after the fact -
@@ -86,7 +89,7 @@ export function InvoiceDetailModal({
   editInvoiceNumber, onChangeInvoiceNumber, editDate, onChangeEditDate,
   isEditDatePickerVisible, onOpenEditDatePicker, onCloseEditDatePicker,
   editAmountWithoutVat, onChangeAmountWithoutVat, editVatAmount, onChangeVatAmount,
-  editVatTreatment, onChangeVatTreatment, editNotes, onChangeNotes,
+  editVatTreatment, onChangeVatTreatment, editPaymentMethod, onChangePaymentMethod, editNotes, onChangeNotes,
   editItems, onChangeEditItemField, savingEdit, onSaveEdit,
   selectedInvoiceAlerts, loadingInvoiceAlerts, updatingPayment, onTogglePaid, onOpenPaymentModal,
   scannedPages, loadingScannedPages, onViewPage, onDelete,
@@ -222,6 +225,23 @@ export function InvoiceDetailModal({
                     >
                       <Text style={[styles.vatTreatmentChipText, editVatTreatment === option && styles.vatTreatmentChipTextActive]}>
                         {t(`vat.${option}`)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
+                <View style={styles.vatTreatmentGrid}>
+                  {(['cash', 'card', 'bank_transfer'] as PaymentMethod[]).map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.vatTreatmentChip, editPaymentMethod === option && styles.vatTreatmentChipActive]}
+                      onPress={() => onChangePaymentMethod(option)}
+                    >
+                      <Text style={[styles.vatTreatmentChipText, editPaymentMethod === option && styles.vatTreatmentChipTextActive]}>
+                        {t(`scan.paymentMethod.${option}`)}
                       </Text>
                     </TouchableOpacity>
                   ))}

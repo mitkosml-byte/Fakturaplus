@@ -423,6 +423,42 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
                 detail=f"Вече има фактура с номер {update_data.get('invoice_number', existing.get('invoice_number'))} от този доставчик",
             )
 
+    explicit_payment = "is_paid" in update_data or "paid_amount" in update_data
+    computed_payment = False  # the payment state below was worked out here, not sent
+    old_method = existing.get("payment_method")
+    new_method = update_data.get("payment_method", old_method)
+    # Switched from paid at the till to a bank transfer: owed until someone
+    # says it was paid (the edit form asks) - it used to stay "paid".
+    if (
+        not explicit_payment and "payment_method" in update_data
+        and old_method in PAID_ON_THE_SPOT and new_method == "bank_transfer"
+    ):
+        update_data["is_paid"] = False
+        update_data["paid_amount"] = 0.0
+        update_data["paid_at"] = None
+        explicit_payment = computed_payment = True
+    # A corrected total moves what is paid with it: paid at the till, the
+    # paid amount follows the new total; by bank, what was paid stays and
+    # the invoice is part-paid (or paid) against the new total. Before, a
+    # paid invoice corrected from 100 to 1 000 stayed "paid" with 100 paid.
+    if (
+        "total_amount" in update_data and not explicit_payment
+        and abs(float(update_data["total_amount"]) - float(existing.get("total_amount") or 0)) > 0.005
+    ):
+        new_total = float(update_data["total_amount"])
+        paid_before = float(existing.get("paid_amount") or 0)
+        if new_method in PAID_ON_THE_SPOT:
+            update_data["paid_amount"] = new_total
+            update_data["is_paid"] = True
+            update_data["paid_at"] = existing.get("paid_at") or update_data.get("date", existing["date"])
+        elif new_method == "bank_transfer":
+            paid_now = min(paid_before, new_total)
+            update_data["paid_amount"] = round(paid_now, 2)
+            update_data["is_paid"] = paid_now >= new_total - 0.01
+            if not update_data["is_paid"]:
+                update_data["paid_at"] = None
+        explicit_payment = computed_payment = new_method in PAID_ON_THE_SPOT or new_method == "bank_transfer"
+
     # Same auto-paid/due-date rules as on create, so switching an invoice's
     # payment method later behaves the same as picking it up front.
     cash_auto_paid = (
@@ -437,7 +473,7 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     if update_data.get("payment_method") == "bank_transfer" and "payment_due_date" not in update_data and not existing.get("payment_due_date"):
         update_data["payment_due_date"] = update_data.get("date", existing["date"]) + timedelta(days=14)
 
-    if "paid_amount" in update_data and not cash_auto_paid:
+    if "paid_amount" in update_data and not cash_auto_paid and not computed_payment:
         # paid_amount is the source of truth for payment progress once
         # given - it drives is_paid/paid_at, not the other way round, so a
         # partial payment (0 < paid_amount < total) always shows is_paid as
@@ -456,7 +492,7 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
             update_data["paid_at"] = datetime.now(timezone.utc)
         elif not now_fully_paid:
             update_data["paid_at"] = None
-    elif "is_paid" in update_data and not cash_auto_paid:
+    elif "is_paid" in update_data and not cash_auto_paid and not computed_payment:
         # Ticking "is_paid" directly (the quick mark-fully-paid/unpaid
         # toggle, without keying in an exact amount) keeps paid_amount
         # consistent with it, and stamps/clears paid_at to "now" - when the
