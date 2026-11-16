@@ -216,6 +216,12 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
         payload.items = [item.model_copy(update={"vat_rate": 0}) for item in payload.items]
     amounts = invoice_vat_breakdown(payload.items)
     paid_when_issued = payload.payment_method in ("cash", "card")
+    # Paid in cash or by card it went through the till (a fiscal receipt),
+    # unless the business says otherwise or keeps no till here: then its
+    # money is in that day's till revenue and the invoice adds none.
+    in_till = paid_when_issued and (
+        payload.in_till if payload.in_till is not None else await company_logs_till(scope)
+    )
     due_date = None
     if not paid_when_issued:
         due_day = business_day(payload.due_date) if payload.due_date else issued + timedelta(days=INVOICE_TERM_DAYS)
@@ -223,10 +229,15 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
             raise HTTPException(status_code=400, detail="Невалиден срок за плащане")
         due_date = due_day.isoformat()
 
+    if payload.external and not payload.invoice_number:
+        raise HTTPException(status_code=400, detail="Въведи номера на фактурата, както е отпечатан")
     if payload.invoice_number:
         number = payload.invoice_number.zfill(INVOICE_NUMBER_DIGITS)
         if await server.db.billing_documents.find_one({**scope, "doc_type": "invoice", "invoice_number": number}):
-            raise HTTPException(status_code=409, detail=f"Фактура № {number} вече е издадена")
+            raise HTTPException(
+                status_code=409,
+                detail=f"Фактура № {number} вече е въведена" if payload.external else f"Фактура № {number} вече е издадена",
+            )
     else:
         latest = await _latest_invoice_number(scope)
         number = str(int(latest) + 1 if latest else 1).zfill(INVOICE_NUMBER_DIGITS)
@@ -240,6 +251,7 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
         amount_without_vat=amounts["amount_without_vat"], vat_amount=amounts["vat_amount"],
         total_amount=amounts["total_amount"], vat_by_rate=amounts["by_rate"],
         vat_exempt_basis=None if vat_registered else VAT_EXEMPT_BASIS,
+        external=payload.external, in_till=in_till,
     )
     if not paid_when_issued:
         receivable = Receivable(
@@ -261,7 +273,8 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
     await audit_service.log_action(
         user_id=current_user.user_id, user_name=current_user.name, action="create", entity_type="issued_invoice",
         entity_id=document.id, company_id=company_id,
-        details={"invoice_number": number, "customer_name": document.customer_name, "total_amount": document.total_amount},
+        details={"invoice_number": number, "customer_name": document.customer_name, "total_amount": document.total_amount,
+                 "external": document.external, "in_till": document.in_till},
     )
     return document
 
@@ -283,7 +296,7 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
     document = BillingDocument(
         user_id=current_user.user_id, company_id=company_id, total_amount=total_amount,
         issue_date=issue_date, due_date=due_date,
-        **payload.model_dump(exclude={"issue_date", "due_date", "invoice_number", "payment_method"}),
+        **payload.model_dump(exclude={"issue_date", "due_date", "invoice_number", "payment_method", "in_till", "external"}),
     )
 
     # A "bill" (not a quote) is money actually owed - automatically record
@@ -301,6 +314,19 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
 
     await server.db.billing_documents.insert_one(document.model_dump())
     return document
+
+@router.get("/billing-documents/invoice-defaults")
+async def get_invoice_defaults(current_user: User = Depends(get_current_user)):
+    """What the invoice form starts from: whether the business is registered
+    for VAT, and whether it enters its till's daily revenue (then an invoice
+    paid in cash or by card went through the till)."""
+    require_permission(current_user, "add_revenue")
+    company_id, scope = await get_company_scope(current_user)
+    company = await server.db.companies.find_one(
+        {"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1},
+    ) if company_id else None
+    return {"vat_registered": company_vat_registered(company), "logs_till": await company_logs_till(scope)}
+
 
 @router.get("/billing-documents", response_model=List[BillingDocument])
 async def get_billing_documents(current_user: User = Depends(get_current_user)):
@@ -332,6 +358,8 @@ async def export_billing_document_pdf(document_id: str, current_user: User = Dep
         company = dict(await server.db.companies.find_one({"id": current_user.company_id}, {"_id": 0}) or {})
         company_name = company.get("name", "")
 
+    if document.get("external"):
+        raise HTTPException(status_code=400, detail="Фактурата е издадена в друга програма - документът е там")
     try:
         if document["doc_type"] == "invoice":
             pdf_data = await asyncio.to_thread(ExportService.generate_issued_invoice_pdf, document, company)
@@ -355,12 +383,21 @@ async def delete_billing_document(document_id: str, current_user: User = Depends
     require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
     document: Dict[str, Any] = dict(await server.db.billing_documents.find_one(
-        {"id": document_id, **scope}, {"_id": 0, "receivable_id": 1, "doc_type": 1, "invoice_number": 1, "cancelled": 1},
+        {"id": document_id, **scope},
+        {"_id": 0, "receivable_id": 1, "doc_type": 1, "invoice_number": 1, "cancelled": 1, "external": 1},
     ) or {})
     if not document:
         raise HTTPException(status_code=404, detail="Документът не е намерен")
     cancelled = False
-    if document.get("doc_type") == "invoice":
+    if document.get("doc_type") == "invoice" and document.get("external"):
+        # Issued in another program: cancelled there if at all - the record
+        # here (entered by mistake, say) just goes.
+        await audit_service.log_action(
+            user_id=current_user.user_id, user_name=current_user.name, action="delete", entity_type="issued_invoice",
+            entity_id=document_id, company_id=company_id,
+            details={"invoice_number": document.get("invoice_number"), "external": True},
+        )
+    elif document.get("doc_type") == "invoice":
         # The numbering stays unbroken: the last invoice issued can go; an
         # earlier one is cancelled - it keeps its number and counts for
         # nothing (revenue, VAT) from then on.

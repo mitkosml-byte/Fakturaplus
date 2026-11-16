@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   ImageBackground,
   RefreshControl,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -62,6 +63,11 @@ export default function BillingDocumentsScreen() {
   // A business not registered under the VAT Act issues invoices without
   // VAT (чл. 113, ал. 9 ЗДДС); the server applies it, the form mirrors it.
   const [vatRegistered, setVatRegistered] = useState(true);
+  // Does the business enter its till's daily revenue here? Then an invoice
+  // paid in cash or by card went through the till (a fiscal receipt) and
+  // its money is in that day's till revenue - not counted a second time.
+  const [logsTill, setLogsTill] = useState(false);
+  const [formInTill, setFormInTill] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!canManage) {
@@ -69,12 +75,13 @@ export default function BillingDocumentsScreen() {
       return;
     }
     try {
-      const [docs, company] = await Promise.all([
+      const [docs, defaults] = await Promise.all([
         api.getBillingDocuments(),
-        api.getCompany().catch(() => null),
+        api.getInvoiceDefaults().catch(() => null),
       ]);
       setDocuments(docs);
-      setVatRegistered(company?.vat_registered !== false);
+      setVatRegistered(defaults?.vat_registered !== false);
+      setLogsTill(!!defaults?.logs_till);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -95,6 +102,7 @@ export default function BillingDocumentsScreen() {
     setFormCustomerEik('');
     setFormCustomerAddress('');
     setFormPaymentMethod('bank_transfer');
+    setFormInTill(logsTill);
     setFormStartNumber('');
     setFormCustomerName('');
     setFormNotes('');
@@ -187,6 +195,7 @@ export default function BillingDocumentsScreen() {
           customer_eik: formCustomerEik.trim() || undefined,
           customer_address: formCustomerAddress.trim() || undefined,
           payment_method: formPaymentMethod,
+          ...(formPaymentMethod !== 'bank_transfer' ? { in_till: formInTill } : {}),
           invoice_number: !hasIssuedInvoices && formStartNumber.trim() ? formStartNumber.trim() : undefined,
         } : {}),
       });
@@ -299,6 +308,16 @@ export default function BillingDocumentsScreen() {
                           <Text style={styles.typeBadgeText}>{t('billingDocuments.cancelled')}</Text>
                         </View>
                       )}
+                      {!doc.cancelled && doc.in_till && (
+                        <View style={styles.typeBadge}>
+                          <Text style={styles.typeBadgeText}>{t('billingDocuments.badgeInTill')}</Text>
+                        </View>
+                      )}
+                      {doc.external && (
+                        <View style={styles.typeBadge}>
+                          <Text style={styles.typeBadgeText}>{t('billingDocuments.badgeExternal')}</Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={[styles.amount, doc.cancelled && { textDecorationLine: 'line-through' }]}>{doc.total_amount.toFixed(2)} €</Text>
                   </View>
@@ -306,13 +325,15 @@ export default function BillingDocumentsScreen() {
                   <View style={styles.rowBottom}>
                     <Text style={styles.date}>{format(new Date(doc.issue_date), 'd MMM yyyy', { locale: dateLocale })}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-                      <TouchableOpacity onPress={() => handleDownload(doc)} disabled={downloadingId === doc.id} hitSlop={8}>
-                        {downloadingId === doc.id ? (
-                          <ActivityIndicator size="small" color={COLORS.primary} />
-                        ) : (
-                          <Ionicons name="download-outline" size={18} color={COLORS.primary} />
-                        )}
-                      </TouchableOpacity>
+                      {!doc.external && (
+                        <TouchableOpacity onPress={() => handleDownload(doc)} disabled={downloadingId === doc.id} hitSlop={8}>
+                          {downloadingId === doc.id ? (
+                            <ActivityIndicator size="small" color={COLORS.primary} />
+                          ) : (
+                            <Ionicons name="download-outline" size={18} color={COLORS.primary} />
+                          )}
+                        </TouchableOpacity>
+                      )}
                       {!doc.cancelled && (
                         <TouchableOpacity onPress={() => handleDelete(doc)} hitSlop={8}>
                           <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
@@ -392,6 +413,17 @@ export default function BillingDocumentsScreen() {
                     <Text style={styles.invoiceHint}>
                       {formPaymentMethod === 'bank_transfer' ? t('billingDocuments.invoiceOwed') : t('billingDocuments.invoicePaidNow')}
                     </Text>
+                    {formPaymentMethod !== 'bank_transfer' && (
+                      <View style={styles.tillRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.tillLabel}>{t('billingDocuments.inTill')}</Text>
+                          <Text style={styles.invoiceHint}>
+                            {formInTill ? t('billingDocuments.inTillHint') : t('billingDocuments.notInTillHint')}
+                          </Text>
+                        </View>
+                        <Switch value={formInTill} onValueChange={setFormInTill} accessibilityLabel={t('billingDocuments.inTill')} />
+                      </View>
+                    )}
                     {!hasIssuedInvoices && (
                       <>
                         <Text style={styles.inputLabel}>{t('billingDocuments.startNumber')}</Text>
@@ -524,6 +556,8 @@ export default function BillingDocumentsScreen() {
 }
 
 const styles = StyleSheet.create({
+  tillRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10, marginBottom: 6 },
+  tillLabel: { color: 'white', fontSize: 14, fontWeight: '600' },
   vatExemptNote: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6 },
   backgroundImage: { flex: 1 },
   overlay: { flex: 1, backgroundColor: 'rgba(10, 15, 28, 0.88)' },

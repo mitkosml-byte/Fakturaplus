@@ -244,6 +244,11 @@ export interface BillingDocument {
   vat_exempt_basis?: string | null;
   // A cancelled invoice keeps its number and counts for nothing.
   cancelled?: boolean;
+  // Issued in another program and entered here with its own number.
+  external?: boolean;
+  // Paid in cash or by card through the till: its money is in that day's
+  // till revenue already - not counted again as income or VAT.
+  in_till?: boolean;
   created_at: string;
 }
 
@@ -470,6 +475,8 @@ export interface OCRResult {
   invoice_number: string;
   document_type?: InvoiceDocumentType | null;  // credit_note, ако е озаглавен "КРЕДИТНО ИЗВЕСТИЕ" (сумите са без минус)
   credited_invoice_number?: string | null;  // при кредитно известие: "към фактура №"
+  buyer?: string | null;  // получателят - за фактура, издадена от самата фирма
+  buyer_eik?: string | null;
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;

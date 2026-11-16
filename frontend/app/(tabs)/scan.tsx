@@ -11,6 +11,7 @@ import {
   Platform,
   Image,
   ImageBackground,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,12 +65,26 @@ export default function ScanScreen() {
   const router = useRouter();
 
   // Which direction the scanned document is: a purchase invoice FROM a
-  // supplier (the default, feeds the invoice form below) or a sales
-  // invoice/receipt the business itself ISSUED to a customer (feeds
-  // straight into that day's daily revenue instead - no separate
-  // sales-invoice record is kept, per the app's pocket-ledger scope).
+  // supplier (the default, feeds the invoice form below) or an invoice the
+  // business itself ISSUED to a customer in another program - saved as an
+  // issued invoice with its own number (income of its day; one paid at the
+  // till is in that day's till revenue already and is not counted again).
   const [scanMode, setScanMode] = useState<'purchase' | 'sales'>('purchase');
   const [salesVatRate, setSalesVatRate] = useState<20 | 9 | 0>(20);
+  const [salesCustomer, setSalesCustomer] = useState('');
+  const [salesCustomerEik, setSalesCustomerEik] = useState('');
+  const [salesPaymentMethod, setSalesPaymentMethod] = useState<'bank_transfer' | 'cash' | 'card'>('bank_transfer');
+  const [salesInTill, setSalesInTill] = useState(false);
+  const [logsTill, setLogsTill] = useState(false);
+
+  // Whether the business enters its till here: then a sales invoice paid in
+  // cash or by card went through the till (a fiscal receipt).
+  useEffect(() => {
+    if (scanMode !== 'sales') return;
+    api.getInvoiceDefaults()
+      .then((defaults) => { setLogsTill(defaults.logs_till); setSalesInTill(defaults.logs_till); })
+      .catch(() => {});
+  }, [scanMode]);
 
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -433,6 +448,12 @@ export default function ScanScreen() {
       setOcrResult(result);
       setDocumentType(result.document_type === 'credit_note' ? 'credit_note' : 'invoice');
       setCreditedInvoiceNumber(result.credited_invoice_number || '');
+      // An invoice the business issued: the customer is its recipient.
+      setSalesCustomer(result.buyer || '');
+      setSalesCustomerEik(result.buyer_eik || '');
+      if (result.payment_method === 'cash' || result.payment_method === 'card' || result.payment_method === 'bank_transfer') {
+        setSalesPaymentMethod(result.payment_method);
+      }
       setSupplier(result.supplier);
       setSupplierEik(result.supplier_eik || '');
       setInvoiceNumber(result.invoice_number);
@@ -614,27 +635,44 @@ export default function ScanScreen() {
     }
   };
 
-  // Sales mode hands off to the Home tab's existing daily-revenue modal
-  // (via router params, the same pattern the unpaid-invoices card already
-  // uses to deep-link into invoices.tsx) rather than saving anything here
-  // directly - that modal already knows how to load whatever's currently
-  // logged for the date and let the owner reconcile it with this scanned
-  // amount, instead of silently overwriting the day's other sales.
-  const handleAddToRevenue = () => {
-    const total = parseFloat(totalAmount);
-    if (!total) {
-      Alert.alert(t('common.error'), t('msg.fillRequired'));
+  // An invoice issued in another program: saved as an issued invoice with
+  // its own number - never added to the till's revenue, where a sale paid
+  // through the till already is (then it is marked so, not counted twice).
+  const handleSaveSalesInvoice = async () => {
+    const total = parseFloat(totalAmount.replace(',', '.'));
+    const number = invoiceNumber.replace(/\D/g, '');
+    if (!total || !salesCustomer.trim() || !number) {
+      Alert.alert(t('common.error'), t('scan.salesRequired'));
       return;
     }
-    router.push({
-      pathname: '/(tabs)',
-      params: {
-        ocrDate: format(invoiceDate, 'yyyy-MM-dd'),
-        ocrFiscalRevenue: String(total),
-        ocrVatRate: String(salesVatRate),
-      },
-    });
-    resetForm();
+    if (number.length > 10) {
+      Alert.alert(t('common.error'), t('scan.salesNumberTooLong'));
+      return;
+    }
+    const net = Math.round((total / (1 + salesVatRate / 100)) * 100) / 100;
+    setIsSaving(true);
+    try {
+      const saved = await api.createBillingDocument({
+        doc_type: 'invoice',
+        external: true,
+        invoice_number: number,
+        customer_name: salesCustomer.trim(),
+        customer_eik: salesCustomerEik.trim() || undefined,
+        issue_date: toApiDate(invoiceDate),
+        payment_method: salesPaymentMethod,
+        ...(salesPaymentMethod !== 'bank_transfer' ? { in_till: salesInTill } : {}),
+        items: [{
+          name: t('scan.salesLine').replace('{number}', number), quantity: 1, unit: 'бр.', unit_price: net, vat_rate: salesVatRate,
+        }],
+      });
+      Haptics.success();
+      Toast.success(t('scan.salesSaved').replace('{number}', saved.invoice_number || number));
+      resetForm();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error?.message || '');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const money = (value: number) => Math.abs(value).toFixed(2);
@@ -832,6 +870,10 @@ export default function ScanScreen() {
     setPaymentDueDate(null);
     setDocumentType('invoice');
     setCreditedInvoiceNumber('');
+    setSalesCustomer('');
+    setSalesCustomerEik('');
+    setSalesPaymentMethod('bank_transfer');
+    setSalesInTill(logsTill);
   };
 
   return (
@@ -1024,6 +1066,41 @@ export default function ScanScreen() {
                       </View>
 
                       <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.salesCustomer')} *</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={salesCustomer}
+                          onChangeText={setSalesCustomer}
+                          placeholder={t('scan.salesCustomerPlaceholder')}
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.salesCustomerEik')}</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={salesCustomerEik}
+                          onChangeText={setSalesCustomerEik}
+                          keyboardType="number-pad"
+                          placeholder="123456789"
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.salesNumber')} *</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={invoiceNumber}
+                          onChangeText={setInvoiceNumber}
+                          keyboardType="number-pad"
+                          placeholder="0000000001"
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
                         <Text style={styles.inputLabel}>{t('scan.issueDate')} *</Text>
                         <TouchableOpacity style={styles.dateInputButton} onPress={() => setDatePickerVisible(true)}>
                           <Ionicons name="calendar" size={20} color={COLORS.primary} />
@@ -1062,6 +1139,34 @@ export default function ScanScreen() {
                             </TouchableOpacity>
                           ))}
                         </View>
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
+                        <View style={styles.vatTreatmentGrid}>
+                          {(['bank_transfer', 'cash', 'card'] as const).map((method) => (
+                            <TouchableOpacity
+                              key={method}
+                              style={[styles.vatTreatmentChip, salesPaymentMethod === method && styles.vatTreatmentChipActive]}
+                              onPress={() => setSalesPaymentMethod(method)}
+                            >
+                              <Text style={[styles.vatTreatmentChipText, salesPaymentMethod === method && styles.vatTreatmentChipTextActive]}>
+                                {t(`scan.paymentMethod.${method}`)}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                        {salesPaymentMethod !== 'bank_transfer' && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.inputLabel}>{t('billingDocuments.inTill')}</Text>
+                              <Text style={styles.eikWarningText}>
+                                {salesInTill ? t('billingDocuments.inTillHint') : t('billingDocuments.notInTillHint')}
+                              </Text>
+                            </View>
+                            <Switch value={salesInTill} onValueChange={setSalesInTill} accessibilityLabel={t('billingDocuments.inTill')} />
+                          </View>
+                        )}
                       </View>
                     </>
                   ) : (
@@ -1491,7 +1596,7 @@ export default function ScanScreen() {
 
                   <PressableScale
                     style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-                    onPress={scanMode === 'sales' ? handleAddToRevenue : () => handleSaveInvoice()}
+                    onPress={scanMode === 'sales' ? handleSaveSalesInvoice : () => handleSaveInvoice()}
                     disabled={isSaving}
                   >
                     {isSaving ? (
@@ -1500,7 +1605,7 @@ export default function ScanScreen() {
                       <>
                         <Ionicons name="checkmark-circle" size={24} color="white" />
                         <Text style={styles.saveButtonText}>
-                          {scanMode === 'sales' ? t('scan.addToRevenue') : t('scan.saveInvoice')}
+                          {scanMode === 'sales' ? t('scan.saveSalesInvoice') : t('scan.saveInvoice')}
                         </Text>
                       </>
                     )}

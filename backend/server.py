@@ -808,6 +808,8 @@ class OCRResult(BaseModel):
     invoice_number: str
     document_type: Optional[str] = None  # invoice | credit_note (озаглавен "КРЕДИТНО ИЗВЕСТИЕ")
     credited_invoice_number: Optional[str] = None  # credit note: "към фактура №"
+    buyer: Optional[str] = None  # получателят - за фактура, издадена от самата фирма
+    buyer_eik: Optional[str] = None
     amount_without_vat: float
     vat_amount: float
     total_amount: float
@@ -2205,6 +2207,8 @@ class ClaudeInvoiceExtraction(BaseModel):
         default=None,
         description="Само при кредитно известие: номерът на фактурата, към която е издадено (\"към фактура №\"); иначе null",
     )
+    buyer: Optional[str] = Field(default=None, description="Името на получателя/купувача, както е на фактурата")
+    buyer_eik: Optional[str] = Field(default=None, description="ЕИК/Булстат на получателя/купувача, ако е видим")
     invoice_date: Optional[str] = Field(default=None, description="Дата на издаване, формат YYYY-MM-DD")
     payment_due_date: Optional[str] = Field(default=None, description="Срок/падеж за плащане, формат YYYY-MM-DD, само ако е изрично отпечатан на фактурата")
     amount_without_vat: float = Field(description="Данъчна основа / обща сума без ДДС")
@@ -2527,6 +2531,16 @@ class BillingDocumentItem(BaseModel):
 # Issued invoices that count: every one not cancelled. A cancelled invoice
 # keeps its number (the numbering stays unbroken) and counts for nothing.
 ISSUED_INVOICES: Dict[str, Any] = {"doc_type": "invoice", "cancelled": {"$ne": True}}
+# What issued invoices add to income and VAT: not those rung up at the till,
+# whose money the day's till revenue already holds.
+ISSUED_INVOICE_REVENUE: Dict[str, Any] = {**ISSUED_INVOICES, "in_till": {"$ne": True}}
+
+
+async def company_logs_till(scope: dict) -> bool:
+    """Does the business enter its till's daily revenue? Then a sale paid in
+    cash or by card went through the till (a fiscal receipt) and is in it."""
+    since = (today_local() - timedelta(days=90)).isoformat()
+    return bool(await db.daily_revenue.find_one({**scope, "date": {"$gte": since}, "fiscal_revenue": {"$gt": 0}}, {"_id": 1}))
 INVOICE_TERM_DAYS = 14  # an issued invoice paid by bank is due 14 days on, unless given
 INVOICE_NUMBER_DIGITS = 10  # "0000000001" - the usual Bulgarian invoice number
 
@@ -2577,6 +2591,13 @@ class BillingDocument(BaseModel):
     vat_exempt_basis: Optional[str] = None
     cancelled: bool = False
     cancelled_at: Optional[datetime] = None
+    # Issued in another program and entered here (scanned or typed): its own
+    # number, kept in the numbering, but no PDF of ours.
+    external: bool = False
+    # Paid in cash or by card through the till: the sale is on that day's
+    # fiscal receipts already, so its money is in the day's till revenue -
+    # never counted a second time as income or VAT (ISSUED_INVOICE_REVENUE).
+    in_till: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class BillingDocumentCreate(BaseModel):
@@ -2593,6 +2614,11 @@ class BillingDocumentCreate(BaseModel):
     # An invoice only: a number of the business's own to continue from (its
     # last one issued elsewhere + 1); left out, the next after the last one here.
     invoice_number: Optional[str] = Field(default=None, pattern=r"^\d{1,10}$")
+    # An invoice issued in another program, entered with its own number.
+    external: bool = False
+    # Paid in cash or by card: was it rung up at the till (a fiscal receipt)?
+    # Left out, yes when the business enters its till's daily revenue.
+    in_till: Optional[bool] = None
 
 
 
@@ -2711,7 +2737,7 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
     ]).to_list(ALL_ROWS)
     # Invoices issued to customers: revenue and VAT on their issue date.
     issued_rows = await db.billing_documents.aggregate([
-        {"$match": {**scope, **ISSUED_INVOICES, "issue_date": period.text_filter()}},
+        {"$match": {**scope, **ISSUED_INVOICE_REVENUE, "issue_date": period.text_filter()}},
         {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
                     "net": {"$sum": "$amount_without_vat"}, "count": {"$sum": 1}}},
     ]).to_list(ALL_ROWS)
@@ -2768,7 +2794,7 @@ async def issued_invoices_by_day(scope: dict, period: Period) -> Dict[str, Dict[
     -> {"total", "vat"}): revenue and VAT of their issue date, so a day's
     chart and the period's totals read the same documents."""
     rows = await db.billing_documents.find(
-        {**scope, **ISSUED_INVOICES, "issue_date": period.text_filter()},
+        {**scope, **ISSUED_INVOICE_REVENUE, "issue_date": period.text_filter()},
         {"_id": 0, "issue_date": 1, "total_amount": 1, "vat_amount": 1},
     ).to_list(ALL_ROWS)
     days: Dict[str, Dict[str, float]] = {}
@@ -5728,6 +5754,25 @@ async def mark_schedule_wages() -> dict:
     return {"marked": marked}
 
 
+async def mark_till_paid_invoices() -> dict:
+    """Invoices issued in cash or by card before the till was taken into
+    account: for a business that enters its till's daily revenue they went
+    through the till (fiscal receipts) - marked so, and no longer counted a
+    second time as income and VAT."""
+    marker = "issued_invoices_in_till_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    unmarked = {"doc_type": "invoice", "payment_method": {"$in": ["cash", "card"]}, "in_till": {"$exists": False}}
+    marked = 0
+    for company_id in await db.billing_documents.distinct("company_id", unmarked):
+        if not company_id or not await db.daily_revenue.find_one({"company_id": company_id, "fiscal_revenue": {"$gt": 0}}, {"_id": 1}):
+            continue
+        result = await db.billing_documents.update_many({"company_id": company_id, **unmarked}, {"$set": {"in_till": True}})
+        marked += result.modified_count
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), "marked": marked})
+    return {"marked": marked}
+
+
 async def start_legacy_recurring_expenses() -> dict:
     """Recurring expenses saved before they did anything: they start with
     this month (no questions about months long gone) and ask before
@@ -5809,6 +5854,12 @@ async def run_data_migrations():
             logger.info(f"Schedule payments' expenses marked as wages: {result}")
     except Exception:
         logger.exception("Schedule wages migration failed")
+    try:
+        result = await mark_till_paid_invoices()
+        if result and not result.get("skipped"):
+            logger.info(f"Issued invoices paid at the till marked: {result}")
+    except Exception:
+        logger.exception("Till-paid invoices migration failed")
     try:
         result = await start_legacy_recurring_expenses()
         if result and not result.get("skipped"):

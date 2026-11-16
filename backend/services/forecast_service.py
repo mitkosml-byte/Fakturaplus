@@ -433,10 +433,11 @@ class ForecastService:
     async def _issued_by_month(self, scope: dict, period: Period) -> Dict[str, float]:
         """Invoices issued to customers in the period, by month ("YYYY-MM" ->
         EUR with VAT) - revenue of their issue date, the same documents as
-        server.ISSUED_INVOICES (a cancelled one counts for nothing). Known
+        server.ISSUED_INVOICE_REVENUE (a cancelled one counts for nothing, one
+        rung up at the till is in the till's revenue already). Known
         amounts: added to a month as they are, never spread over its days."""
         rows = await self.db.billing_documents.find(
-            {**scope, "doc_type": "invoice", "cancelled": {"$ne": True}, "issue_date": period.text_filter()},
+            {**scope, "doc_type": "invoice", "cancelled": {"$ne": True}, "in_till": {"$ne": True}, "issue_date": period.text_filter()},
             {"_id": 0, "issue_date": 1, "total_amount": 1},
         ).to_list(None)
         totals: Dict[str, float] = defaultdict(float)

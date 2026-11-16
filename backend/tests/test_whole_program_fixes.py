@@ -888,6 +888,9 @@ def test_v3_an_issued_invoice_is_revenue_and_vat_on_its_day_and_owed_until_paid(
         "items": [{"name": "Услуга", "quantity": 1, "unit_price": 10}],
     }).json()
     assert cash["invoice_number"] == "0000000002" and cash["receivable_id"] is None and cash["due_date"] is None
+    # This business enters its till: paid in cash, the sale went through it
+    # (a fiscal receipt) and its money is in that day's till revenue (Д4).
+    assert cash["in_till"] is True
     own = client.post("/api/billing-documents", headers=owner, json={
         "doc_type": "invoice", "customer_name": "Клиент", "issue_date": "2026-10-12", "payment_method": "card",
         "invoice_number": "155", "items": [{"name": "Услуга", "quantity": 1, "unit_price": 10}],
@@ -911,7 +914,8 @@ def test_v3_an_issued_invoice_is_revenue_and_vat_on_its_day_and_owed_until_paid(
     assert last["cancelled"] is False
     assert asyncio.run(server.db.billing_documents.find_one({"id": own["id"]})) is None
     final = client.get(f"/api/statistics/summary?{october}", headers=owner).json()
-    assert final["total_issued_invoices"] == 12.0 and round(final["total_income"] - before["total_income"], 2) == 12.0
+    # Left: the cash invoice, already in its day's till - nothing counted twice.
+    assert final["total_issued_invoices"] == 0 and round(final["total_income"] - before["total_income"], 2) == 0
 
 
 def test_v3_issued_invoices_join_the_revenue_forecast_as_known_amounts(client):

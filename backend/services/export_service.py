@@ -2,7 +2,7 @@
 import io
 import os
 from datetime import datetime, timedelta
-from typing import List, Optional, Any
+from typing import Any, Dict, List, Optional
 import json
 from xml.sax.saxutils import escape as _xml_escape
 
@@ -722,6 +722,31 @@ class ExportService:
             cell.font = header_font
             cell.fill = header_fill
 
+        def _rate_parts(doc: dict) -> tuple:
+            """(base 20%, VAT 20%, base 9%, VAT 9%, base 0%) of an issued invoice."""
+            base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
+            for part in doc.get("vat_by_rate") or []:
+                rate = float(part.get("rate", 0) or 0)
+                base, vat = float(part.get("base", 0) or 0), float(part.get("vat", 0) or 0)
+                if abs(rate - 20.0) < 0.01:
+                    base_20, vat_20 = base_20 + base, vat_20 + vat
+                elif abs(rate - 9.0) < 0.01:
+                    base_9, vat_9 = base_9 + base, vat_9 + vat
+                else:
+                    base_0 += base
+            return base_20, vat_20, base_9, vat_9, base_0
+
+        # Invoices issued for sales rung up at the till (fiscal receipts): the
+        # day's till report holds them already, so its row is the till's
+        # sales less those invoices - each sale and its VAT listed once.
+        invoiced_at_till: Dict[str, List[float]] = {}
+        for doc in issued_invoices or []:
+            if doc.get("in_till") and not doc.get("cancelled"):
+                day_parts = invoiced_at_till.setdefault(str(doc.get("issue_date", ""))[:10], [0.0] * 6)
+                for i, value in enumerate(_rate_parts(doc)):
+                    day_parts[i] += value
+                day_parts[5] += float(doc.get("total_amount", 0) or 0)
+
         def _till_row(rev: dict) -> tuple:
             fiscal_revenue = rev.get("fiscal_revenue", 0) or 0
             pocket_money = rev.get("pocket_money", 0) or 0
@@ -735,8 +760,17 @@ class ExportService:
                 vat_9 = round(fiscal_revenue - base_9, 2)
             else:
                 base_0 = fiscal_revenue
+            day = str(rev.get("date", ""))[:10]
+            kind = "Отчет за извършени продажби (81)"
+            invoiced = invoiced_at_till.pop(day, None)
+            if invoiced:
+                base_20, vat_20, base_9, vat_9, base_0 = (
+                    round(value - invoiced[i], 2) for i, value in enumerate((base_20, vat_20, base_9, vat_9, base_0))
+                )
+                fiscal_revenue = round(fiscal_revenue - invoiced[5], 2)
+                kind += " - без фактурираното"
             return (
-                str(rev.get("date", ""))[:10], 0, "Отчет за извършени продажби (81)", "", "", "",
+                day, 0, kind, "", "", "",
                 [base_20, vat_20, base_9, vat_9, base_0, pocket_money, fiscal_revenue + pocket_money],
             )
 
@@ -744,15 +778,7 @@ class ExportService:
             base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
             cancelled = bool(doc.get("cancelled"))
             if not cancelled:
-                for part in doc.get("vat_by_rate") or []:
-                    rate = float(part.get("rate", 0) or 0)
-                    base, vat = float(part.get("base", 0) or 0), float(part.get("vat", 0) or 0)
-                    if abs(rate - 20.0) < 0.01:
-                        base_20, vat_20 = base_20 + base, vat_20 + vat
-                    elif abs(rate - 9.0) < 0.01:
-                        base_9, vat_9 = base_9 + base, vat_9 + vat
-                    else:
-                        base_0 += base
+                base_20, vat_20, base_9, vat_9, base_0 = _rate_parts(doc)
             total = 0.0 if cancelled else float(doc.get("total_amount", 0) or 0)
             kind = "Фактура (01) - анулирана" if cancelled else "Фактура (01)"
             return (

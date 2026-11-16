@@ -608,6 +608,11 @@ class ApiService {
   }
 
   // Billing documents (non-fiscal bill/quote) - Module 7 Finding #3.
+  // What the invoice form starts from (VAT registration, a till kept here).
+  async getInvoiceDefaults(): Promise<{ vat_registered: boolean; logs_till: boolean }> {
+    return this.fetch('/billing-documents/invoice-defaults');
+  }
+
   async createBillingDocument(doc: {
     doc_type: BillingDocumentType;
     customer_id?: string;
@@ -621,6 +626,10 @@ class ApiService {
     customer_address?: string;
     payment_method?: 'cash' | 'bank_transfer' | 'card';
     invoice_number?: string;
+    // Issued in another program (scanned or typed) with its own number.
+    external?: boolean;
+    // Paid in cash or by card: rung up at the till? Left out, the server decides.
+    in_till?: boolean;
   }): Promise<BillingDocument> {
     return this.fetch('/billing-documents', { method: 'POST', body: JSON.stringify(doc) });
   }

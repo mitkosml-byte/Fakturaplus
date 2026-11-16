@@ -512,6 +512,58 @@ export const translations: Translations = {
     bg: 'За връщане или прихващане от доставчика: {amount} €',
     en: 'For the supplier to refund or offset: {amount} €',
   },
+  'scan.salesRequired': {
+    bg: 'Попълни клиента, номера на фактурата и сумата.',
+    en: 'Fill in the customer, the invoice number and the amount.',
+  },
+  'scan.salesNumberTooLong': {
+    bg: 'Номерът на фактурата е най-много 10 цифри.',
+    en: 'An invoice number has at most 10 digits.',
+  },
+  'scan.salesLine': {
+    bg: 'Съгласно фактура № {number}',
+    en: 'As per invoice No. {number}',
+  },
+  'scan.salesSaved': {
+    bg: 'Фактура № {number} е записана при издадените',
+    en: 'Invoice No. {number} saved with the issued invoices',
+  },
+  'scan.salesCustomer': {
+    bg: 'Клиент (получател)',
+    en: 'Customer (recipient)',
+  },
+  'scan.salesCustomerPlaceholder': {
+    bg: 'Името на клиента от фактурата',
+    en: 'The customer name on the invoice',
+  },
+  'scan.salesCustomerEik': {
+    bg: 'ЕИК на клиента',
+    en: 'Customer EIK',
+  },
+  'scan.salesNumber': {
+    bg: 'Номер на фактурата',
+    en: 'Invoice number',
+  },
+  'billingDocuments.inTill': {
+    bg: 'Мина през касата (касов бон)',
+    en: 'Rung up at the till (fiscal receipt)',
+  },
+  'billingDocuments.inTillHint': {
+    bg: 'Сумата вече е в оборота на касата за деня - фактурата не я добавя втори път.',
+    en: 'The amount is in the day\'s till revenue already - the invoice does not add it a second time.',
+  },
+  'billingDocuments.notInTillHint': {
+    bg: 'Сумата не е в оборота на касата - фактурата е приходът за деня.',
+    en: 'The amount is not in the till revenue - the invoice is the day\'s income.',
+  },
+  'billingDocuments.badgeInTill': {
+    bg: 'през касата',
+    en: 'at the till',
+  },
+  'billingDocuments.badgeExternal': {
+    bg: 'от друга програма',
+    en: 'other program',
+  },
   'briefing.snooze': {
     bg: 'Отложи 3 дни',
     en: 'Snooze 3 days',
@@ -1276,32 +1328,32 @@ export const translations: Translations = {
     en: 'Sale summary',
   },
   'scan.salesFormHint': {
-    bg: 'Проверете сумата и датата преди да добавите към оборота',
-    en: 'Check the amount and date before adding to revenue',
+    bg: 'Проверете клиента, номера, сумата и датата преди да запишете',
+    en: 'Check the customer, number, amount and date before saving',
   },
   'scan.salesNote': {
-    bg: 'Това е фактура, издадена от вас към клиент - няма да се запази като отделна фактура, а сумата ще се добави към дневния оборот за тази дата.',
-    en: "This is an invoice you issued to a customer - it won't be saved as a separate invoice; the amount will be added to that date's daily revenue instead.",
+    bg: 'Фактура, издадена от вас в друга програма: записва се като издадена фактура със своя номер - приход за датата си. Платена в брой или с карта през касата, тя вече е в оборота за деня и не се брои втори път.',
+    en: 'An invoice you issued in another program: saved as an issued invoice with its own number - income of its date. Paid in cash or by card through the till, it is in that day\'s till revenue already and is not counted twice.',
   },
-  'scan.addToRevenue': {
-    bg: 'Добави към дневния оборот',
-    en: 'Add to daily revenue',
+  'scan.saveSalesInvoice': {
+    bg: 'Запиши издадената фактура',
+    en: 'Save the issued invoice',
   },
   'scan.salesTipsTitle': {
     bg: 'Какво прави сканирането тук',
     en: 'What scanning does here',
   },
   'scan.salesTip1': {
-    bg: 'Разпознава общата сума и ДДС ставката от издадената фактура',
-    en: 'Recognizes the total amount and VAT rate from the issued invoice',
+    bg: 'Разпознава клиента, номера, сумата и ДДС ставката от издадената фактура',
+    en: 'Recognizes the customer, number, amount and VAT rate from the issued invoice',
   },
   'scan.salesTip2': {
-    bg: 'Отваря дневния оборот за тази дата, за да прегледате и добавите сумата',
-    en: "Opens that date's daily revenue so you can review and add the amount",
+    bg: 'Записва я при издадените фактури - без да я добавя към оборота на касата',
+    en: 'Saves it with the issued invoices - without adding it to the till revenue',
   },
   'scan.salesTipsFooter': {
-    bg: 'Само за фактури, издадени от вас към клиенти - не се запазва отделен документ.',
-    en: "For invoices you issue to customers only - no separate document is kept.",
+    bg: 'Само за фактури, издадени от вас към клиенти в друга програма.',
+    en: 'For invoices you issued to customers in another program only.',
   },
   'scan.tipsTitle': {
     bg: 'Какво разпознава сканирането',
