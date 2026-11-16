@@ -829,6 +829,10 @@ def sanitize_user(user_doc: dict) -> dict:
             for version, added in _PERMISSIONS_ADDED_AT_VERSION.items():
                 if stamped_version < version:
                     defaults |= ROLE_PERMISSIONS.get(role, set()) & added
+            # Payroll used to come with "Бюджет": whoever had it keeps
+            # payroll rather than losing a screen they used.
+            if stamped_version < 6 and "manage_budget" in user_doc["permissions"]:
+                defaults.add("manage_payroll")
             user_doc["permissions"] = sorted(set(user_doc["permissions"]) | defaults)
     return user_doc
 
@@ -902,6 +906,7 @@ ROLE_PERMISSIONS = {
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
         "team_collaboration", "manage_billing", "restore_deleted_data",
         "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
+        "manage_payroll",
     },
     "manager": {
         "manage_budget", "export_data", "view_statistics", "manage_invoices",
@@ -928,11 +933,13 @@ ROLE_PERMISSIONS = {
         # line items themselves or the owner's personal investments.
         "view_profit",
         "team_collaboration",
+        # Payroll is the accountant's work; a manager gets it only if ticked.
+        "manage_payroll",
     },
 }
 
 _STAFF_LIKE_CONFIGURABLE = {
-    "view_audit_log", "manage_budget", "export_data", "view_statistics",
+    "view_audit_log", "manage_budget", "manage_payroll", "export_data", "view_statistics",
     "manage_invoices", "add_revenue", "add_expenses",
     "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
     "team_collaboration", "restore_deleted_data",
@@ -953,7 +960,7 @@ _SENSITIVE_FIELD_PERMISSIONS = {
 # inspecting the stored list - is the only way to tell "never touched since
 # this version" apart from "deliberately configured to have none of the new
 # permissions").
-PERMISSIONS_SCHEMA_VERSION = 5
+PERMISSIONS_SCHEMA_VERSION = 6
 
 # Permissions introduced after PERMISSIONS_SCHEMA_VERSION 1, keyed by the
 # version that added them - see sanitize_user's migration branch below,
@@ -965,6 +972,10 @@ _PERMISSIONS_ADDED_AT_VERSION = {
     3: {"team_collaboration"},
     4: {"restore_deleted_data"},
     5: {"view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet"},
+    # Payroll split off "Бюджет" (manage_budget): salaries, payroll, Pay-run
+    # and schedule payments. See sanitize_user: an account from before that
+    # holds manage_budget keeps payroll too until its next real edit.
+    6: {"manage_payroll"},
 }
 
 ROLE_CONFIGURABLE_PERMISSIONS = {
@@ -972,7 +983,7 @@ ROLE_CONFIGURABLE_PERMISSIONS = {
     "staff": _STAFF_LIKE_CONFIGURABLE,
     # Deliberately narrow - see the accountant note in ROLE_PERMISSIONS above.
     "accountant": {
-        "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
+        "view_audit_log", "manage_budget", "manage_payroll", "export_data", "view_statistics", "manage_invoices",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
         "team_collaboration", "restore_deleted_data",
         "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
@@ -3281,7 +3292,7 @@ async def _signal_schedule_unpaid(company_id, scope, current_user, visibility) -
     mirror of _signal_unpaid_invoices, so a mounting pile of unpaid hourly
     pay shows up here the same way an unpaid supplier invoice does, instead
     of only being visible to someone who happens to open Pay-run."""
-    if not company_id or "manage_budget" not in set(current_user.permissions or []):
+    if not company_id or "manage_payroll" not in set(current_user.permissions or []):
         return None
     # Deferred import: routers/schedule.py itself does `from server import
     # *`, so importing it at server.py's own module level would cycle -

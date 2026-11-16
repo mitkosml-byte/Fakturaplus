@@ -85,6 +85,8 @@ export default function WorkScheduleScreen() {
   const { t, dateLocale } = useTranslation();
   const { user, hasPermission } = useAuth();
   const canManage = hasPermission('manage_budget');
+  // Paying hours is payroll - its own right since "Бюджет" was split.
+  const canPay = hasPermission('manage_payroll');
   const { width: windowWidth } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
@@ -693,7 +695,7 @@ export default function WorkScheduleScreen() {
                 </Text>
               )}
 
-              {canManage && selectedUserId && summary && summary.estimated_pay > 0 && (
+              {canManage && canPay && selectedUserId && summary && summary.estimated_pay > 0 && (
                 schedulePayment ? (
                   <View style={styles.paidCard}>
                     <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />

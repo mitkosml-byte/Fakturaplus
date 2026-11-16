@@ -39,13 +39,13 @@ router = APIRouter(prefix="/api")
 
 @router.get("/payroll/rates")
 async def get_payroll_rates(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, _ = await get_company_scope(current_user)
     return await get_payroll_rates_dict(company_id)
 
 @router.put("/payroll/rates")
 async def update_payroll_rates(request: Request, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, _ = await get_company_scope(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="Нямате фирма")
@@ -71,7 +71,7 @@ async def _validate_linked_user_id(linked_user_id: Optional[str], company_id: Op
 
 @router.post("/employees", response_model=Employee)
 async def create_employee(employee: EmployeeCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, scope = await get_company_scope(current_user)
     await _validate_linked_user_id(employee.linked_user_id, company_id, scope)
 
@@ -90,7 +90,11 @@ async def create_employee(employee: EmployeeCreate, current_user: User = Depends
 
 @router.get("/employees", response_model=List[Employee])
 async def get_employees(active_only: bool = False, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
+    # The team list is also what absences and the schedule pick people
+    # from ("Бюджет"); salaries in it only for who has payroll.
+    granted = set(current_user.permissions or [])
+    if not {"manage_payroll", "manage_budget"} & granted:
+        raise HTTPException(status_code=403, detail="Нямате права за тази операция")
     # Uses the same get_company_scope-based scope as update/delete_employee
     # and the payroll endpoints below (not simple_scope_query) - otherwise a
     # legacy pre-company-id employee record would still be reachable by ID
@@ -102,11 +106,16 @@ async def get_employees(active_only: bool = False, current_user: User = Depends(
         query["active"] = True
 
     employees = await server.db.employees.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    if "manage_payroll" not in granted:
+        for e in employees:
+            e["base_salary"] = 0
+            e["food_vouchers"] = 0
+            e["additional_insurance"] = 0
     return [Employee(**e) for e in employees]
 
 @router.put("/employees/{employee_id}", response_model=Employee)
 async def update_employee(employee_id: str, update: EmployeeUpdate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     company_id, scope = await get_company_scope(current_user)
     if "linked_user_id" in update_data:
@@ -130,7 +139,7 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, current_user
 
 @router.delete("/employees/{employee_id}")
 async def delete_employee(employee_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, scope = await get_company_scope(current_user)
     existing = await server.db.employees.find_one({"id": employee_id, **scope}, {"_id": 0, "name": 1})
     if not existing:
@@ -150,7 +159,7 @@ async def delete_employee(employee_id: str, current_user: User = Depends(get_cur
 @router.post("/payroll/preview")
 async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
     """Изчислява разбивка без да записва - за преглед преди потвърждение."""
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, scope = await get_company_scope(current_user)
     employee = await server.db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
     if not employee:
@@ -171,7 +180,7 @@ async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depend
 
 @router.post("/payroll")
 async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, scope = await get_company_scope(current_user)
     employee = await server.db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
     if not employee:
@@ -255,7 +264,7 @@ async def get_payroll_entries(
     month: Optional[int] = None,
     current_user: User = Depends(get_current_user)
 ):
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, _ = await get_company_scope(current_user)
 
     query = simple_scope_query(company_id, current_user.user_id)
@@ -273,7 +282,7 @@ async def set_payroll_entry_counted_in_expenses(entry_id: str, request: Request,
     expenses (get_payroll_cost_for_period) - gives the owner/accountant
     explicit control per entry, same reasoning as Work Schedule's own
     pay-as-expense toggle, without needing to delete/recreate the record."""
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     body = await request.json()
     counted = body.get("counted_in_expenses")
     if not isinstance(counted, bool):
@@ -288,7 +297,7 @@ async def set_payroll_entry_counted_in_expenses(entry_id: str, request: Request,
 
 @router.delete("/payroll/{entry_id}")
 async def delete_payroll_entry(entry_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, scope = await get_company_scope(current_user)
     entry: Dict[str, Any] = dict(await server.db.payroll_entries.find_one({"id": entry_id, **scope}, {"_id": 0}) or {})
     result = await server.db.payroll_entries.delete_one({"id": entry_id, **scope})
@@ -401,7 +410,7 @@ async def preview_payroll_import(request: Request, file: UploadFile = File(...),
     record, and returns a preview for the user to confirm/adjust - nothing
     is written to the database here, exactly like /ocr/scan's own
     preview-before-save contract for invoices."""
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     if not server.AI_FEATURES_ENABLED:
         raise HTTPException(status_code=503, detail="AI разпознаването временно не е налично. Моля, въведете данните ръчно.")
 
@@ -462,7 +471,7 @@ async def commit_payroll_import(payload: PayrollImportCommitRequest, current_use
     re-derivation) - the entries list here is exactly what the user
     confirmed/edited on top of the preview, each tied to an employee_id
     they picked explicitly."""
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, scope = await get_company_scope(current_user)
 
     imported = 0

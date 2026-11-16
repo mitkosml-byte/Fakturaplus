@@ -705,3 +705,34 @@ def test_v1_v2_v4_bills_are_due_paid_in_parts_and_deleted_with_their_receivable(
     }).json()
     assert client.delete(f"/api/billing-documents/{other['id']}", headers=owner).json()["receivable"] == "deleted"
     assert asyncio.run(server.db.receivables.count_documents({"id": other["receivable_id"]})) == 0
+
+
+def test_r2_payroll_is_its_own_right(client):
+    company_id, _, owner = _company()
+    client.post("/api/employees", headers=owner, json={"name": "Иво", "base_salary": 1500})
+    _, manager = _user(company_id, "manager", sorted(server.ROLE_PERMISSIONS["manager"]), "Управител")
+    assert "manage_payroll" not in server.ROLE_PERMISSIONS["manager"]
+    assert "manage_payroll" in server.ROLE_PERMISSIONS["accountant"]
+
+    assert client.get("/api/payroll", headers=manager).status_code == 403
+    team = client.get("/api/employees", headers=manager)
+    assert team.status_code == 200 and team.json()[0]["base_salary"] == 0   # the team, not the salaries
+    assert client.get("/api/employees", headers=owner).json()[0]["base_salary"] == 1500
+
+    # A manager from before the split, who had "Бюджет", keeps payroll.
+    legacy_id = f"user_{uuid.uuid4().hex[:12]}"
+    token = uuid.uuid4().hex
+    now = datetime.now(timezone.utc)
+
+    async def seed():
+        await server.db.users.insert_one({
+            "user_id": legacy_id, "email": f"{legacy_id}@test.com", "name": "Стар управител", "role": "manager",
+            "company_id": company_id, "permissions": ["manage_budget", "view_statistics"], "auth_provider": "email",
+            "permissions_schema_version": 5, "created_at": now,
+        })
+        await server.db.user_sessions.insert_one({"user_id": legacy_id, "session_token": token,
+                                                  "expires_at": now + timedelta(days=1), "created_at": now})
+    asyncio.run(seed())
+    legacy = {"Authorization": f"Bearer {token}"}
+    assert "manage_payroll" in client.get("/api/auth/me", headers=legacy).json()["permissions"]
+    assert client.get("/api/payroll", headers=legacy).status_code == 200

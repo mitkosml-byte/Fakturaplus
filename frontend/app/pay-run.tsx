@@ -33,7 +33,7 @@ export default function PayRunScreen() {
   const router = useRouter();
   const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
-  const canManage = hasPermission('manage_budget');
+  const canManage = hasPermission('manage_payroll');
 
   const [selectedMonth, setSelectedMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [loading, setLoading] = useState(true);

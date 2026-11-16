@@ -48,7 +48,7 @@ async def batch_pay(payload: BatchPayRequest, current_user: User = Depends(get_c
     one failure (a duplicate entry for someone already paid this month,
     zero scheduled hours for someone else) never blocks the rest of the
     batch - the response reports success/failure per person."""
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, scope = await get_company_scope(current_user)
 
     employee_names: Dict[str, str] = {}

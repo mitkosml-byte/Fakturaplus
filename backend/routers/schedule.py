@@ -423,7 +423,7 @@ async def create_schedule_payment(payload: SchedulePaymentCreate, current_user: 
     Creates a real off-book expense for the computed amount, so it's
     counted in /statistics/summary like any other cost, and records a
     marker so the same days can't be paid twice."""
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, scope = await get_company_scope(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="Нямате активна фирма")
@@ -544,7 +544,7 @@ async def delete_schedule_payment(payment_id: str, current_user: User = Depends(
     """Undoes a payment marker AND removes the expense it created - a
     whole reversal, not a partial one, so the two collections never
     drift out of sync."""
-    require_permission(current_user, "manage_budget")
+    require_permission(current_user, "manage_payroll")
     company_id, _ = await get_company_scope(current_user)
     payment = await server.db.schedule_payments.find_one({"id": payment_id, "company_id": company_id}, {"_id": 0})
     if not payment:

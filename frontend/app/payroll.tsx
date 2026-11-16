@@ -346,7 +346,7 @@ export default function PayrollScreen() {
     }
   };
 
-  if (!hasPermission('manage_budget')) {
+  if (!hasPermission('manage_payroll')) {
     return <AccessDenied />;
   }
 

@@ -68,7 +68,7 @@ export default function TeamScreen() {
           route: '/messages' as const,
         }]
       : []),
-    ...(hasPermission('manage_budget')
+    ...(hasPermission('manage_payroll')
       ? [{
           key: 'payroll',
           title: t('payroll.title'),
