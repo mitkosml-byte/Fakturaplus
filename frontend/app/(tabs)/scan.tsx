@@ -20,7 +20,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { prepareScanImage } from '../../src/utils/scanImage';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
 import { api } from '../../src/services/api';
@@ -257,32 +257,6 @@ export default function ScanScreen() {
     }
     setCapturedImages(updated);
     await processImages(updated);
-  };
-
-  // Phone cameras capture at 3000-4000px+ on the long edge - Claude's
-  // vision pricing is per-pixel-patch (28x28px = 1 token), and a photo that
-  // size already hits the model's own 2576px/4784-token cap on every page,
-  // which is close to the single biggest cost component of a scan. OCR only
-  // needs the text to be legible, not photographic fidelity, so downscaling
-  // here before upload cuts that cost roughly in half with (expected, not
-  // yet measured in production) no loss of extraction accuracy - see the
-  // cost-optimization discussion this was built from. TARGET_LONG_EDGE is
-  // deliberately conservative; lower it further only after confirming OCR
-  // quality holds on real invoices.
-  const TARGET_LONG_EDGE = 1600;
-
-  const prepareScanImage = async (asset: ImagePicker.ImagePickerAsset): Promise<string> => {
-    const longEdge = Math.max(asset.width, asset.height);
-    if (longEdge <= TARGET_LONG_EDGE) {
-      return `data:image/jpeg;base64,${asset.base64}`;
-    }
-    const resized = asset.width >= asset.height
-      ? { width: TARGET_LONG_EDGE }
-      : { height: TARGET_LONG_EDGE };
-    const context = ImageManipulator.manipulate(asset.uri).resize(resized);
-    const rendered = await context.renderAsync();
-    const saved = await rendered.saveAsync({ compress: 0.85, format: SaveFormat.JPEG, base64: true });
-    return `data:image/jpeg;base64,${saved.base64}`;
   };
 
   const handleTakePhoto = async () => {

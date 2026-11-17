@@ -976,6 +976,14 @@ export const translations: Translations = {
     bg: 'Импортирай разходи назад във времето',
     en: 'Import past expenses history',
   },
+  'home.scanReport': { bg: 'Снимай дневния отчет (Z)', en: 'Scan the daily report (Z)' },
+  'home.scanReportHint': {
+    bg: 'Снимайте дневния финансов отчет от касовия апарат - оборотът по ДДС групи, в брой и с карта се попълват сами. Проверете и запазете. Ползва едно сканиране.',
+    en: 'Photograph the till\'s daily Z report - the revenue by VAT group, cash and card fill in by themselves. Check and save. Uses one scan.',
+  },
+  'home.zReportApplied': { bg: 'Попълнено от Z-отчет № {number} - проверете и запазете.', en: 'Filled in from Z report No. {number} - check and save.' },
+  'home.zReportAppliedNoNumber': { bg: 'Попълнено от Z-отчета - проверете и запазете.', en: 'Filled in from the Z report - check and save.' },
+  'home.zReportCheck': { bg: 'Проверете отчета', en: 'Check the report' },
   'home.ocrAdditionNote': {
     bg: 'Добавени {amount} € от сканирана издадена фактура към сумата за деня.',
     en: 'Added {amount} € from a scanned issued invoice to the day\'s total.',

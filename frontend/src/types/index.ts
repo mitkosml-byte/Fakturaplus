@@ -19,6 +19,17 @@ export interface User {
 export type BusinessModule = 'till' | 'billing' | 'team' | 'payroll' | 'assets' | 'wallet';
 export type BusinessModules = Record<BusinessModule, boolean>;
 
+// The till's daily report read from a photo (Н3) - a draft for the form.
+export interface ZReportResult {
+  date: string | null;
+  report_number: string | null;
+  fiscal_revenue: number;
+  card_revenue: number | null;
+  cash_revenue: number | null;
+  vat_groups: VatGroupAmount[];
+  warnings: string[];
+}
+
 // The month's pack for the accountant (Н4).
 export interface AccountantPack {
   month: string;

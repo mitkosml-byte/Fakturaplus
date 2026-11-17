@@ -54,6 +54,9 @@ type Props = {
   onSubmit: () => void;
   onCopyYesterday: () => void;
   copyingYesterday: boolean;
+  // The till's daily report from a photo (Н3).
+  onScanReport?: () => void;
+  scanningReport?: boolean;
 };
 
 export function RevenueModal({
@@ -61,7 +64,7 @@ export function RevenueModal({
   dateLocale, language, ocrAdditionNote, fiscalRevenue, onChangeFiscalRevenue, cardRevenue,
   onChangeCardRevenue, vatRate, onChangeVatRate, splitByRate, onToggleSplitByRate, rateAmounts, onChangeRateAmount,
   pocketMoney, onChangePocketMoney, showPocketMoney, isSubmitting, onSubmit,
-  onCopyYesterday, copyingYesterday,
+  onCopyYesterday, copyingYesterday, onScanReport, scanningReport,
 }: Props) {
   const { t } = useTranslation();
 
@@ -121,6 +124,17 @@ export function RevenueModal({
             )}
             <Text style={styles.copyYesterdayText}>{t('home.sameAsYesterday')}</Text>
           </TouchableOpacity>
+
+          {onScanReport && (
+            <TouchableOpacity style={styles.copyYesterdayButton} onPress={onScanReport} disabled={scanningReport}>
+              {scanningReport ? (
+                <ActivityIndicator size="small" color={COLORS.primary} />
+              ) : (
+                <Ionicons name="camera-outline" size={16} color={COLORS.primary} />
+              )}
+              <Text style={styles.copyYesterdayText}>{t('home.scanReport')}</Text>
+            </TouchableOpacity>
+          )}
 
           {ocrAdditionNote && (
             <View style={[styles.editNoticeBanner, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>

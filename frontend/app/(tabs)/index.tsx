@@ -34,9 +34,10 @@ import { COLORS } from '../../src/theme/colors';
 import { restrictedDataNote } from '../../src/utils/visibilityNote';
 import { PersonalExpenseModal } from '../../src/components/home/PersonalExpenseModal';
 import { RevenueModal, rateAmountsTotal } from '../../src/components/home/RevenueModal';
-import type { VatGroupAmount } from '../../src/types';
+import type { VatGroupAmount, ZReportResult } from '../../src/types';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCard';
+import { pickScanImage } from '../../src/utils/scanImage';
 import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
 import { getDescriptionSuggestions } from '../../src/utils/expenseSuggestions';
@@ -310,6 +311,65 @@ export default function HomeScreen() {
   const pendingOcrRevenueRef = useRef<{ amount: number; vatRate: 20 | 9 | 0 } | null>(null);
   const [ocrAdditionNote, setOcrAdditionNote] = useState<string | null>(null);
 
+  // The till's daily report read from a photo (Н3): the whole day as the
+  // report gives it - it replaces what the form holds (a report is the
+  // day's total, not something added to it). For another day than the
+  // form's, it waits until that day is loaded, then fills it.
+  const pendingZReportRef = useRef<ZReportResult | null>(null);
+  const [scanningReport, setScanningReport] = useState(false);
+  const applyZReport = (report: ZReportResult) => {
+    setFiscalRevenue(report.fiscal_revenue > 0 ? report.fiscal_revenue.toFixed(2) : '');
+    setCardRevenue(report.card_revenue != null && report.card_revenue > 0 ? report.card_revenue.toFixed(2) : '');
+    // Several rates: the day by rate. One: that rate. None read: the form
+    // keeps the rate it has (the server says to check it).
+    if (report.vat_groups.length > 1) {
+      showRevenueVat(report.vat_groups, report.vat_groups[0].rate_percent);
+    } else if (report.vat_groups.length === 1) {
+      showRevenueVat([], report.vat_groups[0].rate_percent);
+    }
+    setOcrAdditionNote(
+      report.report_number
+        ? t('home.zReportApplied').replace('{number}', report.report_number)
+        : t('home.zReportAppliedNoNumber')
+    );
+    if (report.warnings.length > 0) {
+      Alert.alert(t('home.zReportCheck'), report.warnings.join('\n\n'));
+    }
+  };
+  const scanReportFrom = async (source: 'camera' | 'library') => {
+    let image: string | null = null;
+    try {
+      image = await pickScanImage(source);
+    } catch {
+      Alert.alert(t('common.error'), t('scan.cameraError'));
+      return;
+    }
+    if (!image) return;
+    setScanningReport(true);
+    try {
+      const report = await api.scanZReport([image]);
+      const sameDay = !report.date || report.date === format(revenueDate, 'yyyy-MM-dd');
+      if (sameDay) {
+        applyZReport(report);
+      } else {
+        pendingZReportRef.current = report;
+        setRevenueDate(new Date(`${report.date}T00:00:00`));
+      }
+      Haptics.success();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setScanningReport(false);
+    }
+  };
+  const handleScanReport = () => {
+    Alert.alert(t('home.scanReport'), t('home.scanReportHint'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('scan.fromGallery'), onPress: () => scanReportFrom('library') },
+      { text: t('scan.takePhoto'), onPress: () => scanReportFrom('camera') },
+    ]);
+  };
+
   // Load current day revenue when revenue modal opens or date changes, then
   // fold in a pending OCR-scanned sale on top of whatever was already
   // there - never replacing it - so scanning a receipt for a day that
@@ -340,6 +400,10 @@ export default function HomeScreen() {
           t('home.ocrAdditionNote').replace('{amount}', pending.amount.toFixed(2))
         );
         pendingOcrRevenueRef.current = null;
+      } else if (pendingZReportRef.current) {
+        const report = pendingZReportRef.current;
+        pendingZReportRef.current = null;
+        applyZReport(report);
       } else {
         setOcrAdditionNote(null);
       }
@@ -1324,6 +1388,8 @@ export default function HomeScreen() {
         language={language}
         onCopyYesterday={handleCopyYesterday}
         copyingYesterday={copyingYesterday}
+        onScanReport={handleScanReport}
+        scanningReport={scanningReport}
         ocrAdditionNote={ocrAdditionNote}
         fiscalRevenue={fiscalRevenue}
         onChangeFiscalRevenue={setFiscalRevenue}

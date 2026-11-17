@@ -6789,6 +6789,8 @@ from routers import cash_flow as cash_flow_router
 app.include_router(cash_flow_router.router)
 from routers import accountant_pack
 app.include_router(accountant_pack.router)
+from routers import z_report
+app.include_router(z_report.router)
 
 from routers import auth
 app.include_router(auth.router)
