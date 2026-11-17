@@ -264,16 +264,24 @@ async def add_receivable_payment(
         raise HTTPException(status_code=400, detail="Невалидна дата")
     paid = round(float(existing.get("paid_amount") or 0) + payload.amount, 2)
     fully = receivable_left({**existing, "paid_amount": paid}) <= 0.01
+    entry: Dict[str, Any] = {
+        "id": str(uuid.uuid4()), "amount": round(payload.amount, 2), "date": day.isoformat(), "method": payload.method,
+    }
+    target: Dict[str, Any] = {"id": receivable_id, **scope}
+    if payload.bank_transaction:
+        # From a bank statement: the same movement is on a receivable once.
+        entry["bank_transaction"] = payload.bank_transaction
+        target["payments.bank_transaction"] = {"$ne": payload.bank_transaction}
     update: Dict[str, Any] = {
         "paid_amount": paid,
         "is_paid": fully,
-        "payments": [*(existing.get("payments") or []), {
-            "id": str(uuid.uuid4()), "amount": round(payload.amount, 2), "date": day.isoformat(), "method": payload.method,
-        }],
+        "payments": [*(existing.get("payments") or []), entry],
     }
     if fully:
         update["paid_at"] = day_start_utc(day)
-    await server.db.receivables.update_one({"id": receivable_id, **scope}, {"$set": update})
+    written = await server.db.receivables.update_one(target, {"$set": update})
+    if written.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Това движение от извлечението вече е отразено по вземането")
     receivable = await server.db.receivables.find_one({"id": receivable_id, **scope}, {"_id": 0})
     return receivable_view(receivable)
 

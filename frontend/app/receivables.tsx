@@ -317,6 +317,13 @@ export default function ReceivablesScreen() {
               )}
             </View>
           )}
+          {canManage && (summary?.total_owed || 0) > 0 && (
+            <TouchableOpacity style={styles.statementLink} onPress={() => router.push('/bank-statement')}>
+              <Ionicons name="business-outline" size={15} color={COLORS.primary} />
+              <Text style={styles.statementLinkText}>{t('receivables.fromStatement')}</Text>
+              <Ionicons name="chevron-forward" size={14} color={COLORS.primary} />
+            </TouchableOpacity>
+          )}
 
           {loading ? (
             <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
@@ -544,6 +551,8 @@ export default function ReceivablesScreen() {
 }
 
 const styles = StyleSheet.create({
+  statementLink: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingBottom: 8 },
+  statementLinkText: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },
   methodChip: {
     paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18,
     borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.background,

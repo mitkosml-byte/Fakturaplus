@@ -14,6 +14,8 @@ from server import *
 from server import _count_bg
 import server
 
+from services.translit import to_latin
+
 router = APIRouter(prefix="/api")
 
 # What one email can carry; a bigger pack is downloaded and sent another way.
@@ -21,16 +23,9 @@ PACK_EMAIL_LIMIT = 20 * 1024 * 1024
 # A month's pack is offered for the month before from the 1st to the 15th.
 PACK_REMIND_UNTIL_DAY = 15
 
-_CYRILLIC = "абвгдежзийклмнопрстуфхцчшщъьюя"
-_LATIN_OF = ["a", "b", "v", "g", "d", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t", "u", "f",
-             "h", "ts", "ch", "sh", "sht", "a", "y", "yu", "ya"]
-_LATIN = {**dict(zip(_CYRILLIC, _LATIN_OF)), **dict(zip(_CYRILLIC.upper(), (l.capitalize() for l in _LATIN_OF)))}
-
-
 def _file_part(text: Any, limit: int = 40) -> str:
     """A file name part any computer opens: Latin letters, digits, dashes."""
-    latin = "".join(_LATIN.get(ch, ch) for ch in str(text or ""))
-    return re.sub(r"[^A-Za-z0-9]+", "-", latin).strip("-")[:limit] or "bez-ime"
+    return re.sub(r"[^A-Za-z0-9]+", "-", to_latin(text)).strip("-")[:limit] or "bez-ime"
 
 
 def _month_period(month: Optional[str]) -> Period:

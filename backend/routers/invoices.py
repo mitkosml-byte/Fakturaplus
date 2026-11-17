@@ -347,13 +347,21 @@ async def add_invoice_payment(invoice_id: str, payload: InvoicePaymentCreate, cu
     if day > today_local():
         raise HTTPException(status_code=400, detail="Плащането не може да е с бъдеща дата")
     paid = round(float(existing.get("paid_amount") or 0) + payload.amount, 2)
-    payments = [*(existing.get("payments") or []), {
+    entry: Dict[str, Any] = {
         "id": str(uuid.uuid4()), "amount": round(payload.amount, 2), "date": day.isoformat(), "method": payload.method,
-    }]
+    }
+    target: Dict[str, Any] = {"id": invoice_id, **scope}
+    if payload.bank_transaction:
+        # From a bank statement: the same movement is on an invoice once.
+        entry["bank_transaction"] = payload.bank_transaction
+        target["payments.bank_transaction"] = {"$ne": payload.bank_transaction}
+    payments = [*(existing.get("payments") or []), entry]
     fully = invoice_left({**existing, "paid_amount": paid}) <= 0.01
-    await server.db.invoices.update_one({"id": invoice_id, **scope}, {"$set": {
+    written = await server.db.invoices.update_one(target, {"$set": {
         "paid_amount": paid, "is_paid": fully, "payments": payments, "paid_at": _paid_at(existing, payments, fully),
     }})
+    if written.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Това движение от извлечението вече е отразено по фактурата")
     await audit_service.log_action(
         user_id=current_user.user_id, user_name=current_user.name, action="update", entity_type="invoice",
         entity_id=invoice_id, company_id=company_id,

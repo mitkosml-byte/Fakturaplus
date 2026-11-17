@@ -107,6 +107,91 @@ export interface CashFlow {
   notes: string[];
 }
 
+// A file picked to send (expo-document-picker): on the web its File too.
+export interface PickedFile {
+  uri: string;
+  name: string;
+  mimeType?: string;
+  file?: any;
+}
+
+// A bank statement read and matched (Н2). sure: certain, offered ticked;
+// ask: likely, the person decides; entered: already on record another way
+// (typed in by hand, or recorded from another file of the same days);
+// none: no document for it - only listed, nothing is made of it;
+// applied: this very movement, recorded from this statement before.
+export type BankMatchStatus = 'sure' | 'ask' | 'entered' | 'none' | 'applied';
+
+export interface BankTarget {
+  kind: 'invoice' | 'receivable';
+  id: string;
+  label: string;
+  name: string;
+  number: string;
+  // What the document still owes.
+  left: number;
+  // What the movement puts on it (proposals and recorded payments).
+  amount?: number;
+}
+
+export interface BankStatementRow {
+  id: string;
+  date: string;
+  // Money in above zero, money out below.
+  amount: number;
+  counterparty: string;
+  description: string;
+  reference: string;
+  status: BankMatchStatus;
+  reason: string;
+  targets: BankTarget[];
+  alternatives: BankTarget[];
+  entered?: { kind: 'invoice' | 'receivable'; id: string; label: string; date: string; amount: number };
+}
+
+export interface BankStatementPreview {
+  format: 'csv' | 'xlsx' | 'mt940' | 'camt';
+  count: number;
+  skipped_rows: number;
+  other_currency_rows: number;
+  from: string;
+  to: string;
+  money_in: number;
+  money_out: number;
+  closing_balance: number | null;
+  closing_date: string;
+  // May the closing balance become the money in the bank (the cash flow)?
+  can_set_balance: boolean;
+  current_bank_balance: number | null;
+  current_balance_date: string | null;
+  // A newer amount was entered after the statement's last day - it stays.
+  balance_is_newer: boolean;
+  can_pay_invoices: boolean;
+  can_receive: boolean;
+  counts: Record<BankMatchStatus, number>;
+  transactions: BankStatementRow[];
+}
+
+export interface BankStatementApply {
+  payments: {
+    transaction_id: string;
+    date: string;
+    amount: number;
+    targets: { kind: 'invoice' | 'receivable'; id: string; amount: number }[];
+  }[];
+  closing_balance?: number | null;
+  closing_date?: string | null;
+}
+
+export interface BankStatementApplyResult {
+  applied: number;
+  already_recorded: number;
+  failed: { transaction_id: string; target_id: string | null; message: string }[];
+  balance_set: boolean;
+  paid_to_suppliers: number;
+  received_from_customers: number;
+}
+
 // Home's cards for a business that invoices.
 export interface BillingOverview {
   issued_count: number;

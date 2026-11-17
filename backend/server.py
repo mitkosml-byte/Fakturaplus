@@ -1784,6 +1784,9 @@ class InvoicePaymentCreate(BaseModel):
     amount: float = Field(gt=0)
     date: Optional[str] = None  # "YYYY-MM-DD", today if left out
     method: Literal["cash", "bank_transfer", "card"] = "bank_transfer"
+    # Recorded from a bank statement: that movement's id, so reading the
+    # same statement again never pays the invoice twice.
+    bank_transaction: Optional[str] = Field(default=None, max_length=64)
 
 
 def invoice_payments_for(existing: dict, paid: float, day: date) -> List[Dict[str, Any]]:
@@ -2649,6 +2652,8 @@ class ReceivablePaymentCreate(BaseModel):
     amount: float = Field(gt=0)
     date: Optional[str] = None  # "YYYY-MM-DD", today if left out
     method: Literal["cash", "bank_transfer", "card"] = "cash"
+    # Recorded from a bank statement: that movement's id (see InvoicePaymentCreate).
+    bank_transaction: Optional[str] = Field(default=None, max_length=64)
 
 class ReceivableUpdate(BaseModel):
     customer_name: Optional[str] = None
@@ -6915,6 +6920,8 @@ from routers import accountant_pack
 app.include_router(accountant_pack.router)
 from routers import z_report
 app.include_router(z_report.router)
+from routers import bank_statement as bank_statement_router
+app.include_router(bank_statement_router.router)
 
 from routers import auth
 app.include_router(auth.router)

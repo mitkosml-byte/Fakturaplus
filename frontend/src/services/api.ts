@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+import { BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
@@ -400,20 +400,22 @@ class ApiService {
     return `/api/import/template/${entity}`;
   }
 
-  async previewImport(entity: ImportEntity, asset: { uri: string; name: string; mimeType?: string; file?: any }): Promise<ImportPreviewResult> {
+  // A picked file sent as multipart form data (not JSON) - the imports,
+  // the payroll PDF, the bank statement.
+  private async postFile<T>(path: string, asset: PickedFile, fallbackType = 'application/octet-stream'): Promise<T> {
     const formData = new FormData();
     if (Platform.OS === 'web' && asset.file) {
       formData.append('file', asset.file, asset.name);
     } else {
       // React Native's fetch recognizes this {uri, name, type} shape and
       // streams the file from disk - there is no Blob to construct here.
-      formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || 'application/octet-stream' } as any);
+      formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || fallbackType } as any);
     }
 
     const headers: Record<string, string> = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
 
-    const response = await fetch(`${API_URL}/api/import/${entity}/preview`, {
+    const response = await fetch(`${API_URL}/api${path}`, {
       method: 'POST',
       headers,
       body: formData,
@@ -424,6 +426,10 @@ class ApiService {
       throw new Error(formatApiErrorDetail(error.detail));
     }
     return response.json();
+  }
+
+  async previewImport(entity: ImportEntity, asset: PickedFile): Promise<ImportPreviewResult> {
+    return this.postFile(`/import/${entity}/preview`, asset);
   }
 
   async commitImport(entity: ImportEntity, rows: Record<string, any>[]): Promise<ImportCommitResult> {
@@ -765,6 +771,16 @@ class ApiService {
 
   async getBreakEven(): Promise<BreakEven> {
     return this.fetch('/statistics/break-even');
+  }
+
+  // A bank statement (Н2): read and matched - nothing is recorded yet.
+  async previewBankStatement(asset: PickedFile): Promise<BankStatementPreview> {
+    return this.postFile('/bank-statement/preview', asset);
+  }
+
+  // The payments the person confirmed, and the closing balance if asked.
+  async applyBankStatement(body: BankStatementApply): Promise<BankStatementApplyResult> {
+    return this.fetch('/bank-statement/apply', { method: 'POST', body: JSON.stringify(body) });
   }
 
   async getCashFlow(days = 30): Promise<CashFlow> {
@@ -1575,30 +1591,9 @@ class ApiService {
     await this.fetch(`/payroll/${id}`, { method: 'DELETE' });
   }
 
-  // Accountant-ведомост PDF import - same multipart pattern as
-  // previewImport above, since this also sends a file rather than JSON.
-  async previewPayrollImport(asset: { uri: string; name: string; mimeType?: string; file?: any }): Promise<PayrollImportPreviewResponse> {
-    const formData = new FormData();
-    if (Platform.OS === 'web' && asset.file) {
-      formData.append('file', asset.file, asset.name);
-    } else {
-      formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || 'application/pdf' } as any);
-    }
-
-    const headers: Record<string, string> = {};
-    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
-
-    const response = await fetch(`${API_URL}/api/payroll/import/preview`, {
-      method: 'POST',
-      headers,
-      body: formData,
-      credentials: 'include',
-    });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
-      throw new Error(formatApiErrorDetail(error.detail));
-    }
-    return response.json();
+  // Accountant-ведомост PDF import - a file rather than JSON (postFile).
+  async previewPayrollImport(asset: PickedFile): Promise<PayrollImportPreviewResponse> {
+    return this.postFile('/payroll/import/preview', asset, 'application/pdf');
   }
 
   async commitPayrollImport(entries: PayrollImportCommitEntry[]): Promise<PayrollImportCommitResult> {

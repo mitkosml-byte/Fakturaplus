@@ -50,6 +50,7 @@ export default function CashFlowScreen() {
   const { t } = useTranslation();
   const { hasPermission } = useAuth();
   const allowed = hasPermission('view_statistics') && hasPermission('view_profit');
+  const canReadStatement = hasPermission('manage_invoices') || hasPermission('add_revenue');
 
   const [days, setDays] = useState<30 | 60>(30);
   const [flow, setFlow] = useState<CashFlow | null>(null);
@@ -202,6 +203,12 @@ export default function CashFlowScreen() {
               <TouchableOpacity style={[styles.primaryButton, saving && { opacity: 0.6 }]} onPress={savePosition} disabled={saving}>
                 {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{t('cashFlow.saveMoneyNow')}</Text>}
               </TouchableOpacity>
+              {canReadStatement && (
+                <TouchableOpacity style={styles.statementLink} onPress={() => router.push('/bank-statement')}>
+                  <Ionicons name="business-outline" size={15} color={COLORS.primary} />
+                  <Text style={styles.statementLinkText}>{t('cashFlow.fromStatement')}</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <View style={styles.segment}>
@@ -381,6 +388,8 @@ const styles = StyleSheet.create({
   primaryButton: { backgroundColor: COLORS.primary, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 12 },
   primaryButtonText: { color: 'white', fontSize: 15, fontWeight: '600' },
   secondaryButton: { borderRadius: 10, paddingVertical: 10, paddingHorizontal: 18, borderWidth: 1, borderColor: COLORS.primary },
+  statementLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 },
+  statementLinkText: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },
   secondaryButtonText: { color: COLORS.primary, fontWeight: '600' },
   segment: { flexDirection: 'row', backgroundColor: COLORS.surface, borderRadius: 12, padding: 4, marginBottom: 16 },
   segmentOption: { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
