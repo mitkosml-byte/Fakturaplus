@@ -26,6 +26,9 @@ import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } fr
 import { api } from '../../src/services/api';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useModules } from '../../src/stores/modulesStore';
+import { useScanQueueStore, QueuedScan, isNetworkError } from '../../src/stores/scanQueueStore';
+import { useNetwork } from '../../src/hooks/useNetwork';
+import NetInfo from '@react-native-community/netinfo';
 import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint, InvoiceDraftCheck, InvoiceDraftFix, InvoiceDocumentType } from '../../src/types';
 import { detectPackMultiple, formatEur, priceAlertMeaning } from '../../src/utils/priceAlert';
 import { format, parse } from 'date-fns';
@@ -73,7 +76,20 @@ export default function ScanScreen() {
   // till is in that day's till revenue already and is not counted again).
   const [scanMode, setScanMode] = useState<'purchase' | 'sales'>('purchase');
   // An invoice the business issued is saved as an issued invoice - its own right.
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
+  const companyId = user?.company_id ?? null;
+  // Scanning without a connection (Н12): the pages are kept and read once
+  // the connection is back - here, or from the queue below.
+  const { isOnline } = useNetwork();
+  const [offlineWaiting, setOfflineWaiting] = useState(false);
+  const queue = useScanQueueStore((state) => state.items);
+  const loadQueue = useScanQueueStore((state) => state.load);
+  const enqueueScan = useScanQueueStore((state) => state.enqueue);
+  const processQueue = useScanQueueStore((state) => state.processPending);
+  const retryQueued = useScanQueueStore((state) => state.retry);
+  const removeQueued = useScanQueueStore((state) => state.remove);
+  const takeQueued = useScanQueueStore((state) => state.take);
+  const queueProcessing = useScanQueueStore((state) => state.processing);
   const { uses } = useModules();
   const canIssueInvoices = hasPermission('issue_invoices') && uses('billing');
   const usesTill = uses('till');
@@ -246,6 +262,8 @@ export default function ScanScreen() {
   const addPage = async (dataUri: string) => {
     const updated = [...capturedImages, dataUri];
     setCapturedImages(updated);
+    // No connection: the page joins the others, read together later.
+    if (offlineWaiting) return;
     await processImages(updated);
   };
 
@@ -421,97 +439,22 @@ export default function ScanScreen() {
   };
 
   const processImages = async (images: string[]) => {
+    const network = await NetInfo.fetch().catch(() => null);
+    if (network && (network.isConnected === false || network.isInternetReachable === false)) {
+      setOfflineWaiting(true);
+      return;
+    }
+    setOfflineWaiting(false);
     setIsScanning(true);
     setOcrCorrections([]);
     setOcrConfidence(null);
     try {
-      const result = await api.scanInvoice(images);
-      setOcrResult(result);
-      setDocumentType(result.document_type === 'credit_note' ? 'credit_note' : 'invoice');
-      setCreditedInvoiceNumber(result.credited_invoice_number || '');
-      // An invoice the business issued: the customer is its recipient.
-      setSalesCustomer(result.buyer || '');
-      setSalesCustomerEik(result.buyer_eik || '');
-      if (result.payment_method === 'cash' || result.payment_method === 'card' || result.payment_method === 'bank_transfer') {
-        setSalesPaymentMethod(result.payment_method);
-      }
-      setSupplier(result.supplier);
-      setSupplierEik(result.supplier_eik || '');
-      setInvoiceNumber(result.invoice_number);
-      setAmountWithoutVat(result.amount_without_vat.toString());
-      setVatAmount(result.vat_amount.toString());
-      setTotalAmount(result.total_amount.toString());
-      
-      // Save corrections info
-      if (result.corrections && result.corrections.length > 0) {
-        setOcrCorrections(result.corrections);
-      }
-      if (result.confidence) {
-        setOcrConfidence(result.confidence);
-      }
-
-      // Pre-fill the recognized line items - reviewable/editable before saving
-      if (result.items && result.items.length > 0) {
-        setItems(result.items.map(item => ({
-          name: item.name,
-          quantity: String(item.quantity),
-          unit: item.unit || 'бр.',
-          unit_price: String(item.unit_price),
-          ocr: { quantity: item.quantity || 1, unit_price: item.unit_price, total_price: item.total_price },
-        })));
-        setItemPriceHints({});
-        loadItemPriceHints(result.items, result.supplier);
-      }
-      
-      // Set invoice date from OCR if available - and flag it clearly when
-      // it isn't, instead of leaving invoiceDate silently at today's date
-      // with no sign that nothing was actually read off the invoice.
-      let foundDate = false;
-      if (result.invoice_date) {
-        try {
-          // A plain "yyyy-MM-dd" is that day on this device's calendar -
-          // new Date() would read it as UTC midnight, the day before
-          // anywhere west of Greenwich.
-          const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(result.invoice_date)
-            ? parse(result.invoice_date, 'yyyy-MM-dd', new Date())
-            : new Date(result.invoice_date);
-          if (!isNaN(parsedDate.getTime())) {
-            setInvoiceDate(parsedDate);
-            foundDate = true;
-          }
-        } catch (e) {
-          // Keep default date if parsing fails
-        }
-      }
-      setDateFoundByOcr(foundDate);
-
-      // A payment due date printed on the invoice does NOT reliably mean a
-      // deferred bank-transfer payment - many Bulgarian invoice templates
-      // print a standard payment-term line even when the purchase was
-      // actually settled in cash on the spot, and auto-selecting "Банков
-      // превод" from that printed line alone was wrongly flagging cash
-      // purchases as unpaid. The due date is still useful if the user DOES
-      // pick bank transfer themselves, so it's still pre-filled - just no
-      // longer used to pick the payment method on the user's behalf.
-      // The payment method printed on the invoice ("Начин на плащане") is
-      // taken as read; when it isn't printed, the person picks it before
-      // saving - an invoice without one was never tracked as owed.
-      setPaymentMethodFromOcr(!!result.payment_method);
-      if (result.payment_method) {
-        setPaymentMethod(result.payment_method);
-      }
-      if (result.payment_due_date) {
-        try {
-          const parsedDueDate = new Date(result.payment_due_date);
-          if (!isNaN(parsedDueDate.getTime())) {
-            setPaymentDueDate(parsedDueDate);
-          }
-        } catch (e) {
-          // Leave due date unset if parsing fails - manual picker covers it
-        }
-      }
+      applyOcrResult(await api.scanInvoice(images));
     } catch (error: any) {
-      if (error.status === 402) {
+      if (isNetworkError(error)) {
+        // The connection dropped on the way: kept, as if offline from the start.
+        setOfflineWaiting(true);
+      } else if (error.status === 402) {
         // Out of scan credits - this is the app's one paid feature (see
         // ScanCreditService on the backend), so route to the purchase
         // screen instead of showing a dead-end error.
@@ -529,6 +472,139 @@ export default function ScanScreen() {
     } finally {
       setIsScanning(false);
     }
+  };
+
+  // What was read off the pages, into the form - a scan just made or one
+  // taken from the queue of scans read once the connection came back.
+  const applyOcrResult = (result: OCRResult) => {
+    setOcrResult(result);
+    setDocumentType(result.document_type === 'credit_note' ? 'credit_note' : 'invoice');
+    setCreditedInvoiceNumber(result.credited_invoice_number || '');
+    // An invoice the business issued: the customer is its recipient.
+    setSalesCustomer(result.buyer || '');
+    setSalesCustomerEik(result.buyer_eik || '');
+    if (result.payment_method === 'cash' || result.payment_method === 'card' || result.payment_method === 'bank_transfer') {
+      setSalesPaymentMethod(result.payment_method);
+    }
+    setSupplier(result.supplier);
+    setSupplierEik(result.supplier_eik || '');
+    setInvoiceNumber(result.invoice_number);
+    setAmountWithoutVat(result.amount_without_vat.toString());
+    setVatAmount(result.vat_amount.toString());
+    setTotalAmount(result.total_amount.toString());
+    
+    // Save corrections info
+    if (result.corrections && result.corrections.length > 0) {
+      setOcrCorrections(result.corrections);
+    }
+    if (result.confidence) {
+      setOcrConfidence(result.confidence);
+    }
+
+    // Pre-fill the recognized line items - reviewable/editable before saving
+    if (result.items && result.items.length > 0) {
+      setItems(result.items.map(item => ({
+        name: item.name,
+        quantity: String(item.quantity),
+        unit: item.unit || 'бр.',
+        unit_price: String(item.unit_price),
+        ocr: { quantity: item.quantity || 1, unit_price: item.unit_price, total_price: item.total_price },
+      })));
+      setItemPriceHints({});
+      loadItemPriceHints(result.items, result.supplier);
+    }
+    
+    // Set invoice date from OCR if available - and flag it clearly when
+    // it isn't, instead of leaving invoiceDate silently at today's date
+    // with no sign that nothing was actually read off the invoice.
+    let foundDate = false;
+    if (result.invoice_date) {
+      try {
+        // A plain "yyyy-MM-dd" is that day on this device's calendar -
+        // new Date() would read it as UTC midnight, the day before
+        // anywhere west of Greenwich.
+        const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(result.invoice_date)
+          ? parse(result.invoice_date, 'yyyy-MM-dd', new Date())
+          : new Date(result.invoice_date);
+        if (!isNaN(parsedDate.getTime())) {
+          setInvoiceDate(parsedDate);
+          foundDate = true;
+        }
+      } catch (e) {
+        // Keep default date if parsing fails
+      }
+    }
+    setDateFoundByOcr(foundDate);
+
+    // A payment due date printed on the invoice does NOT reliably mean a
+    // deferred bank-transfer payment - many Bulgarian invoice templates
+    // print a standard payment-term line even when the purchase was
+    // actually settled in cash on the spot, and auto-selecting "Банков
+    // превод" from that printed line alone was wrongly flagging cash
+    // purchases as unpaid. The due date is still useful if the user DOES
+    // pick bank transfer themselves, so it's still pre-filled - just no
+    // longer used to pick the payment method on the user's behalf.
+    // The payment method printed on the invoice ("Начин на плащане") is
+    // taken as read; when it isn't printed, the person picks it before
+    // saving - an invoice without one was never tracked as owed.
+    setPaymentMethodFromOcr(!!result.payment_method);
+    if (result.payment_method) {
+      setPaymentMethod(result.payment_method);
+    }
+    if (result.payment_due_date) {
+      try {
+        const parsedDueDate = new Date(result.payment_due_date);
+        if (!isNaN(parsedDueDate.getTime())) {
+          setPaymentDueDate(parsedDueDate);
+        }
+      } catch (e) {
+        // Leave due date unset if parsing fails - manual picker covers it
+      }
+    }
+  };
+
+  // The connection came back while the pages wait here: read them now.
+  useEffect(() => {
+    if (isOnline && offlineWaiting && capturedImages.length > 0) {
+      processImages(capturedImages);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline]);
+
+  useEffect(() => { loadQueue(); }, [loadQueue]);
+  const myQueue = queue.filter((item) => item.companyId === companyId);
+
+  // Kept for later: read on its own once the connection is back.
+  const saveForLater = async () => {
+    try {
+      await enqueueScan(capturedImages, scanMode, companyId);
+      Toast.success(t('scanQueue.saved'));
+      resetForm();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error?.message || t('scanQueue.saveFailed'));
+    }
+  };
+
+  const reviewQueued = async (item: QueuedScan) => {
+    const taken = await takeQueued(item.id);
+    if (!taken) return;
+    resetForm();
+    setScanMode(taken.mode);
+    setCapturedImages(taken.pages);
+    applyOcrResult(taken.result);
+  };
+
+  const retryNow = async (item: QueuedScan) => {
+    await retryQueued(item.id);
+    const ready = await processQueue(companyId);
+    if (ready > 0) Toast.success(t('scanQueue.readyToast').replace('{count}', String(ready)));
+  };
+
+  const deleteQueued = (item: QueuedScan) => {
+    Alert.alert(t('scanQueue.deleteTitle'), t('scanQueue.deleteBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.delete'), style: 'destructive', onPress: () => { removeQueued(item.id); } },
+    ]);
   };
 
   const handleSaveInvoice = async (confirmed: boolean = false) => {
@@ -829,6 +905,7 @@ export default function ScanScreen() {
   };
 
   const resetForm = () => {
+    setOfflineWaiting(false);
     setCapturedImages([]);
     setOcrResult(null);
     setSupplier('');
@@ -916,6 +993,53 @@ export default function ScanScreen() {
             </View>
           ) : null}
 
+          {capturedImages.length === 0 && myQueue.length > 0 && (
+            <View style={styles.queueBox}>
+              <View style={styles.queueHeader}>
+                <Ionicons name="cloud-upload-outline" size={18} color={COLORS.primary} />
+                <Text style={styles.queueTitle}>{t('scanQueue.title').replace('{count}', String(myQueue.length))}</Text>
+                {isOnline && myQueue.some((item) => item.status === 'waiting') && !queueProcessing && (
+                  <TouchableOpacity onPress={() => processQueue(companyId)} hitSlop={8}>
+                    <Text style={styles.queueLink}>{t('scanQueue.readNow')}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {myQueue.map((item) => (
+                <View key={item.id} style={styles.queueRow}>
+                  <Image source={{ uri: item.pages[0] }} style={styles.queueThumb} resizeMode="cover" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.queueWhen}>
+                      {format(new Date(item.createdAt), 'dd.MM HH:mm')}
+                      {item.pages.length > 1 ? ` · ${t('scan.invoiceWithPages').replace('{count}', String(item.pages.length))}` : ''}
+                    </Text>
+                    <Text
+                      style={[styles.queueStatus, item.status === 'ready' && { color: COLORS.success }, item.status === 'failed' && { color: COLORS.danger }]}
+                      numberOfLines={2}
+                    >
+                      {item.status === 'failed' ? (item.error || t('scanQueue.failed')) : t(`scanQueue.status.${item.status}`)}
+                    </Text>
+                  </View>
+                  {item.status === 'reading' && <ActivityIndicator size="small" color={COLORS.primary} />}
+                  {item.status === 'ready' && (
+                    <TouchableOpacity style={styles.queueReview} onPress={() => reviewQueued(item)}>
+                      <Text style={styles.queueReviewText}>{t('scanQueue.review')}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {item.status === 'failed' && (
+                    <TouchableOpacity onPress={() => retryNow(item)} hitSlop={8} accessibilityLabel={t('scanQueue.retry')}>
+                      <Ionicons name="refresh" size={20} color={COLORS.primary} />
+                    </TouchableOpacity>
+                  )}
+                  {item.status !== 'reading' && (
+                    <TouchableOpacity onPress={() => deleteQueued(item)} hitSlop={8} accessibilityLabel={t('common.delete')}>
+                      <Ionicons name="trash-outline" size={18} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
           {capturedImages.length === 0 && scanMode === 'purchase' && (
             <View style={styles.tipsBox}>
               <View style={styles.tipsHeader}>
@@ -1002,7 +1126,17 @@ export default function ScanScreen() {
                 </TouchableOpacity>
               </View>
 
-              {isScanning ? (
+              {offlineWaiting ? (
+                <View style={styles.offlineCard}>
+                  <Ionicons name="cloud-offline-outline" size={32} color={COLORS.warning} />
+                  <Text style={styles.offlineTitle}>{t('scanQueue.offlineTitle')}</Text>
+                  <Text style={styles.offlineText}>{t('scanQueue.offlineText')}</Text>
+                  <TouchableOpacity style={styles.offlineButton} onPress={saveForLater}>
+                    <Ionicons name="save-outline" size={18} color="white" />
+                    <Text style={styles.offlineButtonText}>{t('scanQueue.saveForLater')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : isScanning ? (
                 <View style={styles.scanningContainer}>
                   <ActivityIndicator size="large" color={COLORS.primary} />
                   <Text style={styles.scanningText}>{t('scan.processing')}</Text>
@@ -1606,6 +1740,37 @@ export default function ScanScreen() {
 }
 
 const styles = StyleSheet.create({
+  offlineCard: {
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 12,
+  },
+  offlineTitle: { color: 'white', fontSize: 16, fontWeight: '700' },
+  offlineText: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19, textAlign: 'center' },
+  offlineButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    marginTop: 6,
+  },
+  offlineButtonText: { color: 'white', fontSize: 15, fontWeight: '600' },
+  queueBox: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 14, marginTop: 20 },
+  queueHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  queueTitle: { flex: 1, color: 'white', fontSize: 15, fontWeight: '700' },
+  queueLink: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },
+  queueRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: COLORS.border },
+  queueThumb: { width: 44, height: 56, borderRadius: 6, backgroundColor: COLORS.background },
+  queueWhen: { color: COLORS.textLight, fontSize: 13, fontWeight: '600' },
+  queueStatus: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  queueReview: { backgroundColor: COLORS.primary, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 12 },
+  queueReviewText: { color: 'white', fontSize: 12, fontWeight: '600' },
   backgroundImage: {
     flex: 1,
   },

@@ -5800,6 +5800,28 @@ export const translations: Translations = {
   'cashFlow.fromStatement': { bg: 'Обнови от банково извлечение', en: 'Update from a bank statement' },
   'cashFlow.kind.subscription': { bg: 'Абонамент', en: 'Subscription' },
 
+  // Scanning without a connection (Н12)
+  'scanQueue.offlineTitle': { bg: 'Няма връзка с интернет', en: 'No internet connection' },
+  'scanQueue.offlineText': {
+    bg: 'Снимката е направена. Добавете още страници, ако има, и я запазете - ще бъде разпозната сама, щом се появи връзка, и ще ви чака тук за преглед.',
+    en: 'The photo is taken. Add more pages if there are any and save it - it is read on its own once the connection is back and waits here to be reviewed.',
+  },
+  'scanQueue.saveForLater': { bg: 'Запази и снимай следваща', en: 'Save and scan the next one' },
+  'scanQueue.saved': { bg: 'Запазено - ще се разпознае, щом има връзка', en: 'Saved - it is read once there is a connection' },
+  'scanQueue.saveFailed': { bg: 'Снимката не може да се запази на устройството', en: 'The photo could not be kept on the device' },
+  'scanQueue.title': { bg: 'Снимки, направени без връзка ({count})', en: 'Photos taken offline ({count})' },
+  'scanQueue.readNow': { bg: 'Разпознай сега', en: 'Read now' },
+  'scanQueue.status.waiting': { bg: 'Ще се разпознае, щом има връзка', en: 'Read once there is a connection' },
+  'scanQueue.status.reading': { bg: 'Разпознава се…', en: 'Reading…' },
+  'scanQueue.status.ready': { bg: 'Разпозната - чака преглед', en: 'Read - waiting for review' },
+  'scanQueue.status.failed': { bg: 'Не беше разпозната', en: 'Could not be read' },
+  'scanQueue.failed': { bg: 'Не беше разпозната - опитайте пак', en: 'Could not be read - try again' },
+  'scanQueue.review': { bg: 'Прегледай', en: 'Review' },
+  'scanQueue.retry': { bg: 'Опитай пак', en: 'Try again' },
+  'scanQueue.readyToast': { bg: 'Разпознати снимки: {count} - чакат преглед в „Сканиране“', en: 'Photos read: {count} - waiting for review in "Scan"' },
+  'scanQueue.deleteTitle': { bg: 'Изтриване на снимката', en: 'Delete the photo' },
+  'scanQueue.deleteBody': { bg: 'Снимката ще бъде изтрита от устройството, без да се записва фактура.', en: 'The photo is deleted from the device and no invoice is saved.' },
+
   // The business's own deadlines (Н10)
   'deadlines.title': { bg: 'Срокове', en: 'Deadlines' },
   'deadlines.menuDesc': { bg: 'Застраховки, прегледи, договори, срокове към счетоводителя', en: 'Insurance, inspections, contracts, dates for the accountant' },

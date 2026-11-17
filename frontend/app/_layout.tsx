@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StyleSheet, View } from 'react-native';
+import { AppState, StyleSheet, View } from 'react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '../src/queries/queryClient';
 import { OfflineBanner } from '../src/components/OfflineBanner';
@@ -12,8 +12,11 @@ import { PriceAlertPopup } from '../src/components/PriceAlertPopup';
 import { WalletAlertPopup } from '../src/components/WalletAlertPopup';
 import { OnboardingTutorial } from '../src/components/OnboardingTutorial';
 import { ToastHost } from '../src/components/ToastHost';
-import { useLanguageStore } from '../src/i18n';
+import { useLanguageStore, useTranslation } from '../src/i18n';
 import { useModulesStore } from '../src/stores/modulesStore';
+import { useScanQueueStore } from '../src/stores/scanQueueStore';
+import NetInfo from '@react-native-community/netinfo';
+import { Toast } from '../src/utils/toast';
 import { COLORS } from '../src/theme/colors';
 
 // Single source of truth for auth-based navigation. Screens (login.tsx,
@@ -93,9 +96,45 @@ function AppShell() {
           }}
         />
         <ToastHost />
+        <ScanQueueProcessor companyId={companyId} />
       </View>
     </>
   );
+}
+
+// Scans taken without a connection (Н12) are read on their own once it
+// is back - wherever the person is in the app - and wait on the scan
+// screen to be reviewed.
+function ScanQueueProcessor({ companyId }: { companyId: string | null }) {
+  const { t } = useTranslation();
+  const processPending = useScanQueueStore((state) => state.processPending);
+  useEffect(() => {
+    if (!companyId) return undefined;
+    const run = async () => {
+      const ready = await processPending(companyId);
+      if (ready > 0) Toast.success(t('scanQueue.readyToast').replace('{count}', String(ready)));
+    };
+    run();
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      if (state.isConnected && state.isInternetReachable !== false) run();
+    });
+    // Not every reconnection is told (a browser, some phones): while photos
+    // wait, try again every half minute, and whenever the app comes back.
+    const timer = setInterval(() => {
+      const waiting = useScanQueueStore.getState().items
+        .some((item) => item.status === 'waiting' && item.companyId === companyId);
+      if (waiting) run();
+    }, 30 * 1000);
+    const appState = AppState.addEventListener('change', (next) => {
+      if (next === 'active') run();
+    });
+    return () => {
+      unsubscribe();
+      clearInterval(timer);
+      appState.remove();
+    };
+  }, [companyId, processPending, t]);
+  return null;
 }
 
 export default function RootLayout() {

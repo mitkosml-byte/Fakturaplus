@@ -138,11 +138,14 @@ class ApiService {
       // unlike every other error in this app - replaced with a plain,
       // localized one so it reads the same as everything else.
       const isEn = useLanguageStore.getState().language === 'en';
-      throw new Error(
+      const failure: Error & { network?: boolean } = new Error(
         isEn
           ? 'Connection failed. Check your internet connection and try again.'
           : 'Неуспешна връзка. Проверете интернет връзката си и опитайте отново.'
       );
+      // What was not sent can be kept and sent later (scans without a connection).
+      failure.network = true;
+      throw failure;
     }
 
     if (!response.ok) {
