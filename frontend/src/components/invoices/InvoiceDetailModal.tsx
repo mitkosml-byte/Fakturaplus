@@ -6,7 +6,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { format, Locale } from 'date-fns';
 import { useRouter } from 'expo-router';
 import DateTimePickerModal from '../AppDateTimePicker';
-import { PressableScale } from '..';
+import { PressableScale, LocationPicker } from '..';
+import { locationName, useLocationsStore } from '../../stores/locationsStore';
 import { useTranslation } from '../../i18n';
 import { Invoice, PaymentMethod, VatTreatment, InvoiceDocumentType } from '../../types';
 import { Avatar } from '../Avatar';
@@ -67,6 +68,9 @@ type Props = {
   onChangeCreditedNumber: (v: string) => void;
   editNotes: string;
   onChangeNotes: (v: string) => void;
+  // The location it was bought for (Н11) - offered only with locations.
+  editLocation: string | null;
+  onChangeLocation: (id: string | null) => void;
   // Lets a line item's quantity/unit_price be corrected after the fact -
   // e.g. OCR read "1 бр." for what was actually a 6-pack, making the
   // per-unit price look 6x higher than it is. name/unit stay read-only
@@ -100,11 +104,14 @@ export function InvoiceDetailModal({
   editAmountWithoutVat, onChangeAmountWithoutVat, editVatAmount, onChangeVatAmount,
   editVatTreatment, onChangeVatTreatment, editPaymentMethod, onChangePaymentMethod,
   editDocumentType, onChangeDocumentType, editCreditedNumber, onChangeCreditedNumber, editNotes, onChangeNotes,
+  editLocation, onChangeLocation,
   editItems, onChangeEditItemField, savingEdit, onSaveEdit,
   selectedInvoiceAlerts, loadingInvoiceAlerts, updatingPayment, onTogglePaid, onOpenPaymentModal, onDeletePayment,
   scannedPages, loadingScannedPages, onViewPage, onDelete,
 }: Props) {
   const { t } = useTranslation();
+  const locations = useLocationsStore((state) => state.locations);
+  const invoiceLocation = locationName(locations, invoice?.location_id);
   const router = useRouter();
   const { hasPermission } = useAuth();
   const isCreditNote = invoice?.document_type === 'credit_note';
@@ -325,6 +332,8 @@ export function InvoiceDetailModal({
                 </View>
               )}
 
+              <LocationPicker value={editLocation} onChange={onChangeLocation} noneLabel={t('locations.noneWhole')} />
+
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{t('invoices.notes')}</Text>
                 <TextInput
@@ -372,6 +381,12 @@ export function InvoiceDetailModal({
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('scan.supplierEik')}</Text>
                   <Text style={styles.detailSectionValue}>{invoice.supplier_eik}</Text>
+                </View>
+              )}
+              {!!invoiceLocation && (
+                <View style={styles.detailSection}>
+                  <Text style={styles.detailSectionLabel}>{t('locations.pick')}</Text>
+                  <Text style={styles.detailSectionValue}>{invoiceLocation}</Text>
                 </View>
               )}
               {invoice.vat_treatment && (

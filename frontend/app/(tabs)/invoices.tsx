@@ -312,6 +312,7 @@ export default function InvoicesScreen() {
   const [editDocumentType, setEditDocumentType] = useState<InvoiceDocumentType>('invoice');
   const [editCreditedNumber, setEditCreditedNumber] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editLocation, setEditLocation] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // Real incident this fixes: OCR (or a fat-fingered manual entry) read a
@@ -338,6 +339,7 @@ export default function InvoicesScreen() {
     setEditVatTreatment(invoice.vat_treatment || '');
     setEditPaymentMethod(invoice.payment_method || '');
     setEditNotes(invoice.notes || '');
+    setEditLocation(invoice.location_id ?? null);
     setEditItems(
       (invoice.items || []).map((it) => ({
         id: it.id, name: it.name, quantity: String(it.quantity), unit: it.unit, unit_price: it.unit_price.toFixed(2),
@@ -425,6 +427,8 @@ export default function InvoicesScreen() {
         vat_treatment: editVatTreatment || undefined,
         notes: editNotes.trim() || undefined,
         items: parsedItems.length > 0 ? parsedItems : undefined,
+        // "" takes it off any location.
+        location_id: editLocation ?? '',
       });
       applyInvoiceUpdate(updated);
       setEditMode(false);
@@ -1032,6 +1036,8 @@ export default function InvoicesScreen() {
         onChangePaymentMethod={setEditPaymentMethod}
         editNotes={editNotes}
         onChangeNotes={setEditNotes}
+        editLocation={editLocation}
+        onChangeLocation={setEditLocation}
         editItems={editItems}
         onChangeEditItemField={updateEditItemField}
         savingEdit={savingEdit}

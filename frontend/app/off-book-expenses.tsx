@@ -21,7 +21,8 @@ import { api } from '../src/services/api';
 import { NonInvoiceExpense } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow, SuggestionChips, SwipeableRow } from '../src/components';
+import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow, SuggestionChips, SwipeableRow, LocationPicker } from '../src/components';
+import { useLocationChoice } from '../src/stores/locationsStore';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { getDescriptionSuggestions } from '../src/utils/expenseSuggestions';
 import { COLORS } from '../src/theme/colors';
@@ -58,6 +59,10 @@ export default function OffBookExpensesHistoryScreen() {
   const [formDescription, setFormDescription] = useState('');
   const [formAmount, setFormAmount] = useState('');
   const [formDate, setFormDate] = useState(new Date());
+  // The location it was for (Н11): a new one starts with the last one used.
+  const { fallback: defaultLocation } = useLocationChoice();
+  const [formLocationPick, setFormLocationPick] = useState<string | null | undefined>(undefined);
+  const formLocation = formLocationPick === undefined ? defaultLocation : formLocationPick;
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [descriptionError, setDescriptionError] = useState(false);
   const [amountError, setAmountError] = useState(false);
@@ -131,6 +136,7 @@ export default function OffBookExpensesHistoryScreen() {
     setFormDescription('');
     setFormAmount('');
     setFormDate(new Date());
+    setFormLocationPick(undefined);
     setDescriptionError(false);
     setAmountError(false);
   };
@@ -140,6 +146,7 @@ export default function OffBookExpensesHistoryScreen() {
     setFormDescription(expense.description);
     setFormAmount(String(expense.amount));
     setFormDate(new Date(expense.date));
+    setFormLocationPick(expense.location_id ?? null);
     setDescriptionError(false);
     setAmountError(false);
     setModalVisible(true);
@@ -161,10 +168,11 @@ export default function OffBookExpensesHistoryScreen() {
         date: format(formDate, 'yyyy-MM-dd'),
       };
       if (editingId) {
-        await api.updateExpense(editingId, payload);
+        // "" takes it off any location.
+        await api.updateExpense(editingId, { ...payload, location_id: formLocation ?? '' });
         Toast.success(t('expenses.expenseUpdated'));
       } else {
-        await api.createExpense(payload);
+        await api.createExpense({ ...payload, location_id: formLocation });
         Toast.success(t('msg.expenseSaved'));
       }
       Haptics.success();
@@ -388,6 +396,10 @@ export default function OffBookExpensesHistoryScreen() {
                   cancelTextIOS={t('common.cancel')}
                   locale={language}
                 />
+
+                <View style={{ marginTop: 12 }}>
+                  <LocationPicker value={formLocation} onChange={setFormLocationPick} noneLabel={t('locations.noneWhole')} />
+                </View>
 
                 <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
                   {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
