@@ -23,7 +23,8 @@ import { api } from '../src/services/api';
 import { BillingDocument, BillingDocumentItem, BillingDocumentType, Customer, PriceListEntry } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow } from '../src/components';
+import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow, LocationPicker } from '../src/components';
+import { useLocationChoice, useLocationsStore } from '../src/stores/locationsStore';
 import { COLORS } from '../src/theme/colors';
 import { useModules } from '../src/stores/modulesStore';
 
@@ -88,6 +89,11 @@ export default function BillingDocumentsScreen() {
   const [creditFor, setCreditFor] = useState<BillingDocument | null>(null);
   // The quote a bill or an invoice is being made of.
   const [fromQuote, setFromQuote] = useState<BillingDocument | null>(null);
+  // The location it is sold at (Н11): until picked, the last one used here.
+  const { fallback: defaultLocation } = useLocationChoice();
+  const rememberLocation = useLocationsStore((state) => state.remember);
+  const [locationPick, setLocationPick] = useState<string | null | undefined>(undefined);
+  const docLocation = locationPick === undefined ? defaultLocation : locationPick;
   // A quote: how long it is valid.
   const [formValidDays, setFormValidDays] = useState(30);
 
@@ -135,6 +141,7 @@ export default function BillingDocumentsScreen() {
   const resetForm = () => {
     setCreditFor(null);
     setFromQuote(null);
+    setLocationPick(undefined);
     setFormValidDays(30);
     setDocType(canBill ? 'bill' : 'invoice');
     setFormCustomerEik('');
@@ -218,6 +225,8 @@ export default function BillingDocumentsScreen() {
     resetForm();
     setDocType(target);
     setFromQuote(quote);
+    // Made of a quote: sold where the quote was given.
+    setLocationPick(quote.location_id ?? null);
     setFormCustomerName(quote.customer_name);
     setFormCustomerId(quote.customer_id || null);
     const known = customers.find((c) => c.id === quote.customer_id);
@@ -354,6 +363,7 @@ export default function BillingDocumentsScreen() {
         items: validItems,
         notes: formNotes.trim() || undefined,
         ...(fromQuote ? { from_quote_id: fromQuote.id } : {}),
+        ...(docLocation ? { location_id: docLocation } : {}),
         ...(docType === 'quote' ? { valid_until: format(addDays(new Date(), formValidDays), 'yyyy-MM-dd') } : {}),
         ...(isInvoice ? {
           customer_eik: formCustomerEik.trim() || undefined,
@@ -363,6 +373,7 @@ export default function BillingDocumentsScreen() {
           invoice_number: !hasIssuedInvoices && formStartNumber.trim() ? formStartNumber.trim() : undefined,
         } : {}),
       });
+      if (docLocation) rememberLocation(docLocation);
       Haptics.success();
       Toast.success(
         isInvoice
@@ -659,6 +670,11 @@ export default function BillingDocumentsScreen() {
                 </View>
                 )}
                 {isInvoice && !creditFor && <Text style={styles.invoiceHint}>{t('billingDocuments.invoiceHint')}</Text>}
+                {!creditFor && (
+                  <View style={{ marginTop: 10 }}>
+                    <LocationPicker value={docLocation} onChange={setLocationPick} noneLabel={t('locations.noneWhole')} />
+                  </View>
+                )}
                 {fromQuote && (
                   <Text style={styles.invoiceHint}>
                     {t('billingDocuments.fromQuote').replace('{amount}', fromQuote.total_amount.toFixed(2))}

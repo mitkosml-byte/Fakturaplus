@@ -23,6 +23,7 @@ import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useModules } from '../../src/stores/modulesStore';
+import { useLocationsStore } from '../../src/stores/locationsStore';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
@@ -66,6 +67,8 @@ export default function StatsScreen() {
   const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
   const { uses } = useModules();
+  // A business with locations sees them side by side (Н11).
+  const hasLocations = useLocationsStore((state) => state.locations.length > 0);
   const router = useRouter();
   // Dimensions.get('window') used to be read ONCE at module-eval time -
   // harmless on native, but this app's web build is statically pre-rendered
@@ -1075,6 +1078,12 @@ export default function StatsScreen() {
                   <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/price-list')}>
                     <Ionicons name="pricetags-outline" size={15} color={COLORS.primary} />
                     <Text style={styles.quickLinkChipText}>{t('priceList.title')}</Text>
+                  </TouchableOpacity>
+                )}
+                {hasLocations && hasPermission('view_profit') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/locations')}>
+                    <Ionicons name="storefront-outline" size={15} color={COLORS.success} />
+                    <Text style={styles.quickLinkChipText}>{t('locations.title')}</Text>
                   </TouchableOpacity>
                 )}
                 {hasPermission('view_profit') && (

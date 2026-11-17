@@ -14,6 +14,7 @@ import { OnboardingTutorial } from '../src/components/OnboardingTutorial';
 import { ToastHost } from '../src/components/ToastHost';
 import { useLanguageStore, useTranslation } from '../src/i18n';
 import { useModulesStore } from '../src/stores/modulesStore';
+import { useLocationsStore } from '../src/stores/locationsStore';
 import { useScanQueueStore } from '../src/stores/scanQueueStore';
 import NetInfo from '@react-native-community/netinfo';
 import { Toast } from '../src/utils/toast';
@@ -75,10 +76,13 @@ function AppShell() {
   // whenever the person moves to another company.
   const { user, isAuthenticated } = useAuth();
   const loadModules = useModulesStore((state) => state.load);
+  const loadLocations = useLocationsStore((state) => state.load);
   const companyId = isAuthenticated ? user?.company_id ?? null : null;
   useEffect(() => {
     loadModules(companyId);
-  }, [companyId, loadModules]);
+    // The business's locations - the forms offer them (Н11).
+    loadLocations(companyId);
+  }, [companyId, loadModules, loadLocations]);
 
   return (
     <>

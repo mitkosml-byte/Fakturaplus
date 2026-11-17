@@ -31,6 +31,7 @@ from server import (
     _team_channel_id,
 )
 import server
+from routers.locations import require_location
 import uuid
 from pymongo.errors import DuplicateKeyError
 
@@ -382,6 +383,7 @@ async def _create_issued_invoice(
     `recurring`: (the repeating invoice, its month) it is issued for."""
     company_id, scope = await get_company_scope(current_user)
     quote = await _quote_to_convert(scope, payload.from_quote_id)
+    location_id = await require_location(company_id, payload.location_id or (quote or {}).get("location_id"))
     issued = business_day(payload.issue_date) if payload.issue_date else today_local()
     if issued is None:
         raise HTTPException(status_code=400, detail="Невалидна дата на издаване")
@@ -432,6 +434,7 @@ async def _create_issued_invoice(
         vat_exempt_basis=None if vat_registered else VAT_EXEMPT_BASIS,
         external=payload.external, in_till=in_till, source_quote_id=quote["id"] if quote else None,
         recurring_invoice_id=recurring[0] if recurring else None, recurring_month=recurring[1] if recurring else None,
+        location_id=location_id,
     )
     if not paid_when_issued:
         receivable = Receivable(
@@ -532,6 +535,8 @@ async def _create_credit_note(payload: BillingDocumentCreate, current_user: User
         vat_exempt_basis=invoice.get("vat_exempt_basis"), external=payload.external,
         credited_document_id=invoice["id"], credited_invoice_number=invoice.get("invoice_number"),
         credited_issue_date=invoice.get("issue_date"),
+        # Taken off the location the invoice was for.
+        location_id=invoice.get("location_id"),
     )
     try:
         await server.db.billing_documents.insert_one(document.model_dump())
@@ -559,6 +564,7 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
     require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
     quote = await _quote_to_convert(scope, payload.from_quote_id) if payload.doc_type == BillingDocumentType.BILL else None
+    payload.location_id = await require_location(company_id, payload.location_id or (quote or {}).get("location_id"))
     payload.customer_id = await _customer_for(company_id, scope, current_user.user_id, payload)
     total_amount = round(sum(item.quantity * item.unit_price for item in payload.items), 2)
     issue_date = payload.issue_date or today_local().isoformat()
@@ -593,7 +599,7 @@ async def create_billing_document(payload: BillingDocumentCreate, current_user: 
             user_id=current_user.user_id, company_id=company_id,
             customer_id=document.customer_id, customer_name=document.customer_name,
             description=f"Сметка от {issue_date}" + (f" - {payload.notes}" if payload.notes else ""),
-            amount=total_amount, due_date=due_date,
+            amount=total_amount, due_date=due_date, location_id=document.location_id,
         )
         await server.db.receivables.insert_one(receivable.model_dump())
         document.receivable_id = receivable.id

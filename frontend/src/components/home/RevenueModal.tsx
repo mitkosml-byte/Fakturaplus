@@ -57,6 +57,8 @@ type Props = {
   // The till's daily report from a photo (Н3).
   onScanReport?: () => void;
   scanningReport?: boolean;
+  // Which location's part of the day this is (Н11) - only with locations.
+  locationSlot?: React.ReactNode;
 };
 
 export function RevenueModal({
@@ -64,7 +66,7 @@ export function RevenueModal({
   dateLocale, language, ocrAdditionNote, fiscalRevenue, onChangeFiscalRevenue, cardRevenue,
   onChangeCardRevenue, vatRate, onChangeVatRate, splitByRate, onToggleSplitByRate, rateAmounts, onChangeRateAmount,
   pocketMoney, onChangePocketMoney, showPocketMoney, isSubmitting, onSubmit,
-  onCopyYesterday, copyingYesterday, onScanReport, scanningReport,
+  onCopyYesterday, copyingYesterday, onScanReport, scanningReport, locationSlot,
 }: Props) {
   const { t } = useTranslation();
 
@@ -110,6 +112,8 @@ export function RevenueModal({
             cancelTextIOS={t('common.cancel')}
             locale={language}
           />
+
+          {locationSlot}
 
           <View style={styles.editNoticeBanner}>
             <Ionicons name="information-circle" size={18} color={COLORS.primary} />

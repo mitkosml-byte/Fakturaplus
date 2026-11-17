@@ -31,8 +31,10 @@ from server import (
     _team_channel_id,
 )
 import server
+from typing import Callable
 from pymongo.errors import DuplicateKeyError
 from services import revenue_vat
+from routers.locations import company_has_locations, require_location
 
 router = APIRouter(prefix="/api")
 
@@ -91,6 +93,108 @@ async def _save_revenue_day(company_id: Optional[str], scope: dict, current_user
     return saved
 
 
+# A day's revenue in a business with locations (Н11) is kept in parts: each
+# location's ("by_location": {location id: its part}) and what no location
+# holds - a day entered before there were locations, a sale for the whole
+# business. The day's own fields stay its total, which every module reads;
+# a part is only ever changed together with the total, so the parts always
+# add up to the day and nothing is counted twice or lost.
+PART_FIELDS = ("fiscal_revenue", "card_revenue", "pocket_money")
+
+
+def _sales_by_rate(part: dict) -> Dict[float, float]:
+    """A day's till revenue - or a part of it - by VAT rate."""
+    groups = part.get("vat_groups") or []
+    if groups:
+        return {round(float(g["rate_percent"]), 2): float(g["amount"]) for g in groups}
+    amount = float(part.get("fiscal_revenue") or 0)
+    rate = part.get("vat_rate_percent")
+    return {round(20.0 if rate is None else float(rate), 2): amount} if amount > 0 else {}
+
+
+def _shape_vat(part: Dict[str, Any], by_rate: Dict[float, float], fallback_rate: float) -> None:
+    """Its VAT fields from its sales by rate: one rate - the whole of it at
+    that rate; several - the groups, and the rate of most of the sales."""
+    groups = revenue_vat.normalize_groups({"rate_percent": rate, "amount": amount} for rate, amount in by_rate.items())
+    part["vat_groups"] = groups if len(groups) > 1 else []
+    part["vat_rate_percent"] = max(groups, key=lambda g: g["amount"])["rate_percent"] if groups else fallback_rate
+
+
+def unassigned_part(day: dict) -> Dict[str, Any]:
+    """What no location holds of a day: the day less its locations' parts."""
+    entries = list((day.get("by_location") or {}).values())
+    part: Dict[str, Any] = {
+        f: round(float(day.get(f) or 0) - sum(float(e.get(f) or 0) for e in entries), 2) for f in PART_FIELDS
+    }
+    by_rate = _sales_by_rate(day)
+    for entry in entries:
+        for group_rate, amount in _sales_by_rate(entry).items():
+            by_rate[group_rate] = by_rate.get(group_rate, 0.0) - amount
+    day_rate = day.get("vat_rate_percent")
+    _shape_vat(part, by_rate, 20.0 if day_rate is None else float(day_rate))
+    return part
+
+
+def _day_part(day: dict, location_id: Optional[str]) -> Dict[str, Any]:
+    if not location_id:
+        return unassigned_part(day)
+    entry = (day.get("by_location") or {}).get(location_id)
+    if entry:
+        return dict(entry)
+    rate = day.get("vat_rate_percent")
+    return {**{f: 0.0 for f in PART_FIELDS}, "vat_rate_percent": 20.0 if rate is None else float(rate), "vat_groups": []}
+
+
+async def _save_revenue_part(company_id: Optional[str], scope: dict, current_user: User, day: str,
+                             location_id: Optional[str], change: Callable[[Dict[str, Any]], Dict[str, Any]]) -> dict:
+    """Changes one part of a day - a location's, or what no location holds
+    (`change` gets the part as it is and returns it as it is to be) - and
+    the day's total by exactly as much. A save of the same day by someone
+    else in between is never overwritten: this one is worked out again on
+    what that one left."""
+    for _ in range(5):
+        existing = await server.db.daily_revenue.find_one({**scope, "date": day}, {"_id": 0})
+        base = existing or DailyRevenue(
+            user_id=current_user.user_id, company_id=company_id, date=day,
+            fiscal_revenue=0, pocket_money=0, card_revenue=0, vat_rate_percent=20.0,
+        ).model_dump()
+        old = _day_part(base, location_id)
+        new = change(dict(old))
+        fields: Dict[str, Any] = {
+            f: round(float(base.get(f) or 0) - float(old.get(f) or 0) + float(new.get(f) or 0), 2) for f in PART_FIELDS
+        }
+        by_rate = _sales_by_rate(base)
+        for sign, part in ((-1, old), (1, new)):
+            for rate, amount in _sales_by_rate(part).items():
+                by_rate[rate] = by_rate.get(rate, 0.0) + sign * amount
+        new_rate = new.get("vat_rate_percent")
+        _shape_vat(fields, by_rate, 20.0 if new_rate is None else float(new_rate))
+        entry: Optional[Dict[str, Any]] = None
+        if location_id:
+            entry = {f: round(float(new.get(f) or 0), 2) for f in PART_FIELDS}
+            entry.update(vat_rate_percent=fields["vat_rate_percent"] if new_rate is None else float(new_rate),
+                         vat_groups=list(new.get("vat_groups") or []))
+        if existing is None:
+            doc = {**base, **fields, "by_location": {location_id: entry} if location_id else {}, "revision": 1}
+            try:
+                await server.db.daily_revenue.insert_one(dict(doc))
+                return doc
+            except DuplicateKeyError:
+                continue  # saved by someone a moment earlier - redone on theirs
+        update: Dict[str, Any] = dict(fields)
+        if location_id:
+            update[f"by_location.{location_id}"] = entry
+        moved = await server.db.daily_revenue.update_one(
+            {"id": existing["id"], "revision": existing.get("revision"), **{f: existing.get(f) for f in PART_FIELDS}},
+            {"$set": update, "$inc": {"revision": 1}},
+        )
+        if moved.matched_count:
+            saved = await server.db.daily_revenue.find_one({"id": existing["id"]}, {"_id": 0})
+            saved.setdefault("company_id", company_id)
+            return saved
+    raise HTTPException(status_code=409, detail="Денят се записва в момента и от друг - опитайте отново")
+
+
 def _apply_vat_groups(revenue: DailyRevenueCreate, changes: Dict[str, Any], held_groups: List[dict]) -> None:
     """The day's till revenue by VAT rate, as its save says it. Groups
     sent: the till total is their sum (a total sent beside them must be the
@@ -137,9 +241,20 @@ async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User =
     require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
     day = _revenue_day(revenue.date)
-    changes = {k: v for k, v in revenue.model_dump(exclude={"date"}).items() if v is not None}
+    location_id = await require_location(company_id, revenue.location_id)
+    changes = {k: v for k, v in revenue.model_dump(exclude={"date", "location_id"}).items() if v is not None}
     if not get_financial_visibility(current_user)["pocket_money"]:
         changes.pop("pocket_money", None)
+    if location_id or await company_has_locations(company_id):
+        # This location's part of the day - or, with none named, what no
+        # location holds - is what the form showed and what it replaces.
+        def change(part: Dict[str, Any]) -> Dict[str, Any]:
+            part_changes = dict(changes)
+            _apply_vat_groups(revenue, part_changes, list(part.get("vat_groups") or []))
+            return {**part, **part_changes}
+
+        saved = await _save_revenue_part(company_id, scope, current_user, day, location_id, change)
+        return _revenue_for_viewer(saved, current_user)
     held_groups: List[dict] = []
     if revenue.vat_groups is None and revenue.vat_rate_percent is None and "fiscal_revenue" in changes:
         held = await server.db.daily_revenue.find_one({**scope, "date": day}, {"_id": 0, "vat_groups": 1})
@@ -156,9 +271,16 @@ async def add_pocket_money(payload: PocketMoneyAdd, current_user: User = Depends
     safe for someone who may not see pocket money too."""
     require_permission(current_user, "add_revenue")
     company_id, scope = await get_company_scope(current_user)
-    saved = await _save_revenue_day(
-        company_id, scope, current_user, _revenue_day(payload.date), {}, {"pocket_money": round(payload.amount, 2)},
-    )
+    day = _revenue_day(payload.date)
+    amount = round(payload.amount, 2)
+    location_id = await require_location(company_id, payload.location_id)
+    if location_id or await company_has_locations(company_id):
+        saved = await _save_revenue_part(
+            company_id, scope, current_user, day, location_id,
+            lambda part: {**part, "pocket_money": round(float(part.get("pocket_money") or 0) + amount, 2)},
+        )
+    else:
+        saved = await _save_revenue_day(company_id, scope, current_user, day, {}, {"pocket_money": amount})
     return _revenue_for_viewer(saved, current_user)
 
 def _require_revenue_day_access(current_user: User) -> None:
@@ -195,12 +317,17 @@ async def get_today_revenue(current_user: User = Depends(get_current_user)):
     }
 
 @router.get("/daily-revenue/by-date/{date}")
-async def get_revenue_by_date(date: str, current_user: User = Depends(get_current_user)):
-    """Get revenue for a specific date, for the whole company"""
+async def get_revenue_by_date(date: str, location_id: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    """A day's revenue, as the form shows it to be corrected: the whole
+    day - or, in a business with locations, the part of the location named
+    (none named: what no location holds), which is what a save replaces."""
     _require_revenue_day_access(current_user)
-    _, scope = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
+    location_id = await require_location(company_id, location_id)
     existing = await server.db.daily_revenue.find_one({**scope, "date": date}, {"_id": 0})
     can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
+    if existing and (location_id or existing.get("by_location")):
+        existing = _day_part(existing, location_id)
 
     if existing:
         return {
@@ -262,6 +389,7 @@ async def _refuse_wages(expense_id: str, scope: dict) -> None:
 async def create_expense(expense: NonInvoiceExpenseCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_expenses")
     company_id, _ = await get_company_scope(current_user)
+    expense.location_id = await require_location(company_id, expense.location_id)
     expense_obj = NonInvoiceExpense(
         user_id=current_user.user_id,
         company_id=company_id,
@@ -296,9 +424,11 @@ async def get_expenses(
 @router.put("/expenses/{expense_id}", response_model=NonInvoiceExpense)
 async def update_expense(expense_id: str, update: NonInvoiceExpenseUpdate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "add_expenses")
-    _, scope = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
     await _refuse_wages(expense_id, scope)
     update_data = {k: v for k, v in update.model_dump(exclude_unset=True).items()}
+    if "location_id" in update_data:
+        update_data["location_id"] = await require_location(company_id, update_data["location_id"])
     if update_data:
         result = await server.db.expenses.update_one({"id": expense_id, **scope}, {"$set": update_data})
         if result.matched_count == 0:

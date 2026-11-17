@@ -173,9 +173,9 @@ export default function ReceivablesScreen() {
     setPayMethod('cash');
   };
 
-  const handleLogAsRevenue = async (amount: number, day: string) => {
+  const handleLogAsRevenue = async (amount: number, day: string, locationId?: string | null) => {
     try {
-      await api.addPocketMoney({ date: day, amount });
+      await api.addPocketMoney({ date: day, amount, location_id: locationId || null });
       Haptics.success();
       Toast.success(t('receivables.logAsRevenueSuccess'));
     } catch (error: any) {
@@ -209,7 +209,7 @@ export default function ReceivablesScreen() {
             .replace('{date}', format(payDate, 'd MMM', { locale: dateLocale })),
           [
             { text: t('receivables.logAsRevenueSkip'), style: 'cancel' },
-            { text: t('receivables.logAsRevenueConfirm'), onPress: () => handleLogAsRevenue(amount, day) },
+            { text: t('receivables.logAsRevenueConfirm'), onPress: () => handleLogAsRevenue(amount, day, r.location_id) },
           ]
         );
       }

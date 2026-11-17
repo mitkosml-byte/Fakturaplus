@@ -35,6 +35,7 @@ from server import (
     _team_channel_id,
 )
 import server
+from routers.locations import require_location
 from routers.price_tracking import (
     detect_pack_multiple,
     forget_pack_rule,
@@ -95,6 +96,7 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
             detail=f"{what} с номер {invoice.invoice_number} от {invoice.supplier} вече е {done}{added_by}!",
         )
 
+    invoice.location_id = await require_location(company_id, invoice.location_id)
     invoice_dict = invoice.model_dump()
     # The business day the invoice is dated, kept as 00:00 UTC of it
     # (services/business_calendar) - whatever device or time of day it was
@@ -539,6 +541,9 @@ async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current
     existing = await server.db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
+    if "location_id" in update_data:
+        # "" takes it off any location.
+        update_data["location_id"] = await require_location(company_id, update_data["location_id"])
 
     # The document's type after this edit, and its amounts signed for it: a
     # credit note's below zero, an invoice's never. Switching the type flips

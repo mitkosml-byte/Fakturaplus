@@ -436,6 +436,8 @@ class Invoice(BaseModel):
     # invoice; "credit_note" is a credit note, its amounts below zero.
     document_type: Optional[str] = None
     company_id: Optional[str] = None  # Връзка към фирмата
+    # The location it was bought for (routers/locations); None: the whole business.
+    location_id: Optional[str] = None
     supplier: str
     supplier_eik: Optional[str] = None  # ЕИК/Булстат на доставчика
     invoice_number: str
@@ -596,6 +598,7 @@ class InvoiceCreate(BaseModel):
     supplier: str
     supplier_eik: Optional[str] = None
     invoice_number: str
+    location_id: Optional[str] = Field(default=None, max_length=64)
     document_type: InvoiceDocumentType = "invoice"
     # As printed: a credit note may be typed with or without a minus, it
     # is stored below zero either way (sign_invoice_amounts).
@@ -624,6 +627,8 @@ class InvoiceUpdate(BaseModel):
     supplier: Optional[str] = None
     supplier_eik: Optional[str] = None
     invoice_number: Optional[str] = None
+    # "" takes it off any location.
+    location_id: Optional[str] = Field(default=None, max_length=64)
     document_type: Optional[InvoiceDocumentType] = None
     # Signed by the route, against the document's type after this edit.
     amount_without_vat: Optional[float] = None
@@ -661,6 +666,9 @@ class DailyRevenue(BaseModel):
     # report gives it (they add up to fiscal_revenue); empty when the whole
     # day is at vat_rate_percent (services/revenue_vat).
     vat_groups: List[VatGroupAmount] = Field(default_factory=list)
+    # Stored beside these, never in a reply: "by_location" - each location's
+    # part of the day (routers/revenue_expenses._save_revenue_part); the
+    # day's own fields stay its total.
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class DailyRevenueCreate(BaseModel):
@@ -676,6 +684,8 @@ class DailyRevenueCreate(BaseModel):
     # The day by VAT rate, as the till's daily report gives it: the till
     # total is then their sum. An empty list: the whole day at one rate.
     vat_groups: Optional[List[VatGroupAmount]] = None
+    # The figures are this location's for the day (routers/locations).
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 
 class PocketMoneyAdd(BaseModel):
@@ -683,6 +693,8 @@ class PocketMoneyAdd(BaseModel):
     never replacing it (a paid bill logged as revenue)."""
     date: str
     amount: float = Field(gt=0)
+    # Added to this location's part of the day (routers/locations).
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 # An expense record that is wages paid by Work Schedule (one per day
 # worked): counted with payroll, never as an off-book expense, and managed
@@ -698,6 +710,7 @@ class NonInvoiceExpense(BaseModel):
     amount: float
     date: str
     kind: Optional[str] = None  # SCHEDULE_WAGES, or None for an ordinary off-book expense
+    location_id: Optional[str] = None  # the location it was for; None: the whole business
     schedule_payment_id: Optional[str] = None
     # A recurring expense's payment for a month ("YYYY-MM") - see
     # routers/recurring.py; one per recurring expense and month.
@@ -709,11 +722,13 @@ class NonInvoiceExpenseCreate(BaseModel):
     description: str
     amount: float = Field(gt=0)
     date: str
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 class NonInvoiceExpenseUpdate(BaseModel):
     description: Optional[str] = None
     amount: Optional[float] = Field(default=None, gt=0)
     date: Optional[str] = None
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 # ===================== PERSONAL EXPENSES & ROI MODELS =====================
 
@@ -2626,6 +2641,9 @@ class Receivable(BaseModel):
     # Its document was cancelled (or deleted) after money came in: nothing
     # is owed any more, and what was paid is the customer's to get back.
     cancelled: bool = False
+    # Owed on a bill of a location (routers/locations): a cash payment logged
+    # as revenue goes to that location's day.
+    location_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -2792,6 +2810,8 @@ class BillingDocument(BaseModel):
     # its month "YYYY-MM": the month's invoice is this one, never a second.
     recurring_invoice_id: Optional[str] = None
     recurring_month: Optional[str] = None
+    # The location it was sold at (routers/locations); None: the whole business.
+    location_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -2851,6 +2871,7 @@ class BillingDocumentCreate(BaseModel):
     valid_until: Optional[str] = None
     # A bill or an invoice made of a quote: that quote (it is then accepted).
     from_quote_id: Optional[str] = None
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 
 # A quote is valid this many days after it is issued unless given a date.
@@ -5242,6 +5263,8 @@ class Employee(BaseModel):
     # doesn't require a login at all (e.g. kitchen staff who never use the
     # app), so this stays optional rather than merging the two identities.
     linked_user_id: Optional[str] = None
+    # The location they work at (routers/locations) - its payroll goes there.
+    location_id: Optional[str] = None
     # Paid annual leave, in working days a year (чл. 155 КТ: at least 20),
     # and the unused days carried into a year - {"year", "days"} - entered
     # once; the years after it are worked out (employee_leave_balance).
@@ -5259,6 +5282,7 @@ class EmployeeCreate(BaseModel):
     additional_insurance: float = 0
     linked_user_id: Optional[str] = None
     annual_leave_days: float = Field(default=20, ge=0, le=365)
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
@@ -5271,6 +5295,8 @@ class EmployeeUpdate(BaseModel):
     active: Optional[bool] = None
     linked_user_id: Optional[str] = None
     annual_leave_days: Optional[float] = Field(default=None, ge=0, le=365)
+    # "" takes them off any location.
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 class PayrollRates(BaseModel):
     company_id: str
@@ -6564,6 +6590,8 @@ async def create_indexes():
         await db.price_list.create_index([("company_id", 1), ("name_key", 1)])
         # The owner's own deadlines.
         await db.deadlines.create_index([("company_id", 1), ("due_date", 1)])
+        # The business's locations (shops, sites, branches).
+        await db.locations.create_index([("company_id", 1), ("created_at", 1)])
         await db.billing_documents.create_index([("company_id", 1), ("recurring_invoice_id", 1), ("recurring_month", 1)])
 
         # A login waiting for its second step: found by its token, gone
@@ -6976,6 +7004,8 @@ from routers import price_list as price_list_router
 app.include_router(price_list_router.router)
 from routers import deadlines as deadlines_router
 app.include_router(deadlines_router.router)
+from routers import locations as locations_router
+app.include_router(locations_router.router)
 
 from routers import auth
 app.include_router(auth.router)

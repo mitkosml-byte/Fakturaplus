@@ -33,3 +33,4 @@ export { SuggestionChips } from './SuggestionChips';
 export { SwipeableRow } from './SwipeableRow';
 export { TeamMemberProfileSheet } from './TeamMemberProfileSheet';
 export { AvatarCropModal } from './AvatarCropModal';
+export { LocationPicker } from './LocationPicker';

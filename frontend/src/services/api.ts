@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Deadline, DeadlineInput, PriceList, PriceListEntry, PriceEntryInput, PurchaseItem, SoldItem, PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+import { BusinessLocation, LocationComparison, Deadline, DeadlineInput, PriceList, PriceListEntry, PriceEntryInput, PurchaseItem, SoldItem, PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
@@ -561,7 +561,9 @@ class ApiService {
 
   // A field left out keeps what the day already holds (pocket money for
   // someone who may not see it, an empty import cell).
-  async createDailyRevenue(revenue: { date: string; fiscal_revenue?: number; pocket_money?: number; card_revenue?: number; vat_rate_percent?: number; vat_groups?: VatGroupAmount[] }): Promise<DailyRevenue> {
+  // With a location: that location's part of the day; in a business with
+  // locations, none named is what no location holds.
+  async createDailyRevenue(revenue: { date: string; fiscal_revenue?: number; pocket_money?: number; card_revenue?: number; vat_rate_percent?: number; vat_groups?: VatGroupAmount[]; location_id?: string | null }): Promise<DailyRevenue> {
     return this.fetch('/daily-revenue', {
       method: 'POST',
       body: JSON.stringify(revenue),
@@ -570,7 +572,7 @@ class ApiService {
 
   // Adds to a day's pocket money (never replaces it) - a paid bill logged
   // as revenue.
-  async addPocketMoney(payload: { date: string; amount: number }): Promise<DailyRevenue> {
+  async addPocketMoney(payload: { date: string; amount: number; location_id?: string | null }): Promise<DailyRevenue> {
     return this.fetch('/daily-revenue/add-pocket', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -586,14 +588,15 @@ class ApiService {
     return this.fetch(`/expenses${query ? `?${query}` : ''}`);
   }
 
-  async createExpense(expense: { description: string; amount: number; date: string }): Promise<NonInvoiceExpense> {
+  async createExpense(expense: { description: string; amount: number; date: string; location_id?: string | null }): Promise<NonInvoiceExpense> {
     return this.fetch('/expenses', {
       method: 'POST',
       body: JSON.stringify(expense),
     });
   }
 
-  async updateExpense(id: string, update: Partial<{ description: string; amount: number; date: string }>): Promise<NonInvoiceExpense> {
+  // location_id "" takes it off any location.
+  async updateExpense(id: string, update: Partial<{ description: string; amount: number; date: string; location_id: string }>): Promise<NonInvoiceExpense> {
     return this.fetch(`/expenses/${id}`, {
       method: 'PUT',
       body: JSON.stringify(update),
@@ -680,6 +683,8 @@ class ApiService {
     valid_until?: string;
     // A bill or an invoice made of a quote.
     from_quote_id?: string;
+    // The location it was sold at.
+    location_id?: string;
   }): Promise<BillingDocument> {
     return this.fetch('/billing-documents', { method: 'POST', body: JSON.stringify(doc) });
   }
@@ -784,6 +789,27 @@ class ApiService {
   // The payments the person confirmed, and the closing balance if asked.
   async applyBankStatement(body: BankStatementApply): Promise<BankStatementApplyResult> {
     return this.fetch('/bank-statement/apply', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  // The business's locations (Н11).
+  async getLocations(): Promise<BusinessLocation[]> {
+    return this.fetch('/locations');
+  }
+
+  async createLocation(body: { name: string; address?: string | null }): Promise<BusinessLocation> {
+    return this.fetch('/locations', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  async updateLocation(id: string, body: { name?: string; address?: string | null; is_active?: boolean }): Promise<BusinessLocation> {
+    return this.fetch(`/locations/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+
+  async deleteLocation(id: string): Promise<void> {
+    await this.fetch(`/locations/${id}`, { method: 'DELETE' });
+  }
+
+  async compareLocations(startDate: string, endDate: string): Promise<LocationComparison> {
+    return this.fetch(`/locations/compare?start_date=${startDate}&end_date=${endDate}`);
   }
 
   // The business's own deadlines (Н10).
@@ -1003,7 +1029,9 @@ class ApiService {
   }
 
   // Revenue by date
-  async getRevenueByDate(date: string): Promise<{
+  // The day - or, in a business with locations, the part of the location
+  // named (none: what no location holds) - as a save would replace it.
+  async getRevenueByDate(date: string, locationId?: string | null): Promise<{
     date: string;
     fiscal_revenue: number;
     pocket_money: number;
@@ -1011,7 +1039,7 @@ class ApiService {
     vat_rate_percent: number;
     vat_groups?: VatGroupAmount[];
   }> {
-    return this.fetch(`/daily-revenue/by-date/${date}`);
+    return this.fetch(`/daily-revenue/by-date/${date}${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`);
   }
 
   async getTodayRevenue(): Promise<{

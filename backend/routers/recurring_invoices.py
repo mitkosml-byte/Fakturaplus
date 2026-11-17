@@ -17,6 +17,7 @@ import calendar
 from fastapi import APIRouter
 from server import *
 import server
+from routers.locations import require_location
 
 from routers.receivables import _create_issued_invoice
 
@@ -47,6 +48,8 @@ class RecurringInvoiceCreate(BaseModel):
     due_days: Optional[int] = Field(default=None, ge=0, le=180)
     start_month: Optional[str] = Field(default=None, pattern=_MONTH_PATTERN)
     end_month: Optional[str] = Field(default=None, pattern=_MONTH_PATTERN)
+    # The location its invoices are for (routers/locations).
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 
 class RecurringInvoiceUpdate(BaseModel):
@@ -60,6 +63,8 @@ class RecurringInvoiceUpdate(BaseModel):
     # "" clears it: no last month.
     end_month: Optional[str] = Field(default=None, pattern=r"^(\d{4}-(0[1-9]|1[0-2]))?$")
     is_active: Optional[bool] = None
+    # "" takes it off any location.
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 
 def month_of(day: date) -> str:
@@ -197,6 +202,7 @@ async def create_recurring_invoice(payload: RecurringInvoiceCreate, current_user
             "customer_eik": source.get("customer_eik"), "customer_address": source.get("customer_address"),
             "items": source.get("items") or [], "notes": source.get("notes"),
             "payment_method": source.get("payment_method") or "bank_transfer",
+            "location_id": source.get("location_id"),
             "day_of_month": issued_on.day if issued_on else 1,
             "due_days": (due - issued_on).days if due and issued_on and due >= issued_on else INVOICE_TERM_DAYS,
         }
@@ -221,6 +227,7 @@ async def create_recurring_invoice(payload: RecurringInvoiceCreate, current_user
         "due_days": int(fields["due_days"]) if fields.get("due_days") is not None else INVOICE_TERM_DAYS,
         "start_month": fields.get("start_month") or month_of(today), "end_month": fields.get("end_month"),
         "is_active": True, "issued": [], "source_document_id": source["id"] if source else None,
+        "location_id": await require_location(company_id, fields.get("location_id")),
         "created_at": datetime.now(timezone.utc),
     }
     await server.db.recurring_invoices.insert_one(dict(template))
@@ -249,6 +256,8 @@ async def update_recurring_invoice(template_id: str, payload: RecurringInvoiceUp
         update["items"] = [BillingDocumentItem(**item).model_dump() for item in update["items"]]
     if update.get("end_month") == "":
         update["end_month"] = None
+    if "location_id" in update:
+        update["location_id"] = await require_location(company_id, update["location_id"])
     if update:
         await server.db.recurring_invoices.update_one({"id": template_id, **scope}, {"$set": update})
     return await _view(company_id, scope, await _template(scope, template_id))
@@ -305,6 +314,7 @@ async def issue_recurring_invoice(template_id: str, current_user: User = Depends
         notes=with_month(template.get("notes"), month), issue_date=today.isoformat(),
         due_date=(today + timedelta(days=int(template.get("due_days") or 0))).isoformat() if paid_by_bank else None,
         payment_method=template.get("payment_method") or "bank_transfer",
+        location_id=template.get("location_id"),
     )
     try:
         issued = await _create_issued_invoice(invoice, current_user, recurring=(template_id, month))

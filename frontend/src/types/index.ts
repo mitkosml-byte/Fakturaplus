@@ -265,6 +265,43 @@ export interface RecurringInvoiceInput {
 export type DeadlineCategory = 'insurance' | 'inspection' | 'contract' | 'accountant' | 'tax' | 'license' | 'other';
 export type DeadlineRepeat = 'none' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly' | 'months';
 
+// The business's locations (Н11): shops, sites, branches.
+export interface BusinessLocation {
+  id: string;
+  name: string;
+  address: string | null;
+  is_active: boolean;
+}
+
+export interface LocationComparisonRow {
+  id: string;
+  name: string;
+  is_active: boolean;
+  income: number;
+  expense: number;
+  profit: number;
+  margin_percent: number | null;
+  revenue_days: number;
+  revenue_per_day: number | null;
+  parts: {
+    till: number;
+    issued_invoices: number;
+    purchases: number;
+    off_book: number | null;  // null: hidden from this person
+    payroll: number;
+  };
+  team: number;
+}
+
+export interface LocationComparison {
+  period: { start: string; end: string };
+  locations: LocationComparisonRow[];
+  // What no location holds (depreciation, a purchase for the whole business...).
+  shared: { income: number; expense: number; profit: number };
+  // The business's own numbers - the same as in Statistics.
+  total: { income: number; expense: number; profit: number };
+}
+
 export interface Deadline {
   id: string;
   title: string;
@@ -490,6 +527,8 @@ export interface Invoice {
   id: string;
   user_id: string;
   company_id?: string;
+  // The location it was bought for; none: the whole business.
+  location_id?: string | null;
   supplier: string;
   supplier_eik?: string;
   invoice_number: string;
@@ -562,6 +601,7 @@ export interface NonInvoiceExpense {
   // A recurring expense's payment for a month (recorded from Budget)
   recurring_id?: string | null;
   recurring_month?: string | null;
+  location_id?: string | null;
 }
 
 export interface Customer {
@@ -639,6 +679,8 @@ export interface Receivable {
   // so a payment on it is never offered as new revenue.
   billing_document_id?: string | null;
   revenue_counted?: boolean;
+  // Owed on a bill of a location: logged as revenue, it goes to that location.
+  location_id?: string | null;
   // Taken off by credit notes to its invoice.
   credited_amount?: number;
   // Its document was cancelled after money came in: nothing is owed, what
@@ -680,6 +722,7 @@ export interface BillingDocument {
   customer_name: string;
   items: BillingDocumentItem[];
   notes?: string | null;
+  location_id?: string | null;
   issue_date: string;
   due_date?: string | null;
   total_amount: number;  // an invoice's is with VAT
@@ -1469,6 +1512,8 @@ export interface Employee {
   // into a year (entered once).
   annual_leave_days?: number;
   leave_carryover?: { year: number; days: number } | null;
+  // The location they work at - its payroll goes there.
+  location_id?: string | null;
   created_at: string;
 }
 
@@ -1494,6 +1539,8 @@ export interface EmployeeCreate {
   food_vouchers?: number;
   additional_insurance?: number;
   linked_user_id?: string | null;
+  // "" on an update takes them off any location.
+  location_id?: string | null;
 }
 
 export type ShiftRepeatPattern = 'none' | 'daily' | 'weekly' | 'monthly';

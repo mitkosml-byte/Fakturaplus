@@ -78,6 +78,9 @@ class Section:
     # Settings-like records are keyed by the company (and their own key
     # fields) and carry no "id" of their own.
     has_id: bool = True
+    # Fields holding a map keyed by other records' ids (a day's revenue by
+    # location): the keys are carried over as the references are.
+    keyed_by_id: Tuple[str, ...] = field(default_factory=tuple)
 
 
 # Records whose user_id is who ENTERED them (older files left it out).
@@ -90,6 +93,7 @@ AUTHORED = {
 
 # Parents before the records that point at them.
 SECTIONS: List[Section] = [
+    Section("locations", lambda d: (_norm(d.get("name")),), label="Обекти"),
     Section("customers", lambda d: (_norm(d.get("name")),), label="Клиенти"),
     Section("employees", lambda d: (_norm(d.get("name")),), label="Служители"),
     Section("payroll_rates", None, singleton=True, has_id=False, label="Осигурителни ставки"),
@@ -133,7 +137,10 @@ SECTIONS: List[Section] = [
         ),
         label="Повтарящи се фактури",
     ),
-    Section("daily_revenue", lambda d: (_day(d.get("date")),), label="Дневни обороти", legacy_key="daily_revenues"),
+    Section(
+        "daily_revenue", lambda d: (_day(d.get("date")),), label="Дневни обороти", legacy_key="daily_revenues",
+        keyed_by_id=("by_location",),
+    ),
     Section(
         "expenses",
         lambda d: (_day(d.get("date")), _money(d.get("amount")), _norm(d.get("description"))),
@@ -359,6 +366,9 @@ async def restore(
                         doc[f] = id_map[doc[f]]
                     else:
                         unresolved.append(f)
+                for f in section.keyed_by_id:
+                    if isinstance(doc.get(f), dict):
+                        doc[f] = {id_map.get(key, key): value for key, value in doc[f].items()}
 
                 old_id = doc.get("id") if isinstance(doc.get("id"), str) else None
                 if old_id and old_id in here_ids:

@@ -33,6 +33,7 @@ _eik_check_digit,
     _team_channel_id,
 )
 import server
+from routers.locations import require_location
 from pymongo.errors import DuplicateKeyError
 
 router = APIRouter(prefix="/api")
@@ -122,6 +123,7 @@ async def create_employee(employee: EmployeeCreate, current_user: User = Depends
     require_permission(current_user, "manage_payroll")
     company_id, scope = await get_company_scope(current_user)
     await _validate_linked_user_id(employee.linked_user_id, company_id, scope)
+    employee.location_id = await require_location(company_id, employee.location_id)
 
     employee_obj = Employee(user_id=current_user.user_id, company_id=company_id, **employee.model_dump())
     await server.db.employees.insert_one(employee_obj.model_dump())
@@ -168,6 +170,9 @@ async def update_employee(employee_id: str, update: EmployeeUpdate, current_user
     company_id, scope = await get_company_scope(current_user)
     if "linked_user_id" in update_data:
         await _validate_linked_user_id(update_data["linked_user_id"], company_id, scope)
+    if "location_id" in update_data:
+        # "" takes them off any location.
+        update_data["location_id"] = await require_location(company_id, update_data["location_id"])
     result = await server.db.employees.update_one({"id": employee_id, **scope}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Служителят не е намерен")

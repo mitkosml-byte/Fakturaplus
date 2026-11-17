@@ -346,6 +346,17 @@ export default function ProfileScreen() {
               onPress: () => router.push('/users-management'),
             }]
           : []),
+        ...(company && (hasPermission('manage_company') || (hasPermission('view_statistics') && hasPermission('view_profit')))
+          ? [{
+              key: 'locations',
+              title: t('locations.title'),
+              subtitle: t('locations.menuDesc'),
+              icon: 'storefront-outline' as const,
+              iconBg: 'rgba(16, 185, 129, 0.15)',
+              iconColor: COLORS.success,
+              onPress: () => router.push('/locations'),
+            }]
+          : []),
         ...(uses('till') && hasPermission('manage_company')
           ? [{
               key: 'closedDays',

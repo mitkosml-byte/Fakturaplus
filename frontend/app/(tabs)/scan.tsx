@@ -22,7 +22,8 @@ import { Haptics } from '../../src/utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { prepareScanImage } from '../../src/utils/scanImage';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
-import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
+import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale, LocationPicker } from '../../src/components';
+import { useLocationChoice, useLocationsStore } from '../../src/stores/locationsStore';
 import { api } from '../../src/services/api';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useModules } from '../../src/stores/modulesStore';
@@ -167,6 +168,11 @@ export default function ScanScreen() {
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [items, setItems] = useState<EditableItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>('');
+  // The location the invoice is for (Н11): until picked, the last one used here.
+  const { fallback: defaultLocation } = useLocationChoice();
+  const rememberLocation = useLocationsStore((state) => state.remember);
+  const [locationPick, setLocationPick] = useState<string | null | undefined>(undefined);
+  const invoiceLocation = locationPick === undefined ? defaultLocation : locationPick;
   const [paymentMethodFromOcr, setPaymentMethodFromOcr] = useState(false);
   const [paymentMethodMissing, setPaymentMethodMissing] = useState(false);
   const [paymentDueDate, setPaymentDueDate] = useState<Date | null>(null);
@@ -675,7 +681,9 @@ export default function ScanScreen() {
         items: itemsPayload.length > 0 ? itemsPayload : undefined,
         payment_method: (!isCreditNote && paymentMethod) || undefined,
         payment_due_date: !isCreditNote && paymentMethod === 'bank_transfer' && paymentDueDate ? toApiDate(paymentDueDate) : undefined,
+        location_id: invoiceLocation,
       });
+      if (invoiceLocation) rememberLocation(invoiceLocation);
       Haptics.success();
       if (isCreditNote) {
         Toast.success(t('scan.creditNoteSaved'));
@@ -718,10 +726,12 @@ export default function ScanScreen() {
         issue_date: toApiDate(invoiceDate),
         payment_method: salesPaymentMethod,
         ...(salesPaymentMethod !== 'bank_transfer' ? { in_till: salesInTill } : {}),
+        ...(invoiceLocation ? { location_id: invoiceLocation } : {}),
         items: [{
           name: t('scan.salesLine').replace('{number}', number), quantity: 1, unit: 'бр.', unit_price: net, vat_rate: salesVatRate,
         }],
       });
+      if (invoiceLocation) rememberLocation(invoiceLocation);
       Haptics.success();
       Toast.success(t('scan.salesSaved').replace('{number}', saved.invoice_number || number));
       resetForm();
@@ -906,6 +916,7 @@ export default function ScanScreen() {
 
   const resetForm = () => {
     setOfflineWaiting(false);
+    setLocationPick(undefined);
     setCapturedImages([]);
     setOcrResult(null);
     setSupplier('');
@@ -1258,6 +1269,8 @@ export default function ScanScreen() {
                         </View>
                       </View>
 
+                      <LocationPicker value={invoiceLocation} onChange={setLocationPick} noneLabel={t('locations.noneWhole')} />
+
                       <View style={styles.inputGroup}>
                         <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
                         <View style={styles.vatTreatmentGrid}>
@@ -1478,6 +1491,8 @@ export default function ScanScreen() {
                       </View>
                     )}
                   </StaggerReveal>
+
+                  <LocationPicker value={invoiceLocation} onChange={setLocationPick} noneLabel={t('locations.noneWhole')} />
 
                   {/* Nothing is owed on a credit note - no payment to say. */}
                   {!isCreditNote && (

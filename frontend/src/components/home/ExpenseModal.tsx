@@ -37,13 +37,15 @@ type Props = {
   onSubmit: () => void;
   suggestions?: DescriptionSuggestion[];
   onPickSuggestion?: (s: DescriptionSuggestion) => void;
+  // Which location the expense is for (Н11) - only with locations.
+  locationSlot?: React.ReactNode;
 };
 
 export function ExpenseModal({
   visible, onClose, onViewHistory, date, onChangeDate, isDatePickerVisible, onOpenDatePicker,
   onCloseDatePicker, dateLocale, language, loadingExpenses, dayExpenses, onDeleteExpense,
   description, descriptionError, onChangeDescription, amount, amountError, onChangeAmount,
-  isSubmitting, onSubmit, suggestions, onPickSuggestion,
+  isSubmitting, onSubmit, suggestions, onPickSuggestion, locationSlot,
 }: Props) {
   const { t } = useTranslation();
 
@@ -135,6 +137,7 @@ export function ExpenseModal({
 
           <View style={styles.addExpenseSection}>
             <Text style={styles.addExpenseTitle}>{t('expenses.addNew')}:</Text>
+            {locationSlot}
 
             {suggestions && onPickSuggestion && (
               <SuggestionChips

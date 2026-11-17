@@ -27,7 +27,8 @@ import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator, PeriodSoFarNote } from '../../src/components/PeriodNavigator';
 import { useSharedPeriod } from '../../src/utils/sharedPeriod';
 import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
-import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard, LockedValue } from '../../src/components';
+import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard, LockedValue, LocationPicker } from '../../src/components';
+import { useLocationChoice, useLocationsStore } from '../../src/stores/locationsStore';
 import Animated from 'react-native-reanimated';
 import { PeriodState, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
@@ -133,6 +134,14 @@ export default function HomeScreen() {
   // one is ever open at a time, and this guards against a rapid double-tap
   // on Save creating a duplicate record.
   const [isSubmittingForm, setIsSubmittingForm] = useState(false);
+  // Which location a day's revenue or an expense is for (Н11): until
+  // picked, the one used last on this device. Nothing shows without locations.
+  const { fallback: defaultLocation } = useLocationChoice();
+  const rememberLocation = useLocationsStore((state) => state.remember);
+  const [revenueLocationPick, setRevenueLocationPick] = useState<string | null | undefined>(undefined);
+  const revenueLocation = revenueLocationPick === undefined ? defaultLocation : revenueLocationPick;
+  const [expenseLocationPick, setExpenseLocationPick] = useState<string | null | undefined>(undefined);
+  const expenseLocation = expenseLocationPick === undefined ? defaultLocation : expenseLocationPick;
 
   // Expense form
   const [expenseDescription, setExpenseDescription] = useState('');
@@ -218,22 +227,21 @@ export default function HomeScreen() {
     }
   }, []);
 
-  const loadCurrentDayRevenue = useCallback(async (date: Date) => {
+  // With locations, the day of the location picked (none picked: what no
+  // location holds) - the part a save replaces.
+  const fetchRevenueDay = useCallback(async (date: Date, locationId: string | null) => {
     try {
-      const dateStr = format(date, 'yyyy-MM-dd');
-      const data = await api.getRevenueByDate(dateStr);
-      setFiscalRevenue(data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
-      setPocketMoney(data.pocket_money > 0 ? data.pocket_money.toString() : '');
-      setCardRevenue(data.card_revenue > 0 ? data.card_revenue.toString() : '');
-      showRevenueVat(data.vat_groups, data.vat_rate_percent);
-      return data;
-    } catch (error) {
-      setFiscalRevenue('');
-      setPocketMoney('');
-      setCardRevenue('');
-      showRevenueVat([], 20);
+      return await api.getRevenueByDate(format(date, 'yyyy-MM-dd'), locationId);
+    } catch {
       return null;
     }
+  }, []);
+
+  const showRevenueDay = useCallback((data: Awaited<ReturnType<typeof api.getRevenueByDate>> | null) => {
+    setFiscalRevenue(data && data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
+    setPocketMoney(data && data.pocket_money > 0 ? data.pocket_money.toString() : '');
+    setCardRevenue(data && data.card_revenue > 0 ? data.card_revenue.toString() : '');
+    showRevenueVat(data?.vat_groups ?? [], data?.vat_rate_percent ?? 20);
   }, [showRevenueVat]);
 
   // Switches the form between one rate and the day by rate, keeping what
@@ -263,7 +271,7 @@ export default function HomeScreen() {
     setCopyingYesterday(true);
     try {
       const yesterdayStr = format(subDays(revenueDate, 1), 'yyyy-MM-dd');
-      const data = await api.getRevenueByDate(yesterdayStr);
+      const data = await api.getRevenueByDate(yesterdayStr, revenueLocation);
       if (!data || (data.fiscal_revenue === 0 && data.card_revenue === 0 && data.pocket_money === 0)) {
         Alert.alert(t('home.sameAsYesterday'), t('home.sameAsYesterdayEmpty'));
         return;
@@ -377,8 +385,12 @@ export default function HomeScreen() {
   // already has manually-logged sales adds to the total instead of erasing it.
   useEffect(() => {
     if (!revenueModalVisible) return;
+    let stale = false;
     (async () => {
-      const existing = await loadCurrentDayRevenue(revenueDate);
+      const existing = await fetchRevenueDay(revenueDate, revenueLocation);
+      // Another day or location was picked meanwhile - its own load shows it.
+      if (stale) return;
+      showRevenueDay(existing);
       const pending = pendingOcrRevenueRef.current;
       if (pending) {
         const existingFiscal = existing?.fiscal_revenue || 0;
@@ -412,8 +424,9 @@ export default function HomeScreen() {
     // t() is a plain function from useTranslation(), recreated on every
     // render (not memoized) - listing it here would refire this effect on
     // every render and re-fetch/overwrite the addition it just applied.
+    return () => { stale = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revenueModalVisible, revenueDate, loadCurrentDayRevenue]);
+  }, [revenueModalVisible, revenueDate, revenueLocation, fetchRevenueDay, showRevenueDay]);
 
   // Hand-off from the scan screen's "sales" mode: a receipt/invoice the
   // business itself issued was recognized there, and its amount/date/VAT
@@ -641,6 +654,7 @@ export default function HomeScreen() {
   // wrong date while the dashboard you're looking at looks unchanged.
   const closeRevenueModal = () => {
     setRevenueModalVisible(false);
+    setRevenueLocationPick(undefined);
     setRevenueDate(getDefaultActionDate());
   };
 
@@ -670,7 +684,10 @@ export default function HomeScreen() {
         // field is hidden and the day keeps what it holds.
         ...(canSeePocketMoney ? { pocket_money: parseFloat(pocketMoney) || 0 } : {}),
         card_revenue: parseFloat(cardRevenue) || 0,
+        location_id: revenueLocation,
       });
+      if (revenueLocation) rememberLocation(revenueLocation);
+      setRevenueLocationPick(undefined);
       setRevenueModalVisible(false);
       setFiscalRevenue('');
       setPocketMoney('');
@@ -694,7 +711,9 @@ export default function HomeScreen() {
         description: expenseDescription,
         amount: parseFloat(expenseAmount),
         date: format(expenseDate, 'yyyy-MM-dd'),
+        location_id: expenseLocation,
       });
+      if (expenseLocation) rememberLocation(expenseLocation);
       // Don't close modal, just clear fields and refresh list
       setExpenseDescription('');
       setExpenseAmount('');
@@ -1413,6 +1432,14 @@ export default function HomeScreen() {
         showPocketMoney={canSeePocketMoney}
         isSubmitting={isSubmittingForm}
         onSubmit={handleAddRevenue}
+        locationSlot={
+          <LocationPicker
+            value={revenueLocation}
+            onChange={setRevenueLocationPick}
+            noneLabel={t('locations.noneShared')}
+            hint={revenueLocation === null ? t('locations.revenueNoneHint') : t('locations.revenueHint')}
+          />
+        }
       />
 
       {/* Expense Modal */}
@@ -1421,6 +1448,7 @@ export default function HomeScreen() {
         onClose={() => {
           setExpenseModalVisible(false);
           setExpenseDate(getDefaultActionDate());
+          setExpenseLocationPick(undefined);
         }}
         onViewHistory={() => {
           setExpenseModalVisible(false);
@@ -1451,6 +1479,9 @@ export default function HomeScreen() {
           setExpenseDescriptionError(false);
           setExpenseAmountError(false);
         }}
+        locationSlot={
+          <LocationPicker value={expenseLocation} onChange={setExpenseLocationPick} noneLabel={t('locations.noneWhole')} />
+        }
       />
 
       <ExcelImportModal

@@ -22,7 +22,7 @@ import { Employee, PayrollAgreementType, PayrollRates, PayrollBreakdown, Payroll
 import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter } from '../src/components';
+import { AccessDenied, ScreenEnter, LocationPicker } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import PayrollPdfImportModal from '../src/components/PayrollPdfImportModal';
 import { COLORS } from '../src/theme/colors';
@@ -35,6 +35,8 @@ const emptyEmployeeForm = () => ({
   food_vouchers: '',
   additional_insurance: '',
   linked_user_id: null as string | null,
+  // Where they work (Н11): their payroll goes to that location.
+  location_id: null as string | null,
 });
 
 export default function PayrollScreen() {
@@ -143,6 +145,7 @@ export default function PayrollScreen() {
       food_vouchers: emp.food_vouchers ? String(emp.food_vouchers) : '',
       additional_insurance: emp.additional_insurance ? String(emp.additional_insurance) : '',
       linked_user_id: emp.linked_user_id || null,
+      location_id: emp.location_id || null,
     });
     setEmployeeModalVisible(true);
   };
@@ -163,9 +166,10 @@ export default function PayrollScreen() {
     };
     try {
       if (editingEmployee) {
-        await api.updateEmployee(editingEmployee.id, payload);
+        // "" takes them off a location.
+        await api.updateEmployee(editingEmployee.id, { ...payload, location_id: employeeForm.location_id ?? '' });
       } else {
-        await api.createEmployee(payload);
+        await api.createEmployee({ ...payload, location_id: employeeForm.location_id });
       }
       setEmployeeModalVisible(false);
       await loadData();
@@ -586,6 +590,13 @@ export default function PayrollScreen() {
                   />
                 </View>
               </View>
+
+              <LocationPicker
+                value={employeeForm.location_id}
+                onChange={(id) => setEmployeeForm((p) => ({ ...p, location_id: id }))}
+                label={t('locations.employeeLabel')}
+                noneLabel={t('locations.noneTeam')}
+              />
 
               <Text style={styles.inputLabel}>{t('payroll.linkedAccount')}</Text>
               <Text style={styles.linkedAccountHint}>{t('payroll.linkedAccountHint')}</Text>
