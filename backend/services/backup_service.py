@@ -84,7 +84,7 @@ class Section:
 AUTHORED = {
     "customers", "employees", "invoices", "assets", "billing_documents", "receivables",
     "daily_revenue", "expenses", "recurring_expenses", "payroll_entries",
-    "personal_wallet_entries", "personal_expenses", "recurring_invoices", "price_list",
+    "personal_wallet_entries", "personal_expenses", "recurring_invoices", "price_list", "deadlines",
 }
 
 
@@ -124,6 +124,7 @@ SECTIONS: List[Section] = [
         label="Вземания",
     ),
     Section("price_list", lambda d: (_norm(d.get("name")),), label="Ценоразпис"),
+    Section("deadlines", lambda d: (_norm(d.get("title")), _day(d.get("due_date"))), label="Срокове"),
     Section(
         "recurring_invoices",
         lambda d: (

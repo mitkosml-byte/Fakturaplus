@@ -79,6 +79,7 @@ const CTA_LABEL: Record<string, string> = {
   payment_reminders: 'briefing.cta.payment_reminders',
   recurring_invoices: 'briefing.cta.recurring_invoices',
   margins: 'briefing.cta.margins',
+  deadlines: 'briefing.cta.deadlines',
 };
 
 // Answers that settle a recurring expense's month right here.

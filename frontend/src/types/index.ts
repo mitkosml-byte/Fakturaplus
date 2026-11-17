@@ -260,6 +260,39 @@ export interface RecurringInvoiceInput {
   is_active?: boolean;
 }
 
+// The business's own deadlines (Н10): what the owner enters - an
+// insurance, an inspection, a contract, what the accountant needs.
+export type DeadlineCategory = 'insurance' | 'inspection' | 'contract' | 'accountant' | 'tax' | 'license' | 'other';
+export type DeadlineRepeat = 'none' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly' | 'months';
+
+export interface Deadline {
+  id: string;
+  title: string;
+  category: DeadlineCategory;
+  due_date: string;
+  repeat: DeadlineRepeat;
+  repeat_months: number | null;
+  remind_days_before: number;
+  notes: string | null;
+  amount: number | null;
+  is_active: boolean;
+  days_left: number;
+  status: 'overdue' | 'soon' | 'later' | 'done';
+  next_dates: string[];
+  last_done: string | null;
+}
+
+export interface DeadlineInput {
+  title?: string;
+  category?: DeadlineCategory;
+  due_date?: string;
+  repeat?: DeadlineRepeat;
+  repeat_months?: number | null;
+  remind_days_before?: number;
+  notes?: string | null;
+  amount?: number | null;
+}
+
 // The business's own selling prices and their margin (Н8).
 export interface CostPart {
   item_name: string;

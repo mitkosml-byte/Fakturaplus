@@ -415,6 +415,17 @@ export default function ProfileScreen() {
               onPress: () => router.push('/audit-log'),
             }]
           : []),
+        ...(user?.role === 'owner' || user?.role === 'manager'
+          ? [{
+              key: 'deadlines',
+              title: t('deadlines.title'),
+              subtitle: t('deadlines.menuDesc'),
+              icon: 'alarm-outline' as const,
+              iconBg: 'rgba(245, 158, 11, 0.15)',
+              iconColor: COLORS.warning,
+              onPress: () => router.push('/deadlines'),
+            }]
+          : []),
         ...(isOwner
           ? [{
               key: 'backup',

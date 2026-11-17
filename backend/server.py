@@ -4094,6 +4094,12 @@ async def _signal_payment_reminders(company_id, scope, current_user, visibility)
     return await payment_reminders_signal(company_id, scope, current_user)
 
 
+async def _signal_deadlines(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """The owner's own deadlines, past or near (routers/deadlines)."""
+    from routers.deadlines import deadlines_signal
+    return await deadlines_signal(company_id, scope, current_user)
+
+
 async def _signal_margins(company_id, scope, current_user, visibility) -> Optional[dict]:
     """Selling prices whose margin fell as purchases got dearer (routers/price_list)."""
     from routers.price_list import margins_signal
@@ -4644,6 +4650,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
     _signal_payments_this_week, _signal_backup, _signal_two_factor, _signal_cash_flow,
     _signal_accountant_pack, _signal_payment_reminders, _signal_recurring_invoices, _signal_margins,
+    _signal_deadlines,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
@@ -4667,7 +4674,8 @@ SIGNAL_MODULES: Dict[str, Tuple[str, ...]] = {
     "recurring_invoices": ("billing",),
 }
 
-SNOOZE_ONLY_SIGNALS = {"unpaid_invoices", "receivables", "scan_credits", "budget", "schedule_unpaid"}
+# A deadline the owner set is put off, never dismissed for good.
+SNOOZE_ONLY_SIGNALS = {"unpaid_invoices", "receivables", "scan_credits", "budget", "schedule_unpaid", "deadlines"}
 SIGNAL_SNOOZE_DAYS = 3
 # A dismissed insight is looked at afresh after this long even if unchanged.
 SIGNAL_DISMISS_DAYS = 90
@@ -6554,6 +6562,8 @@ async def create_indexes():
         await db.recurring_invoices.create_index([("company_id", 1)])
         # The business's own selling prices, one per name.
         await db.price_list.create_index([("company_id", 1), ("name_key", 1)])
+        # The owner's own deadlines.
+        await db.deadlines.create_index([("company_id", 1), ("due_date", 1)])
         await db.billing_documents.create_index([("company_id", 1), ("recurring_invoice_id", 1), ("recurring_month", 1)])
 
         # A login waiting for its second step: found by its token, gone
@@ -6964,6 +6974,8 @@ from routers import recurring_invoices as recurring_invoices_router
 app.include_router(recurring_invoices_router.router)
 from routers import price_list as price_list_router
 app.include_router(price_list_router.router)
+from routers import deadlines as deadlines_router
+app.include_router(deadlines_router.router)
 
 from routers import auth
 app.include_router(auth.router)
