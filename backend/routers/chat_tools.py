@@ -287,6 +287,11 @@ class ChatDataTools:
             "pay_day": flow["pay_day"], "notes": flow["notes"],
         }
 
+    async def break_even(self) -> dict:
+        """This month's break-even income, the fixed costs and the margin
+        behind it, how far the month is, and today's target."""
+        return await break_even_for(self.company_id, self.scope, self.user)
+
     def sees_customers(self) -> bool:
         """Customers and the documents to them: as in the app, for whoever
         enters revenue or issues invoices."""
@@ -559,11 +564,24 @@ def build_chat_tools(data: ChatDataTools) -> list:
     async def cash_flow(days: int = 30) -> str:
         return _dump(await data.cash_flow(days))
 
+    @beta_async_tool(
+        name="break_even",
+        description=(
+            "This month's break-even: the income at which the month ends at zero (fixed costs - payroll, recurring "
+            "expenses, depreciation - divided by the usual margin of the last full months), the income so far, what "
+            "is missing or by how much it is above, the working days left and what each of them has to bring. Call it "
+            "for 'колко трябва да продам, за да съм на нула', 'каква ми е дневната цел', 'кога излизам на печалба този месец'."
+        ),
+        input_schema={"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+    )
+    async def break_even() -> str:
+        return _dump(await data.break_even())
+
     tools = [period_totals, revenue_breakdown, top_expenses, item_purchases, supplier_purchases]
     # Customers: only for whoever may see them in the app.
     if data.sees_customers():
         tools.append(customer_sales)
-    # The money ahead: likewise.
+    # The money ahead and the month's break-even: likewise.
     if data.sees_cash_flow():
-        tools.append(cash_flow)
+        tools.extend([cash_flow, break_even])
     return tools

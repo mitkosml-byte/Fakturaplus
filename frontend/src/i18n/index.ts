@@ -5674,6 +5674,44 @@ export const translations: Translations = {
   'accountSecurity.codesCopied': { bg: 'Кодовете са копирани', en: 'Codes copied' },
   'accountSecurity.savedThem': { bg: 'Записах ги', en: 'I saved them' },
 
+  // Break-even and the day's target (Н5)
+  'breakEven.title': { bg: 'Дневна цел', en: 'Today\'s target' },
+  'breakEven.todayTarget': {
+    bg: 'толкова трябва да продадеш днес, за да е месецът на нула. Днес досега: {amount}',
+    en: 'is what today has to sell for the month to end at zero. Today so far: {amount}',
+  },
+  'breakEven.nextDaysTarget': {
+    bg: 'на ден от следващия работен ден, за да е месецът на нула',
+    en: 'a day from the next working day, for the month to end at zero',
+  },
+  'breakEven.missingAtEnd': { bg: 'не достигат до точката на рентабилност за месеца', en: 'short of the month\'s break-even' },
+  'breakEven.reachedTitle': { bg: 'Месецът е на плюс', en: 'The month is in profit' },
+  'breakEven.reachedText': { bg: 'над точката на рентабилност - оттук нататък всяка продажба носи печалба', en: 'above break-even - from here on every sale is profit' },
+  'breakEven.monthLine': { bg: 'За месеца: {soFar} от {target}', en: 'This month: {soFar} of {target}' },
+  'breakEven.daysLeft': { bg: 'остават {days} работни дни', en: '{days} working days left' },
+  'breakEven.howTitle': { bg: 'Откъде идва числото', en: 'Where the number comes from' },
+  'breakEven.payroll': { bg: 'Заплати и осигуровки', en: 'Payroll' },
+  'breakEven.recurring': { bg: 'Периодични разходи', en: 'Recurring expenses' },
+  'breakEven.depreciation': { bg: 'Амортизация', en: 'Depreciation' },
+  'breakEven.fixedTotal': { bg: 'Постоянни разходи за месеца', en: 'Fixed costs this month' },
+  'breakEven.margin': { bg: 'Обичаен марж', en: 'Usual margin' },
+  'breakEven.marginLastMonths': {
+    bg: 'Маржът е от последните три пълни месеца: каква част от продажбите остава след стоката и материалите.',
+    en: 'The margin is from the last three full months: the share of sales left after goods and materials.',
+  },
+  'breakEven.marginThisMonth': {
+    bg: 'Маржът е от месеца досега - ще стане по-точен след първия пълен месец.',
+    en: 'The margin is from the month so far - it gets more accurate after the first full month.',
+  },
+  'breakEven.formula': {
+    bg: 'Точка на рентабилност = постоянни разходи ÷ марж. Оценка е: реалната печалба зависи от покупките през месеца.',
+    en: 'Break-even = fixed costs ÷ margin. An estimate: the real profit depends on what is bought during the month.',
+  },
+  'breakEven.addFixedCosts': {
+    bg: 'Добавете заплатите и периодичните разходи (наем, абонаменти), за да виждате дневната цел за излизане на нула.',
+    en: 'Add payroll and recurring expenses (rent, subscriptions) to see the daily target for breaking even.',
+  },
+
   // The month's pack for the accountant (Н4)
   'accountantPack.title': { bg: 'Пакет за счетоводителя', en: 'Pack for the accountant' },
   'accountantPack.exportDesc': {

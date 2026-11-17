@@ -174,7 +174,8 @@ def test_ask_my_numbers_hands_the_model_its_data_tools(client, monkeypatch):
     assert r.json()["answer"] == "Миналия месец: 750 бр."
     # An owner sees customers too: the customers look-up comes with the rest.
     assert sorted(t.name for t in seen["tools"]) == [
-        "cash_flow", "customer_sales", "item_purchases", "period_totals", "revenue_breakdown", "supplier_purchases", "top_expenses"]
+        "break_even", "cash_flow", "customer_sales", "item_purchases", "period_totals", "revenue_breakdown",
+        "supplier_purchases", "top_expenses"]
     assert seen["fallbacks"] == "default" and seen["max_iterations"] == 6
     assert today_local().isoformat() in seen["system"]
     logged = asyncio.run(server.db.ai_usage_log.count_documents({"company_id": company_id, "endpoint": "ask_my_numbers"}))

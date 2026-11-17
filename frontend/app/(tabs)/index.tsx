@@ -37,6 +37,7 @@ import { RevenueModal, rateAmountsTotal } from '../../src/components/home/Revenu
 import type { VatGroupAmount, ZReportResult } from '../../src/types';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCard';
+import { BreakEvenCard } from '../../src/components/home/BreakEvenCard';
 import { pickScanImage } from '../../src/utils/scanImage';
 import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
@@ -996,6 +997,12 @@ export default function HomeScreen() {
                 : ''}
             </Text>
           </TouchableOpacity>
+        )}
+
+        {/* The day's target: what the month has to sell to end at zero (Н5) -
+            for whoever sees the profit. */}
+        {hasPermission('view_profit') && (
+          <BreakEvenCard canManageBudget={hasPermission('manage_budget')} refreshSignal={summary} />
         )}
 
         {/* Average Daily Turnover - taps through to the same stat in Statistics,

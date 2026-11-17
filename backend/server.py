@@ -3736,6 +3736,138 @@ async def _signal_payments_this_week(company_id, scope, current_user, visibility
                        + "|" + ",".join(sorted(f"{i}:{y}-{m}" for i, y, m in seen_items)),
     }
 
+async def month_payroll(company_id: Optional[str], scope: dict, year: int, month: int, expect: bool = True) -> Dict[str, float]:
+    """A month's payroll: what is recorded for it (the entries counted in
+    expenses) and what is still expected - each active employee without an
+    entry for the month, by their salary and the month's rates. Together
+    they are the month's payroll, each person once."""
+    entries = await db.payroll_entries.find(
+        {**scope, "period_year": year, "period_month": month},
+        {"_id": 0, "employee_id": 1, "total_employer_cost": 1, "counted_in_expenses": 1},
+    ).to_list(ALL_ROWS)
+    recorded = sum(float(e.get("total_employer_cost") or 0) for e in entries if e.get("counted_in_expenses") is not False)
+    expected = 0.0
+    if expect:
+        have = {e.get("employee_id") for e in entries}
+        month_key = f"{year}-{month:02d}"
+        employees = await db.employees.find({**scope, "active": True}, {"_id": 0}).to_list(ALL_ROWS)
+        pending = [
+            e for e in employees
+            if e.get("id") not in have and not (e.get("hire_date") and str(e["hire_date"])[:7] > month_key)
+        ]
+        if pending:
+            rates = await get_payroll_rates_dict(company_id, year, month)
+            expected = sum(
+                calculate_payroll(
+                    float(e.get("base_salary") or 0), e.get("agreement_type") or "gross", rates, 0,
+                    float(e.get("food_vouchers") or 0), float(e.get("additional_insurance") or 0),
+                )["total_employer_cost"]
+                for e in pending
+            )
+    return {"recorded": round(recorded, 2), "expected": round(expected, 2)}
+
+
+# The usual margin is read off this many full months before the current one.
+BREAK_EVEN_MONTHS = 3
+
+
+async def break_even_for(company_id: Optional[str], scope: dict, current_user: User) -> dict:
+    """What has to be sold this month for it to end at zero, and what that
+    asks of today (services/break_even): the month's fixed costs - payroll,
+    recurring expenses, depreciation - over the usual margin of the last
+    full months. The same income and expenses as the profit on Home."""
+    visibility = get_financial_visibility(current_user)
+    today = today_local()
+    month = Period.month_of(today)
+    month_key = today.strftime("%Y-%m")
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "modules": 1}) if company_id else None
+    modules = company_modules(company)
+    off_book_visible = bool(visibility["off_book_expenses"])
+
+    async def month_figures(period: Period, through: date) -> dict:
+        totals = await period_totals(company_id, scope, current_user.user_id, period)
+        income, _ = period_income_expense(totals, visibility)
+        recurring = await recurring_service.month_projection(
+            db, company_id, scope, period.start.year, period.start.month, through, off_book_visible,
+        )
+        # What follows the sales: every invoice and expense that is not a
+        # recurring one (payroll and depreciation are counted apart).
+        variable = totals["invoice_total"] + (totals["off_book_expenses"] if off_book_visible else 0) - recurring["paid_so_far"]
+        return {
+            "month": period.start.strftime("%Y-%m"), "income": income, "variable": max(variable, 0.0),
+            "revenue_days": len(totals["revenue_days"]), "issued": float(totals.get("issued_invoice_total") or 0),
+        }
+
+    def says_enough(months: List[dict]) -> bool:
+        income = sum(m["income"] for m in months)
+        if income <= 0:
+            return False
+        mostly_invoices = sum(m["issued"] for m in months) > 0.5 * income
+        return mostly_invoices or sum(m["revenue_days"] for m in months) >= break_even_service.MIN_REVENUE_DAYS
+
+    past: List[dict] = []
+    first = month.start
+    for _ in range(BREAK_EVEN_MONTHS):
+        first = (first - timedelta(days=1)).replace(day=1)
+        period = Period.month_of(first)
+        past.append(await month_figures(period, period.end))
+    used = [m for m in past if m["income"] > 0]
+    basis = "last_months"
+    if not says_enough(used):
+        # A business in its first months: the month so far, once it says enough.
+        so_far = month.through(today) or month
+        used = [await month_figures(so_far, today)]
+        basis = "this_month"
+    margin = break_even_service.usual_margin(used) if says_enough(used) else None
+    if margin is None:
+        return {
+            "available": False, "reason": "not_enough_data", "month": month_key,
+            "message": "Още няма достатъчно въведени приходи и разходи, за да се види обичайният марж.",
+        }
+    if margin <= 0.01:
+        return {
+            "available": False, "reason": "no_margin", "month": month_key,
+            "message": "За последните месеци разходите за стока и материали са колкото приходите или повече - "
+                       "при този марж няма точка на рентабилност.",
+        }
+
+    payroll = await month_payroll(company_id, scope, today.year, today.month, expect=modules["payroll"])
+    wages = await schedule_wages_for_period(company_id, current_user.user_id, month.through(today) or month)
+    depreciation = await get_depreciation_cost_for_period(company_id, current_user.user_id, month.start, month.end)
+    recurring_now = await recurring_service.month_projection(db, company_id, scope, today.year, today.month, today, off_book_visible)
+    fixed = {
+        "payroll": round(payroll["recorded"] + payroll["expected"] + wages, 2),
+        "recurring": round(recurring_now["month_total"], 2),
+        "depreciation": round(depreciation, 2),
+    }
+    fixed["total"] = round(sum(fixed.values()), 2)
+    if fixed["total"] <= 0:
+        return {
+            "available": False, "reason": "no_fixed_costs", "month": month_key,
+            "message": "Няма въведени постоянни разходи за месеца - добавете заплатите и периодичните разходи (наем, абонаменти).",
+        }
+
+    before_today = month.through(today - timedelta(days=1))
+    income_before = 0.0
+    if before_today:
+        income_before, _ = period_income_expense(await period_totals(company_id, scope, current_user.user_id, before_today), visibility)
+    income_today, _ = period_income_expense(
+        await period_totals(company_id, scope, current_user.user_id, Period.day(today)), visibility,
+    )
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+    open_days = [
+        day for day in (today + timedelta(days=n) for n in range((month.end - today).days + 1))
+        if not is_date_closed(day.isoformat(), closed_weekdays, exceptions_map)
+    ]
+    return {
+        "available": True, "month": month_key,
+        "fixed_costs": fixed,
+        "margin_percent": round(margin * 100, 1),
+        "margin_basis": {"kind": basis, "months": [m["month"] for m in used]},
+        **break_even_service.work_out(fixed["total"], margin, income_before, income_today, len(open_days), today in open_days),
+    }
+
+
 # The till revenue a usual weekday brings: the last 8 weeks of it.
 CASH_FLOW_REVENUE_WEEKS = 8
 CASH_FLOW_MAX_DAYS = 90
@@ -3835,26 +3967,17 @@ async def cash_flow_projection(company_id: Optional[str], scope: dict, current_u
                     str(item.get("description") or "Периодичен разход").strip(), overdue=due < today,
                 ))
 
-    # The month's payroll on its pay day - unless that month's is recorded.
+    # The month's payroll on its pay day - for whoever has no payroll
+    # recorded for that month yet (a recorded one is not expected again).
     pay_day = await _cash_flow_pay_day(company, scope)
     if modules["payroll"]:
-        employees = await db.employees.find({**scope, "active": True}, {"_id": 0}).to_list(ALL_ROWS)
-        if employees:
-            for year, month in months:
-                rates = await get_payroll_rates_dict(company_id, year, month)
-                monthly = sum(
-                    calculate_payroll(
-                        float(e.get("base_salary") or 0), e.get("agreement_type") or "gross", rates, 0,
-                        float(e.get("food_vouchers") or 0), float(e.get("additional_insurance") or 0),
-                    )["total_employer_cost"]
-                    for e in employees
-                )
-                day = date(year, month, min(pay_day, days_in_month(year, month)))
-                if monthly <= 0 or not (today <= day <= end):
-                    continue
-                if await db.payroll_entries.find_one({**scope, "period_year": year, "period_month": month}, {"_id": 1}):
-                    continue
-                events.append(cash_flow_service.CashEvent(day, -round(monthly, 2), cash_flow_service.PAYROLL, "Заплати и осигуровки"))
+        for year, month in months:
+            day = date(year, month, min(pay_day, days_in_month(year, month)))
+            if not (today <= day <= end):
+                continue
+            still_expected = (await month_payroll(company_id, scope, year, month))["expected"]
+            if still_expected > 0:
+                events.append(cash_flow_service.CashEvent(day, -still_expected, cash_flow_service.PAYROLL, "Заплати и осигуровки"))
 
     # VAT for a month is paid by the 14th of the next one.
     if company_vat_registered(company):
@@ -4917,6 +5040,7 @@ from services.audit_service import AuditService
 from services.forecast_service import ForecastService
 from services import recurring_service
 from services import cash_flow as cash_flow_service
+from services import break_even as break_even_service
 from services import import_service
 from services import push_service
 

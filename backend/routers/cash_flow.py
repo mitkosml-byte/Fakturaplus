@@ -34,6 +34,14 @@ async def get_cash_flow(days: int = 30, current_user: User = Depends(get_current
     return await cash_flow_projection(company_id, scope, current_user, days)
 
 
+@router.get("/statistics/break-even")
+async def get_break_even(current_user: User = Depends(get_current_user)):
+    """What has to be sold this month to end at zero, and today's share of it."""
+    _require_cash_flow(current_user)
+    company_id, scope = await get_company_scope(current_user)
+    return await break_even_for(company_id, scope, current_user)
+
+
 @router.post("/cash-flow/position")
 async def set_cash_position(payload: CashPositionCreate, current_user: User = Depends(get_current_user)):
     """How much money the business has now - where the projection starts."""

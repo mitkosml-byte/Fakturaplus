@@ -19,6 +19,27 @@ export interface User {
 export type BusinessModule = 'till' | 'billing' | 'team' | 'payroll' | 'assets' | 'wallet';
 export type BusinessModules = Record<BusinessModule, boolean>;
 
+// This month's break-even and the day's target (Н5).
+export interface BreakEven {
+  available: boolean;
+  reason?: 'not_enough_data' | 'no_margin' | 'no_fixed_costs';
+  message?: string;
+  month: string;
+  fixed_costs?: { payroll: number; recurring: number; depreciation: number; total: number };
+  margin_percent?: number;
+  margin_basis?: { kind: 'last_months' | 'this_month'; months: string[] };
+  break_even_income?: number;
+  income_so_far?: number;
+  missing?: number;
+  above?: number;
+  reached?: boolean;
+  open_days_left?: number;
+  today_is_open?: boolean;
+  daily_target?: number;
+  income_today?: number;
+  progress?: number;
+}
+
 // The till's daily report read from a photo (Н3) - a draft for the form.
 export interface ZReportResult {
   date: string | null;
