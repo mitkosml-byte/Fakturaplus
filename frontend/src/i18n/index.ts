@@ -5800,6 +5800,45 @@ export const translations: Translations = {
   'cashFlow.fromStatement': { bg: 'Обнови от банково извлечение', en: 'Update from a bank statement' },
   'cashFlow.kind.subscription': { bg: 'Абонамент', en: 'Subscription' },
 
+  // The business's own selling prices (Н8)
+  'priceList.title': { bg: 'Ценоразпис и марж', en: 'Prices and margin' },
+  'priceList.intro': {
+    bg: 'Вашите продажни цени - същите във фактурите, сметките и офертите. Посочете от какво е направен всеки артикул и програмата ще смята себестойността от последните покупки и ще каже, когато доставчик поскъпне.',
+    en: 'Your selling prices - the same on invoices, bills and quotes. Say what each one is made of and the program works out its cost from the latest purchases and tells you when a supplier gets dearer.',
+  },
+  'priceList.empty': { bg: 'Още няма цени. Добавете с „+“ или от продаваното досега по-долу.', en: 'No prices yet. Add one with "+" or from what was sold so far below.' },
+  'priceList.withVat': { bg: '{amount} с ДДС', en: '{amount} with VAT' },
+  'priceList.withoutVat': { bg: '{amount} без ДДС', en: '{amount} without VAT' },
+  'priceList.perUnit': { bg: 'за 1 {unit}', en: 'per {unit}' },
+  'priceList.margin': { bg: 'Марж {percent}%', en: 'Margin {percent}%' },
+  'priceList.cost': { bg: 'Себестойност {amount}', en: 'Cost {amount}' },
+  'priceList.noCost': { bg: 'Без себестойност - посочете от какво е', en: 'No cost yet - say what it is made of' },
+  'priceList.dropped': {
+    bg: 'Маржът падна от {then}% на {now}%. За същия марж: {price}.',
+    en: 'The margin fell from {then}% to {now}%. To keep it: {price}.',
+  },
+  'priceList.setNew': { bg: 'Нова цена {price}', en: 'New price {price}' },
+  'priceList.keep': { bg: 'Остави цената', en: 'Keep the price' },
+  'priceList.sold': { bg: 'Продавано, но без цена в списъка', en: 'Sold, but not in the list' },
+  'priceList.add': { bg: 'Нова цена', en: 'New price' },
+  'priceList.name': { bg: 'Име', en: 'Name' },
+  'priceList.unit': { bg: 'Мярка', en: 'Unit' },
+  'priceList.price': { bg: 'Цена без ДДС', en: 'Price without VAT' },
+  'priceList.priceNoVat': { bg: 'Цена', en: 'Price' },
+  'priceList.vatRate': { bg: 'ДДС %', en: 'VAT %' },
+  'priceList.madeOf': { bg: 'От какво е (за 1 {unit})', en: 'Made of (per {unit})' },
+  'priceList.madeOfHint': {
+    bg: 'Изберете купените артикули от фактурите на доставчиците и колко от всеки влиза в 1 продаван (напр. 0.009 кг кафе и 0.15 л мляко).',
+    en: 'Pick the items bought on supplier invoices and how much of each goes into one sold (e.g. 0.009 kg of coffee and 0.15 l of milk).',
+  },
+  'priceList.searchPurchase': { bg: 'Търси купен артикул…', en: 'Search a purchased item…' },
+  'priceList.lastBought': { bg: 'последно {price} за {unit} · {supplier}', en: 'last {price} per {unit} · {supplier}' },
+  'priceList.saved': { bg: 'Цената е запазена', en: 'Price saved' },
+  'priceList.invalid': { bg: 'Въведете име и цена', en: 'Enter a name and a price' },
+  'priceList.deleteConfirm': { bg: 'Цената излиза от ценоразписа. Издадените документи не се променят.', en: 'The price leaves the list. Documents issued stay as they are.' },
+  'priceList.fromList': { bg: 'от ценоразписа', en: 'from the price list' },
+  'briefing.cta.margins': { bg: 'Виж цените', en: 'View the prices' },
+
   // Payment reminders to customers (Н6)
   'reminders.title': { bg: 'Напомняния за плащане', en: 'Payment reminders' },
   'reminders.intro': {

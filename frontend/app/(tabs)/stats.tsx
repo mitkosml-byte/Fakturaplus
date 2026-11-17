@@ -1071,6 +1071,12 @@ export default function StatsScreen() {
                     <Text style={styles.quickLinkChipText}>{t('profile.budget')}</Text>
                   </TouchableOpacity>
                 )}
+                {(hasPermission('view_statistics') || hasPermission('manage_invoices')) && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/price-list')}>
+                    <Ionicons name="pricetags-outline" size={15} color={COLORS.primary} />
+                    <Text style={styles.quickLinkChipText}>{t('priceList.title')}</Text>
+                  </TouchableOpacity>
+                )}
                 {hasPermission('view_profit') && (
                   <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/cash-flow')}>
                     <Ionicons name="trending-up-outline" size={15} color={COLORS.success} />

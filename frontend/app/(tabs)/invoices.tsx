@@ -734,6 +734,12 @@ export default function InvoicesScreen() {
                   <Text style={styles.quickLinkChipText}>{t('billingDocuments.title')}</Text>
                 </TouchableOpacity>
               )}
+              {usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/price-list')}>
+                  <Ionicons name="pricetags-outline" size={15} color={COLORS.success} />
+                  <Text style={styles.quickLinkChipText}>{t('priceList.title')}</Text>
+                </TouchableOpacity>
+              )}
               {usesBilling && hasPermission('issue_invoices') && (
                 <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/recurring-invoices')}>
                   <Ionicons name="repeat-outline" size={15} color={COLORS.success} />

@@ -260,6 +260,65 @@ export interface RecurringInvoiceInput {
   is_active?: boolean;
 }
 
+// The business's own selling prices and their margin (Н8).
+export interface CostPart {
+  item_name: string;
+  quantity: number;
+  unit?: string | null;
+}
+
+export interface PriceListEntry {
+  id: string;
+  name: string;
+  unit: string;
+  // Without VAT (an invoice line); price_gross is what the customer pays (a bill).
+  price: number;
+  vat_rate: number;
+  price_gross: number;
+  price_set_at?: string | null;
+  // Only for those who see purchase prices.
+  costs?: (CostPart & { unit_price: number | null; line_cost: number | null; supplier: string | null; date: string | null })[];
+  cost?: number | null;
+  cost_at_price?: number | null;
+  margin_percent?: number | null;
+  margin_then_percent?: number | null;
+  margin_dropped?: boolean;
+  suggested_price?: number | null;
+  suggested_gross?: number | null;
+}
+
+export interface PriceList {
+  entries: PriceListEntry[];
+  can_edit: boolean;
+  sees_costs: boolean;
+  vat_registered: boolean;
+}
+
+export interface PurchaseItem {
+  item_name: string;
+  unit: string | null;
+  unit_price: number;
+  supplier: string | null;
+  date: string;
+}
+
+export interface SoldItem {
+  name: string;
+  unit: string;
+  price: number;
+  vat_rate: number;
+  last_sold: string;
+  count: number;
+}
+
+export interface PriceEntryInput {
+  name?: string;
+  unit?: string;
+  price?: number;
+  vat_rate?: number;
+  costs?: CostPart[];
+}
+
 // Home's cards for a business that invoices.
 export interface BillingOverview {
   issued_count: number;

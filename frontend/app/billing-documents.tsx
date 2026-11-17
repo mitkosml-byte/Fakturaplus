@@ -20,7 +20,7 @@ import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
 import { downloadAndShareFile } from '../src/utils/downloadFile';
 import { api } from '../src/services/api';
-import { BillingDocument, BillingDocumentItem, BillingDocumentType, Customer } from '../src/types';
+import { BillingDocument, BillingDocumentItem, BillingDocumentType, Customer, PriceListEntry } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow } from '../src/components';
@@ -77,6 +77,8 @@ export default function BillingDocumentsScreen() {
   // A business not registered under the VAT Act issues invoices without
   // VAT (чл. 113, ал. 9 ЗДДС); the server applies it, the form mirrors it.
   const [vatRegistered, setVatRegistered] = useState(true);
+  // The business's own prices (Н8): the same line on an invoice, a bill or a quote.
+  const [priceList, setPriceList] = useState<PriceListEntry[]>([]);
   // Does the business enter its till's daily revenue here? Then an invoice
   // paid in cash or by card went through the till (a fiscal receipt) and
   // its money is in that day's till revenue - not counted a second time.
@@ -95,12 +97,14 @@ export default function BillingDocumentsScreen() {
       return;
     }
     try {
-      const [docs, defaults, knownCustomers] = await Promise.all([
+      const [docs, defaults, knownCustomers, prices] = await Promise.all([
         api.getBillingDocuments(),
         api.getInvoiceDefaults().catch(() => null),
         api.getCustomers().catch(() => [] as Customer[]),
+        api.getPriceList().catch(() => null),
       ]);
       setDocuments(docs);
+      setPriceList(prices?.entries || []);
       setCustomers(knownCustomers);
       setVatRegistered(defaults?.vat_registered !== false);
       setLogsTill(!!defaults?.logs_till);
@@ -181,10 +185,26 @@ export default function BillingDocumentsScreen() {
     return Array.from(byKey.values()).sort((a, b) => b.count - a.count || (a.date < b.date ? 1 : -1));
   }, [documents]);
 
+  // The price list first - its price as this document needs it: without
+  // VAT on an invoice (the VAT on top), what the customer pays on a bill or
+  // a quote - then lines charged before.
   const itemMatches = (name: string) => {
     const q = name.trim().toLowerCase();
     if (!q) return [];
-    return itemDirectory.filter((it) => it.name.toLowerCase() !== q && it.name.toLowerCase().includes(q)).slice(0, 5);
+    const listed = priceList
+      .filter((entry) => entry.name.toLowerCase() !== q && entry.name.toLowerCase().includes(q))
+      .slice(0, 4)
+      .map((entry) => ({
+        name: entry.name, unit: entry.unit, fromList: true,
+        unit_price: isInvoice ? entry.price : entry.price_gross,
+        vat_rate: entry.vat_rate,
+      }));
+    const listedNames = new Set(priceList.map((entry) => entry.name.toLowerCase()));
+    const past = itemDirectory
+      .filter((it) => it.name.toLowerCase() !== q && it.name.toLowerCase().includes(q) && !listedNames.has(it.name.toLowerCase()))
+      .slice(0, 5 - listed.length)
+      .map((it) => ({ name: it.name, unit: it.unit, unit_price: it.unit_price, fromList: false, vat_rate: undefined as number | undefined }));
+    return [...listed, ...past];
   };
 
   // A credit note is laid out as an invoice is: lines with their VAT rates.
@@ -773,8 +793,10 @@ export default function BillingDocumentsScreen() {
                               name: match.name,
                               unit: match.unit,
                               unit_price: String(match.unit_price),
+                              ...(match.fromList && isInvoice && match.vat_rate !== undefined ? { vat_rate: String(match.vat_rate) } : {}),
                             })}
                           >
+                            {match.fromList && <Ionicons name="pricetag-outline" size={12} color={COLORS.primary} />}
                             <Text style={styles.itemChipText} numberOfLines={1}>
                               {match.name} · {match.unit_price.toFixed(2)} €
                             </Text>
@@ -967,6 +989,9 @@ const styles = StyleSheet.create({
   itemNameInput: { marginBottom: 8 },
   itemChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
   itemChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 14,

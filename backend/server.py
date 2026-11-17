@@ -4094,6 +4094,12 @@ async def _signal_payment_reminders(company_id, scope, current_user, visibility)
     return await payment_reminders_signal(company_id, scope, current_user)
 
 
+async def _signal_margins(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Selling prices whose margin fell as purchases got dearer (routers/price_list)."""
+    from routers.price_list import margins_signal
+    return await margins_signal(company_id, scope, current_user)
+
+
 async def _signal_recurring_invoices(company_id, scope, current_user, visibility) -> Optional[dict]:
     """This month's repeating invoices ready to issue (routers/recurring_invoices)."""
     from routers.recurring_invoices import recurring_invoices_signal
@@ -4637,7 +4643,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
     _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
     _signal_payments_this_week, _signal_backup, _signal_two_factor, _signal_cash_flow,
-    _signal_accountant_pack, _signal_payment_reminders, _signal_recurring_invoices,
+    _signal_accountant_pack, _signal_payment_reminders, _signal_recurring_invoices, _signal_margins,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
@@ -6546,6 +6552,8 @@ async def create_indexes():
         await db.cash_positions.create_index([("company_id", 1), ("date", -1), ("created_at", -1)])
         # Invoices that repeat, and the month's invoice each one issued.
         await db.recurring_invoices.create_index([("company_id", 1)])
+        # The business's own selling prices, one per name.
+        await db.price_list.create_index([("company_id", 1), ("name_key", 1)])
         await db.billing_documents.create_index([("company_id", 1), ("recurring_invoice_id", 1), ("recurring_month", 1)])
 
         # A login waiting for its second step: found by its token, gone
@@ -6954,6 +6962,8 @@ from routers import payment_reminders as payment_reminders_router
 app.include_router(payment_reminders_router.router)
 from routers import recurring_invoices as recurring_invoices_router
 app.include_router(recurring_invoices_router.router)
+from routers import price_list as price_list_router
+app.include_router(price_list_router.router)
 
 from routers import auth
 app.include_router(auth.router)
