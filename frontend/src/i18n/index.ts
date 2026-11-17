@@ -1044,6 +1044,10 @@ export const translations: Translations = {
     bg: 'Досега: {range}',
     en: 'So far: {range}',
   },
+  // Today's revenue among the boxes, whatever period they show.
+  'home.todayRevenueBox': { bg: 'Дневен оборот', en: 'Daily revenue' },
+  'home.todayRevenueToday': { bg: 'за днес', en: 'today' },
+  'home.todayRevenueEmpty': { bg: 'днес: не е въведен', en: 'today: not entered' },
   'home.expenses': {
     bg: 'В канала',
     en: 'Expenses',

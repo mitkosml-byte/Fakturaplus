@@ -62,6 +62,9 @@ export default function HomeScreen() {
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string; revenueDate?: string }>();
 
   const [summary, setSummary] = useState<Summary | null>(null);
+  // Today's revenue, whatever period is shown: the till's and Джобче, as
+  // entered for the business's today (null until it arrives).
+  const [todayRevenue, setTodayRevenue] = useState<{ date: string; fiscal_revenue: number; pocket_money: number } | null>(null);
   // Which period the dashboard cards below are showing - defaults to the
   // current (in-progress) calendar month, matching the previous hardcoded
   // behavior, but lets the user step back to any past day/week/month/year
@@ -187,6 +190,14 @@ export default function HomeScreen() {
 
     await Promise.all([
       (async () => {
+        if (!usesTill) return;
+        try {
+          setTodayRevenue(await api.getTodayRevenue());
+        } catch {
+          // Shown as not entered; the next refresh tries again.
+        }
+      })(),
+      (async () => {
         try {
           const summaryData = await api.getSummary({ start_date, end_date });
           setSummary(summaryData);
@@ -207,7 +218,7 @@ export default function HomeScreen() {
         }
       })(),
     ]);
-  }, [periodState]);
+  }, [periodState, usesTill]);
 
   // Pre-fills the form with whatever is already logged for this date, so
   // saving corrects that value directly instead of adding a delta to it -
@@ -659,6 +670,7 @@ export default function HomeScreen() {
   };
 
   const canSeePocketMoney = hasPermission('view_pocket_money');
+  const todayRevenueTotal = (todayRevenue?.fiscal_revenue || 0) + (todayRevenue?.pocket_money || 0);
 
   const handleAddRevenue = async () => {
     const fiscalTotal = revenueSplitByRate ? rateAmountsTotal(revenueRateAmounts) : parseFloat(fiscalRevenue) || 0;
@@ -1090,6 +1102,30 @@ export default function HomeScreen() {
           </View>
           {usesTill && (
           <>
+          {/* The day's revenue - today's, whichever period the boxes show.
+              A tap opens today's day to enter or correct it. */}
+          <TouchableOpacity
+            style={styles.statItem}
+            onPress={() => {
+              setRevenueDate(todayRevenue ? new Date(`${todayRevenue.date}T00:00:00`) : new Date());
+              setRevenueModalVisible(true);
+            }}
+            disabled={!hasPermission('add_revenue')}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.todayRevenueBox')}
+          >
+            {todayRevenueTotal > 0 ? (
+              <CountUp value={todayRevenueTotal} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
+            ) : (
+              <Text style={[styles.statValue, { color: COLORS.textMuted }]}>—</Text>
+            )}
+            <Text style={styles.statLabel}>{t('home.todayRevenueBox')}</Text>
+            {todayRevenue && todayRevenueTotal === 0 ? (
+              <Text style={styles.statHint}>{t('home.todayRevenueEmpty')}</Text>
+            ) : (
+              <Text style={[styles.statHint, { color: COLORS.textMuted }]}>{t('home.todayRevenueToday')}</Text>
+            )}
+          </TouchableOpacity>
           <View style={styles.statItem}>
             {summary && summary.total_fiscal_revenue === null ? (
               <LockedValue textStyle={styles.statValue} fakeText="1240" iconSize={16} />
@@ -1112,7 +1148,8 @@ export default function HomeScreen() {
           </TouchableOpacity>
           </>
           )}
-          <View style={[styles.statItem, { overflow: 'visible' }]}>
+          {/* With the till's boxes the profit closes the grid on its own row. */}
+          <View style={[styles.statItem, { overflow: 'visible' }, usesTill && { width: '100%' }]}>
             <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
             {summary && summary.profit === null ? (
               <LockedValue textStyle={styles.statValue} fakeText="380" iconSize={16} />
@@ -1743,6 +1780,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
     marginTop: 4,
+  },
+  statHint: {
+    fontSize: 11,
+    color: COLORS.warning,
+    marginTop: 2,
   },
   restrictedNote: {
     flexDirection: 'row',
