@@ -318,11 +318,18 @@ export default function ReceivablesScreen() {
             </View>
           )}
           {canManage && (summary?.total_owed || 0) > 0 && (
-            <TouchableOpacity style={styles.statementLink} onPress={() => router.push('/bank-statement')}>
-              <Ionicons name="business-outline" size={15} color={COLORS.primary} />
-              <Text style={styles.statementLinkText}>{t('receivables.fromStatement')}</Text>
-              <Ionicons name="chevron-forward" size={14} color={COLORS.primary} />
-            </TouchableOpacity>
+            <View style={styles.linksRow}>
+              {(summary?.overdue_count || 0) > 0 && (
+                <TouchableOpacity style={styles.statementLink} onPress={() => router.push('/payment-reminders')}>
+                  <Ionicons name="notifications-outline" size={15} color={COLORS.primary} />
+                  <Text style={styles.statementLinkText}>{t('reminders.link')}</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={styles.statementLink} onPress={() => router.push('/bank-statement')}>
+                <Ionicons name="business-outline" size={15} color={COLORS.primary} />
+                <Text style={styles.statementLinkText}>{t('receivables.fromStatement')}</Text>
+              </TouchableOpacity>
+            </View>
           )}
 
           {loading ? (
@@ -551,7 +558,8 @@ export default function ReceivablesScreen() {
 }
 
 const styles = StyleSheet.create({
-  statementLink: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingBottom: 8 },
+  linksRow: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingBottom: 8, gap: 16 },
+  statementLink: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statementLinkText: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },
   methodChip: {
     paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18,

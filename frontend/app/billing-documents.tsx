@@ -221,6 +221,30 @@ export default function BillingDocumentsScreen() {
     }
   };
 
+  // The same invoice every month (Н7): ready on its day, issued with a tap.
+  const makeRecurring = (invoice: BillingDocument) => {
+    const day = new Date(invoice.issue_date).getDate();
+    Alert.alert(
+      t('recurringInvoices.makeRecurring'),
+      t('recurringInvoices.makeRecurringText').replace('{day}', String(day)).replace('{customer}', invoice.customer_name),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('recurringInvoices.makeRecurring'),
+          onPress: async () => {
+            try {
+              await api.createRecurringInvoice({ from_document_id: invoice.id });
+              Toast.success(t('recurringInvoices.created'));
+              router.push('/recurring-invoices');
+            } catch (error: any) {
+              Alert.alert(t('common.error'), error.message);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const openCreditNote = (invoice: BillingDocument) => {
     resetForm();
     setDocType('credit_note');
@@ -558,6 +582,11 @@ export default function BillingDocumentsScreen() {
                           ) : (
                             <Ionicons name="download-outline" size={18} color={COLORS.primary} />
                           )}
+                        </TouchableOpacity>
+                      )}
+                      {doc.doc_type === 'invoice' && !doc.cancelled && canIssueInvoices && !doc.recurring_invoice_id && (
+                        <TouchableOpacity onPress={() => makeRecurring(doc)} hitSlop={8} accessibilityLabel={t('recurringInvoices.makeRecurring')}>
+                          <Ionicons name="repeat-outline" size={18} color={COLORS.primary} />
                         </TouchableOpacity>
                       )}
                       {doc.doc_type === 'invoice' && !doc.cancelled && canIssueInvoices

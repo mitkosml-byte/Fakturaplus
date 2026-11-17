@@ -33,10 +33,11 @@ const KIND_ICON: Record<CashFlowEvent['kind'], keyof typeof Ionicons.glyphMap> =
   recurring: 'repeat-outline',
   payroll: 'people-outline',
   vat: 'calculator-outline',
+  subscription: 'repeat-outline',
 };
 
 // Whose label already says what it is (payroll, VAT) goes without the kind.
-const PREFIXED_KINDS: CashFlowEvent['kind'][] = ['invoice', 'receivable', 'recurring'];
+const PREFIXED_KINDS: CashFlowEvent['kind'][] = ['invoice', 'receivable', 'recurring', 'subscription'];
 
 const money = (n: number) => `${n.toFixed(2)} €`;
 const dayLabel = (iso: string) => format(parseISO(iso), 'dd.MM');

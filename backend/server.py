@@ -2788,6 +2788,10 @@ class BillingDocument(BaseModel):
     converted_document_id: Optional[str] = None
     # A bill or an invoice made of a quote: that quote.
     source_quote_id: Optional[str] = None
+    # Issued from an invoice that repeats (routers/recurring_invoices), for
+    # its month "YYYY-MM": the month's invoice is this one, never a second.
+    recurring_invoice_id: Optional[str] = None
+    recurring_month: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -3941,6 +3945,13 @@ async def cash_flow_projection(company_id: Optional[str], scope: dict, current_u
         else:
             events.append(cash_flow_service.CashEvent(due, left, cash_flow_service.RECEIVABLE, receivable.get("customer_name") or "Клиент"))
 
+    # Invoices that repeat, not issued yet for their month: their money by
+    # the due date they will have. One issued is a debt above - never both.
+    if modules["billing"]:
+        from routers.recurring_invoices import expected_receipts
+        for day, amount, label in await expected_receipts(company_id, scope, today, end):
+            events.append(cash_flow_service.CashEvent(day, amount, cash_flow_service.SUBSCRIPTION, label))
+
     # Supplier invoices still to pay, by their due date - an overdue one (or
     # one without a date) is to pay now.
     unpaid, _, _ = await split_overdue_invoices(scope)
@@ -4023,7 +4034,7 @@ async def cash_flow_projection(company_id: Optional[str], scope: dict, current_u
     else:
         notes.append("Въведете колко пари имате сега (в брой и в банка) - прогнозата тръгва от тях.")
     if modules["billing"]:
-        notes.append("Бъдещи фактури към клиенти не са в прогнозата - само вземанията, които вече са записани.")
+        notes.append("Бъдещи фактури към клиенти не са в прогнозата (освен повтарящите се) - само вземанията, които вече са записани.")
 
     result = cash_flow_service.project(
         start_balance, today, days, events, weekday_revenue,
@@ -4075,6 +4086,18 @@ async def _signal_accountant_pack(company_id, scope, current_user, visibility) -
     """Last month's documents for the accountant (routers/accountant_pack)."""
     from routers.accountant_pack import accountant_pack_signal
     return await accountant_pack_signal(company_id, scope, current_user)
+
+
+async def _signal_payment_reminders(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Reminders to customers due now (routers/payment_reminders)."""
+    from routers.payment_reminders import payment_reminders_signal
+    return await payment_reminders_signal(company_id, scope, current_user)
+
+
+async def _signal_recurring_invoices(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """This month's repeating invoices ready to issue (routers/recurring_invoices)."""
+    from routers.recurring_invoices import recurring_invoices_signal
+    return await recurring_invoices_signal(company_id, scope, current_user)
 
 
 async def _signal_scan_credits(company_id, scope, current_user, visibility) -> Optional[dict]:
@@ -4614,7 +4637,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
     _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
     _signal_payments_this_week, _signal_backup, _signal_two_factor, _signal_cash_flow,
-    _signal_accountant_pack,
+    _signal_accountant_pack, _signal_payment_reminders, _signal_recurring_invoices,
 ]
 
 # Signals about money at risk can only be put off for a few days, never
@@ -4634,6 +4657,8 @@ SIGNAL_MODULES: Dict[str, Tuple[str, ...]] = {
     "payroll_rates_year": ("payroll",),
     "personal_wallet": ("wallet",),
     "receivables": ("billing",),
+    "payment_reminders": ("billing",),
+    "recurring_invoices": ("billing",),
 }
 
 SNOOZE_ONLY_SIGNALS = {"unpaid_invoices", "receivables", "scan_credits", "budget", "schedule_unpaid"}
@@ -6519,6 +6544,9 @@ async def create_indexes():
 
         # The money the business said it has, latest first.
         await db.cash_positions.create_index([("company_id", 1), ("date", -1), ("created_at", -1)])
+        # Invoices that repeat, and the month's invoice each one issued.
+        await db.recurring_invoices.create_index([("company_id", 1)])
+        await db.billing_documents.create_index([("company_id", 1), ("recurring_invoice_id", 1), ("recurring_month", 1)])
 
         # A login waiting for its second step: found by its token, gone
         # once expired (the TTL monitor sweeps it; the code checks the time).
@@ -6922,6 +6950,10 @@ from routers import z_report
 app.include_router(z_report.router)
 from routers import bank_statement as bank_statement_router
 app.include_router(bank_statement_router.router)
+from routers import payment_reminders as payment_reminders_router
+app.include_router(payment_reminders_router.router)
+from routers import recurring_invoices as recurring_invoices_router
+app.include_router(recurring_invoices_router.router)
 
 from routers import auth
 app.include_router(auth.router)

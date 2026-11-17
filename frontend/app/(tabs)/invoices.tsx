@@ -715,7 +715,7 @@ export default function InvoicesScreen() {
               category - they're all documents/money with the outside
               world, the same subject matter as the invoice list right
               below, so a visible link belongs here instead. */}
-          {((usesBilling && hasPermission('add_revenue')) || hasPermission('view_statistics') || canReadStatement) && (
+          {((usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices'))) || hasPermission('view_statistics') || canReadStatement) && (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -732,6 +732,18 @@ export default function InvoicesScreen() {
                 <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/billing-documents')}>
                   <Ionicons name="document-text-outline" size={15} color={COLORS.success} />
                   <Text style={styles.quickLinkChipText}>{t('billingDocuments.title')}</Text>
+                </TouchableOpacity>
+              )}
+              {usesBilling && hasPermission('issue_invoices') && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/recurring-invoices')}>
+                  <Ionicons name="repeat-outline" size={15} color={COLORS.success} />
+                  <Text style={styles.quickLinkChipText}>{t('recurringInvoices.title')}</Text>
+                </TouchableOpacity>
+              )}
+              {usesBilling && hasPermission('add_revenue') && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/payment-reminders')}>
+                  <Ionicons name="notifications-outline" size={15} color={COLORS.success} />
+                  <Text style={styles.quickLinkChipText}>{t('reminders.title')}</Text>
                 </TouchableOpacity>
               )}
               {canReadStatement && (

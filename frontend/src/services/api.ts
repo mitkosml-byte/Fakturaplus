@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+import { PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
@@ -781,6 +781,44 @@ class ApiService {
   // The payments the person confirmed, and the closing balance if asked.
   async applyBankStatement(body: BankStatementApply): Promise<BankStatementApplyResult> {
     return this.fetch('/bank-statement/apply', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  // Payment reminders to customers (Н6): suggested, sent one at a time.
+  async getPaymentReminders(): Promise<PaymentReminders> {
+    return this.fetch('/payment-reminders');
+  }
+
+  async sendPaymentReminder(
+    receivableId: string,
+    body: { stage: ReminderStage | 'manual'; email: string; subject: string; message: string },
+  ): Promise<{ sent: boolean; to: string; stage: string; attached: boolean }> {
+    return this.fetch(`/payment-reminders/${receivableId}/send`, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  // A stage put off, or done another way (a call, a message).
+  async recordPaymentReminder(receivableId: string, stage: ReminderStage, action: 'skipped' | 'sent_other'): Promise<void> {
+    await this.fetch(`/payment-reminders/${receivableId}/record`, { method: 'POST', body: JSON.stringify({ stage, action }) });
+  }
+
+  // Invoices that repeat every month (Н7).
+  async getRecurringInvoices(): Promise<RecurringInvoice[]> {
+    return this.fetch('/recurring-invoices');
+  }
+
+  async createRecurringInvoice(body: RecurringInvoiceInput): Promise<RecurringInvoice> {
+    return this.fetch('/recurring-invoices', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  async updateRecurringInvoice(id: string, body: RecurringInvoiceInput): Promise<RecurringInvoice> {
+    return this.fetch(`/recurring-invoices/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+
+  async deleteRecurringInvoice(id: string): Promise<void> {
+    await this.fetch(`/recurring-invoices/${id}`, { method: 'DELETE' });
+  }
+
+  async issueRecurringInvoice(id: string): Promise<{ document: BillingDocument; template: RecurringInvoice }> {
+    return this.fetch(`/recurring-invoices/${id}/issue`, { method: 'POST' });
   }
 
   async getCashFlow(days = 30): Promise<CashFlow> {

@@ -24,6 +24,8 @@ INVOICE = "invoice"
 RECURRING = "recurring"
 PAYROLL = "payroll"
 VAT = "vat"
+# An invoice that repeats (routers/recurring_invoices), not issued yet for its month.
+SUBSCRIPTION = "subscription"
 
 
 @dataclass

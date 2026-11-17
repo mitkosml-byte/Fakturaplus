@@ -84,7 +84,7 @@ class Section:
 AUTHORED = {
     "customers", "employees", "invoices", "assets", "billing_documents", "receivables",
     "daily_revenue", "expenses", "recurring_expenses", "payroll_entries",
-    "personal_wallet_entries", "personal_expenses",
+    "personal_wallet_entries", "personal_expenses", "recurring_invoices",
 }
 
 
@@ -122,6 +122,14 @@ SECTIONS: List[Section] = [
         "receivables",
         lambda d: (_norm(d.get("customer_name")), _norm(d.get("description")), _money(d.get("amount")), _day(d.get("due_date"))),
         label="Вземания",
+    ),
+    Section(
+        "recurring_invoices",
+        lambda d: (
+            _norm(d.get("customer_name")), d.get("day_of_month"),
+            _norm(((d.get("items") or [{}])[0] or {}).get("name") if isinstance(d.get("items"), list) else ""),
+        ),
+        label="Повтарящи се фактури",
     ),
     Section("daily_revenue", lambda d: (_day(d.get("date")),), label="Дневни обороти", legacy_key="daily_revenues"),
     Section(

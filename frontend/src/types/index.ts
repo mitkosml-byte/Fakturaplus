@@ -73,7 +73,8 @@ export interface AccountantPack {
 export interface CashFlowEvent {
   date: string;
   amount: number; // money in above zero, out below
-  kind: 'receivable' | 'revenue' | 'invoice' | 'recurring' | 'payroll' | 'vat';
+  // subscription: an invoice that repeats, not issued yet for its month.
+  kind: 'receivable' | 'revenue' | 'invoice' | 'recurring' | 'payroll' | 'vat' | 'subscription';
   label: string;
   overdue: boolean;
 }
@@ -190,6 +191,73 @@ export interface BankStatementApplyResult {
   balance_set: boolean;
   paid_to_suppliers: number;
   received_from_customers: number;
+}
+
+// A payment reminder to a customer (Н6): due on the due date, a week and
+// two weeks after it - each stage suggested once, sent by the person.
+export type ReminderStage = 'due' | 'week' | 'two_weeks';
+
+export interface PaymentReminderItem {
+  receivable_id: string;
+  customer_id: string | null;
+  customer_name: string;
+  // The customer's address, when the program knows it.
+  email: string | null;
+  document: { id: string; kind: string; number: string | null; has_pdf: boolean } | null;
+  label: string;
+  amount_left: number;
+  due_date: string;
+  days_overdue: number;
+  stage: ReminderStage;
+  suggested: boolean;
+  history: { stage: ReminderStage | 'manual'; channel: 'email' | 'other' | 'skipped'; to: string | null; at: string }[];
+  subject: string;
+  message: string;
+}
+
+export interface PaymentReminders {
+  email_enabled: boolean;
+  suggested: PaymentReminderItem[];
+  other: PaymentReminderItem[];
+}
+
+// An invoice that repeats every month (Н7).
+export type RecurringInvoiceState = 'issued' | 'ready' | 'upcoming' | 'paused' | 'ended';
+
+export interface RecurringInvoice {
+  id: string;
+  customer_id: string | null;
+  customer_name: string;
+  customer_eik: string | null;
+  customer_address: string | null;
+  items: BillingDocumentItem[];
+  notes: string | null;
+  payment_method: 'cash' | 'bank_transfer' | 'card';
+  day_of_month: number;
+  due_days: number;
+  start_month: string;
+  end_month: string | null;
+  is_active: boolean;
+  amount_without_vat: number;
+  vat_amount: number;
+  total_amount: number;
+  month: string;
+  month_label: string;
+  issue_day: string;
+  state: RecurringInvoiceState;
+  issued_document: { id: string; invoice_number: string | null; issue_date: string; total_amount: number } | null;
+  history: { month: string; document_id: string; invoice_number: string | null; total_amount: number }[];
+}
+
+export interface RecurringInvoiceInput {
+  from_document_id?: string;
+  customer_name?: string;
+  items?: BillingDocumentItem[];
+  notes?: string | null;
+  day_of_month?: number;
+  due_days?: number;
+  end_month?: string;
+  is_active?: boolean;
 }
 
 // Home's cards for a business that invoices.
@@ -552,6 +620,9 @@ export interface BillingDocument {
   converted_document_id?: string | null;
   // A bill or an invoice made of a quote.
   source_quote_id?: string | null;
+  // Issued from an invoice that repeats, for its month ("YYYY-MM").
+  recurring_invoice_id?: string | null;
+  recurring_month?: string | null;
   // Where a bill's or an invoice's money stands (as listed).
   payment_status?: 'paid' | 'partly_paid' | 'owed' | 'overdue' | 'credited' | null;
   paid_amount?: number | null;

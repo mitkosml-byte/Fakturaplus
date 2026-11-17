@@ -372,11 +372,14 @@ async def _mark_quote_converted(scope: dict, quote: Optional[dict], document: Bi
         )
 
 
-async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: User) -> BillingDocument:
+async def _create_issued_invoice(
+    payload: BillingDocumentCreate, current_user: User, recurring: Optional[Tuple[str, str]] = None,
+) -> BillingDocument:
     """An invoice to a customer: the next number in sequence (or the one the
     business continues from), VAT by rate, revenue and VAT on its issue
     date (period_totals reads it there). Paid in cash or by card when
-    issued; otherwise owed - a receivable that is already revenue."""
+    issued; otherwise owed - a receivable that is already revenue.
+    `recurring`: (the repeating invoice, its month) it is issued for."""
     company_id, scope = await get_company_scope(current_user)
     quote = await _quote_to_convert(scope, payload.from_quote_id)
     issued = business_day(payload.issue_date) if payload.issue_date else today_local()
@@ -428,6 +431,7 @@ async def _create_issued_invoice(payload: BillingDocumentCreate, current_user: U
         total_amount=amounts["total_amount"], vat_by_rate=amounts["by_rate"],
         vat_exempt_basis=None if vat_registered else VAT_EXEMPT_BASIS,
         external=payload.external, in_till=in_till, source_quote_id=quote["id"] if quote else None,
+        recurring_invoice_id=recurring[0] if recurring else None, recurring_month=recurring[1] if recurring else None,
     )
     if not paid_when_issued:
         receivable = Receivable(
