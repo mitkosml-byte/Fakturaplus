@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Alert } from '../../src/utils/alert';
@@ -29,7 +28,6 @@ import { getRoleName as sharedGetRoleName, getRoleColor } from '../../src/utils/
 import { Avatar } from '../../src/components/Avatar';
 import { AvatarCropModal } from '../../src/components/AvatarCropModal';
 import { COLORS } from '../../src/theme/colors';
-import { DURATION, EASING } from '../../src/theme/motion';
 
 // A profile picture is a small icon shown everywhere (team list, chat,
 // calendar, audit log) - not read for fine detail like an invoice scan,
@@ -70,70 +68,9 @@ export default function ProfileScreen() {
   const [newCompanyEik, setNewCompanyEik] = useState('');
   const [creatingCompany, setCreatingCompany] = useState(false);
 
-  // Profile IA: 20 flat rows regrouped into 5 categories (Motion Design
-  // Audit's documented proposal) behind a horizontal chip selector, the
-  // same pattern Statistics uses for its own tabs. A category is only
-  // ever shown if it has at least one item this user's role can see, so
-  // a narrower permission set means fewer categories, not emptier ones.
+  // Account (Л7): every section listed under its own title - nothing
+  // hidden behind chips; a section shows only with an item this person sees.
   type CategoryKey = 'company' | 'accounting' | 'security' | 'settings' | 'support';
-  const [activeCategory, setActiveCategory] = useState<CategoryKey | null>(null);
-  const [displayedCategory, setDisplayedCategory] = useState<CategoryKey | null>(null);
-  // Measured on demand via measureLayout rather than cached from onLayout:
-  // react-native-web's onLayout is backed by a ResizeObserver, which only
-  // fires on a SIZE change - a chip that merely shifts x position because a
-  // sibling was inserted/removed before it (exactly what happens here, since
-  // hasPermission depends on `user` and can load a beat after first paint,
-  // changing which categories - and therefore which chips - exist) never
-  // refires onLayout, leaving a stale cached x behind. measureLayout queries
-  // the real current DOM position every time instead, so it can't go stale.
-  const rowRef = useRef<View>(null);
-  const chipRefs = useRef<Partial<Record<CategoryKey, any>>>({});
-  const pillX = useSharedValue(0);
-  const pillWidth = useSharedValue(0);
-  const contentOpacity = useSharedValue(1);
-  const prevVisibleKeysRef = useRef<string | null>(null);
-
-  const movePillTo = (key: CategoryKey, animate: boolean) => {
-    const node = chipRefs.current[key];
-    const row = rowRef.current;
-    if (!node || !row) return;
-    // @ts-ignore - measureLayout is exposed by the host component both the
-    // View and the TouchableOpacity ref forward to on native and web.
-    node.measureLayout(
-      row,
-      (x: number, _y: number, width: number) => {
-        if (animate) {
-          pillX.value = withTiming(x, { duration: DURATION.fast, easing: EASING.standard });
-          pillWidth.value = withTiming(width, { duration: DURATION.fast, easing: EASING.standard });
-        } else {
-          pillX.value = x;
-          pillWidth.value = width;
-        }
-      },
-      () => {}
-    );
-  };
-
-  const handleCategoryChange = (key: CategoryKey) => {
-    if (key === activeCategory) return;
-    setActiveCategory(key);
-    movePillTo(key, true);
-    // Content cross-fades rather than slides (Motion Design System:
-    // "Category tab / chip switch") - sliding both the pill and the
-    // content underneath would be two competing horizontal motions.
-    contentOpacity.value = withTiming(0, { duration: DURATION.fast, easing: EASING.easeIn }, (finished) => {
-      if (finished) {
-        runOnJS(setDisplayedCategory)(key);
-        contentOpacity.value = withTiming(1, { duration: DURATION.fast, easing: EASING.easeOut });
-      }
-    });
-  };
-
-  const contentAnimatedStyle = useAnimatedStyle(() => ({ opacity: contentOpacity.value }));
-  const pillAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: pillX.value }],
-    width: pillWidth.value,
-  }));
 
   const loadCompany = useCallback(async () => {
     try {
@@ -368,6 +305,17 @@ export default function ProfileScreen() {
               onPress: () => router.push('/closed-days'),
             }]
           : []),
+        ...(user?.role === 'owner' || user?.role === 'manager'
+          ? [{
+              key: 'deadlines',
+              title: t('deadlines.title'),
+              subtitle: t('deadlines.menuDesc'),
+              icon: 'alarm-outline' as const,
+              iconBg: 'rgba(245, 158, 11, 0.15)',
+              iconColor: COLORS.warning,
+              onPress: () => router.push('/deadlines'),
+            }]
+          : []),
       ],
     },
     {
@@ -424,17 +372,6 @@ export default function ProfileScreen() {
               iconBg: 'rgba(99, 102, 241, 0.15)',
               iconColor: COLORS.indigo,
               onPress: () => router.push('/audit-log'),
-            }]
-          : []),
-        ...(user?.role === 'owner' || user?.role === 'manager'
-          ? [{
-              key: 'deadlines',
-              title: t('deadlines.title'),
-              subtitle: t('deadlines.menuDesc'),
-              icon: 'alarm-outline' as const,
-              iconBg: 'rgba(245, 158, 11, 0.15)',
-              iconColor: COLORS.warning,
-              onPress: () => router.push('/deadlines'),
             }]
           : []),
         ...(isOwner
@@ -529,33 +466,6 @@ export default function ProfileScreen() {
   ];
 
   const visibleCategories = allCategories.filter((c) => c.items.length > 0);
-  const visibleKeysSignature = visibleCategories.map((c) => c.key).join(',');
-  if (prevVisibleKeysRef.current !== null && prevVisibleKeysRef.current !== visibleKeysSignature) {
-    if (activeCategory !== null && !visibleCategories.some((c) => c.key === activeCategory)) {
-      // The active category's permission was revoked out from under it
-      // (edge case - a role change mid-session) - fall back to the first
-      // category that's still actually visible.
-      setActiveCategory(visibleCategories[0]?.key ?? null);
-      setDisplayedCategory(visibleCategories[0]?.key ?? null);
-    }
-  }
-  prevVisibleKeysRef.current = visibleKeysSignature;
-  if (activeCategory === null && visibleCategories.length > 0) {
-    // First render: pick the first visible category without going through
-    // the animated transition - there's nothing on screen yet to cross-fade from.
-    setActiveCategory(visibleCategories[0].key);
-    setDisplayedCategory(visibleCategories[0].key);
-  }
-  const currentItems = visibleCategories.find((c) => c.key === displayedCategory)?.items || [];
-
-  // Re-snap the pill (no animation - this isn't a user action) whenever the
-  // set of visible categories changes, e.g. once `user` finishes loading a
-  // beat after first paint and a permission-gated category's chip appears
-  // or disappears, shifting everyone after it.
-  useEffect(() => {
-    if (activeCategory) movePillTo(activeCategory, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleKeysSignature, activeCategory]);
 
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -574,27 +484,10 @@ export default function ProfileScreen() {
           >
             <View style={styles.header}>
               <Text style={styles.title}>{t('profile.title')}</Text>
-              <TouchableOpacity
-                style={styles.headerLogoutButton}
-                onPress={handleLogout}
-                accessibilityLabel={t('profile.logout')}
-              >
-                <Ionicons name="log-out-outline" size={22} color={COLORS.danger} />
-              </TouchableOpacity>
             </View>
 
-            {/* Company Banner - always opens the switcher, which also has
-                the "add another company" entry point, not just a way to
-                jump between companies you already have. */}
-            {company && (
-              <TouchableOpacity style={styles.companyBanner} onPress={() => setShowSwitcherModal(true)} accessibilityLabel={t('companySwitcher.switchCompany')}>
-                <Ionicons name="business" size={20} color={COLORS.primary} />
-                <Text style={styles.companyName}>{company.name}</Text>
-                <Ionicons name="swap-horizontal" size={18} color={COLORS.primary} />
-              </TouchableOpacity>
-            )}
-
-            {/* User Card */}
+            {/* Who is signed in, in one row - the picture changes with a tap,
+                a long press removes it. */}
             <View style={styles.userCard}>
               <TouchableOpacity
                 style={styles.avatarContainer}
@@ -603,73 +496,63 @@ export default function ProfileScreen() {
                 disabled={uploadingAvatar}
                 accessibilityLabel={t('profile.changeAvatar')}
               >
-                <Avatar uri={user?.picture} name={user?.name} size={80} />
+                <Avatar uri={user?.picture} name={user?.name} size={52} />
                 <View style={styles.avatarEditBadge}>
                   {uploadingAvatar ? (
                     <ActivityIndicator size="small" color="white" />
                   ) : (
-                    <Ionicons name="camera" size={14} color="white" />
+                    <Ionicons name="camera" size={11} color="white" />
                   )}
                 </View>
               </TouchableOpacity>
-              <Text style={styles.userName}>{user?.name || t('role.user')}</Text>
-              <Text style={styles.userEmail}>{user?.email || ''}</Text>
-              <View style={styles.roleContainer}>
-                <Ionicons
-                  name={user?.role === 'owner' ? 'star' : user?.role === 'manager' ? 'briefcase' : user?.role === 'accountant' ? 'calculator' : 'person'}
-                  size={16}
-                  color={getRoleColor(user?.role || 'staff')}
-                />
-                <Text style={[styles.roleText, { color: getRoleColor(user?.role || 'staff') }]}>
-                  {getRoleName(user?.role || 'staff')}
-                </Text>
+              <View style={styles.userInfo}>
+                <Text style={styles.userName} numberOfLines={1}>{user?.name || t('role.user')}</Text>
+                <Text style={styles.userEmail} numberOfLines={1}>{user?.email || ''}</Text>
+                <View style={styles.roleContainer}>
+                  <Ionicons
+                    name={user?.role === 'owner' ? 'star' : user?.role === 'manager' ? 'briefcase' : user?.role === 'accountant' ? 'calculator' : 'person'}
+                    size={13}
+                    color={getRoleColor(user?.role || 'staff')}
+                  />
+                  <Text style={[styles.roleText, { color: getRoleColor(user?.role || 'staff') }]}>
+                    {getRoleName(user?.role || 'staff')}
+                  </Text>
+                </View>
               </View>
-        </View>
+            </View>
 
-        {/* Category selector - replaces the old flat 20-row list (Motion
-            Design Audit's Profile IA proposal). A sliding pill tracks the
-            active chip; the row below cross-fades when it changes. */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoryScroll}
-        >
-          <View ref={rowRef} style={styles.categoryRow}>
-            <Animated.View style={[styles.categoryPill, pillAnimatedStyle]} />
-            {visibleCategories.map((cat) => (
-              <TouchableOpacity
-                key={cat.key}
-                ref={(node) => { chipRefs.current[cat.key] = node; }}
-                style={styles.categoryChip}
-                onPress={() => handleCategoryChange(cat.key)}
-              >
-                <Ionicons
-                  name={cat.icon}
-                  size={15}
-                  color={activeCategory === cat.key ? 'white' : COLORS.textMuted}
-                />
-                <Text style={[styles.categoryChipText, activeCategory === cat.key && styles.categoryChipTextActive]}>
-                  {cat.label}
-                </Text>
+            {/* The company - a tap opens the switcher, which also adds another. */}
+            {company && (
+              <TouchableOpacity style={styles.companyBanner} onPress={() => setShowSwitcherModal(true)} accessibilityLabel={t('companySwitcher.switchCompany')}>
+                <Ionicons name="business" size={18} color={COLORS.primary} />
+                <Text style={styles.companyName} numberOfLines={1}>{company.name}</Text>
+                <Ionicons name="swap-horizontal" size={16} color={COLORS.primary} />
               </TouchableOpacity>
-            ))}
-          </View>
-        </ScrollView>
+            )}
 
-        <Animated.View style={[styles.menuSection, contentAnimatedStyle]}>
-          {currentItems.map((item) => (
-            <TouchableOpacity key={item.key} style={styles.menuItem} onPress={item.onPress}>
-              <View style={[styles.menuIcon, { backgroundColor: item.iconBg }]}>
-                <Ionicons name={item.icon} size={20} color={item.iconColor} />
+            {visibleCategories.map((category) => (
+              <View key={category.key} style={styles.menuSection}>
+                <Text style={styles.sectionTitle}>{category.label}</Text>
+                <View style={styles.sectionCard}>
+                {category.items.map((item, index) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
+                    onPress={item.onPress}
+                  >
+                    <View style={[styles.menuIcon, { backgroundColor: item.iconBg }]}>
+                      <Ionicons name={item.icon} size={18} color={item.iconColor} />
+                    </View>
+                    <View style={styles.menuContent}>
+                      <Text style={styles.menuTitle}>{item.title}</Text>
+                      <Text style={styles.menuSubtitle} numberOfLines={1}>{item.subtitle}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                ))}
+                </View>
               </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{item.title}</Text>
-                <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          ))}
-        </Animated.View>
+            ))}
 
             {/* Logout Button */}
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -869,87 +752,63 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    marginBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerLogoutButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    marginBottom: 16,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     color: 'white',
   },
-  companyBanner: {
+  // Who is signed in, in one row.
+  userCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-  },
-  companyName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.primary,
-    flex: 1,
-  },
-  userCard: {
+    gap: 14,
     backgroundColor: COLORS.surface,
-    borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 24,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
   },
   avatarContainer: {
-    marginBottom: 16,
-    padding: 3,
-    borderRadius: 43,
-    borderWidth: 3,
+    padding: 2,
+    borderRadius: 30,
+    borderWidth: 2,
     borderColor: COLORS.primary,
   },
   avatarEditBadge: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    bottom: -2,
+    right: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: COLORS.primary,
     borderWidth: 2,
     borderColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  userInfo: { flex: 1 },
   userName: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 4,
   },
   userEmail: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.textSecondary,
-    marginBottom: 12,
+    marginTop: 1,
   },
   roleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    marginTop: 6,
     backgroundColor: COLORS.background,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   roleText: {
     fontSize: 12,
@@ -959,64 +818,56 @@ const styles = StyleSheet.create({
   roleTextAccountant: {
     color: COLORS.primary,
   },
-  categoryScroll: {
-    marginBottom: 16,
-    flexGrow: 0,
-  },
-  categoryRow: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderRadius: 14,
-    padding: 4,
-    gap: 2,
-  },
-  categoryPill: {
-    position: 'absolute',
-    top: 4,
-    bottom: 4,
-    left: 0,
-    backgroundColor: COLORS.primary,
-    borderRadius: 10,
-  },
-  categoryChip: {
+  companyBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 12,
     paddingVertical: 10,
-    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginBottom: 20,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
   },
-  categoryChipText: {
-    fontSize: 13,
+  companyName: {
+    fontSize: 15,
     fontWeight: '600',
-    color: COLORS.textMuted,
+    color: COLORS.primary,
+    flex: 1,
   },
-  categoryChipTextActive: {
-    color: 'white',
-  },
+  // Each section: its title, then its items in one card.
   menuSection: {
-    marginBottom: 24,
+    marginBottom: 18,
   },
-  menuSectionTitle: {
+  sectionTitle: {
     fontSize: 12,
     color: COLORS.textMuted,
-    fontWeight: '600',
-    marginBottom: 12,
+    fontWeight: '700',
+    marginBottom: 8,
     marginLeft: 4,
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sectionCard: {
+    borderRadius: 14,
+    overflow: 'hidden',
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  menuItemDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
   },
   menuIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 9,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -1032,7 +883,7 @@ const styles = StyleSheet.create({
   menuSubtitle: {
     fontSize: 12,
     color: COLORS.textMuted,
-    marginTop: 2,
+    marginTop: 1,
   },
   logoutButton: {
     flexDirection: 'row',

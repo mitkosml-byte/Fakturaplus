@@ -2324,8 +2324,8 @@ export const translations: Translations = {
   
   // Profile Screen
   'profile.title': {
-    bg: 'Профил',
-    en: 'Profile',
+    bg: 'Акаунт',
+    en: 'Account',
   },
   'profile.settings': {
     bg: 'Настройки',
