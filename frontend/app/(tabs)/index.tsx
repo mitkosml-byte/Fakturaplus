@@ -24,7 +24,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator, PeriodSoFarNote } from '../../src/components/PeriodNavigator';
 import { useSharedPeriod } from '../../src/utils/sharedPeriod';
-import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard, LockedValue, LocationPicker } from '../../src/components';
+import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, CelebrationGlow, MorningBriefingCard, LockedValue, LocationPicker } from '../../src/components';
 import { useLocationChoice, useLocationsStore } from '../../src/stores/locationsStore';
 import Animated from 'react-native-reanimated';
 import { PeriodState, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
@@ -53,7 +53,6 @@ export default function HomeScreen() {
   const { uses } = useModules();
   const usesTill = uses('till');
   const usesBilling = uses('billing');
-  const usesWallet = uses('wallet');
   const showTeamTab = useShowTeamTab();
   const router = useRouter();
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string; revenueDate?: string }>();
@@ -285,7 +284,7 @@ export default function HomeScreen() {
   // AsyncStorage. That first loadData() call used to go out with no auth
   // at all, fail with 401, and since nothing else ever re-triggers a focus
   // event on its own, the summary card (and everything chained off it
-  // below - MorningBriefingCard, PersonalWalletTeaser) stayed stuck on its
+  // below - MorningBriefingCard) stayed stuck on its
   // loading skeleton forever, until the user manually switched tabs and
   // back. useFocusEffect's own implementation re-runs its effect whenever
   // the memoized callback's identity changes while the screen is still
@@ -868,9 +867,8 @@ export default function HomeScreen() {
               />
             )}
 
-            {/* Personal wallet teaser - collapsed by default, see component for
-                why it's gated here rather than inside it. */}
-            {usesWallet && hasPermission('view_personal_wallet') && <PersonalWalletTeaser refreshSignal={summary} />}
+            {/* "Лично тефтерче" is not on Home (Л4): it is in История и
+                справки, and the day's review says when it needs a look. */}
       </ScrollView>
 
       {/* Revenue Modal */}
