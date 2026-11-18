@@ -6,10 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  TextInput,
-  Platform,
   ImageBackground,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,7 +15,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
-import { Summary, DailyRevenue, NonInvoiceExpense, RoiAdviceResponse } from '../../src/types';
+import { Summary, NonInvoiceExpense } from '../../src/types';
 import { format, subDays } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
@@ -26,19 +23,16 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
 import { PeriodNavigator, PeriodSoFarNote } from '../../src/components/PeriodNavigator';
 import { useSharedPeriod } from '../../src/utils/sharedPeriod';
-import { ClosedDaysCalendar } from '../../src/components/ClosedDaysCalendar';
 import { ScanCreditsBadge, useDirectionalReveal, CountUp, SkeletonStat, CelebrationGlow, PersonalWalletTeaser, MorningBriefingCard, LockedValue, LocationPicker } from '../../src/components';
 import { useLocationChoice, useLocationsStore } from '../../src/stores/locationsStore';
 import Animated from 'react-native-reanimated';
 import { PeriodState, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 import { restrictedDataNote } from '../../src/utils/visibilityNote';
-import { PersonalExpenseModal } from '../../src/components/home/PersonalExpenseModal';
 import { RevenueModal, rateAmountsTotal } from '../../src/components/home/RevenueModal';
 import type { VatGroupAmount, ZReportResult } from '../../src/types';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCard';
-import { BreakEvenCard } from '../../src/components/home/BreakEvenCard';
 import { pickScanImage } from '../../src/utils/scanImage';
 import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
@@ -48,8 +42,8 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 
 export default function HomeScreen() {
   const { t, dateLocale } = useTranslation();
-  const { language, setLanguage } = useLanguageStore();
-  const { isOwner, hasPermission, isLoading: authLoading } = useAuth();
+  const { language } = useLanguageStore();
+  const { hasPermission, isLoading: authLoading } = useAuth();
   // Home shows what the business uses (У3): a business without a till sees
   // no till revenue, average per day or pocket money; one that invoices
   // sees what it issued and what customers owe, with "+ Фактура".
@@ -102,24 +96,7 @@ export default function HomeScreen() {
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
   const [importRevenueModalVisible, setImportRevenueModalVisible] = useState(false);
   const [importExpenseModalVisible, setImportExpenseModalVisible] = useState(false);
-  const [personalExpenseModalVisible, setPersonalExpenseModalVisible] = useState(false);
-  
-  // ROI state (owner only)
-  const [roiData, setRoiData] = useState<any>(null);
-  // AI advice on the ROI numbers: shown when already kept for these numbers,
-  // otherwise asked for with a tap (it costs a model call, so never on its own).
-  const [roiAdvice, setRoiAdvice] = useState<RoiAdviceResponse | null>(null);
-  const [roiAdviceLoading, setRoiAdviceLoading] = useState(false);
-  const [loadingRoi, setLoadingRoi] = useState(false);
-  
-  // Personal expense form
-  const [personalAmount, setPersonalAmount] = useState('');
-  const [personalDescription, setPersonalDescription] = useState('');
-  const [personalType, setPersonalType] = useState('recurring');
-  const [personalCategory, setPersonalCategory] = useState('other');
-  const [personalAmountError, setPersonalAmountError] = useState(false);
-  const [personalDescriptionError, setPersonalDescriptionError] = useState(false);
-  
+
   // Revenue form
   const [fiscalRevenue, setFiscalRevenue] = useState('');
   const [pocketMoney, setPocketMoney] = useState('');
@@ -155,12 +132,6 @@ export default function HomeScreen() {
   // opens - drives the "Recent" quick-fill chips, independent of whatever
   // single day dayExpenses above is currently scoped to.
   const [expenseSuggestionSource, setExpenseSuggestionSource] = useState<NonInvoiceExpense[]>([]);
-  // Same idea for personal expenses - getPersonalExpenses() with no
-  // month/year returns the owner's full history, so this needs no new
-  // backend endpoint either.
-  const [personalSuggestionSource, setPersonalSuggestionSource] = useState<
-    { description: string; amount: number; date: string }[]
-  >([]);
   
   // Date picker states
   const [isRevenueDatePickerVisible, setRevenueDatePickerVisible] = useState(false);
@@ -499,124 +470,6 @@ export default function HomeScreen() {
     [expenseSuggestionSource]
   );
 
-  useEffect(() => {
-    if (!personalExpenseModalVisible || personalSuggestionSource.length > 0) return;
-    api.getPersonalExpenses()
-      .then(({ personal_expenses }) =>
-        setPersonalSuggestionSource(
-          personal_expenses.map((p) => ({ description: p.description, amount: p.amount, date: p.created_at }))
-        )
-      )
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [personalExpenseModalVisible]);
-
-  const personalSuggestions = useMemo(
-    () => getDescriptionSuggestions(personalSuggestionSource),
-    [personalSuggestionSource]
-  );
-
-  // Load ROI/personal-investments data - visible to the owner and to any
-  // delegated member the owner has granted view_personal_investments.
-  // Follows the same period navigator as the rest of the dashboard (via the
-  // calendar month its selected period falls in - the ROI endpoint and its
-  // AI insights are inherently month-shaped, e.g. "wait ~45 days of data"),
-  // instead of always silently defaulting to the current month regardless
-  // of what period the dashboard above is actually showing - that mismatch
-  // is exactly what made this card look "frozen" at zero once a new month
-  // started with no personal expenses logged yet, even though September's
-  // real data was still sitting right there, one period-back away.
-  const canViewPersonalInvestments = hasPermission('view_personal_investments');
-  const loadRoiData = useCallback(async () => {
-    if (!canViewPersonalInvestments) return;
-
-    setLoadingRoi(true);
-    try {
-      const periodStart = getPeriodBounds(periodState).start;
-      const roiPeriod = { month: periodStart.getMonth() + 1, year: periodStart.getFullYear(), language };
-      const data = await api.getROIAnalysis(roiPeriod);
-      setRoiData(data);
-      setRoiAdvice(null);
-      if (data.analysis?.payback) {
-        api.getRoiAdvice({ ...roiPeriod, generate: false }).then(setRoiAdvice).catch(() => setRoiAdvice(null));
-      }
-    } catch (error) {
-      console.error('Error loading ROI:', error);
-      setRoiData(null);
-    } finally {
-      setLoadingRoi(false);
-    }
-  }, [canViewPersonalInvestments, periodState, language]);
-
-  const askRoiAdvice = async () => {
-    const periodStart = getPeriodBounds(periodState).start;
-    setRoiAdviceLoading(true);
-    try {
-      setRoiAdvice(await api.getRoiAdvice({
-        month: periodStart.getMonth() + 1, year: periodStart.getFullYear(), language, generate: true,
-      }));
-    } catch (error: any) {
-      Alert.alert(t('common.error'), error?.message || '');
-    } finally {
-      setRoiAdviceLoading(false);
-    }
-  };
-
-  // authLoading in the deps list: same auth-readiness race as loadData
-  // above - see its comment. useFocusEffect re-runs its effect whenever
-  // this memoized callback's identity changes while still focused, so
-  // this alone both skips the doomed first call and retries once
-  // checkAuth() actually finishes.
-  useFocusEffect(
-    useCallback(() => {
-      if (!authLoading && canViewPersonalInvestments) {
-        loadRoiData();
-      }
-    }, [canViewPersonalInvestments, loadRoiData, authLoading])
-  );
-
-  // Create personal expense
-  const handleCreatePersonalExpense = async () => {
-    const amount = parseFloat(personalAmount);
-    const invalidAmount = isNaN(amount) || amount <= 0;
-    const missingDescription = !personalDescription.trim();
-    setPersonalAmountError(invalidAmount);
-    setPersonalDescriptionError(missingDescription);
-    if (invalidAmount || missingDescription) return;
-    if (isSubmittingForm) return;
-
-    // Tagged to whichever period the dashboard above is currently showing,
-    // not necessarily today's real calendar month - otherwise adding an
-    // expense while looking back at a past period would silently file it
-    // under the current month instead, making the card you're looking at
-    // never update (exactly what made this section look "frozen").
-    const periodStart = getPeriodBounds(periodState).start;
-    setIsSubmittingForm(true);
-    try {
-      await api.createPersonalExpense({
-        amount,
-        description: personalDescription.trim(),
-        expense_type: personalType,
-        category: personalCategory,
-        period_month: periodStart.getMonth() + 1,
-        period_year: periodStart.getFullYear(),
-      });
-
-      Haptics.success();
-      Toast.success(t('personal.created'));
-      setPersonalAmount('');
-      setPersonalDescription('');
-      setPersonalType('recurring');
-      setPersonalCategory('other');
-      setPersonalExpenseModalVisible(false);
-      loadRoiData();
-    } catch (error) {
-      Alert.alert(t('common.error'), t('common.operationFailed'));
-    } finally {
-      setIsSubmittingForm(false);
-    }
-  };
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
@@ -758,11 +611,37 @@ export default function HomeScreen() {
   };
 
   const today = format(new Date(), "d MMMM yyyy 'г.'" , { locale: bg });
-  // Average per day with revenue entered (backend period pace): a day
-  // nobody entered, a closed day or a day still to come is not a day of the
-  // average. While the period runs, its expected end comes with it.
-  const pace = summary?.pace ?? null;
-  const avgDailyTurnover = pace?.avg_per_revenue_day ?? 0;
+  // The day's actions, in the order a day goes: the till's revenue, an
+  // expense, an invoice to a customer.
+  const homeActions: { key: string; label: string; hint: string; icon: keyof typeof Ionicons.glyphMap; color: string; onPress: () => void }[] = [
+    ...(usesTill && hasPermission('add_revenue') ? [{
+      key: 'revenue', label: t('home.dailyRevenue'), hint: t('home.actionRevenueHint'), icon: 'cash' as const, color: COLORS.success,
+      onPress: () => { setRevenueDate(getDefaultActionDate()); setRevenueModalVisible(true); },
+    }] : []),
+    ...(hasPermission('add_expenses') ? [{
+      key: 'expense', label: t('home.expenses'), hint: t('home.actionExpenseHint'), icon: 'remove-circle' as const, color: COLORS.warning,
+      onPress: () => { setExpenseDate(getDefaultActionDate()); setExpenseModalVisible(true); },
+    }] : []),
+    ...(usesBilling && hasPermission('issue_invoices') ? [{
+      key: 'invoice', label: t('home.actionInvoice'), hint: t('home.actionInvoiceHint'), icon: 'document-text' as const, color: COLORS.primary,
+      onPress: () => router.push({ pathname: '/billing-documents', params: { new: 'invoice' } }),
+    }] : []),
+  ];
+  // Under the boxes: the period's revenue (with a till, the till and
+  // Джобче added up - for who sees both) and its expenses.
+  const ledgerRows: { key: string; label: string; value: number }[] = [];
+  if (summary) {
+    if (usesTill) {
+      if (summary.total_fiscal_revenue !== null && summary.total_pocket_money !== null) {
+        ledgerRows.push({ key: 'till', label: t('home.revenueSum'), value: (summary.total_fiscal_revenue || 0) + (summary.total_pocket_money || 0) });
+      }
+    } else if (summary.total_income !== null) {
+      ledgerRows.push({ key: 'income', label: t('home.totalIncome'), value: summary.total_income || 0 });
+    }
+    if (summary.total_expense !== null) {
+      ledgerRows.push({ key: 'expense', label: t('home.totalExpenses'), value: summary.total_expense || 0 });
+    }
+  }
   // Which totals - and so which profit - this viewer sees; the "no
   // statistics at all" case has a note of its own further up.
   const restrictedNote = summary?.financial_visibility?.statistics === false
@@ -788,629 +667,145 @@ export default function HomeScreen() {
             style={styles.scrollView}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           >
-            {/* Header - greeting and the icon row stack vertically instead
-                of sharing one row, since three icons (scan credits, language,
-                receipt) squeezed next to the large greeting text crowded
-                together on narrower phone screens. */}
+            {/* Home (Л3, Л4): what to do today, the main numbers, what needs
+                attention. VAT, the average, payment kinds, the break-even and
+                personal investments are in Statistics; the language and the
+                days off in Account. */}
             <View style={styles.header}>
-              <View>
+              <View style={{ flexShrink: 1 }}>
                 <Text style={styles.greeting}>{t('home.welcome')}</Text>
                 <Text style={styles.date}>{today}</Text>
               </View>
-              <View style={styles.headerIconsRow}>
-                <ScanCreditsBadge />
-                <TouchableOpacity
-                  style={styles.headerIcon}
-                  onPress={() => { Haptics.success(); setLanguage(language === 'bg' ? 'en' : 'bg'); }}
-                  accessibilityLabel={t('home.switchLanguage')}
-                >
-                  <Text style={styles.languageToggleText}>{language === 'bg' ? 'BG' : 'EN'}</Text>
-                </TouchableOpacity>
-                <View style={styles.headerIcon}>
-                  <Ionicons name="receipt" size={28} color={COLORS.primary} />
-                </View>
-              </View>
+              <ScanCreditsBadge />
             </View>
 
-            <MorningBriefingCard refreshSignal={summary} />
+            {/* The day's actions first - each only for who may do it (a
+                button whose only outcome is a refusal is not shown). */}
+            {homeActions.length > 0 && (
+              <View style={styles.actionsContainer}>
+                {homeActions.map((action) => (
+                  <TouchableOpacity
+                    key={action.key}
+                    style={[styles.actionButton, { backgroundColor: action.color }]}
+                    onPress={action.onPress}
+                    accessibilityRole="button"
+                    accessibilityLabel={action.label}
+                  >
+                    <Ionicons name={action.icon} size={22} color="white" />
+                    <Text style={styles.actionButtonText} numberOfLines={2}>{action.label}</Text>
+                    <Text style={styles.actionButtonHint} numberOfLines={2}>{action.hint}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
             <PeriodSoFarNote summary={summary} />
 
             <Animated.View style={periodReveal.style}>
-            {/* Summary Cards - skeletons stand in until the first real
-                summary lands, so these never flash "0.00 €" for data that
-                just hasn't arrived yet. Once it lands, a card whose field
-                came back null (viewer lacks view_statistics) shows a
-                blurred placeholder instead of either the real figure or a
-                bare lock icon - nothing sensitive sits behind the blur,
-                the backend already redacted the real number to null. */}
-            {!summary ? (
-              <>
-                <View style={styles.summaryContainer}>
-                  <SkeletonStat style={[styles.summaryCard, styles.incomeCard]} />
-                  <SkeletonStat style={[styles.summaryCard, styles.expenseCard]} />
-                </View>
-                {usesTill && (
-                <View style={styles.summaryContainer}>
-                  <SkeletonStat style={[styles.summaryCard, styles.cashCard]} />
-                  <SkeletonStat style={[styles.summaryCard, styles.cardCard]} />
-                </View>
-                )}
-              </>
-            ) : (
-            <>
-            <View style={styles.summaryContainer}>
-              <View style={[styles.summaryCard, styles.incomeCard]}>
-                <View style={styles.cardIcon}>
-                  <Ionicons name="trending-up" size={24} color={COLORS.success} />
-                </View>
-                <Text style={styles.cardLabel}>{t('home.totalIncome')}</Text>
-                {summary.total_income === null ? (
-                  <LockedValue textStyle={[styles.cardValue, { color: COLORS.success }]} fakeText="1 240.00 €" />
+              {/* The main numbers: invoices, the till, Джобче, the profit -
+                  and under them the period's revenue and expenses. */}
+              <View style={styles.statsGrid}>
+                {!summary ? (
+                  <>
+                    <SkeletonStat style={styles.statItem} />
+                    <SkeletonStat style={styles.statItem} />
+                    {usesTill && <SkeletonStat style={styles.statItem} />}
+                    {usesTill && <SkeletonStat style={styles.statItem} />}
+                  </>
                 ) : (
-                  <CountUp
-                    value={summary.total_income || 0}
-                    formatter={(n) => `${n.toFixed(2)} €`}
-                    style={[styles.cardValue, { color: COLORS.success }]}
-                  />
-                )}
-                {/* Invoices issued to customers are income of their day. */}
-                {!!summary.total_issued_invoices && (
-                  <Text style={styles.cardIssuedNote}>
-                    {t('stats.ofWhichIssuedInvoices').replace('{amount}', summary.total_issued_invoices.toFixed(2))}
-                  </Text>
-                )}
-              </View>
-
-              <View style={[styles.summaryCard, styles.expenseCard]}>
-                <View style={styles.cardIcon}>
-                  <Ionicons name="trending-down" size={24} color={COLORS.danger} />
-            </View>
-            <Text style={styles.cardLabel}>{t('home.totalExpenses')}</Text>
-            {summary.total_expense === null ? (
-              <LockedValue textStyle={[styles.cardValue, { color: COLORS.danger }]} fakeText="860.00 €" />
-            ) : (
-              <CountUp
-                value={summary.total_expense || 0}
-                formatter={(n) => `${n.toFixed(2)} €`}
-                style={[styles.cardValue, { color: COLORS.danger }]}
-              />
-            )}
-          </View>
-        </View>
-
-        {/* How the income came: cash, card and - for invoices paid by bank - bank.
-            Cash and card are the till's - shown without one only if money came so. */}
-        {(usesTill || (summary.total_cash_revenue || 0) > 0 || (summary.total_card_revenue || 0) > 0) && (
-        <View style={styles.summaryContainer}>
-          <View style={[styles.summaryCard, styles.cashCard]}>
-            <View style={styles.cardIcon}>
-              <Ionicons name="cash-outline" size={24} color={COLORS.success} />
-            </View>
-            <Text style={styles.cardLabel}>{t('home.cashRevenue')}</Text>
-            {summary.total_cash_revenue === null ? (
-              <LockedValue textStyle={[styles.cardValue, { color: COLORS.success }]} fakeText="430.00 €" />
-            ) : (
-              <CountUp
-                value={summary.total_cash_revenue || 0}
-                formatter={(n) => `${n.toFixed(2)} €`}
-                style={[styles.cardValue, { color: COLORS.success }]}
-              />
-            )}
-          </View>
-
-          <View style={[styles.summaryCard, styles.cardCard]}>
-            <View style={styles.cardIcon}>
-              <Ionicons name="card-outline" size={24} color={COLORS.info} />
-            </View>
-            <Text style={styles.cardLabel}>{t('home.cardRevenue')}</Text>
-            {summary.total_card_revenue === null ? (
-              <LockedValue textStyle={[styles.cardValue, { color: COLORS.info }]} fakeText="810.00 €" />
-            ) : (
-              <CountUp
-                value={summary.total_card_revenue || 0}
-                formatter={(n) => `${n.toFixed(2)} €`}
-                style={[styles.cardValue, { color: COLORS.info }]}
-              />
-            )}
-          </View>
-        </View>
-        )}
-        {(summary.total_bank_revenue || 0) > 0 && (
-          <View style={styles.summaryContainer}>
-            <View style={[styles.summaryCard, styles.bankCard]}>
-              <View style={styles.cardIcon}>
-                <Ionicons name="business-outline" size={24} color={COLORS.primary} />
-              </View>
-              <Text style={styles.cardLabel}>{t('home.bankRevenue')}</Text>
-              <CountUp
-                value={summary.total_bank_revenue || 0}
-                formatter={(n) => `${n.toFixed(2)} €`}
-                style={[styles.cardValue, { color: COLORS.primary }]}
-              />
-            </View>
-          </View>
-        )}
-            </>
-            )}
-
-        {/* Not registered for VAT: no VAT to pay or deduct */}
-        {summary?.vat_registered !== false && (
-        <>
-        {/* VAT Card */}
-        <View style={styles.vatCard}>
-          <View style={styles.vatHeader}>
-            <Ionicons name="calculator" size={24} color={COLORS.primary} />
-            <Text style={styles.vatTitle}>{t('home.vatToPay')}</Text>
-          </View>
-          {summary?.vat_to_pay === null ? (
-            <LockedValue textStyle={styles.vatValue} fakeText="124.50 €" iconSize={18} />
-          ) : (
-            <CountUp
-              value={summary?.vat_to_pay || 0}
-              formatter={(n) => `${n.toFixed(2)} €`}
-              style={[styles.vatValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}
-            />
-          )}
-          <View style={styles.vatDetails}>
-            <View style={styles.vatDetailRow}>
-              <Text style={styles.vatDetailLabel}>{t('stats.vatFromSales')}:</Text>
-              {summary?.fiscal_vat === null ? (
-                <LockedValue textStyle={styles.vatDetailValue} fakeText="210.40 €" iconSize={11} />
-              ) : (
-                <Text style={styles.vatDetailValue}>{summary?.fiscal_vat?.toFixed(2) || '0.00'} €</Text>
-              )}
-            </View>
-            <View style={styles.vatDetailRow}>
-              <Text style={styles.vatDetailLabel}>{t('stats.vatCredit')}:</Text>
-              {summary?.total_invoice_vat === null ? (
-                <LockedValue textStyle={styles.vatDetailValue} fakeText="85.90 €" iconSize={11} />
-              ) : (
-                <Text style={styles.vatDetailValue}>-{summary?.total_invoice_vat?.toFixed(2) || '0.00'} €</Text>
-              )}
-            </View>
-          </View>
-        </View>
-        </>
-        )}
-            </Animated.View>
-
-        {/* A business that invoices: issued in the period, owed now,
-            overdue - and "+ Фактура" (У2, У3). */}
-        {usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
-          <BillingOverviewCard
-            startDate={toApiDate(getPeriodBounds(periodState).start)}
-            endDate={toApiDate(getPeriodBounds(periodState).end)}
-            canIssue={hasPermission('issue_invoices')}
-            refreshSignal={summary}
-          />
-        )}
-
-        {/* Unpaid supplier invoices reminder - company-wide, not scoped to
-            this month, since money owed from any past period is still owed */}
-        {(summary?.unpaid_invoice_count || 0) > 0 && (
-          <TouchableOpacity
-            style={[styles.unpaidCard, (summary?.overdue_invoice_count || 0) > 0 && styles.unpaidCardOverdue]}
-            onPress={() => router.push({ pathname: '/(tabs)/invoices', params: { paymentFilter: 'unpaid' } })}
-            activeOpacity={0.8}
-          >
-            <View style={styles.unpaidHeader}>
-              <Ionicons
-                name={(summary?.overdue_invoice_count || 0) > 0 ? 'alert-circle' : 'time-outline'}
-                size={24}
-                color={(summary?.overdue_invoice_count || 0) > 0 ? COLORS.danger : COLORS.warning}
-              />
-              <Text style={styles.unpaidTitle}>{t('home.unpaidInvoices')}</Text>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </View>
-            <CountUp
-              value={summary?.total_unpaid_amount || 0}
-              formatter={(n) => `${n.toFixed(2)} €`}
-              style={[styles.unpaidValue, { color: (summary?.overdue_invoice_count || 0) > 0 ? COLORS.danger : COLORS.warning }]}
-            />
-            <Text style={styles.unpaidSubtitle}>
-              {summary?.unpaid_invoice_count} {t('home.unpaidInvoicesCount')}
-              {(summary?.overdue_invoice_count || 0) > 0
-                ? ` · ${summary?.overdue_invoice_count} ${t('home.overdueInvoicesCount')}`
-                : ''}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {/* The day's target: what the month has to sell to end at zero (Н5) -
-            for whoever sees the profit. */}
-        {hasPermission('view_profit') && (
-          <BreakEvenCard canManageBudget={hasPermission('manage_budget')} refreshSignal={summary} />
-        )}
-
-        {/* Average Daily Turnover - taps through to the same stat in Statistics,
-            broken down by period, for deeper business analysis. The till's:
-            the average of the days it was entered. */}
-        {usesTill && (
-        <TouchableOpacity
-          style={styles.avgTurnoverCard}
-          onPress={() => router.push('/(tabs)/stats')}
-          activeOpacity={0.8}
-        >
-          <View style={styles.avgTurnoverHeader}>
-            <Ionicons name="speedometer" size={24} color={COLORS.info} />
-            <Text style={styles.avgTurnoverTitle}>{t('home.avgDailyTurnover')}</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-          </View>
-          {summary && summary.total_income === null ? (
-            <LockedValue textStyle={styles.avgTurnoverValue} fakeText="61.30 €" iconSize={18} />
-          ) : (
-            <CountUp
-              value={avgDailyTurnover}
-              formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
-              style={styles.avgTurnoverValue}
-            />
-          )}
-          <Text style={styles.avgTurnoverSubtitle}>
-            {t('home.avgDailyTurnoverSubtitle').replace('{days}', String(pace?.revenue_days ?? 0))}
-          </Text>
-          {pace?.is_current && pace.expected_income !== null && (
-            <Text style={styles.avgTurnoverSubtitle}>
-              {t('home.expectedPeriodEnd').replace('{amount}', `${pace.expected_income.toFixed(2)} €`)}
-            </Text>
-          )}
-        </TouchableOpacity>
-        )}
-
-        {summary?.financial_visibility?.statistics === false && (
-          <View style={styles.restrictedNote}>
-            <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
-            <Text style={styles.restrictedNoteText}>{t('visibility.noStatistics')}</Text>
-          </View>
-        )}
-
-        {/* Closed/open-days calendar - embedded here (collapsed by default)
-            so it's regularly filled in without needing a trip to Profile,
-            since it directly feeds the average-turnover figure above. */}
-        {usesTill && hasPermission('manage_company') && (
-          <View style={{ marginBottom: 16 }}>
-            <ClosedDaysCalendar collapsible />
-          </View>
-        )}
-
-        {/* Personal wallet teaser - collapsed by default, see component for
-            why it's gated here rather than inside it. */}
-        {usesWallet && hasPermission('view_personal_wallet') && <PersonalWalletTeaser refreshSignal={summary} />}
-
-        {/* Stats Overview */}
-        <View style={styles.statsGrid}>
-          <View style={styles.statItem}>
-            {summary && summary.invoice_count === null ? (
-              <LockedValue textStyle={styles.statValue} fakeText="14" iconSize={16} />
-            ) : (
-              <CountUp value={summary?.invoice_count || 0} formatter={(n) => `${Math.round(n)}`} style={styles.statValue} />
-            )}
-            <Text style={styles.statLabel}>{t('home.invoices')}</Text>
-          </View>
-          {usesTill && (
-          <>
-          <View style={styles.statItem}>
-            {summary && summary.total_fiscal_revenue === null ? (
-              <LockedValue textStyle={styles.statValue} fakeText="1240" iconSize={16} />
-            ) : (
-              <CountUp value={summary?.total_fiscal_revenue || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
-            )}
-            <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.statItem}
-            onPress={() => router.push('/pocket-money-history')}
-            disabled={summary?.total_pocket_money === null}
-          >
-            {summary && summary.total_pocket_money === null ? (
-              <LockedValue textStyle={styles.statValue} fakeText="95" iconSize={16} />
-            ) : (
-              <CountUp value={summary?.total_pocket_money || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
-            )}
-            <Text style={styles.statLabel}>{t('home.pocket')}</Text>
-          </TouchableOpacity>
-          </>
-          )}
-          <View style={[styles.statItem, { overflow: 'visible' }]}>
-            <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
-            {summary && summary.profit === null ? (
-              <LockedValue textStyle={styles.statValue} fakeText="380" iconSize={16} />
-            ) : (
-              <CountUp
-                value={summary?.profit || 0}
-                formatter={(n) => `${n.toFixed(0)}`}
-                style={[styles.statValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
-              />
-            )}
-            <Text style={styles.statLabel}>{t('home.profit')}</Text>
-          </View>
-          {/* The till's and Джобче's revenue added up, for the period shown -
-              a day's turnover when the period is a day. Only for who sees
-              both (else it would only repeat the till's box). */}
-          {usesTill && summary && summary.total_fiscal_revenue !== null && summary.total_pocket_money !== null && (
-            <View style={styles.revenueSumRow}>
-              <Text style={styles.revenueSumLabel}>{t('home.revenueSum')}</Text>
-              <Text style={styles.revenueSumValue}>
-                {((summary.total_fiscal_revenue || 0) + (summary.total_pocket_money || 0)).toFixed(2)} €
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {restrictedNote && (
-          <View style={styles.restrictedNote}>
-            <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
-            <Text style={styles.restrictedNoteText}>{restrictedNote}</Text>
-          </View>
-        )}
-
-        {/* Action Buttons - each gated on its own permission (an owner can
-            fine-tune these independently per member via the permissions
-            checklist), rather than showing a button whose only possible
-            outcome is a permission-denied error from the backend. */}
-        {((usesTill && hasPermission('add_revenue')) || hasPermission('add_expenses')) && (
-          <View style={styles.actionsContainer}>
-            {usesTill && hasPermission('add_revenue') && (
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: COLORS.success }]}
-                onPress={() => {
-                  setRevenueDate(getDefaultActionDate());
-                  setRevenueModalVisible(true);
-                }}
-              >
-                <Ionicons name="cash" size={24} color="white" />
-                <Text style={styles.actionButtonText}>{t('home.dailyRevenue')}</Text>
-              </TouchableOpacity>
-            )}
-
-            {hasPermission('add_expenses') && (
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: COLORS.warning }]}
-                onPress={() => {
-                  setExpenseDate(getDefaultActionDate());
-                  setExpenseModalVisible(true);
-                }}
-              >
-                <Ionicons name="remove-circle" size={24} color="white" />
-                <Text style={styles.actionButtonText}>{t('home.expenses')}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {((usesTill && hasPermission('add_revenue')) || hasPermission('add_expenses')) && (
-          <View style={styles.importLinksRow}>
-            {usesTill && hasPermission('add_revenue') && (
-              <TouchableOpacity style={styles.importLink} onPress={() => setImportRevenueModalVisible(true)}>
-                <Ionicons name="cloud-upload-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.importLinkText}>{t('home.importRevenueHistory')}</Text>
-              </TouchableOpacity>
-            )}
-            {hasPermission('add_expenses') && (
-              <TouchableOpacity style={styles.importLink} onPress={() => setImportExpenseModalVisible(true)}>
-                <Ionicons name="cloud-upload-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.importLinkText}>{t('home.importExpensesHistory')}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* Personal Expenses & ROI Section - visible to anyone with
-            view_personal_investments; adding a personal expense stays an
-            owner-only write action regardless. */}
-        {usesWallet && canViewPersonalInvestments && (
-          <View style={styles.roiSection}>
-            <View style={styles.roiHeader}>
-              <View style={styles.roiTitleRow}>
-                <Ionicons name="person-circle" size={24} color={COLORS.primary} />
-                <View style={{ flexShrink: 1 }}>
-                  <Text style={styles.roiTitle} numberOfLines={1}>{t('personal.title')}</Text>
-                  <Text style={styles.roiPeriodLabel} numberOfLines={1}>
-                    {format(getPeriodBounds(periodState).start, 'LLLL yyyy', { locale: dateLocale })}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.roiActionsRow}>
-                <TouchableOpacity
-                  style={styles.historyPersonalButton}
-                  onPress={() => router.push('/personal-expenses')}
-                >
-                  <Ionicons name="time-outline" size={18} color={COLORS.textSecondary} />
-                  <Text style={styles.historyPersonalText}>{t('personal.history')}</Text>
-                </TouchableOpacity>
-                {isOwner && (
-                  <TouchableOpacity
-                    style={styles.addPersonalButton}
-                    onPress={() => setPersonalExpenseModalVisible(true)}
-                  >
-                    <Ionicons name="add-circle" size={20} color={COLORS.primary} />
-                    <Text style={styles.addPersonalText}>{t('personal.addExpense')}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            {loadingRoi ? (
-              <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 20 }} />
-            ) : roiData ? (
-              <>
-                {/* ROI Stats */}
-                <View style={styles.roiStats}>
-                  <View style={styles.roiStatItem}>
-                    <Text style={styles.roiStatLabel}>{t('roi.totalInvestment')}</Text>
-                    <Text style={[styles.roiStatValue, { color: COLORS.danger }]}>
-                      {roiData.total_personal_investment.toFixed(2)} €
-                    </Text>
-                  </View>
-                  <View style={styles.roiStatItem}>
-                    <Text style={styles.roiStatLabel}>{t('roi.totalProfit')}</Text>
-                    {roiData.total_profit === null ? (
-                      <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
-                    ) : (
-                      <Text style={[styles.roiStatValue, { color: roiData.total_profit >= 0 ? COLORS.success : COLORS.danger }]}>
-                        {roiData.total_profit.toFixed(2)} €
-                      </Text>
-                    )}
-                  </View>
-                  <View style={styles.roiStatItem}>
-                    <Text style={styles.roiStatLabel}>{t('roi.roiPercent')}</Text>
-                    {roiData.roi_percent === null ? (
-                      <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
-                    ) : (
-                      <Text style={[styles.roiStatValue, { color: roiData.roi_percent >= 0 ? COLORS.success : COLORS.danger }]}>
-                        {roiData.roi_percent.toFixed(1)}%
-                      </Text>
-                    )}
-                  </View>
-                </View>
-
-                {/* ROI Status Indicator - hidden entirely without view_profit,
-                    since a covered/not-covered verdict is itself derived from
-                    the profit figure this viewer isn't allowed to see. */}
-                {roiData.investment_covered !== null && (
-                  <View style={[
-                    styles.roiStatus,
-                    { backgroundColor: roiData.investment_covered ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }
-                  ]}>
-                    <Ionicons
-                      name={roiData.investment_covered ? "checkmark-circle" : "alert-circle"}
-                      size={20}
-                      color={roiData.investment_covered ? COLORS.success : COLORS.danger}
-                    />
-                    <Text style={[
-                      styles.roiStatusText,
-                      { color: roiData.investment_covered ? COLORS.success : COLORS.danger }
-                    ]}>
-                      {roiData.investment_covered ? t('roi.investmentCovered') : t('roi.investmentNotCovered')}
-                    </Text>
-                  </View>
-                )}
-
-                {/* What the business gives back: payback over the last months,
-                    what moved profit, what can be done (each opening its place),
-                    and AI advice on those numbers when asked for. */}
-                {roiData.analysis ? (
-                  <View style={styles.aiInsights}>
-                    <Text style={styles.aiInsightsTitle}>{t('roi.analysisTitle')}</Text>
-                    {roiData.analysis.payback && (
-                      <Text style={styles.roiPaybackText}>{roiData.analysis.payback.text}</Text>
-                    )}
-                    {roiData.analysis.month && (
-                      <Text style={styles.aiInsightText}>{roiData.analysis.month.text}</Text>
-                    )}
-                    {roiData.analysis.movers.length > 0 && (
+                  <>
+                    <View style={styles.statItem}>
+                      {summary.invoice_count === null ? (
+                        <LockedValue textStyle={styles.statValue} fakeText="14" iconSize={16} />
+                      ) : (
+                        <CountUp value={summary.invoice_count || 0} formatter={(n) => `${Math.round(n)}`} style={styles.statValue} />
+                      )}
+                      <Text style={styles.statLabel}>{t('home.invoices')}</Text>
+                    </View>
+                    {usesTill && (
                       <>
-                        <Text style={styles.roiSubTitle}>{t('roi.whatMoved')}</Text>
-                        {roiData.analysis.movers.map((mover: any) => (
-                          <View key={`${mover.kind}-${mover.label}`} style={styles.roiLine}>
-                            <Ionicons
-                              name={mover.profit_effect >= 0 ? 'arrow-up-circle' : 'arrow-down-circle'}
-                              size={16}
-                              color={mover.profit_effect >= 0 ? COLORS.success : COLORS.danger}
-                            />
-                            <Text style={[styles.aiInsightText, styles.roiLineText]}>{mover.text}</Text>
+                        <View style={styles.statItem}>
+                          {summary.total_fiscal_revenue === null ? (
+                            <LockedValue textStyle={styles.statValue} fakeText="1240" iconSize={16} />
+                          ) : (
+                            <CountUp value={summary.total_fiscal_revenue || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
+                          )}
+                          <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.statItem}
+                          onPress={() => router.push('/pocket-money-history')}
+                          disabled={summary.total_pocket_money === null}
+                        >
+                          {summary.total_pocket_money === null ? (
+                            <LockedValue textStyle={styles.statValue} fakeText="95" iconSize={16} />
+                          ) : (
+                            <CountUp value={summary.total_pocket_money || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
+                          )}
+                          <Text style={styles.statLabel}>{t('home.pocket')}</Text>
+                        </TouchableOpacity>
+                      </>
+                    )}
+                    <View style={[styles.statItem, { overflow: 'visible' }]}>
+                      <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
+                      {summary.profit === null ? (
+                        <LockedValue textStyle={styles.statValue} fakeText="380" iconSize={16} />
+                      ) : (
+                        <CountUp
+                          value={summary.profit || 0}
+                          formatter={(n) => `${n.toFixed(0)}`}
+                          style={[styles.statValue, { color: (summary.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
+                        />
+                      )}
+                      <Text style={styles.statLabel}>{t('home.profit')}</Text>
+                    </View>
+                    {ledgerRows.length > 0 && (
+                      <View style={styles.ledger}>
+                        {ledgerRows.map((row, index) => (
+                          <View key={row.key} style={[styles.ledgerRow, index > 0 && styles.ledgerRowDivider]}>
+                            <Text style={styles.ledgerLabel}>{row.label}</Text>
+                            <Text style={styles.ledgerValue}>{row.value.toFixed(2)} €</Text>
                           </View>
                         ))}
-                      </>
-                    )}
-                    {roiData.analysis.actions.length > 0 && (
-                      <>
-                        <Text style={styles.roiSubTitle}>{t('roi.whatToDo')}</Text>
-                        {roiData.analysis.actions.map((action: any) => (
-                          <TouchableOpacity
-                            key={action.kind}
-                            style={styles.roiAction}
-                            onPress={() => router.push(action.route as any)}
-                          >
-                            <Ionicons name="bulb-outline" size={16} color={COLORS.warning} />
-                            <Text style={[styles.aiInsightText, styles.roiLineText]}>{action.text}</Text>
-                            <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
-                          </TouchableOpacity>
-                        ))}
-                      </>
-                    )}
-                    {roiData.analysis.notes.map((note: string) => (
-                      <Text key={note} style={styles.roiNote}>{note}</Text>
-                    ))}
-                    {roiAdvice?.available && (roiAdvice.advice ? (
-                      <View style={styles.roiAdviceBox}>
-                        <View style={styles.roiLine}>
-                          <Ionicons name="sparkles" size={14} color={COLORS.primary} />
-                          <Text style={styles.roiAdviceTitle}>{t('roi.aiAdvice')}</Text>
-                        </View>
-                        <Text style={styles.roiAdviceHeadline}>{roiAdvice.advice.headline}</Text>
-                        {roiAdvice.advice.points.map((point) => (
-                          <Text key={point} style={styles.aiInsightText}>• {point}</Text>
-                        ))}
                       </View>
-                    ) : (
-                      <TouchableOpacity
-                        style={styles.roiAdviceButton}
-                        onPress={askRoiAdvice}
-                        disabled={roiAdviceLoading}
-                      >
-                        {roiAdviceLoading ? (
-                          <ActivityIndicator size="small" color={COLORS.primary} />
-                        ) : (
-                          <>
-                            <Ionicons name="sparkles" size={16} color={COLORS.primary} />
-                            <View style={{ flexShrink: 1 }}>
-                              <Text style={styles.roiAdviceButtonText}>{t('roi.askAdvice')}</Text>
-                              <Text style={styles.roiNote}>{t('roi.askAdviceHint')}</Text>
-                            </View>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                ) : roiData.ai_insights && roiData.ai_insights.length > 0 && (
-                  <View style={styles.aiInsights}>
-                    <Text style={styles.aiInsightsTitle}>{t('roi.aiInsights')}</Text>
-                    {roiData.ai_insights.map((insight: string, index: number) => (
-                      <Text key={index} style={styles.aiInsightText}>{insight}</Text>
-                    ))}
-                  </View>
+                    )}
+                  </>
                 )}
-              </>
-            ) : (
-              <View style={styles.noRoiData}>
-                <Text style={styles.noRoiDataText}>{t('roi.noData')}</Text>
-                <Text style={styles.noRoiDataSubtext}>{t('personal.subtitle')}</Text>
+              </View>
+            </Animated.View>
+
+            {summary?.financial_visibility?.statistics === false && (
+              <View style={styles.restrictedNote}>
+                <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
+                <Text style={styles.restrictedNoteText}>{t('visibility.noStatistics')}</Text>
               </View>
             )}
-          </View>
-        )}
-      </ScrollView>
+            {restrictedNote && (
+              <View style={styles.restrictedNote}>
+                <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
+                <Text style={styles.restrictedNoteText}>{restrictedNote}</Text>
+              </View>
+            )}
 
-      {/* Personal Expense Modal (Owner Only) */}
-      {isOwner && (
-        <PersonalExpenseModal
-          visible={personalExpenseModalVisible}
-          onClose={() => setPersonalExpenseModalVisible(false)}
-          periodLabel={format(getPeriodBounds(periodState).start, 'LLLL yyyy', { locale: dateLocale })}
-          amount={personalAmount}
-          amountError={personalAmountError}
-          onChangeAmount={(v) => { setPersonalAmount(v); setPersonalAmountError(false); }}
-          description={personalDescription}
-          descriptionError={personalDescriptionError}
-          onChangeDescription={(v) => { setPersonalDescription(v); setPersonalDescriptionError(false); }}
-          type={personalType}
-          onChangeType={setPersonalType}
-          category={personalCategory}
-          onChangeCategory={setPersonalCategory}
-          isSubmitting={isSubmittingForm}
-          onSubmit={handleCreatePersonalExpense}
-          language={language}
-          suggestions={personalSuggestions}
-          onPickSuggestion={(s) => {
-            setPersonalDescription(s.description);
-            setPersonalAmount(String(s.amount));
-            setPersonalDescriptionError(false);
-            setPersonalAmountError(false);
-          }}
-        />
-      )}
+            {/* What needs attention: up to two, the rest behind "show more". */}
+            <MorningBriefingCard refreshSignal={summary} />
+
+            {/* A business that invoices: issued in the period, owed now,
+                overdue (У2) - its "Фактура" is the action above. */}
+            {usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
+              <BillingOverviewCard
+                startDate={toApiDate(getPeriodBounds(periodState).start)}
+                endDate={toApiDate(getPeriodBounds(periodState).end)}
+                canIssue={false}
+                refreshSignal={summary}
+              />
+            )}
+
+            {/* Personal wallet teaser - collapsed by default, see component for
+                why it's gated here rather than inside it. */}
+            {usesWallet && hasPermission('view_personal_wallet') && <PersonalWalletTeaser refreshSignal={summary} />}
+      </ScrollView>
 
       {/* Revenue Modal */}
       <RevenueModal
@@ -1443,6 +838,7 @@ export default function HomeScreen() {
         showPocketMoney={canSeePocketMoney}
         isSubmitting={isSubmittingForm}
         onSubmit={handleAddRevenue}
+        onImportHistory={() => { closeRevenueModal(); setImportRevenueModalVisible(true); }}
         locationSlot={
           <LocationPicker
             value={revenueLocation}
@@ -1484,6 +880,11 @@ export default function HomeScreen() {
         isSubmitting={isSubmittingForm}
         onSubmit={handleAddExpense}
         suggestions={expenseSuggestions}
+        onImportHistory={() => {
+          setExpenseModalVisible(false);
+          setExpenseLocationPick(undefined);
+          setImportExpenseModalVisible(true);
+        }}
         onPickSuggestion={(s) => {
           setExpenseDescription(s.description);
           setExpenseAmount(String(s.amount));
@@ -1541,14 +942,11 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    marginBottom: 24,
-  },
-  headerIconsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-end',
-    gap: 10,
-    marginTop: 12,
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 16,
   },
   greeting: {
     fontSize: 28,
@@ -1559,178 +957,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     marginTop: 4,
-  },
-  headerIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  languageToggleText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  summaryContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-  },
-  incomeCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.success,
-  },
-  expenseCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.danger,
-  },
-  cashCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.success,
-  },
-  cardCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.info,
-  },
-  bankCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.primary,
-  },
-  unpaidCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.warning,
-  },
-  unpaidCardOverdue: {
-    borderColor: COLORS.danger,
-  },
-  unpaidHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  unpaidTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-    marginLeft: 12,
-    flex: 1,
-  },
-  unpaidValue: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  unpaidSubtitle: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-  },
-  cardIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  cardIssuedNote: {
-    fontSize: 11,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-  },
-  cardLabel: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  cardValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  vatCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-  },
-  vatHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  vatTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-    marginLeft: 12,
-  },
-  vatValue: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-  vatDetails: {
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    paddingTop: 12,
-  },
-  vatDetailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  vatDetailLabel: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-  },
-  vatDetailValue: {
-    fontSize: 13,
-    color: COLORS.textLight,
-    fontWeight: '500',
-  },
-  avgTurnoverCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.info,
-  },
-  avgTurnoverHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  avgTurnoverTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-    marginLeft: 12,
-    flex: 1,
-  },
-  avgTurnoverValue: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: COLORS.info,
-    marginBottom: 4,
-  },
-  avgTurnoverSubtitle: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
   },
   statsGrid: {
     flexDirection: 'row',
@@ -1756,23 +982,29 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 4,
   },
-  revenueSumRow: {
+  ledger: {
     width: '100%',
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+  },
+  ledgerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
     paddingVertical: 10,
-    paddingHorizontal: 16,
   },
-  revenueSumLabel: {
+  ledgerRowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+  },
+  ledgerLabel: {
     fontSize: 12,
     color: COLORS.textSecondary,
     flexShrink: 1,
   },
-  revenueSumValue: {
+  ledgerValue: {
     fontSize: 15,
     fontWeight: '700',
     color: 'white',
@@ -1792,237 +1024,28 @@ const styles = StyleSheet.create({
   },
   actionsContainer: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 32,
-  },
-  importLinksRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 16,
-    marginTop: -20,
-    marginBottom: 24,
-  },
-  importLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  importLinkText: {
-    fontSize: 12,
-    color: COLORS.primary,
-    fontWeight: '500',
+    gap: 10,
+    marginBottom: 16,
   },
   actionButton: {
     flex: 1,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    borderRadius: 14,
+    gap: 2,
   },
   actionButtonText: {
     color: 'white',
     fontSize: 14,
-    fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end',
-  },
-  // Personal Expenses & ROI Styles
-  roiSection: {
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 32,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-  },
-  roiHeader: {
-    marginBottom: 16,
-    gap: 10,
-  },
-  roiTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  roiTitle: {
-    fontSize: 18,
     fontWeight: '700',
-    color: COLORS.primary,
-    flexShrink: 1,
+    marginTop: 2,
+    textAlign: 'center',
   },
-  roiPeriodLabel: {
+  actionButtonHint: {
+    color: 'rgba(255, 255, 255, 0.85)',
     fontSize: 11,
-    color: COLORS.textMuted,
-    textTransform: 'capitalize',
-    marginTop: 1,
-  },
-  roiActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  addPersonalButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    padding: 8,
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    borderRadius: 8,
-    flexShrink: 1,
-  },
-  addPersonalText: {
-    fontSize: 12,
-    color: COLORS.primary,
-    fontWeight: '600',
-  },
-  historyPersonalButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    padding: 8,
-    backgroundColor: 'rgba(148, 163, 184, 0.15)',
-    borderRadius: 8,
-    flexShrink: 1,
-  },
-  historyPersonalText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    fontWeight: '600',
-  },
-  roiStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  roiStatItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  roiStatLabel: {
-    fontSize: 11,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  roiStatValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  roiStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 16,
-  },
-  roiStatusText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  aiInsights: {
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
-    borderRadius: 10,
-    padding: 14,
-  },
-  aiInsightsTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.primary,
-    marginBottom: 10,
-  },
-  aiInsightText: {
-    fontSize: 13,
-    color: COLORS.textSubtle,
-    lineHeight: 20,
-    marginBottom: 6,
-  },
-  roiPaybackText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-    lineHeight: 21,
-    marginBottom: 8,
-  },
-  roiSubTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-    marginTop: 8,
-    marginBottom: 6,
-  },
-  roiLine: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-  },
-  roiLineText: {
-    flex: 1,
-  },
-  roiAction: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-    paddingVertical: 2,
-  },
-  roiNote: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    lineHeight: 16,
-    marginTop: 4,
-  },
-  roiAdviceBox: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: `${COLORS.primary}1A`,
-    borderWidth: 1,
-    borderColor: `${COLORS.primary}40`,
-  },
-  roiAdviceTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  roiAdviceHeadline: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'white',
-    lineHeight: 19,
-    marginTop: 6,
-    marginBottom: 6,
-  },
-  roiAdviceButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: `${COLORS.primary}66`,
-  },
-  roiAdviceButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.primary,
-  },
-  noRoiData: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  noRoiDataText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  noRoiDataSubtext: {
-    fontSize: 12,
-    color: COLORS.textMuted,
+    textAlign: 'center',
   },
 });

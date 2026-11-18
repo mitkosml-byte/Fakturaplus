@@ -1045,7 +1045,15 @@ export const translations: Translations = {
     en: 'So far: {range}',
   },
   // The till's and Джобче's revenue added up, under the number boxes.
+  'stats.paymentKinds': { bg: 'Приходи по вид плащане', en: 'Income by payment kind' },
   'home.revenueSum': { bg: 'Оборот (фискален + джобче)', en: 'Revenue (fiscal + pocket)' },
+  // Home's actions, each with a word on what it records.
+  'home.actionRevenueHint': { bg: 'каса и джобче', en: 'till and pocket' },
+  'home.actionExpenseHint': { bg: 'без фактура', en: 'no invoice' },
+  'home.actionInvoice': { bg: 'Фактура', en: 'Invoice' },
+  'home.actionInvoiceHint': { bg: 'към клиент', en: 'to a customer' },
+  'home.importRevenueShort': { bg: 'Минали дни от Excel', en: 'Past days from Excel' },
+  'home.importExpensesShort': { bg: 'Минали разходи от Excel', en: 'Past expenses from Excel' },
   'home.expenses': {
     bg: 'В канала',
     en: 'Expenses',

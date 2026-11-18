@@ -39,6 +39,9 @@ import { WeekdayRevenueCard } from '../../src/components/stats/WeekdayRevenueCar
 import { StaffingEfficiencyCard } from '../../src/components/stats/StaffingEfficiencyCard';
 import { ForecastCard } from '../../src/components/stats/ForecastCard';
 import { PriceInflationCard } from '../../src/components/stats/PriceInflationCard';
+import { PaymentKindsCard } from '../../src/components/stats/PaymentKindsCard';
+import { BreakEvenCard } from '../../src/components/home/BreakEvenCard';
+import { PersonalInvestmentsCard } from '../../src/components/PersonalInvestmentsCard';
 import { AlertSettingsModal } from '../../src/components/stats/AlertSettingsModal';
 import { SupplierCompareModal } from '../../src/components/stats/SupplierCompareModal';
 import { COLORS } from '../../src/theme/colors';
@@ -1223,6 +1226,13 @@ export default function StatsScreen() {
                   </View>
                 )}
 
+                {/* Moved here from Home (Л4): how the income came in, and
+                    what the month has to sell to end at zero. */}
+                {summary && <PaymentKindsCard summary={summary} usesTill={uses('till')} />}
+                {hasPermission('view_profit') && (
+                  <BreakEvenCard canManageBudget={hasPermission('manage_budget')} refreshSignal={summary} />
+                )}
+
                 {/* Chart window navigation - only relevant once the period
                     spans more than one 7-day window (month/year); a plain
                     week never needs it. */}
@@ -1492,6 +1502,12 @@ export default function StatsScreen() {
                     forecastRangeDays={forecastRangeDays}
                     onChangeRangeDays={setForecastRangeDays}
                   />
+                )}
+
+                {/* What the owner put in and what the business gives back -
+                    moved here from Home (Л4). */}
+                {uses('wallet') && hasPermission('view_personal_investments') && (
+                  <PersonalInvestmentsCard periodState={summaryPeriodState} />
                 )}
 
                 {/* ROI Trend - owner or a delegated view_personal_investments

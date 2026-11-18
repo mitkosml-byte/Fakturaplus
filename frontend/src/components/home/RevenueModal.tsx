@@ -59,6 +59,8 @@ type Props = {
   scanningReport?: boolean;
   // Which location's part of the day this is (Н11) - only with locations.
   locationSlot?: React.ReactNode;
+  // Past days from a spreadsheet - needed once, so here, not on Home.
+  onImportHistory?: () => void;
 };
 
 export function RevenueModal({
@@ -66,7 +68,7 @@ export function RevenueModal({
   dateLocale, language, ocrAdditionNote, fiscalRevenue, onChangeFiscalRevenue, cardRevenue,
   onChangeCardRevenue, vatRate, onChangeVatRate, splitByRate, onToggleSplitByRate, rateAmounts, onChangeRateAmount,
   pocketMoney, onChangePocketMoney, showPocketMoney, isSubmitting, onSubmit,
-  onCopyYesterday, copyingYesterday, onScanReport, scanningReport, locationSlot,
+  onCopyYesterday, copyingYesterday, onScanReport, scanningReport, locationSlot, onImportHistory,
 }: Props) {
   const { t } = useTranslation();
 
@@ -239,6 +241,12 @@ export function RevenueModal({
             </View>
           )}
 
+          {onImportHistory && (
+            <TouchableOpacity style={styles.importLink} onPress={onImportHistory}>
+              <Ionicons name="cloud-upload-outline" size={14} color={COLORS.primary} />
+              <Text style={styles.importLinkText}>{t('home.importRevenueShort')}</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
         <PressableScale style={styles.submitButton} onPress={onSubmit} disabled={isSubmitting}>
           {isSubmitting ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('home.save')}</Text>}
@@ -249,6 +257,8 @@ export function RevenueModal({
 }
 
 const styles = StyleSheet.create({
+  importLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 },
+  importLinkText: { fontSize: 12, color: COLORS.primary, fontWeight: '500' },
   modalContent: {
     flexShrink: 1,
     backgroundColor: COLORS.surface,

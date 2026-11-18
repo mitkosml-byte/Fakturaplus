@@ -45,7 +45,7 @@ const INSIGHT_KEYS = new Set([
 
 // The review shows the few most important things first; the rest wait
 // behind "show more".
-const VISIBLE_SIGNALS = 3;
+const VISIBLE_SIGNALS = 2;
 
 // The one thing to do about each kind of signal - its button opens the
 // exact place (the signal's own route: the right tab, filter or day).

@@ -39,13 +39,15 @@ type Props = {
   onPickSuggestion?: (s: DescriptionSuggestion) => void;
   // Which location the expense is for (Н11) - only with locations.
   locationSlot?: React.ReactNode;
+  // Past expenses from a spreadsheet - needed once, so here, not on Home.
+  onImportHistory?: () => void;
 };
 
 export function ExpenseModal({
   visible, onClose, onViewHistory, date, onChangeDate, isDatePickerVisible, onOpenDatePicker,
   onCloseDatePicker, dateLocale, language, loadingExpenses, dayExpenses, onDeleteExpense,
   description, descriptionError, onChangeDescription, amount, amountError, onChangeAmount,
-  isSubmitting, onSubmit, suggestions, onPickSuggestion, locationSlot,
+  isSubmitting, onSubmit, suggestions, onPickSuggestion, locationSlot, onImportHistory,
 }: Props) {
   const { t } = useTranslation();
 
@@ -175,6 +177,12 @@ export function ExpenseModal({
                 <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
               </Expandable>
             </View>
+            {onImportHistory && (
+              <TouchableOpacity style={styles.importLink} onPress={onImportHistory}>
+                <Ionicons name="cloud-upload-outline" size={14} color={COLORS.primary} />
+                <Text style={styles.importLinkText}>{t('home.importExpensesShort')}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </ScrollView>
         <PressableScale style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={onSubmit} disabled={isSubmitting}>
@@ -191,6 +199,8 @@ export function ExpenseModal({
 }
 
 const styles = StyleSheet.create({
+  importLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 },
+  importLinkText: { fontSize: 12, color: COLORS.primary, fontWeight: '500' },
   modalContent: {
     flexShrink: 1,
     backgroundColor: COLORS.surface,
