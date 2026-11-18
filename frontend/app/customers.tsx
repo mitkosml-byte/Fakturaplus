@@ -278,29 +278,33 @@ export default function CustomersScreen() {
             </BottomSheet>
 
             <BottomSheet visible={formVisible} onClose={() => setFormVisible(false)}>
-              <ScrollView style={styles.sheet} contentContainerStyle={{ paddingBottom: 30 }} keyboardShouldPersistTaps="handled">
-                <Text style={styles.sheetTitle}>{editing ? t('customers.edit') : t('customers.add')}</Text>
-                {FIELDS.map((field) => (
-                  <View key={field.key}>
-                    <Text style={styles.inputLabel}>{t(field.label)}{field.key === 'name' ? ' *' : ''}</Text>
-                    <TextInput
-                      style={[styles.input, field.key === 'notes' && { minHeight: 60 }]}
-                      value={String(form[field.key] || '')}
-                      onChangeText={(value) => setForm((prev) => ({ ...prev, [field.key]: value }))}
-                      keyboardType={field.keyboard}
-                      autoCapitalize={field.key === 'email' ? 'none' : 'sentences'}
-                      multiline={field.key === 'notes'}
-                      placeholderTextColor={COLORS.textMuted}
-                    />
-                  </View>
-                ))}
-                <TouchableOpacity style={styles.saveButton} onPress={save} disabled={saving}>
-                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setFormVisible(false)}>
-                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
-              </ScrollView>
+              <View style={styles.formSheet}>
+                <ScrollView style={styles.sheet} contentContainerStyle={{ paddingBottom: 8 }} keyboardShouldPersistTaps="handled">
+                  <Text style={styles.sheetTitle}>{editing ? t('customers.edit') : t('customers.add')}</Text>
+                  {FIELDS.map((field) => (
+                    <View key={field.key}>
+                      <Text style={styles.inputLabel}>{t(field.label)}{field.key === 'name' ? ' *' : ''}</Text>
+                      <TextInput
+                        style={[styles.input, field.key === 'notes' && { minHeight: 60 }]}
+                        value={String(form[field.key] || '')}
+                        onChangeText={(value) => setForm((prev) => ({ ...prev, [field.key]: value }))}
+                        keyboardType={field.keyboard}
+                        autoCapitalize={field.key === 'email' ? 'none' : 'sentences'}
+                        multiline={field.key === 'notes'}
+                        placeholderTextColor={COLORS.textMuted}
+                      />
+                    </View>
+                  ))}
+                </ScrollView>
+                <View style={styles.formFooter}>
+                  <TouchableOpacity style={styles.saveButton} onPress={save} disabled={saving}>
+                    {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.cancelButton} onPress={() => setFormVisible(false)}>
+                    <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </BottomSheet>
           </SafeAreaView>
         </View>
@@ -332,6 +336,8 @@ const styles = StyleSheet.create({
   meta: { color: COLORS.textMuted, fontSize: 12, marginTop: 3 },
   cardLoading: { position: 'absolute', top: '50%', alignSelf: 'center' },
   sheet: { padding: 20 },
+  formSheet: { flexShrink: 1 },
+  formFooter: { paddingHorizontal: 20, paddingBottom: 30 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 6 },
   sheetTitle: { flex: 1, fontSize: 18, fontWeight: 'bold', color: 'white', marginBottom: 6 },
   detail: { color: COLORS.textSecondary, fontSize: 13, marginTop: 3 },

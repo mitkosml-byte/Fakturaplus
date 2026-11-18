@@ -12,6 +12,7 @@ import { PriceAlertPopup } from '../src/components/PriceAlertPopup';
 import { WalletAlertPopup } from '../src/components/WalletAlertPopup';
 import { OnboardingTutorial } from '../src/components/OnboardingTutorial';
 import { ToastHost } from '../src/components/ToastHost';
+import { AlertHost } from '../src/components/AlertHost';
 import { useLanguageStore, useTranslation } from '../src/i18n';
 import { useModulesStore } from '../src/stores/modulesStore';
 import { useLocationsStore } from '../src/stores/locationsStore';
@@ -100,6 +101,7 @@ function AppShell() {
           }}
         />
         <ToastHost />
+        <AlertHost />
         <ScanQueueProcessor companyId={companyId} />
       </View>
     </>

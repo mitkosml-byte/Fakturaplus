@@ -586,23 +586,23 @@ export default function UsersManagementScreen() {
                   </View>
                 )}
 
-                <PressableScale
-                  style={[styles.inviteButton, inviting && styles.buttonDisabled]}
-                  onPress={handleInvite}
-                  disabled={inviting}
-                >
-                  {inviting ? (
-                    <ActivityIndicator color="white" />
-                  ) : (
-                    <>
-                      <Ionicons name="send" size={20} color="white" />
-                      <Text style={styles.inviteButtonText}>
-                        {t('users.createInvitation')}
-                      </Text>
-                    </>
-                  )}
-                </PressableScale>
                 </ScrollView>
+              <PressableScale
+                style={[styles.inviteButton, inviting && styles.buttonDisabled]}
+                onPress={handleInvite}
+                disabled={inviting}
+              >
+                {inviting ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <>
+                    <Ionicons name="send" size={20} color="white" />
+                    <Text style={styles.inviteButtonText}>
+                      {t('users.createInvitation')}
+                    </Text>
+                  </>
+                )}
+              </PressableScale>
               </View>
           </BottomSheet>
 
@@ -681,20 +681,22 @@ export default function UsersManagementScreen() {
                         </View>
                       )}
 
-                      <PressableScale
-                        style={[styles.inviteButton, savingAccess && styles.buttonDisabled]}
-                        onPress={handleSaveAccess}
-                        disabled={savingAccess}
-                      >
-                        {savingAccess ? (
-                          <ActivityIndicator color="white" />
-                        ) : (
-                          <Text style={styles.inviteButtonText}>{t('users.saveChanges')}</Text>
-                        )}
-                      </PressableScale>
                     </>
                   )}
                 </ScrollView>
+                {editingUser && (
+                  <PressableScale
+                    style={[styles.inviteButton, savingAccess && styles.buttonDisabled]}
+                    onPress={handleSaveAccess}
+                    disabled={savingAccess}
+                  >
+                    {savingAccess ? (
+                      <ActivityIndicator color="white" />
+                    ) : (
+                      <Text style={styles.inviteButtonText}>{t('users.saveChanges')}</Text>
+                    )}
+                  </PressableScale>
+                )}
               </View>
           </BottomSheet>
 
@@ -953,6 +955,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
+    flexShrink: 1,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

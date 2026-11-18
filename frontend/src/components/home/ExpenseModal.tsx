@@ -51,7 +51,7 @@ export function ExpenseModal({
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
-      <View style={[styles.modalContent, { maxHeight: '90%' }]}>
+      <View style={styles.modalContent}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{t('expenses.title')}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -175,17 +175,16 @@ export function ExpenseModal({
                 <Text style={styles.fieldErrorText}>{t('common.required')}</Text>
               </Expandable>
             </View>
-
-            <PressableScale style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={onSubmit} disabled={isSubmitting}>
-              {isSubmitting ? <ActivityIndicator color="white" /> : (
-                <>
-                  <Ionicons name="add-circle" size={20} color="white" />
-                  <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
-                </>
-              )}
-            </PressableScale>
           </View>
         </ScrollView>
+        <PressableScale style={[styles.submitButton, { backgroundColor: COLORS.warning }]} onPress={onSubmit} disabled={isSubmitting}>
+          {isSubmitting ? <ActivityIndicator color="white" /> : (
+            <>
+              <Ionicons name="add-circle" size={20} color="white" />
+              <Text style={styles.submitButtonText}>{t('expenses.add')}</Text>
+            </>
+          )}
+        </PressableScale>
       </View>
     </BottomSheet>
   );
@@ -193,6 +192,7 @@ export function ExpenseModal({
 
 const styles = StyleSheet.create({
   modalContent: {
+    flexShrink: 1,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

@@ -328,7 +328,7 @@ export default function RecurringInvoicesScreen() {
           <BottomSheet visible={!!editing} onClose={() => setEditing(null)}>
             {editing && draft && (
               <View style={styles.sheet}>
-                <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 560 }}>
+                <ScrollView keyboardShouldPersistTaps="handled">
                   <Text style={styles.sheetTitle}>{editing.customer_name}</Text>
                   <View style={styles.switchRow}>
                     <Text style={styles.fieldLabel}>{t('recurringInvoices.active')}</Text>
@@ -387,13 +387,13 @@ export default function RecurringInvoicesScreen() {
                   <TextInput style={[styles.input, { minHeight: 60 }]} value={draft.notes} multiline
                     onChangeText={(notes) => setDraft({ ...draft, notes })} />
 
-                  <TouchableOpacity style={[styles.primaryButton, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
-                    {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.deleteButton} onPress={remove}>
-                    <Text style={styles.deleteText}>{t('common.delete')}</Text>
-                  </TouchableOpacity>
                 </ScrollView>
+                <TouchableOpacity style={[styles.primaryButton, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
+                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.deleteButton} onPress={remove}>
+                  <Text style={styles.deleteText}>{t('common.delete')}</Text>
+                </TouchableOpacity>
               </View>
             )}
           </BottomSheet>
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: 'white', fontSize: 14, fontWeight: '600' },
   secondaryButton: { borderRadius: 12, padding: 11, alignItems: 'center', borderWidth: 1, borderColor: COLORS.primary, marginTop: 10 },
   secondaryButtonText: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },
-  sheet: { padding: 16 },
+  sheet: { padding: 16, flexShrink: 1 },
   sheetTitle: { color: 'white', fontSize: 17, fontWeight: '700', marginBottom: 12 },
   pickRow: {
     flexDirection: 'row',

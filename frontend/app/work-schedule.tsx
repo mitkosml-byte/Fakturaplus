@@ -1018,17 +1018,17 @@ export default function WorkScheduleScreen() {
                   multiline
                 />
 
-                <TouchableOpacity
-                  style={[styles.saveButton, saving && { opacity: 0.6 }]}
-                  onPress={handleSave}
-                  disabled={saving}
-                >
-                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
-                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
               </ScrollView>
+              <TouchableOpacity
+                style={[styles.saveButton, saving && { opacity: 0.6 }]}
+                onPress={handleSave}
+                disabled={saving}
+              >
+                {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
             </View>
           </BottomSheet>
 
@@ -1072,17 +1072,17 @@ export default function WorkScheduleScreen() {
                   multiline
                 />
 
-                <TouchableOpacity
-                  style={[styles.saveButton, adjustSaving && { opacity: 0.6 }]}
-                  onPress={handleSaveAdjustment}
-                  disabled={adjustSaving}
-                >
-                  {adjustSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setAdjustModalVisible(false)}>
-                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
               </ScrollView>
+              <TouchableOpacity
+                style={[styles.saveButton, adjustSaving && { opacity: 0.6 }]}
+                onPress={handleSaveAdjustment}
+                disabled={adjustSaving}
+              >
+                {adjustSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setAdjustModalVisible(false)}>
+                <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
             </View>
           </BottomSheet>
 
@@ -1121,17 +1121,17 @@ export default function WorkScheduleScreen() {
                       })}
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.saveButton, copyApplying && { opacity: 0.6 }]}
-                  onPress={handleApplyCopy}
-                  disabled={copyApplying}
-                >
-                  {copyApplying ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('schedule.copyShiftApply')}</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setCopyModalVisible(false)}>
-                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
               </ScrollView>
+              <TouchableOpacity
+                style={[styles.saveButton, copyApplying && { opacity: 0.6 }]}
+                onPress={handleApplyCopy}
+                disabled={copyApplying}
+              >
+                {copyApplying ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('schedule.copyShiftApply')}</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setCopyModalVisible(false)}>
+                <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
             </View>
           </BottomSheet>
 
@@ -1182,17 +1182,17 @@ export default function WorkScheduleScreen() {
                   multiline
                 />
 
-                <TouchableOpacity
-                  style={[styles.saveButton, leaveSaving && { opacity: 0.6 }]}
-                  onPress={handleSaveLeave}
-                  disabled={leaveSaving}
-                >
-                  {leaveSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setLeaveModalVisible(false)}>
-                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
               </ScrollView>
+              <TouchableOpacity
+                style={[styles.saveButton, leaveSaving && { opacity: 0.6 }]}
+                onPress={handleSaveLeave}
+                disabled={leaveSaving}
+              >
+                {leaveSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setLeaveModalVisible(false)}>
+                <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
             </View>
           </BottomSheet>
 
@@ -1433,6 +1433,7 @@ const styles = StyleSheet.create({
   adjustedText: { fontSize: 12, color: COLORS.warning, flexShrink: 1 },
   revertLink: { fontSize: 12, color: COLORS.primary, fontWeight: '600', textDecorationLine: 'underline' },
   modalContent: {
+    flexShrink: 1,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

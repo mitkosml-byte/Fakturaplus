@@ -328,17 +328,17 @@ export default function CalendarScreen() {
                     ))}
                   </View>
 
-                  <TouchableOpacity
-                    style={[styles.saveButton, saving && { opacity: 0.6 }]}
-                    onPress={handleSave}
-                    disabled={saving}
-                  >
-                    {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
-                    <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                  </TouchableOpacity>
                 </ScrollView>
+                <TouchableOpacity
+                  style={[styles.saveButton, saving && { opacity: 0.6 }]}
+                  onPress={handleSave}
+                  disabled={saving}
+                >
+                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
               </View>
           </BottomSheet>
 
@@ -425,6 +425,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
+    flexShrink: 1,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

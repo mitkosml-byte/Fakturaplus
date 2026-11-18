@@ -452,10 +452,10 @@ export default function ReceivablesScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
-                <TouchableOpacity style={[styles.saveButton, { marginTop: 18 }]} onPress={handleSavePayment} disabled={paySaving}>
-                  <Text style={styles.saveButtonText}>{paySaving ? '...' : t('receivables.recordPayment')}</Text>
-                </TouchableOpacity>
               </ScrollView>
+              <TouchableOpacity style={[styles.saveButton, { marginTop: 18 }]} onPress={handleSavePayment} disabled={paySaving}>
+                <Text style={styles.saveButtonText}>{paySaving ? '...' : t('receivables.recordPayment')}</Text>
+              </TouchableOpacity>
             </View>
           </BottomSheet>
 
@@ -541,13 +541,13 @@ export default function ReceivablesScreen() {
                   </View>
                 )}
 
-                <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
-                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => { setModalVisible(false); resetForm(); }}>
-                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
               </ScrollView>
+              <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
+                {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => { setModalVisible(false); resetForm(); }}>
+                <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
             </View>
           </BottomSheet>
         </SafeAreaView>
@@ -626,17 +626,17 @@ const styles = StyleSheet.create({
   },
   dueDate: { fontSize: 12, color: COLORS.textMuted },
   dueDateOverdue: { color: COLORS.danger, fontWeight: '600' },
-  modalContent: { padding: 20, paddingBottom: 30 },
+  modalContent: { padding: 20, paddingBottom: 30, flexShrink: 1 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: 'white', marginBottom: 16 },
   inputLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 6, marginTop: 10 },
   input: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 12,
     color: 'white',
     fontSize: 14,
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: COLORS.border,
   },
   inputErrorBorder: { borderColor: COLORS.danger },
   inputLocked: { opacity: 0.6 },

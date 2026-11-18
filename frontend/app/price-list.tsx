@@ -308,7 +308,7 @@ export default function PriceListScreen() {
           <BottomSheet visible={!!draft} onClose={() => setDraft(null)}>
             {draft && (
               <View style={styles.sheet}>
-                <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 600 }}>
+                <ScrollView keyboardShouldPersistTaps="handled">
                   <Text style={styles.sheetTitle}>{draft.id ? draft.name : t('priceList.add')}</Text>
                   <Text style={styles.label}>{t('priceList.name')}</Text>
                   <TextInput style={styles.input} value={draft.name} onChangeText={(name) => setDraft({ ...draft, name })} />
@@ -396,15 +396,15 @@ export default function PriceListScreen() {
                     </>
                   )}
 
-                  <TouchableOpacity style={[styles.primaryButton, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
-                    {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
-                  {draft.id && (
-                    <TouchableOpacity style={styles.deleteButton} onPress={remove}>
-                      <Text style={styles.deleteText}>{t('common.delete')}</Text>
-                    </TouchableOpacity>
-                  )}
                 </ScrollView>
+                <TouchableOpacity style={[styles.primaryButton, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
+                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                {draft.id && (
+                  <TouchableOpacity style={styles.deleteButton} onPress={remove}>
+                    <Text style={styles.deleteText}>{t('common.delete')}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </BottomSheet>
@@ -475,7 +475,7 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   chipText: { color: COLORS.textLight, fontSize: 12 },
-  sheet: { padding: 16 },
+  sheet: { padding: 16, flexShrink: 1 },
   sheetTitle: { color: 'white', fontSize: 17, fontWeight: '700', marginBottom: 8 },
   label: { color: COLORS.textSecondary, fontSize: 12, marginTop: 10, marginBottom: 4 },
   input: {

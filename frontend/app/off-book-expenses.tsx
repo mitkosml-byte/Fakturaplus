@@ -401,13 +401,13 @@ export default function OffBookExpensesHistoryScreen() {
                   <LocationPicker value={formLocation} onChange={setFormLocationPick} noneLabel={t('locations.noneWhole')} />
                 </View>
 
-                <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
-                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => { setModalVisible(false); resetForm(); }}>
-                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
               </ScrollView>
+              <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
+                {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => { setModalVisible(false); resetForm(); }}>
+                <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
             </View>
           </BottomSheet>
         </SafeAreaView>
@@ -493,17 +493,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   expenseDate: { fontSize: 12, color: COLORS.textMuted },
-  modalContent: { padding: 20, paddingBottom: 30 },
+  modalContent: { padding: 20, paddingBottom: 30, flexShrink: 1 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: 'white', marginBottom: 16 },
   inputLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 6, marginTop: 10 },
   input: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.background,
     borderRadius: 10,
     padding: 12,
     color: 'white',
     fontSize: 14,
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: COLORS.border,
   },
   inputErrorBorder: { borderColor: COLORS.danger },
   fieldErrorText: { color: COLORS.danger, fontSize: 12, marginTop: 4 },

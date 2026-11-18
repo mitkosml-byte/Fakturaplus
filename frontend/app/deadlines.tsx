@@ -264,7 +264,7 @@ export default function DeadlinesScreen() {
           <BottomSheet visible={!!draft} onClose={() => setDraft(null)}>
             {draft && (
               <View style={styles.sheet}>
-                <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 600 }}>
+                <ScrollView keyboardShouldPersistTaps="handled">
                   <Text style={styles.sheetTitle}>{draft.id ? draft.title : t('deadlines.add')}</Text>
                   <Text style={styles.label}>{t('deadlines.what')}</Text>
                   <TextInput
@@ -329,15 +329,15 @@ export default function DeadlinesScreen() {
                   <Text style={styles.label}>{t('deadlines.notes')}</Text>
                   <TextInput style={[styles.input, { minHeight: 60 }]} value={draft.notes} multiline
                     onChangeText={(notes) => setDraft({ ...draft, notes })} />
-                  <TouchableOpacity style={[styles.primaryButton, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
-                    {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
-                  {draft.id && (
-                    <TouchableOpacity style={styles.deleteButton} onPress={remove}>
-                      <Text style={styles.deleteText}>{t('common.delete')}</Text>
-                    </TouchableOpacity>
-                  )}
                 </ScrollView>
+                <TouchableOpacity style={[styles.primaryButton, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
+                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                {draft.id && (
+                  <TouchableOpacity style={styles.deleteButton} onPress={remove}>
+                    <Text style={styles.deleteText}>{t('common.delete')}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </BottomSheet>
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
   next: { color: COLORS.textMuted, fontSize: 11, marginTop: 8, marginLeft: 30 },
   doneButton: { backgroundColor: COLORS.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
   doneText: { color: 'white', fontSize: 13, fontWeight: '600' },
-  sheet: { padding: 16 },
+  sheet: { padding: 16, flexShrink: 1 },
   sheetTitle: { color: 'white', fontSize: 17, fontWeight: '700', marginBottom: 8 },
   label: { color: COLORS.textSecondary, fontSize: 12, marginTop: 12, marginBottom: 4 },
   input: {

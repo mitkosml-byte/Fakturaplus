@@ -51,7 +51,7 @@ export function PersonalExpenseModal({
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
-      <View style={[styles.modalContent, { maxHeight: '90%' }]}>
+      <View style={styles.modalContent}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{t('personal.addExpense')}</Text>
           <TouchableOpacity onPress={onClose}>
@@ -151,10 +151,10 @@ export function PersonalExpenseModal({
             </ScrollView>
           </View>
 
-          <PressableScale style={styles.submitButton} onPress={onSubmit} disabled={isSubmitting}>
-            {isSubmitting ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
-          </PressableScale>
         </ScrollView>
+        <PressableScale style={styles.submitButton} onPress={onSubmit} disabled={isSubmitting}>
+          {isSubmitting ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
+        </PressableScale>
       </View>
     </BottomSheet>
   );
@@ -162,6 +162,7 @@ export function PersonalExpenseModal({
 
 const styles = StyleSheet.create({
   modalContent: {
+    flexShrink: 1,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

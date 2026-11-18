@@ -859,13 +859,13 @@ export default function PersonalExpensesHistoryScreen() {
                     ))}
                   </View>
 
-                  <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
-                    {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
-                    <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                  </TouchableOpacity>
                 </ScrollView>
+                <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
+                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
               </View>
           </BottomSheet>
 
@@ -994,13 +994,13 @@ export default function PersonalExpensesHistoryScreen() {
                     placeholderTextColor={COLORS.textMuted}
                   />
 
-                  <TouchableOpacity style={[styles.saveButton, walletSaving && { opacity: 0.6 }]} onPress={handleSaveWalletEntry} disabled={walletSaving}>
-                    {walletSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setWalletModalVisible(false)}>
-                    <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                  </TouchableOpacity>
                 </ScrollView>
+                <TouchableOpacity style={[styles.saveButton, walletSaving && { opacity: 0.6 }]} onPress={handleSaveWalletEntry} disabled={walletSaving}>
+                  {walletSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setWalletModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
               </View>
           </BottomSheet>
         </SafeAreaView>
@@ -1102,6 +1102,7 @@ const styles = StyleSheet.create({
   expenseMeta: { fontSize: 12, color: COLORS.textMuted, marginTop: 8 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'flex-end' },
   modalContent: {
+    flexShrink: 1,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
