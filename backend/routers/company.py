@@ -555,6 +555,25 @@ class ModulesUpdate(BaseModel):
     modules: Dict[str, bool]
 
 
+@router.get("/company/getting-started")
+async def getting_started(current_user: User = Depends(get_current_user)):
+    """A new business's first steps, for Home's "Започни оттук" to tick
+    off: a day's revenue entered, a supplier invoice saved, an expense
+    without invoice, an invoice issued to a customer. Each is whether the
+    business has one at all - nothing more is read."""
+    _, scope = await get_company_scope(current_user)
+
+    async def has_any(collection: str, extra: Optional[Dict[str, Any]] = None) -> bool:
+        return bool(await server.db[collection].find_one({**scope, **(extra or {})}, {"_id": 1}))
+
+    return {
+        "revenue": await has_any("daily_revenue"),
+        "invoice": await has_any("invoices"),
+        "expense": await has_any("expenses"),
+        "issued": await has_any("billing_documents", {"doc_type": "invoice"}),
+    }
+
+
 @router.get("/company/modules")
 async def get_company_modules(current_user: User = Depends(get_current_user)):
     """The parts of the program this business uses - for everyone in it (the

@@ -1,68 +1,42 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSegments, usePathname, useRouter } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { useOnboardingStore } from '../stores/onboardingStore';
+import { useModulesStore } from '../stores/modulesStore';
+import { api } from '../services/api';
 import { COLORS } from '../theme/colors';
 import { ModalBlurBackdrop } from './ModalBlurBackdrop';
-import { ModulesPicker } from './ModulesPicker';
-import { useModulesStore } from '../stores/modulesStore';
 
-// Non-intrusive, one-time product tour: auto-opens the first time a given
-// user logs in (see useOnboardingStore.checkAndMaybeOpen). The small floating
-// "?" button rendered on every authenticated screen is a separate, permanent
-// shortcut to the Help screen - not a way to replay this tour.
-const STEPS = [
-  { icon: 'sparkles', titleKey: 'tutorial.step1Title', textKey: 'tutorial.step1Text' },
-  { icon: 'scan', titleKey: 'tutorial.step2Title', textKey: 'tutorial.step2Text' },
-  { icon: 'cash', titleKey: 'tutorial.step3Title', textKey: 'tutorial.step3Text' },
-  { icon: 'bar-chart', titleKey: 'tutorial.step4Title', textKey: 'tutorial.step4Text' },
-  { icon: 'people', titleKey: 'tutorial.step5Title', textKey: 'tutorial.step5Text' },
-  { icon: 'help-buoy', titleKey: 'tutorial.step6Title', textKey: 'tutorial.step6Text' },
+// The first start (Л5): one question - "С какво работите?" - for the
+// owner of a new business. The answer sets the parts of the program it
+// uses and whether it is registered for VAT, so Home and the menus show
+// only those from the first minute; everything stays in Account → Фирма to
+// change later. No tour: each screen says what it does once, the first
+// time it is opened (FirstUseHint), and an empty Home says where to start.
+// A member who joins a business is asked nothing.
+//
+// The small floating "?" button rendered on authenticated screens is a
+// separate, permanent shortcut to the Help screen.
+const CHOICES = [
+  { key: 'till', icon: 'cash-outline', labelKey: 'start.till', hintKey: 'start.tillHint' },
+  { key: 'billing', icon: 'document-text-outline', labelKey: 'start.billing', hintKey: 'start.billingHint' },
+  { key: 'team', icon: 'people-outline', labelKey: 'start.team', hintKey: 'start.teamHint' },
+  { key: 'vat', icon: 'calculator-outline', labelKey: 'start.vat', hintKey: 'start.vatHint' },
 ] as const;
 
-// Module 3 audit finding: the same 6-step tour ran for every business in
-// the same fixed order, even though which feature matters most varies a
-// lot (a restaurant cares about daily revenue entry first, a craftsman
-// about scanning supplier invoices first). Per the audit's recommended
-// fix, this stays a SINGLE tour - one branch question up front reorders
-// which 2-3 of the middle, business-relevant steps (scan / revenue-entry
-// / stats) lead, rather than building a separate tour per business type.
-// The intro (sparkles, index 0) always opens and the permanent help
-// reminder (help-buoy, index 5) always closes.
-const BUSINESS_TYPES = [
-  { key: 'retail', icon: 'storefront', labelKey: 'tutorial.businessTypeRetail' },
-  { key: 'food', icon: 'restaurant', labelKey: 'tutorial.businessTypeFood' },
-  { key: 'craftsman', icon: 'construct', labelKey: 'tutorial.businessTypeCraftsman' },
-  { key: 'other', icon: 'ellipsis-horizontal', labelKey: 'tutorial.businessTypeOther' },
-] as const;
-
-const STEP_ORDER_BY_BUSINESS_TYPE: Record<string, number[]> = {
-  retail: [1, 2, 3, 4],
-  food: [2, 1, 3, 4],
-  craftsman: [1, 3, 2, 4],
-  other: [1, 2, 3, 4],
-};
-
-function buildSteps(businessType: string | null) {
-  const middleOrder = STEP_ORDER_BY_BUSINESS_TYPE[businessType ?? 'other'] || [1, 2, 3, 4];
-  return [STEPS[0], ...middleOrder.map((i) => STEPS[i]), STEPS[5]];
-}
+type ChoiceKey = typeof CHOICES[number]['key'];
 
 const HIDDEN_ON_SEGMENTS = ['login', 'forgot-password', 'help'];
 
 // Every tab-root screen (Home, Scan, Invoices, Stats, Team, Profile) already
 // has a tab bar eating into the bottom, and several also place a real "add"
-// FAB at bottom-right (employee-absences.tsx) or export/logout icons in the
-// header top-right (stats/invoices/profile) - bottom-left is the one corner
-// none of them use, so the help button lives there instead of fighting each
-// screen's own layout. Mirrors the tab-bar height constant from
-// (tabs)/_layout.tsx - kept in sync with that file's own TAB_ROUTES list
-// (which also conditionally includes '/team'), since missing a route here
-// just means a wrong offset, not a wrong screen.
+// FAB at bottom-right or export/logout icons in the header top-right -
+// bottom-left is the one corner none of them use, so the help button lives
+// there. Mirrors the tab-bar height constant from (tabs)/_layout.tsx.
 const TAB_ROUTES = ['/', '/scan', '/invoices', '/stats', '/team', '/profile'];
 const TAB_BAR_HEIGHT = 70;
 
@@ -74,13 +48,16 @@ export function OnboardingTutorial() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { isVisible, markSeen, checkAndMaybeOpen } = useOnboardingStore();
-  const [step, setStep] = React.useState(0);
-  const [businessType, setBusinessType] = React.useState<string | null>(null);
-  const [branchAnswered, setBranchAnswered] = React.useState(false);
-  // The owner says what the business uses ("Какво ползвам"), right after
-  // the business type - whatever it leaves out leaves the menus.
+
+  // Only the owner sets what the business uses. The question waits until
+  // the business's parts have loaded, so an owner is never skipped by mistake.
   const canEditModules = useModulesStore((state) => state.canEdit);
-  const [modulesAnswered, setModulesAnswered] = React.useState(false);
+  const modulesCompany = useModulesStore((state) => state.companyId);
+  const saveModules = useModulesStore((state) => state.save);
+  const modulesReady = !!user?.company_id && modulesCompany === user.company_id;
+
+  const [chosen, setChosen] = React.useState<Record<ChoiceKey, boolean>>({ till: true, billing: false, team: false, vat: false });
+  const [saving, setSaving] = React.useState(false);
 
   useEffect(() => {
     if (isAuthenticated && user?.user_id) {
@@ -88,44 +65,39 @@ export function OnboardingTutorial() {
     }
   }, [isAuthenticated, user?.user_id]);
 
+  const finish = () => {
+    if (user?.user_id) markSeen(user.user_id);
+  };
+
+  // A member who joined a business: nothing to ask.
   useEffect(() => {
-    if (isVisible) {
-      setStep(0);
-      setBusinessType(null);
-      setBranchAnswered(false);
-      setModulesAnswered(false);
+    if (isVisible && modulesReady && !canEditModules) finish();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVisible, modulesReady, canEditModules]);
+
+  const toggle = (key: ChoiceKey) => setChosen((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await saveModules({
+        till: chosen.till, billing: chosen.billing, team: chosen.team, payroll: chosen.team,
+        // Not asked: off until wanted (Account → Фирма).
+        assets: false, wallet: false,
+      });
+      await api.updateCompany({ vat_registered: chosen.vat });
+    } catch {
+      // Offline or a hiccup: every part stays on and the VAT question waits
+      // on Home, as for a business that never answered.
+    } finally {
+      setSaving(false);
+      finish();
     }
-  }, [isVisible]);
-
-  const orderedSteps = React.useMemo(() => buildSteps(businessType), [businessType]);
-
-  const chooseBusinessType = (type: string | null) => {
-    setBusinessType(type);
-    setBranchAnswered(true);
   };
 
   const hideFloatingButton = !isAuthenticated || HIDDEN_ON_SEGMENTS.includes(segments[0] as string);
   const isTabRoot = TAB_ROUTES.includes(pathname);
   const floatingBottom = insets.bottom + (isTabRoot ? TAB_BAR_HEIGHT + 12 : 16);
-
-  const finish = () => {
-    if (user?.user_id) markSeen(user.user_id);
-  };
-
-  const goNext = () => {
-    if (step < orderedSteps.length - 1) {
-      setStep(step + 1);
-    } else {
-      finish();
-    }
-  };
-
-  const goBack = () => {
-    if (step > 0) setStep(step - 1);
-  };
-
-  const current = orderedSteps[step];
-  const isLastStep = step === orderedSteps.length - 1;
 
   return (
     <>
@@ -139,91 +111,42 @@ export function OnboardingTutorial() {
         </TouchableOpacity>
       )}
 
-      <Modal visible={isVisible} animationType="fade" transparent onRequestClose={finish}>
+      <Modal visible={isVisible && modulesReady && canEditModules} animationType="fade" transparent onRequestClose={finish}>
         <View style={styles.overlay}>
           <ModalBlurBackdrop />
           <View style={styles.card}>
-            <TouchableOpacity style={styles.closeBtn} onPress={finish}>
-              <Ionicons name="close" size={22} color={COLORS.textMuted} />
+            <View style={styles.iconCircle}>
+              <Ionicons name="sparkles" size={30} color={COLORS.primary} />
+            </View>
+            <Text style={styles.title}>{t('start.question')}</Text>
+            <Text style={styles.text}>{t('start.subtitle')}</Text>
+
+            <View style={styles.choices}>
+              {CHOICES.map((choice) => {
+                const on = chosen[choice.key];
+                return (
+                  <TouchableOpacity
+                    key={choice.key}
+                    style={[styles.choice, on && styles.choiceOn]}
+                    onPress={() => toggle(choice.key)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                  >
+                    <Ionicons name={choice.icon} size={20} color={on ? COLORS.primary : COLORS.textMuted} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.choiceLabel, on && styles.choiceLabelOn]}>{t(choice.labelKey)}</Text>
+                      <Text style={styles.choiceHint}>{t(choice.hintKey)}</Text>
+                    </View>
+                    <Ionicons name={on ? 'checkbox' : 'square-outline'} size={22} color={on ? COLORS.primary : COLORS.textMuted} />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity style={styles.primaryBtn} onPress={save} disabled={saving}>
+              {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryBtnText}>{t('start.done')}</Text>}
             </TouchableOpacity>
-
-            {!branchAnswered ? (
-              <>
-                <View style={styles.iconCircle}>
-                  <Ionicons name="compass" size={32} color={COLORS.primary} />
-                </View>
-
-                <Text style={styles.title}>{t('tutorial.businessTypeQuestion')}</Text>
-                <Text style={styles.text}>{t('tutorial.businessTypeSubtitle')}</Text>
-
-                <View style={styles.businessTypeGrid}>
-                  {BUSINESS_TYPES.map((bt) => (
-                    <TouchableOpacity
-                      key={bt.key}
-                      style={styles.businessTypeOption}
-                      onPress={() => chooseBusinessType(bt.key)}
-                    >
-                      <Ionicons name={bt.icon as any} size={22} color={COLORS.primary} />
-                      <Text style={styles.businessTypeOptionText}>{t(bt.labelKey)}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <TouchableOpacity style={styles.secondaryBtn} onPress={() => chooseBusinessType(null)}>
-                  <Text style={styles.secondaryBtnText}>{t('tutorial.skip')}</Text>
-                </TouchableOpacity>
-              </>
-            ) : canEditModules && !modulesAnswered ? (
-              <>
-                <View style={styles.iconCircle}>
-                  <Ionicons name="apps" size={32} color={COLORS.primary} />
-                </View>
-                <Text style={styles.title}>{t('tutorial.modulesQuestion')}</Text>
-                <Text style={styles.text}>{t('tutorial.modulesSubtitle')}</Text>
-                <View style={styles.modulesList}>
-                  <ModulesPicker compact />
-                </View>
-                <View style={styles.actions}>
-                  <TouchableOpacity style={styles.primaryBtn} onPress={() => setModulesAnswered(true)}>
-                    <Text style={styles.primaryBtnText}>{t('tutorial.next')}</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <>
-                <View style={styles.iconCircle}>
-                  <Ionicons name={current.icon as any} size={32} color={COLORS.primary} />
-                </View>
-
-                <Text style={styles.title}>{t(current.titleKey)}</Text>
-                <Text style={styles.text}>{t(current.textKey)}</Text>
-
-                <View style={styles.dotsRow}>
-                  {orderedSteps.map((_, i) => (
-                    <View key={i} style={[styles.dot, i === step && styles.dotActive]} />
-                  ))}
-                </View>
-
-                <Text style={styles.stepCounter}>
-                  {t('tutorial.stepCounter').replace('{current}', String(step + 1)).replace('{total}', String(orderedSteps.length))}
-                </Text>
-
-                <View style={styles.actions}>
-                  {step === 0 ? (
-                    <TouchableOpacity style={styles.secondaryBtn} onPress={finish}>
-                      <Text style={styles.secondaryBtnText}>{t('tutorial.skip')}</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity style={styles.secondaryBtn} onPress={goBack}>
-                      <Text style={styles.secondaryBtnText}>{t('tutorial.back')}</Text>
-                    </TouchableOpacity>
-                  )}
-                  <TouchableOpacity style={styles.primaryBtn} onPress={goNext}>
-                    <Text style={styles.primaryBtnText}>{isLastStep ? t('tutorial.done') : t('tutorial.next')}</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
+            <Text style={styles.later}>{t('start.later')}</Text>
           </View>
         </View>
       </Modal>
@@ -264,105 +187,55 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(139, 92, 246, 0.3)',
   },
-  closeBtn: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    padding: 4,
-    zIndex: 1,
-  },
   iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: 'rgba(139, 92, 246, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   title: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: 'bold',
     color: 'white',
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 6,
   },
   text: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.textSubtle,
     textAlign: 'center',
-    lineHeight: 21,
-    marginBottom: 18,
-  },
-  businessTypeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    width: '100%',
+    lineHeight: 19,
     marginBottom: 16,
   },
-  businessTypeOption: {
-    flexBasis: '47%',
-    flexGrow: 1,
+  choices: {
+    alignSelf: 'stretch',
+    gap: 8,
+    marginBottom: 16,
+  },
+  choice: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     borderRadius: 12,
     backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.25)',
+    borderColor: COLORS.border,
   },
-  businessTypeOptionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'white',
-    textAlign: 'center',
+  choiceOn: {
+    borderColor: 'rgba(139, 92, 246, 0.6)',
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
   },
-  dotsRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 8,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: COLORS.border,
-  },
-  dotActive: {
-    backgroundColor: COLORS.primary,
-    width: 16,
-  },
-  stepCounter: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginBottom: 18,
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 10,
-    width: '100%',
-  },
-  modulesList: {
-    alignSelf: 'stretch',
-    marginBottom: 16,
-  },
-  secondaryBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    backgroundColor: COLORS.border,
-  },
-  secondaryBtnText: {
-    color: COLORS.textSubtle,
-    fontWeight: '600',
-    fontSize: 14,
-  },
+  choiceLabel: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' },
+  choiceLabelOn: { color: 'white' },
+  choiceHint: { color: COLORS.textMuted, fontSize: 12, marginTop: 1 },
   primaryBtn: {
-    flex: 1,
-    paddingVertical: 12,
+    alignSelf: 'stretch',
+    paddingVertical: 13,
     borderRadius: 10,
     alignItems: 'center',
     backgroundColor: COLORS.primary,
@@ -372,4 +245,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  later: { color: COLORS.textMuted, fontSize: 12, marginTop: 10, textAlign: 'center' },
 });

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { FirstUseHint } from '../../src/components/FirstUseHint';
 import {
   View,
   Text,
@@ -1122,6 +1123,7 @@ export default function StatsScreen() {
 
             {activeTab === 'overview' ? (
               <>
+                <FirstUseHint id="stats" icon="bar-chart" text={t('hint.stats')} />
                 {/* One period for everything below - the cards, the
                     average, the charts, the top 3 - and for Home. */}
                 <PeriodNavigator state={summaryPeriodState} onChange={setSummaryPeriodState} />

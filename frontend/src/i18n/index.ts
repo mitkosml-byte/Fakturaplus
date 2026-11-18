@@ -1047,6 +1047,29 @@ export const translations: Translations = {
   // The till's and Джобче's revenue added up, under the number boxes.
   'stats.paymentKinds': { bg: 'Приходи по вид плащане', en: 'Income by payment kind' },
   'home.revenueSum': { bg: 'Оборот (фискален + джобче)', en: 'Revenue (fiscal + pocket)' },
+  // The first start: one question (Л5).
+  'start.question': { bg: 'С какво работите?', en: 'What do you work with?' },
+  'start.subtitle': { bg: 'Отбележете каквото ползвате - програмата ще показва само него.', en: 'Tick what you use - the app will show just that.' },
+  'start.till': { bg: 'Каса (касов апарат)', en: 'A till (cash register)' },
+  'start.tillHint': { bg: 'дневен оборот и джобче', en: 'daily revenue and pocket money' },
+  'start.billing': { bg: 'Фактури към клиенти', en: 'Invoices to customers' },
+  'start.billingHint': { bg: 'издаване, вземания, оферти', en: 'issuing, receivables, quotes' },
+  'start.team': { bg: 'Служители', en: 'Employees' },
+  'start.teamHint': { bg: 'график, заплати, отпуски', en: 'schedule, payroll, leave' },
+  'start.vat': { bg: 'Регистрирани по ДДС', en: 'VAT registered' },
+  'start.vatHint': { bg: 'ДДС за плащане и фактури с ДДС', en: 'VAT to pay and invoices with VAT' },
+  'start.done': { bg: 'Готово', en: 'Done' },
+  'start.later': { bg: 'Всичко се променя после от Акаунт → Фирма.', en: 'Change any of it later in Account → Company.' },
+  // An empty Home says where to start.
+  'startHere.title': { bg: 'Започни оттук', en: 'Start here' },
+  'startHere.revenue': { bg: 'Въведете оборота за деня', en: "Enter the day's revenue" },
+  'startHere.invoice': { bg: 'Снимайте фактура от доставчик', en: 'Photograph a supplier invoice' },
+  'startHere.issued': { bg: 'Издайте фактура към клиент', en: 'Issue an invoice to a customer' },
+  'startHere.hide': { bg: 'Скрий', en: 'Hide' },
+  // What a screen does, once, the first time it is opened.
+  'hint.scan': { bg: 'Снимайте фактурата от доставчик - програмата прочита доставчика, сумите и ДДС сама.', en: 'Photograph a supplier invoice - the app reads the supplier, amounts and VAT itself.' },
+  'hint.invoices': { bg: 'Фактурите от доставчици. Докоснете фактура, за да я видите, поправите или платите.', en: 'Supplier invoices. Tap one to see it, correct it or mark it paid.' },
+  'hint.stats': { bg: 'Числата по периоди: приходи, разходи, ДДС и прогноза. Периодът е общ с Главната.', en: 'Numbers by period: income, expenses, VAT and the forecast. The period is shared with Home.' },
   // Home's actions, each with a word on what it records.
   'home.actionRevenueHint': { bg: 'каса и джобче', en: 'till and pocket' },
   'home.actionExpenseHint': { bg: 'без фактура', en: 'no invoice' },
@@ -3284,98 +3307,6 @@ export const translations: Translations = {
   },
 
   // Onboarding tutorial (shown once on first login, reopenable via the "?" button)
-  'tutorial.businessTypeQuestion': {
-    bg: 'Какъв е вашият бизнес?',
-    en: "What's your business?",
-  },
-  'tutorial.businessTypeSubtitle': {
-    bg: 'За да подредим обиколката според това, което ви е най-полезно.',
-    en: "So we can order the tour around what's most useful to you.",
-  },
-  'tutorial.businessTypeRetail': {
-    bg: 'Търговия на дребно',
-    en: 'Retail shop',
-  },
-  'tutorial.businessTypeFood': {
-    bg: 'Храни и напитки',
-    en: 'Food & drink',
-  },
-  'tutorial.businessTypeCraftsman': {
-    bg: 'Услуги / занаятчия',
-    en: 'Services / craftsman',
-  },
-  'tutorial.businessTypeOther': {
-    bg: 'Друго',
-    en: 'Other',
-  },
-  'tutorial.step1Title': {
-    bg: 'Добре дошли във Фактура+!',
-    en: 'Welcome to Fakturaplus!',
-  },
-  'tutorial.step1Text': {
-    bg: 'Кратко ще ви разведем из основните функции. Отнема половин минута - можете да го пропуснете по всяко време.',
-    en: "We'll give you a quick tour of the main features. It takes half a minute - you can skip it anytime.",
-  },
-  'tutorial.step2Title': {
-    bg: 'Сканиране на фактури',
-    en: 'Scanning invoices',
-  },
-  'tutorial.step2Text': {
-    bg: 'От "Сканирай" снимате фактура (дори многостранична) и AI разпознава доставчик, суми и ДДС автоматично.',
-    en: 'From "Scan" you photograph an invoice (even a multi-page one) and AI reads the supplier, amounts and VAT automatically.',
-  },
-  'tutorial.step3Title': {
-    bg: 'Оборот и разходи',
-    en: 'Revenue and expenses',
-  },
-  'tutorial.step3Text': {
-    bg: 'От Начало въвеждате дневния оборот и разходите без фактура. Записът за деня се поправя, а не се сумира.',
-    en: "From Home you enter the day's revenue and expenses without an invoice. A day's entry is corrected, not added to.",
-  },
-  'tutorial.step4Title': {
-    bg: 'Статистики и почивни дни',
-    en: 'Statistics and closed days',
-  },
-  'tutorial.step4Text': {
-    bg: 'В Статистики виждате графики, ДДС за плащане и прогнози. Отбележете почивните дни на фирмата, за да не изкривяват средния оборот.',
-    en: "Statistics shows charts, VAT to pay and forecasts. Mark your company's closed days so they don't skew the average turnover.",
-  },
-  'tutorial.step5Title': {
-    bg: 'Екип и права',
-    en: 'Team and permissions',
-  },
-  'tutorial.step5Text': {
-    bg: 'От Профил поканете мениджър, служител или счетоводител - всеки с точно определени права на достъп.',
-    en: 'From Profile, invite a manager, staff member or accountant - each with precisely defined access rights.',
-  },
-  'tutorial.step6Title': {
-    bg: 'Винаги на разположение',
-    en: 'Always available',
-  },
-  'tutorial.step6Text': {
-    bg: 'Бутонът "?" долу вляво ви отвежда директно в Помощ по всяко време, ако ви потрябва помощ отново.',
-    en: 'The "?" button at the bottom-left takes you straight to Help anytime you need it again.',
-  },
-  'tutorial.stepCounter': {
-    bg: 'Стъпка {current} от {total}',
-    en: 'Step {current} of {total}',
-  },
-  'tutorial.skip': {
-    bg: 'Пропусни',
-    en: 'Skip',
-  },
-  'tutorial.back': {
-    bg: 'Назад',
-    en: 'Back',
-  },
-  'tutorial.next': {
-    bg: 'Напред',
-    en: 'Next',
-  },
-  'tutorial.done': {
-    bg: 'Разбрах',
-    en: 'Got it',
-  },
   'tutorial.helpButtonLabel': {
     bg: 'Помощ',
     en: 'Help',
@@ -6196,11 +6127,6 @@ export const translations: Translations = {
   'modules.assetsHint': { bg: 'Дълготрайни активи и амортизация', en: 'Fixed assets and depreciation' },
   'modules.wallet': { bg: 'Лични пари на собственика', en: 'Owner\'s personal money' },
   'modules.walletHint': { bg: 'Личен портфейл и лични вложения в бизнеса', en: 'Personal wallet and personal money put into the business' },
-  'tutorial.modulesQuestion': { bg: 'Какво ползвате?', en: 'What do you use?' },
-  'tutorial.modulesSubtitle': {
-    bg: 'Изключете това, което не ви трябва - програмата ще е по-проста. Може да го промените по всяко време от Настройки на фирмата.',
-    en: 'Turn off what you do not need - the program gets simpler. You can change it any time in the company settings.',
-  },
   'home.billingTitle': { bg: 'Клиенти', en: 'Customers' },
   'home.newInvoice': { bg: 'Фактура', en: 'Invoice' },
   'home.billingIssued': { bg: 'Издадени фактури', en: 'Invoices issued' },

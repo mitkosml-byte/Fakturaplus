@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { FirstUseHint } from '../../src/components/FirstUseHint';
 import {
   View,
   Text,
@@ -782,6 +783,10 @@ export default function InvoicesScreen() {
               <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
             </TouchableOpacity>
           )}
+
+          <View style={{ marginHorizontal: 16 }}>
+            <FirstUseHint id="invoices" icon="document-text" text={t('hint.invoices')} />
+          </View>
 
           {/* Search */}
           <View style={styles.searchContainer}>

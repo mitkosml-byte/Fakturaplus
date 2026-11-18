@@ -1843,6 +1843,14 @@ export interface HolidayWorkEntry {
   created_at: string;
 }
 
+// What a business has entered of its first steps (Home's "Започни оттук").
+export interface GettingStarted {
+  revenue: boolean;
+  invoice: boolean;
+  expense: boolean;
+  issued: boolean;
+}
+
 export type LeaveType = 'paid' | 'unpaid' | 'sick';
 
 // Why a sick-leave sheet was issued - never the diagnosis.

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { FirstUseHint } from '../../src/components/FirstUseHint';
 import {
   View,
   Text,
@@ -959,6 +960,7 @@ export default function ScanScreen() {
                 <Text style={styles.subtitle}>{t('scan.subtitle')}</Text>
               </View>
 
+              {capturedImages.length === 0 && <FirstUseHint id="scan" icon="scan" text={t('hint.scan')} />}
               {capturedImages.length === 0 && <ScanCreditsReloadButton />}
 
               {capturedImages.length === 0 && (

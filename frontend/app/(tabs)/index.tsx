@@ -15,7 +15,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
-import { Summary, NonInvoiceExpense } from '../../src/types';
+import { Summary, NonInvoiceExpense, GettingStarted } from '../../src/types';
 import { format, subDays } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
@@ -33,9 +33,11 @@ import { RevenueModal, rateAmountsTotal } from '../../src/components/home/Revenu
 import type { VatGroupAmount, ZReportResult } from '../../src/types';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCard';
+import { GettingStartedCard } from '../../src/components/home/GettingStartedCard';
 import { pickScanImage } from '../../src/utils/scanImage';
 import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
+import { useOnboardingStore } from '../../src/stores/onboardingStore';
 import { getDescriptionSuggestions } from '../../src/utils/expenseSuggestions';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -43,7 +45,7 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 export default function HomeScreen() {
   const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
-  const { hasPermission, isLoading: authLoading } = useAuth();
+  const { user, hasPermission, isLoading: authLoading } = useAuth();
   // Home shows what the business uses (У3): a business without a till sees
   // no till revenue, average per day or pocket money; one that invoices
   // sees what it issued and what customers owe, with "+ Фактура".
@@ -56,6 +58,9 @@ export default function HomeScreen() {
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string; revenueDate?: string }>();
 
   const [summary, setSummary] = useState<Summary | null>(null);
+  // A business that has entered nothing yet sees where to start, not zeros.
+  const [startStatus, setStartStatus] = useState<GettingStarted | null>(null);
+  const nothingYet = !!startStatus && !startStatus.revenue && !startStatus.invoice && !startStatus.expense && !startStatus.issued;
   // Which period the dashboard cards below are showing - defaults to the
   // current (in-progress) calendar month, matching the previous hardcoded
   // behavior, but lets the user step back to any past day/week/month/year
@@ -284,6 +289,15 @@ export default function HomeScreen() {
       if (!authLoading) loadData();
     }, [loadData, authLoading])
   );
+
+  // The first-start answer changes what Home shows (the parts, the VAT):
+  // once it is given, everything here loads again.
+  const onboardingOpen = useOnboardingStore((state) => state.isVisible);
+  const wasOnboardingOpen = useRef(false);
+  useEffect(() => {
+    if (wasOnboardingOpen.current && !onboardingOpen) loadData();
+    wasOnboardingOpen.current = onboardingOpen;
+  }, [onboardingOpen, loadData]);
 
   // Set by the scan screen's "sales" mode hand-off (see the effect below) -
   // a ref, not state, so consuming it doesn't itself retrigger the load
@@ -699,6 +713,18 @@ export default function HomeScreen() {
               </View>
             )}
 
+            <GettingStartedCard
+              companyId={user?.company_id}
+              showRevenue={usesTill && hasPermission('add_revenue')}
+              showInvoice={hasPermission('manage_invoices')}
+              showIssued={usesBilling && hasPermission('issue_invoices')}
+              onAddRevenue={() => { setRevenueDate(getDefaultActionDate()); setRevenueModalVisible(true); }}
+              refreshSignal={summary}
+              onStatus={setStartStatus}
+            />
+
+            {!nothingYet && (
+            <>
             <PeriodNavigator state={periodState} onChange={handlePeriodChange} />
             <PeriodSoFarNote summary={summary} />
 
@@ -787,13 +813,15 @@ export default function HomeScreen() {
                 <Text style={styles.restrictedNoteText}>{restrictedNote}</Text>
               </View>
             )}
+            </>
+            )}
 
             {/* What needs attention: up to two, the rest behind "show more". */}
             <MorningBriefingCard refreshSignal={summary} />
 
             {/* A business that invoices: issued in the period, owed now,
                 overdue (У2) - its "Фактура" is the action above. */}
-            {usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
+            {usesBilling && !nothingYet && (hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
               <BillingOverviewCard
                 startDate={toApiDate(getPeriodBounds(periodState).start)}
                 endDate={toApiDate(getPeriodBounds(periodState).end)}
