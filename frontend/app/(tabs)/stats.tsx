@@ -29,7 +29,7 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { PeriodNavigator, PeriodSoFarNote } from '../../src/components/PeriodNavigator';
-import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
+import { ChipTabs, FadeIn, CountUp } from '../../src/components';
 import { getPeriodBounds, getComparablePrevious, toApiDate } from '../../src/utils/periodRange';
 import { useSharedPeriod } from '../../src/utils/sharedPeriod';
 import { differenceInCalendarDays, format, parseISO } from 'date-fns';
@@ -611,6 +611,8 @@ export default function StatsScreen() {
   // Quantity is ranked within one unit at a time - the units on offer, most
   // common first, and the one currently shown.
   const restrictedNote = restrictedDataNote(summary?.financial_visibility, t);
+  // The months something was put in - the only ones with a return to show.
+  const investedMonths = roiTrend.filter((pt) => (pt.personal_investment || 0) > 0 && pt.roi_percent !== null);
   const quantityUnits: string[] = Object.keys(itemStats?.top_by_quantity_by_unit || {});
   const activeQuantityUnit = quantityUnit && quantityUnits.includes(quantityUnit) ? quantityUnit : quantityUnits[0] ?? null;
 
@@ -646,13 +648,18 @@ export default function StatsScreen() {
     ),
   }));
 
+  // A day's bar is what was spent that day; the month's salaries and
+  // depreciation are a cost of the month, told in a line under the chart
+  // (a month's bar holds them - they are that month's).
+  const barExpense = (item: ChartDataPoint) =>
+    item.bucket === 'day' ? Math.round((item.expense - (item.monthly_costs ?? 0)) * 100) / 100 : item.expense;
   const expenseBarData = chartData.map((item) => ({
-    value: item.expense,
+    value: barExpense(item),
     label: barLabel(item),
     frontColor: item.is_closed ? COLORS.borderLight : COLORS.danger,
     topLabelComponent: () => (
       <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.danger, fontSize: 10 }}>
-        {item.expense > 0 ? item.expense.toFixed(0) : ''}
+        {barExpense(item) > 0 ? barExpense(item).toFixed(0) : ''}
       </Text>
     ),
   }));
@@ -674,7 +681,27 @@ export default function StatsScreen() {
         : `${windowedIncomeBarData[0].label} - ${windowedIncomeBarData[windowedIncomeBarData.length - 1].label}`)
     : '';
 
-  // Small "+12% спрямо миналия месец" style badge for the summary cards
+  // Salaries and depreciation of the period, by name: apart from the day
+  // bars, or the part of the month bars they are.
+  const monthlyCostsTotal = Math.round(chartData.reduce((sum, item) => sum + (item.monthly_costs ?? 0), 0) * 100) / 100;
+  const monthlyCostsNote = (() => {
+    if (monthlyCostsTotal < 0.01) return null;
+    const depreciation = summary?.total_depreciation_expense;
+    const parts: string[] = [];
+    if (depreciation === null || depreciation === undefined) {
+      parts.push(t('stats.monthlyCostsBoth').replace('{amount}', `${monthlyCostsTotal.toFixed(2)} €`));
+    } else {
+      const payroll = Math.round((monthlyCostsTotal - depreciation) * 100) / 100;
+      if (payroll >= 0.01) parts.push(t('stats.monthlyPayroll').replace('{amount}', `${payroll.toFixed(2)} €`));
+      if (depreciation >= 0.01) parts.push(t('stats.monthlyDepreciation').replace('{amount}', `${depreciation.toFixed(2)} €`));
+    }
+    if (!parts.length) return null;
+    const costs = parts.join(t('stats.and'));
+    const sentence = t(chartData[0]?.bucket === 'month' ? 'stats.monthlyCostsIncluded' : 'stats.monthlyCostsApart').replace('{costs}', costs);
+    return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+  })();
+
+  // Small "+12% спрямо миналия месец" style badge for the chart totals
   const renderTrendBadge = (current?: number | null, previous?: number | null, higherIsBetter: boolean = true) => {
     if (current === undefined || current === null || previous === undefined || previous === null || !previous) return null;
     const diff = current - previous;
@@ -1066,12 +1093,6 @@ export default function StatsScreen() {
                 style={styles.quickLinksRow}
                 contentContainerStyle={styles.quickLinksContent}
               >
-                {hasPermission('view_statistics') && (
-                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/ask-my-numbers')}>
-                    <Ionicons name="chatbubbles-outline" size={15} color={COLORS.success} />
-                    <Text style={styles.quickLinkChipText}>{t('askMyNumbers.title')}</Text>
-                  </TouchableOpacity>
-                )}
                 {hasPermission('manage_budget') && (
                   <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/budget')}>
                     <Ionicons name="wallet-outline" size={15} color={COLORS.primary} />
@@ -1088,12 +1109,6 @@ export default function StatsScreen() {
                   <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/locations')}>
                     <Ionicons name="storefront-outline" size={15} color={COLORS.success} />
                     <Text style={styles.quickLinkChipText}>{t('locations.title')}</Text>
-                  </TouchableOpacity>
-                )}
-                {hasPermission('view_profit') && (
-                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/cash-flow')}>
-                    <Ionicons name="trending-up-outline" size={15} color={COLORS.success} />
-                    <Text style={styles.quickLinkChipText}>{t('cashFlow.title')}</Text>
                   </TouchableOpacity>
                 )}
                 {uses('assets') && hasPermission('manage_budget') && (
@@ -1155,76 +1170,40 @@ export default function StatsScreen() {
                   </View>
                 )}
 
-                {/* Summary Cards - a skeleton stand-in until the first real
-                    summary lands, so the grid never briefly shows "0.00 €"
-                    for data that just hasn't arrived yet. */}
-                {!summary ? (
-                  <View style={styles.summaryGrid}>
-                    <SkeletonStat style={styles.summaryCard} />
-                    <SkeletonStat style={styles.summaryCard} />
-                    <SkeletonStat style={styles.summaryCard} />
-                    <SkeletonStat style={styles.summaryCard} />
-                  </View>
-                ) : (
-                <View style={styles.summaryGrid}>
-                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.success }]}>
-                    <Ionicons name="trending-up" size={24} color={COLORS.success} />
-                    <Text style={styles.cardLabel}>{t('stats.totalIncome')}</Text>
-                    <CountUp
-                      value={summary?.total_income || 0}
-                      formatter={(n) => `${n.toFixed(2)} €`}
-                      style={[styles.cardValue, { color: COLORS.success }]}
-                    />
-                    {renderTrendBadge(summary?.total_income, previousSummary?.total_income, true)}
-                    {!!summary?.total_issued_invoices && (
-                      <Text style={styles.cardIssuedNote}>
-                        {t('stats.ofWhichIssuedInvoices').replace('{amount}', summary.total_issued_invoices.toFixed(2))}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.danger }]}>
-                    <Ionicons name="trending-down" size={24} color={COLORS.danger} />
-                    <Text style={styles.cardLabel}>{t('stats.totalExpense')}</Text>
-                    <CountUp
-                      value={summary?.total_expense || 0}
-                      formatter={(n) => `${n.toFixed(2)} €`}
-                      style={[styles.cardValue, { color: COLORS.danger }]}
-                    />
-                    {renderTrendBadge(summary?.total_expense, previousSummary?.total_expense, false)}
-                  </View>
-                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.primary }]}>
-                    <Ionicons name="calculator" size={24} color={COLORS.primary} />
-                    <Text style={styles.cardLabel}>{t('stats.vatToPay')}</Text>
-                    <CountUp
-                      value={summary?.vat_to_pay || 0}
-                      formatter={(n) => `${n.toFixed(2)} €`}
-                      style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}
-                    />
-                    {renderTrendBadge(summary?.vat_to_pay, previousSummary?.vat_to_pay, false)}
-                  </View>
-                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.warning }]}>
-                    <Ionicons name="wallet" size={24} color={COLORS.warning} />
-                    <Text style={styles.cardLabel}>{t('stats.profitLabel')}</Text>
-                    {summary && summary.profit === null ? (
-                      <Ionicons name="lock-closed" size={20} color={COLORS.textMuted} style={{ marginVertical: 4 }} />
-                    ) : (
-                      <>
-                        <CountUp
-                          value={summary?.profit || 0}
-                          formatter={(n) => `${n.toFixed(2)} €`}
-                          style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
-                        />
-                        {renderTrendBadge(summary?.profit, previousSummary?.profit, true)}
-                      </>
-                    )}
-                  </View>
-                </View>
-                )}
-
                 {restrictedNote && (
                   <View style={styles.restrictedNote}>
                     <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
                     <Text style={styles.restrictedNoteText}>{restrictedNote}</Text>
+                  </View>
+                )}
+
+                {/* Sections of Statistics (Л8): money ahead, and everything
+                    for the accountant - each one tap, not a hidden link. */}
+                {(hasPermission('view_profit') || hasPermission('export_data')) && (
+                  <View style={styles.sectionLinks}>
+                    {hasPermission('view_profit') && (
+                      <TouchableOpacity style={styles.sectionLink} onPress={() => router.push('/cash-flow')}>
+                        <Ionicons name="trending-up-outline" size={20} color={COLORS.success} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.sectionLinkTitle}>{t('cashFlow.title')}</Text>
+                          <Text style={styles.sectionLinkText}>{t('stats.cashFlowSection')}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+                      </TouchableOpacity>
+                    )}
+                    {hasPermission('export_data') && (
+                      <TouchableOpacity
+                        style={[styles.sectionLink, hasPermission('view_profit') && styles.sectionLinkDivider]}
+                        onPress={() => router.push('/accountant-pack')}
+                      >
+                        <Ionicons name="briefcase-outline" size={20} color={COLORS.primary} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.sectionLinkTitle}>{t('accountantPack.title')}</Text>
+                          <Text style={styles.sectionLinkText}>{t('stats.accountantPackSection')}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+                      </TouchableOpacity>
+                    )}
                   </View>
                 )}
 
@@ -1265,7 +1244,20 @@ export default function StatsScreen() {
                   <View style={styles.chartHeader}>
                     <Ionicons name="arrow-up-circle" size={24} color={COLORS.success} />
                     <Text style={styles.chartTitle}>{t('stats.income')}</Text>
+                    {summary && summary.total_income !== null && (
+                      <View style={styles.chartTotal}>
+                        <Text style={[styles.chartTotalValue, { color: COLORS.success }]}>
+                          {(summary.total_income || 0).toFixed(2)} €
+                        </Text>
+                        {renderTrendBadge(summary.total_income, previousSummary?.total_income, true)}
+                      </View>
+                    )}
                   </View>
+                  {!!summary?.total_issued_invoices && (
+                    <Text style={styles.chartSubNote}>
+                      {t('stats.ofWhichIssuedInvoices').replace('{amount}', summary.total_issued_invoices.toFixed(2))}
+                    </Text>
+                  )}
                   {windowedIncomeBarData.length > 0 ? (() => {
                     // Size bars/spacing to the windowed (max 7) day count so
                     // all of them fit within the chart's width comfortably -
@@ -1322,6 +1314,14 @@ export default function StatsScreen() {
                   <View style={styles.chartHeader}>
                     <Ionicons name="arrow-down-circle" size={24} color={COLORS.danger} />
                     <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
+                    {summary && summary.total_expense !== null && (
+                      <View style={styles.chartTotal}>
+                        <Text style={[styles.chartTotalValue, { color: COLORS.danger }]}>
+                          {(summary.total_expense || 0).toFixed(2)} €
+                        </Text>
+                        {renderTrendBadge(summary.total_expense, previousSummary?.total_expense, false)}
+                      </View>
+                    )}
                   </View>
                   {windowedExpenseBarData.length > 0 ? (() => {
                     const yAxisLabelWidth = 34;
@@ -1357,9 +1357,7 @@ export default function StatsScreen() {
                       <Text style={styles.noDataText}>{t('stats.noData')}</Text>
                     </View>
                   )}
-                  {chartData.some((d) => (d.fixed_costs ?? 0) > 0) && (
-                    <Text style={styles.chartNote}>{t('stats.chartFixedCostsNote')}</Text>
-                  )}
+                  {!!monthlyCostsNote && <Text style={styles.chartNote}>{monthlyCostsNote}</Text>}
                 </View>
 
                 {/* Not registered for VAT: no VAT breakdown */}
@@ -1393,65 +1391,6 @@ export default function StatsScreen() {
                 </View>
                 </>
                 )}
-
-                {/* Additional Stats */}
-                <View style={styles.additionalStats}>
-                  <Text style={styles.sectionTitle}>{t('stats.additionalInfo')}</Text>
-                  
-                  <View style={styles.statRow}>
-                    <View style={styles.statItem}>
-                      <Ionicons name="receipt" size={20} color={COLORS.primary} />
-                      <Text style={styles.statLabel}>{t('stats.invoiceCount')}</Text>
-                      <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
-                    </View>
-                    <View style={styles.statItem}>
-                      <Ionicons name="cash" size={20} color={COLORS.success} />
-                      <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_fiscal_revenue?.toFixed(0) || 0} €</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.statRow}>
-                    <View style={styles.statItem}>
-                      <Ionicons name="wallet" size={20} color={COLORS.warning} />
-                      <Text style={styles.statLabel}>{t('home.pocket')}</Text>
-                      {summary && summary.total_pocket_money === null ? (
-                        <Ionicons name="lock-closed" size={16} color={COLORS.textMuted} />
-                      ) : (
-                        <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0} €</Text>
-                      )}
-                    </View>
-                    <View style={styles.statItem}>
-                      <Ionicons name="remove-circle" size={20} color={COLORS.danger} />
-                      <Text style={styles.statLabel}>{t('stats.expensesNoInvoice')}</Text>
-                      {summary && summary.total_non_invoice_expenses === null ? (
-                        <Ionicons name="lock-closed" size={16} color={COLORS.textMuted} />
-                      ) : (
-                        <Text style={styles.statValue}>{summary?.total_non_invoice_expenses?.toFixed(0) || 0} €</Text>
-                      )}
-                    </View>
-                  </View>
-
-                  {!!summary?.total_payroll_cost && (
-                    <View style={styles.statRow}>
-                      <View style={[styles.statItem, { flex: 1 }]}>
-                        <Ionicons name="people" size={20} color={COLORS.success} />
-                        <Text style={styles.statLabel}>{t('payroll.totalCostThisMonth')}</Text>
-                        <Text style={styles.statValue}>{summary.total_payroll_cost.toFixed(2)} €</Text>
-                      </View>
-                    </View>
-                  )}
-
-                  {!!summary?.total_depreciation_expense && (
-                    <View style={styles.statRow}>
-                      <View style={[styles.statItem, { flex: 1 }]}>
-                        <Ionicons name="business" size={20} color={COLORS.warning} />
-                        <Text style={styles.statLabel}>{t('assets.depreciationThisMonth')}</Text>
-                        <Text style={styles.statValue}>{summary.total_depreciation_expense.toFixed(2)} €</Text>
-                      </View>
-                    </View>
-                  )}
-                </View>
 
                 {/* Top 3 quick view */}
                 {hasPermission('view_statistics') && (topSuppliers.length > 0 || topItems.length > 0) && (
@@ -1516,14 +1455,14 @@ export default function StatsScreen() {
                     viewer, but also gated on view_profit: roi_percent/profit
                     come back null without it (see /roi/trend), and a null
                     value would otherwise break the chart. */}
-                {hasPermission('view_personal_investments') && hasPermission('view_profit') && roiTrend.length > 0 && (
+                {hasPermission('view_personal_investments') && hasPermission('view_profit') && investedMonths.length >= 2 && (
                   <View style={styles.chartContainer}>
                     <View style={styles.chartHeader}>
                       <Ionicons name="pulse" size={24} color={COLORS.primary} />
                       <Text style={styles.chartTitle}>{t('stats.roiTrendTitle')}</Text>
                     </View>
                     <LineChart
-                      data={roiTrend.map((pt) => ({ value: pt.roi_percent, label: pt.label }))}
+                      data={investedMonths.map((pt) => ({ value: pt.roi_percent, label: pt.label }))}
                       width={chartWidth}
                       height={180}
                       color={COLORS.primary}
@@ -2512,6 +2451,16 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 4,
   },
+  sectionLinks: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  sectionLink: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
+  sectionLinkDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border },
+  sectionLinkTitle: { color: 'white', fontSize: 15, fontWeight: '600' },
+  sectionLinkText: { color: COLORS.textMuted, fontSize: 12, marginTop: 1 },
   quickLinksRow: {
     marginTop: 12,
     height: 36,
@@ -2631,34 +2580,6 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 6,
   },
-  summaryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 20,
-  },
-  summaryCard: {
-    width: '47%',
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 16,
-    borderLeftWidth: 4,
-  },
-  cardIssuedNote: {
-    fontSize: 11,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-  },
-  cardLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 8,
-  },
-  cardValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 4,
-  },
   restrictedNote: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2718,6 +2639,9 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 16,
   },
+  chartTotal: { marginLeft: 'auto', alignItems: 'flex-end' },
+  chartTotalValue: { fontSize: 16, fontWeight: 'bold' },
+  chartSubNote: { fontSize: 11, color: COLORS.textSecondary, marginTop: -6, marginBottom: 8, textAlign: 'right' },
   chartTitle: {
     fontSize: 16,
     fontWeight: '600',
@@ -2781,35 +2705,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
-  },
-  additionalStats: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-  },
-  statRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
-  },
-  statItem: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-  },
-  statLabel: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: 'white',
-    marginTop: 4,
   },
   top3Section: {
     backgroundColor: COLORS.surface,

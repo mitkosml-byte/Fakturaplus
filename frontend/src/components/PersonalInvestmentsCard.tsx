@@ -142,6 +142,7 @@ export function PersonalInvestmentsCard({ periodState }: Props) {
   };
 
   if (!canViewPersonalInvestments) return null;
+  const invested = (roiData?.total_personal_investment || 0) > 0;
 
   return (
     <>
@@ -198,6 +199,9 @@ export function PersonalInvestmentsCard({ periodState }: Props) {
                 </Text>
               )}
             </View>
+            {/* A return only on something put in (Л9): with nothing in,
+                no percent and no "covered". */}
+            {invested && (
             <View style={styles.roiStatItem}>
               <Text style={styles.roiStatLabel}>{t('roi.roiPercent')}</Text>
               {roiData.roi_percent === null ? (
@@ -208,12 +212,13 @@ export function PersonalInvestmentsCard({ periodState }: Props) {
                 </Text>
               )}
             </View>
+            )}
           </View>
 
           {/* ROI Status Indicator - hidden entirely without view_profit,
               since a covered/not-covered verdict is itself derived from
               the profit figure this viewer isn't allowed to see. */}
-          {roiData.investment_covered !== null && (
+          {invested && roiData.investment_covered !== null && (
             <View style={[
               styles.roiStatus,
               { backgroundColor: roiData.investment_covered ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }

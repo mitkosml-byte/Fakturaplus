@@ -3100,10 +3100,14 @@ async def issued_invoices_by_day(scope: dict, period: Period) -> Dict[str, Dict[
     return days
 
 
-async def monthly_costs_by_day(company_id: Optional[str], user_id: str, period: Period) -> Dict[str, float]:
-    """Payroll and depreciation falling on each day of the period ("YYYY-MM-DD"
-    -> EUR): each month's amount spread evenly over its days, so a chart's
-    days add up to exactly what period_totals counts for the same period."""
+async def monthly_costs_by_day(company_id: Optional[str], user_id: str, period: Period) -> Dict[str, Dict[str, float]]:
+    """Payroll and depreciation falling on each day of the period, in two
+    parts ("YYYY-MM-DD" -> {"monthly": EUR, "wages": EUR}): "monthly" is the
+    month's payroll and depreciation spread evenly over its days - a cost of
+    the month, not of the day, so a day chart keeps it out of its bars;
+    "wages" is what Work Schedule paid for the shifts worked that day. A
+    chart's days add up to exactly what period_totals counts for the same
+    period."""
     per_month: Dict[tuple, float] = {}
     for year, month in period.months():
         whole = Period.month(year, month)
@@ -3114,7 +3118,10 @@ async def monthly_costs_by_day(company_id: Optional[str], user_id: str, period: 
     # Wages paid by Work Schedule fall on the days that were worked.
     wages = await schedule_wages_by_day(company_id, user_id, period)
     return {
-        day.isoformat(): per_month[(day.year, day.month)] / days_in_month(day.year, day.month) + wages.get(day.isoformat(), 0.0)
+        day.isoformat(): {
+            "monthly": per_month[(day.year, day.month)] / days_in_month(day.year, day.month),
+            "wages": wages.get(day.isoformat(), 0.0),
+        }
         for day in period.iter_days()
     }
 

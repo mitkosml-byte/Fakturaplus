@@ -1118,6 +1118,9 @@ export interface ChartDataPoint {
   // (fixed_costs), so the buckets add up to the summary's total expense.
   expense: number;
   fixed_costs?: number;
+  // The month's payroll and depreciation within fixed_costs - a cost of
+  // the month: a day chart shows it apart, not as the day's spending.
+  monthly_costs?: number;
   vat: number;
   is_closed: boolean;
   has_revenue?: boolean;

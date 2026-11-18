@@ -531,8 +531,10 @@ def test_z1_z2_p5_schedule_wages_are_payroll_on_the_days_worked_and_double_pay_a
     # The chart's days carry them on the days worked (December is still
     # ahead, so read the chart's day costs directly).
     by_day = asyncio.run(server.monthly_costs_by_day(company_id, owner_id, Period.parse("2026-12-01", "2026-12-31")))
-    assert round(by_day["2026-12-08"] - by_day["2026-12-09"], 2) == 96
-    assert round(sum(by_day.values()), 2) == round(after["total_payroll_cost"] + after["total_depreciation_expense"], 2)
+    assert (by_day["2026-12-08"]["wages"], by_day["2026-12-09"]["wages"]) == (96, 0)
+    assert by_day["2026-12-08"]["monthly"] == by_day["2026-12-09"]["monthly"]   # the month's share, the same each day
+    assert round(sum(day["monthly"] + day["wages"] for day in by_day.values()), 2) == round(
+        after["total_payroll_cost"] + after["total_depreciation_expense"], 2)
 
     # Not an off-book expense to list, edit or delete on its own.
     listed = client.get("/api/expenses?start_date=2026-12-01&end_date=2026-12-31", headers=owner).json()

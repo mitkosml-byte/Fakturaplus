@@ -253,14 +253,16 @@ async def get_chart_data(
     expenses = await server.db.expenses.find(
         {**scope, "date": shown.text_filter(), **NOT_WAGES}, {"_id": 0, "date": 1, "amount": 1}
     ).to_list(ALL_ROWS) if visibility["off_book_expenses"] else []
-    fixed_by_day = await monthly_costs_by_day(company_id, current_user.user_id, shown)
+    costs_by_day = await monthly_costs_by_day(company_id, current_user.user_id, shown)
 
     from collections import defaultdict
-    days: Dict[str, Dict[str, Any]] = {
-        day.isoformat(): {"income": 0.0, "expense": 0.0, "fixed": fixed_by_day.get(day.isoformat(), 0.0), "vat": 0.0,
-                          "has_revenue": False}
-        for day in shown.iter_days()
-    }
+    days: Dict[str, Dict[str, Any]] = {}
+    for day in shown.iter_days():
+        costs = costs_by_day.get(day.isoformat(), {"monthly": 0.0, "wages": 0.0})
+        days[day.isoformat()] = {
+            "income": 0.0, "expense": 0.0, "fixed": costs["monthly"] + costs["wages"], "monthly": costs["monthly"],
+            "vat": 0.0, "has_revenue": False,
+        }
     for inv in invoices:
         inv_day = business_day(inv.get("date"))
         if inv_day and inv_day.isoformat() in days:
@@ -291,6 +293,10 @@ async def get_chart_data(
             "income": values["income"],
             "expense": values["expense"] + values["fixed"],
             "fixed_costs": values["fixed"],
+            # The month's payroll and depreciation (part of fixed_costs): a
+            # cost of the month - a day chart shows it apart, not as the
+            # day's spending.
+            "monthly_costs": values["monthly"],
             "vat": values["vat"],
             **extra,
         }
@@ -299,7 +305,7 @@ async def get_chart_data(
         """Each series in cents that add up to the period's own total -
         rounding every bar by itself made the chart's sum differ from the
         summary (a month's salary spread as 46.03 € a day)."""
-        for field in ("income", "expense", "fixed_costs", "vat"):
+        for field in ("income", "expense", "fixed_costs", "monthly_costs", "vat"):
             for point, value in zip(points, round_to_cents_keeping_total([p[field] for p in points])):
                 point[field] = value
         return points
@@ -313,11 +319,11 @@ async def get_chart_data(
         ])
 
     months: Dict[str, Dict[str, Any]] = defaultdict(
-        lambda: {"income": 0.0, "expense": 0.0, "fixed": 0.0, "vat": 0.0, "revenue_days": 0, "open_days": 0}
+        lambda: {"income": 0.0, "expense": 0.0, "fixed": 0.0, "monthly": 0.0, "vat": 0.0, "revenue_days": 0, "open_days": 0}
     )
     for date_str, values in days.items():
         month = months[date_str[:7]]
-        for field in ("income", "expense", "fixed", "vat"):
+        for field in ("income", "expense", "fixed", "monthly", "vat"):
             month[field] += values[field]
         month["revenue_days"] += 1 if values["has_revenue"] else 0
         month["open_days"] += 0 if is_date_closed(date_str, closed_weekdays, exceptions_map) else 1

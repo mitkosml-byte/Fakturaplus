@@ -1083,6 +1083,13 @@ export const translations: Translations = {
   'hint.scan': { bg: 'Снимайте фактурата от доставчик - програмата прочита доставчика, сумите и ДДС сама.', en: 'Photograph a supplier invoice - the app reads the supplier, amounts and VAT itself.' },
   'hint.invoices': { bg: 'Фактурите от доставчици. Докоснете фактура, за да я видите, поправите или платите.', en: 'Supplier invoices. Tap one to see it, correct it or mark it paid.' },
   'hint.stats': { bg: 'Числата по периоди: приходи, разходи, ДДС и прогноза. Периодът е общ с Главната.', en: 'Numbers by period: income, expenses, VAT and the forecast. The period is shared with Home.' },
+  // Statistics without repeats (Л9): the month's costs under the expense chart.
+  'stats.monthlyPayroll': { bg: 'заплати {amount}', en: 'salaries {amount}' },
+  'stats.monthlyDepreciation': { bg: 'амортизация {amount}', en: 'depreciation {amount}' },
+  'stats.monthlyCostsBoth': { bg: 'заплати и амортизация {amount}', en: 'salaries and depreciation {amount}' },
+  'stats.and': { bg: ' и ', en: ' and ' },
+  'stats.monthlyCostsApart': { bg: '{costs} за периода — разход на месеца, не на отделен ден.', en: '{costs} for the period - a cost of the month, not of a single day.' },
+  'stats.monthlyCostsIncluded': { bg: 'В това число {costs}.', en: 'Of which {costs}.' },
   // One place per function (Л8).
   'home.askPlaceholder': { bg: 'Попитайте за числата си…', en: 'Ask about your numbers…' },
   'stats.cashFlowSection': { bg: 'какво влиза и излиза в следващите седмици', en: 'what comes in and goes out in the weeks ahead' },
@@ -2282,8 +2289,8 @@ export const translations: Translations = {
     en: 'Income',
   },
   'stats.vatBreakdown': {
-    bg: 'ДДС Разбивка',
-    en: 'VAT Breakdown',
+    bg: 'ДДС за периода',
+    en: 'VAT for the period',
   },
   'stats.vatFromSales': {
     bg: 'ДДС от продажби',
@@ -3350,29 +3357,9 @@ export const translations: Translations = {
   },
   
   // Stats Screen additional
-  'stats.totalIncome': {
-    bg: 'Общ приход',
-    en: 'Total Income',
-  },
-  'stats.totalExpense': {
-    bg: 'Общ разход',
-    en: 'Total Expense',
-  },
   'stats.vatToPay': {
     bg: 'ДДС за плащане',
     en: 'VAT to Pay',
-  },
-  'stats.profitLabel': {
-    bg: 'Печалба',
-    en: 'Profit',
-  },
-  'stats.expensesNoInvoice': {
-    bg: 'Разходи "в канала"',
-    en: 'Expenses (no invoice)',
-  },
-  'stats.additionalInfo': {
-    bg: 'Допълнителна информация',
-    en: 'Additional Information',
   },
   'stats.ofWhichIssuedInvoices': {
     bg: 'от тях издадени фактури: {amount} €',
@@ -3895,10 +3882,6 @@ export const translations: Translations = {
   'stats.forecastWithCurrentMonth': {
     bg: 'Прогнозата включва очаквания край на текущия месец.',
     en: 'The forecast includes the expected end of the current month.',
-  },
-  'stats.chartFixedCostsNote': {
-    bg: 'Разходите включват дела на всеки ден от заплатите и амортизацията.',
-    en: 'Expenses include each day’s share of payroll and depreciation.',
   },
   'stats.activeInPeriod': {
     bg: 'С покупки в периода',

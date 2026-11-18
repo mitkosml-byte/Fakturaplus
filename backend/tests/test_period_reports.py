@@ -94,6 +94,11 @@ def test_the_chart_adds_up_to_the_summary_by_day_and_by_month(client):
         "id": uuid.uuid4().hex, "company_id": company_id, "user_id": user.user_id, "employee_id": "e1",
         "period_month": 10, "period_year": 2026, "total_employer_cost": 3100.0,
     }))
+    # Wages paid through Work Schedule for a shift worked on 5 October (made up).
+    asyncio.run(server.db.expenses.insert_one({
+        "id": uuid.uuid4().hex, "company_id": company_id, "user_id": user.user_id,
+        "kind": "schedule_wages", "date": "2026-10-05", "amount": 96.0, "description": "Надници",
+    }))
 
     for start, end, bucket in (("2026-10-01", "2026-10-31", "day"), ("2026-01-01", "2026-10-31", "month")):
         chart = client.get(f"/api/statistics/chart-data?start_date={start}&end_date={end}", headers=headers).json()
@@ -105,6 +110,11 @@ def test_the_chart_adds_up_to_the_summary_by_day_and_by_month(client):
     assert len(by_day) == 31 and by_day[-1]["label"] == "31.10"
     assert by_day[0]["has_revenue"] is True and by_day[2]["has_revenue"] is False   # 3 October not entered
     assert by_day[0]["fixed_costs"] == pytest.approx(100.0)                          # 3100 / 31
+    # The salary is a cost of the month, apart from the day's own spending;
+    # the wages of a shift stay on the day it was worked.
+    assert by_day[0]["monthly_costs"] == pytest.approx(100.0)
+    assert sum(p["monthly_costs"] for p in by_day) == pytest.approx(3100.0)
+    assert (by_day[4]["fixed_costs"], by_day[4]["monthly_costs"]) == (pytest.approx(196.0), pytest.approx(100.0))
 
     # The current calendar month, only up to today.
     current = client.get("/api/statistics/chart-data?period=month", headers=headers).json()
