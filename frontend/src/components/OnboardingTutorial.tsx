@@ -1,8 +1,6 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useSegments, usePathname, useRouter } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { useOnboardingStore } from '../stores/onboardingStore';
@@ -19,8 +17,8 @@ import { ModalBlurBackdrop } from './ModalBlurBackdrop';
 // time it is opened (FirstUseHint), and an empty Home says where to start.
 // A member who joins a business is asked nothing.
 //
-// The small floating "?" button rendered on authenticated screens is a
-// separate, permanent shortcut to the Help screen.
+// Help is in the header of Home and in Account → Помощ - no floating
+// button: it sat over the forms' fields and buttons (Л12).
 const CHOICES = [
   { key: 'till', icon: 'cash-outline', labelKey: 'start.till', hintKey: 'start.tillHint' },
   { key: 'billing', icon: 'document-text-outline', labelKey: 'start.billing', hintKey: 'start.billingHint' },
@@ -30,23 +28,9 @@ const CHOICES = [
 
 type ChoiceKey = typeof CHOICES[number]['key'];
 
-const HIDDEN_ON_SEGMENTS = ['login', 'forgot-password', 'help'];
-
-// Every tab-root screen (Home, Scan, Invoices, Stats, Team, Profile) already
-// has a tab bar eating into the bottom, and several also place a real "add"
-// FAB at bottom-right or export/logout icons in the header top-right -
-// bottom-left is the one corner none of them use, so the help button lives
-// there. Mirrors the tab-bar height constant from (tabs)/_layout.tsx.
-const TAB_ROUTES = ['/', '/scan', '/invoices', '/stats', '/team', '/profile'];
-const TAB_BAR_HEIGHT = 70;
-
 export function OnboardingTutorial() {
   const { user, isAuthenticated } = useAuth();
   const { t } = useTranslation();
-  const segments = useSegments();
-  const pathname = usePathname();
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { isVisible, markSeen, checkAndMaybeOpen } = useOnboardingStore();
 
   // Only the owner sets what the business uses. The question waits until
@@ -95,22 +79,8 @@ export function OnboardingTutorial() {
     }
   };
 
-  const hideFloatingButton = !isAuthenticated || HIDDEN_ON_SEGMENTS.includes(segments[0] as string);
-  const isTabRoot = TAB_ROUTES.includes(pathname);
-  const floatingBottom = insets.bottom + (isTabRoot ? TAB_BAR_HEIGHT + 12 : 16);
-
   return (
     <>
-      {!hideFloatingButton && (
-        <TouchableOpacity
-          style={[styles.floatingButton, { bottom: floatingBottom }]}
-          onPress={() => router.push('/help')}
-          accessibilityLabel={t('tutorial.helpButtonLabel')}
-        >
-          <Ionicons name="help" size={20} color="white" />
-        </TouchableOpacity>
-      )}
-
       <Modal visible={isVisible && modulesReady && canEditModules} animationType="fade" transparent onRequestClose={finish}>
         <View style={styles.overlay}>
           <ModalBlurBackdrop />
@@ -160,22 +130,6 @@ export function OnboardingTutorial() {
 }
 
 const styles = StyleSheet.create({
-  floatingButton: {
-    position: 'absolute',
-    left: 16,
-    zIndex: 999,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(139, 92, 246, 0.9)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
-  },
   overlay: {
     flex: 1,
     justifyContent: 'center',

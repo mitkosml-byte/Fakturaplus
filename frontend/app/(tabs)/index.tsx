@@ -698,7 +698,17 @@ export default function HomeScreen() {
                 <Text style={styles.greeting}>{t('home.welcome')}</Text>
                 <Text style={styles.date}>{today}</Text>
               </View>
-              <ScanCreditsBadge />
+              <View style={styles.headerActions}>
+                <ScanCreditsBadge />
+                <TouchableOpacity
+                  style={styles.helpButton}
+                  onPress={() => router.push('/help')}
+                  accessibilityLabel={t('tutorial.helpButtonLabel')}
+                  hitSlop={6}
+                >
+                  <Ionicons name="help" size={18} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* The day's actions first - each only for who may do it (a
@@ -1003,6 +1013,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
     marginBottom: 16,
+  },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  helpButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   greeting: {
     fontSize: 28,
