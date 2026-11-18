@@ -1082,6 +1082,8 @@ export const translations: Translations = {
   // What a screen does, once, the first time it is opened.
   'hint.invoices': { bg: 'Докоснете фактура, за да я платите.', en: 'Tap an invoice to pay it.' },
   'hint.stats': { bg: 'Периодът е общ с Главната.', en: 'The period is shared with Home.' },
+  // The invoices' header in one row (Л13).
+  'invoices.eikChip': { bg: 'без ЕИК', en: 'no EIK' },
   // Shorter texts, the owner's words (Л10).
   'common.howItWorks': { bg: 'Как се смята', en: 'How it works' },
   'invoices.deletedRestorable': { bg: 'Фактурата е изтрита — може да я върнете от Дневника на действията.', en: 'Invoice deleted - you can bring it back from the audit log.' },
@@ -2824,8 +2826,8 @@ export const translations: Translations = {
     en: 'Scan your first invoice',
   },
   'invoices.searchPlaceholder': {
-    bg: 'Търси по доставчик или номер...',
-    en: 'Search by supplier or number...',
+    bg: 'Доставчик или №',
+    en: 'Supplier or No.',
   },
   'invoices.paymentFilterAll': {
     bg: 'Всички',
@@ -2965,14 +2967,6 @@ export const translations: Translations = {
     bg: 'фактури без валиден ЕИК на доставчика',
     en: "invoices with no valid supplier EIK",
   },
-  'invoices.showAll': {
-    bg: 'Покажи всички',
-    en: 'Show all',
-  },
-  'invoices.showOnlyThese': {
-    bg: 'Покажи само тях',
-    en: 'Show only these',
-  },
   'invoices.filtersButton': {
     bg: 'Филтри',
     en: 'Filters',
@@ -2980,10 +2974,6 @@ export const translations: Translations = {
   'invoices.truncatedBanner': {
     bg: 'Показани са {shown} от {total} фактури. Прецизирай период или търсене, за да видиш останалите.',
     en: 'Showing {shown} of {total} invoices. Narrow the date range or search to see the rest.',
-  },
-  'invoices.filtersActive': {
-    bg: 'активни',
-    en: 'active',
   },
 
   // Company Settings

@@ -33,8 +33,7 @@ import { ImageViewerModal } from '../../src/components/invoices/ImageViewerModal
 import { PaymentModal, PaymentMethodChoice } from '../../src/components/invoices/PaymentModal';
 import { InvoiceDetailModal } from '../../src/components/invoices/InvoiceDetailModal';
 import { COLORS } from '../../src/theme/colors';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
-import { DURATION, EASING } from '../../src/theme/motion';
+import Animated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
 import { toApiDate } from '../../src/utils/periodRange';
 import { formatAmount, formatMoney } from '../../src/utils/money';
 
@@ -143,16 +142,6 @@ export default function InvoicesScreen() {
   const [showOnlyEikIssues, setShowOnlyEikIssues] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'partial' | 'overdue'>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const chevronRotation = useSharedValue(0);
-  useEffect(() => {
-    chevronRotation.value = withTiming(filtersExpanded ? 180 : 0, {
-      duration: DURATION.deliberate,
-      easing: EASING.standard,
-    });
-  }, [filtersExpanded]);
-  const chevronStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${chevronRotation.value}deg` }],
-  }));
 
   // Lets the Home dashboard's unpaid-invoices reminder deep-link straight
   // into this filter instead of always landing on "all".
@@ -760,8 +749,9 @@ export default function InvoicesScreen() {
             <FirstUseHint id="invoices" icon="document-text" text={t('hint.invoices')} />
           </View>
 
-          {/* Search */}
-          <View style={styles.searchContainer}>
+          {/* Search, the filters and the EIK warning - one row (Л13). */}
+          <View style={styles.searchRow}>
+          <View style={[styles.searchContainer, styles.searchInRow]}>
             <Ionicons name="search" size={20} color={COLORS.textMuted} />
             <TextInput
               style={styles.searchInput}
@@ -777,22 +767,36 @@ export default function InvoicesScreen() {
               </TouchableOpacity>
             )}
           </View>
-
-          {/* Filters toggle — collapsed by default so the chip rows don't
-              permanently eat vertical space above the list */}
+          {/* The filters (period, payment) open under the row; the number
+              says how many are on. */}
           <TouchableOpacity
-            style={styles.filtersToggle}
+            style={[styles.filterButton, (filtersExpanded || activeFilterCount > 0) && styles.filterButtonOn]}
             onPress={() => setFiltersExpanded((prev) => !prev)}
+            accessibilityLabel={t('invoices.filtersButton')}
+            accessibilityState={{ expanded: filtersExpanded }}
           >
-            <Ionicons name="options-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.filtersToggleText}>
-              {t('invoices.filtersButton')}
-              {activeFilterCount > 0 ? ` · ${activeFilterCount} ${t('invoices.filtersActive')}` : ''}
-            </Text>
-            <Animated.View style={chevronStyle}>
-              <Ionicons name="chevron-down" size={16} color={COLORS.primary} />
-            </Animated.View>
+            <Ionicons name="options-outline" size={20} color={COLORS.primary} />
+            {activeFilterCount > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
+          {/* Invoices whose supplier has no valid EIK: a filter of its own. */}
+          {eikIssueCount > 0 && (
+            <TouchableOpacity
+              style={[styles.eikChip, showOnlyEikIssues && styles.eikChipOn]}
+              onPress={() => setShowOnlyEikIssues((prev) => !prev)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: showOnlyEikIssues }}
+              accessibilityLabel={`${eikIssueCount} ${eikIssueCount === 1 ? t('invoices.missingEikSingular') : t('invoices.missingEikPlural')}`}
+            >
+              <Ionicons name="alert-circle" size={15} color={showOnlyEikIssues ? COLORS.background : COLORS.warning} />
+              <Text style={[styles.eikChipText, showOnlyEikIssues && styles.eikChipTextOn]}>{eikIssueCount}</Text>
+              <Text style={[styles.eikChipText, showOnlyEikIssues && styles.eikChipTextOn]}>{t('invoices.eikChip')}</Text>
+            </TouchableOpacity>
+          )}
+          </View>
 
           <Expandable expanded={filtersExpanded}>
             <>
@@ -886,22 +890,6 @@ export default function InvoicesScreen() {
                   .replace('{total}', String(invoicesTotalCount))}
               </Text>
             </View>
-          )}
-
-          {/* ЕИК issues banner */}
-          {eikIssueCount > 0 && (
-            <TouchableOpacity
-              style={[styles.eikBanner, showOnlyEikIssues && styles.eikBannerActive]}
-              onPress={() => setShowOnlyEikIssues((prev) => !prev)}
-            >
-              <Ionicons name="alert-circle" size={18} color={COLORS.warning} />
-              <Text style={styles.eikBannerText}>
-                {eikIssueCount} {eikIssueCount === 1 ? t('invoices.missingEikSingular') : t('invoices.missingEikPlural')}
-              </Text>
-              <Text style={styles.eikBannerAction}>
-                {showOnlyEikIssues ? t('invoices.showAll') : t('invoices.showOnlyThese')}
-              </Text>
-            </TouchableOpacity>
           )}
 
           {/* Summary */}
@@ -1100,28 +1088,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 12,
   },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16 },
+  searchInRow: { flex: 1, marginHorizontal: 0, paddingHorizontal: 12, gap: 8 },
+  filterButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterButtonOn: { backgroundColor: 'rgba(139, 92, 246, 0.2)' },
+  filterBadge: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  filterBadgeText: { color: 'white', fontSize: 10, fontWeight: '700' },
+  eikChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 46,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+  },
+  eikChipOn: { backgroundColor: COLORS.warning },
+  eikChipText: { color: COLORS.warning, fontSize: 13, fontWeight: '700' },
+  eikChipTextOn: { color: COLORS.background },
   searchInput: {
     flex: 1,
     paddingVertical: 14,
     color: 'white',
     fontSize: 16,
-  },
-  filtersToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: COLORS.surface,
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  filtersToggleText: {
-    fontSize: 13,
-    color: COLORS.primary,
-    fontWeight: '600',
   },
   quickLinksRow: {
     marginTop: 12,
@@ -1313,20 +1320,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  eikBannerActive: {
-    backgroundColor: 'rgba(245, 158, 11, 0.25)',
-  },
   eikBannerText: {
     flex: 1,
     fontSize: 13,
     color: COLORS.warning,
     fontWeight: '600',
-  },
-  eikBannerAction: {
-    fontSize: 12,
-    color: COLORS.warning,
-    fontWeight: '700',
-    textDecorationLine: 'underline',
   },
   supplierContainer: {
     flexDirection: 'row',
