@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { WeekdayRevenueStat, WeakDaySuggestion } from '../../types';
 import { COLORS } from '../../theme/colors';
+import { formatAmount, formatMoney } from '../../utils/money';
 
 // Module: cross-data-source insight #2 - average revenue per weekday,
 // bucketed from daily_revenue alone (get_weekday_revenue_pattern), with a
@@ -43,7 +44,7 @@ export function WeekdayRevenueCard({ weekdays, suggestion }: Props) {
                 ]}
               />
             </View>
-            <Text style={styles.valueLabel}>{w.avg_revenue.toFixed(0)} €</Text>
+            <Text style={styles.valueLabel}>{formatMoney(w.avg_revenue)}</Text>
           </View>
         ))}
       </View>
@@ -54,8 +55,8 @@ export function WeekdayRevenueCard({ weekdays, suggestion }: Props) {
           <Text style={styles.suggestionText}>
             {t('stats.weakDaySuggestion')
               .replace('{day}', t(`weekday.${suggestion.weekday}`))
-              .replace('{avg}', suggestion.avg_revenue.toFixed(0))
-              .replace('{overall}', suggestion.overall_avg_revenue.toFixed(0))
+              .replace('{avg}', formatAmount(suggestion.avg_revenue))
+              .replace('{overall}', formatAmount(suggestion.overall_avg_revenue))
               .replace('{percent}', String(suggestion.percent_below_average))}
           </Text>
         </View>

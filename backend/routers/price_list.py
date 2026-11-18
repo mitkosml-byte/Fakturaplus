@@ -366,7 +366,7 @@ async def margins_signal(company_id: Optional[str], scope: dict, current_user: U
     dropped.sort(key=lambda e: (e["margin_then_percent"] - e["margin_percent"]), reverse=True)
     top = dropped[0]
     vat = await _vat_registered(company_id)
-    price = f"{top['suggested_gross']:.2f} €" + (" с ДДС" if vat else "")
+    price = f"{fmt_eur(top['suggested_gross'])}" + (" с ДДС" if vat else "")
     more = f" И още {len(dropped) - 1} {'цена' if len(dropped) == 2 else 'цени'}." if len(dropped) > 1 else ""
     return {
         "key": "margins", "severity": "warning", "priority": 58, "title": "Покупните цени поскъпнаха",

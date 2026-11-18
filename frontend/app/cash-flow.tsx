@@ -23,6 +23,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import { formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -39,7 +40,7 @@ const KIND_ICON: Record<CashFlowEvent['kind'], keyof typeof Ionicons.glyphMap> =
 // Whose label already says what it is (payroll, VAT) goes without the kind.
 const PREFIXED_KINDS: CashFlowEvent['kind'][] = ['invoice', 'receivable', 'recurring', 'subscription'];
 
-const money = (n: number) => `${n.toFixed(2)} €`;
+const money = (n: number) => `${formatMoney(n)}`;
 const dayLabel = (iso: string) => format(parseISO(iso), 'dd.MM');
 
 // Will the money last (Н1)? From the money the business has now, the days

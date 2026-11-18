@@ -7,6 +7,7 @@ import DateTimePickerModal from '../AppDateTimePicker';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
 import { BottomSheet, PressableScale } from '..';
+import { formatAmount } from '../../utils/money';
 
 // Extracted from index.tsx (Module 1 audit finding #4). Edit-in-place form
 // for a single day's revenue (fiscal, card-paid portion, VAT rate, pocket money).
@@ -166,7 +167,7 @@ export function RevenueModal({
                 </View>
               ))}
               <Text style={styles.rateTotal}>
-                {t('home.vatByRateTotal').replace('{amount}', rateAmountsTotal(rateAmounts).toFixed(2))}
+                {t('home.vatByRateTotal').replace('{amount}', formatAmount(rateAmountsTotal(rateAmounts)))}
               </Text>
               <Text style={styles.inputHint}>{t('home.vatByRateHint')}</Text>
               <TouchableOpacity style={styles.splitToggle} onPress={onToggleSplitByRate}>

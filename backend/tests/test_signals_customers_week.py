@@ -30,11 +30,11 @@ def test_p2_debts_are_counted_by_customer_with_who_owes_most(client):
     for amount in (100, 50):
         client.post("/api/receivables", headers=owner, json={"customer_name": "Ресторант Лале", "amount": amount, "due_date": "2026-01-10"})
     signal = _signal(server._signal_receivables, company_id, _owner(owner_id))
-    assert signal["detail"] == "2 просрочени вземания от 1 клиент - общо 150.00 €. Дължи Ресторант Лале."
+    assert signal["detail"] == "2 просрочени вземания от 1 клиент - общо 150,00\u00a0€. Дължи Ресторант Лале."
 
     client.post("/api/receivables", headers=owner, json={"customer_name": "Хотел Морско", "amount": 400, "due_date": "2026-01-12"})
     signal = _signal(server._signal_receivables, company_id, _owner(owner_id))
-    assert signal["detail"] == "3 просрочени вземания от 2 клиента - общо 550.00 €. Най-много дължи Хотел Морско - 400.00 €."
+    assert signal["detail"] == "3 просрочени вземания от 2 клиента - общо 550,00\u00a0€. Най-много дължи Хотел Морско - 400,00\u00a0€."
 
 
 def test_p4_the_weeks_payments(client, monkeypatch):
@@ -52,12 +52,12 @@ def test_p4_the_weeks_payments(client, monkeypatch):
     monkeypatch.setattr(server, "today_local", lambda: date(2026, 11, 18))   # a Wednesday
     signal = _signal(server._signal_payments_this_week, company_id, user)
     assert signal["title"] == "Плащания тази седмица"
-    assert signal["detail"] == "Тази седмица (до 22.11) плащаш 1 фактура за 120.00 € и Наем 800.00 €."
+    assert signal["detail"] == "Тази седмица (до 22.11) плащаш 1 фактура за 120,00\u00a0€ и Наем 800,00\u00a0€."
 
     monkeypatch.setattr(server, "today_local", lambda: date(2026, 11, 21))   # Saturday: the week ahead
     signal = _signal(server._signal_payments_this_week, company_id, user)
     assert signal["title"] == "Плащания следващата седмица" and "до 29.11" in signal["detail"]
-    assert "1 фактура за 120.00 €" in signal["detail"] and "Наем" in signal["detail"]
+    assert "1 фактура за 120,00\u00a0€" in signal["detail"] and "Наем" in signal["detail"]
 
 
 def test_p3_the_assistant_can_ask_about_customers(client):

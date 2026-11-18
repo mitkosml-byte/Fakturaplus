@@ -342,7 +342,7 @@ async def add_invoice_payment(invoice_id: str, payload: InvoicePaymentCreate, cu
     if existing.get("is_paid") or left <= 0.005:
         raise HTTPException(status_code=400, detail="Фактурата вече е платена")
     if payload.amount > left + 0.01:
-        raise HTTPException(status_code=400, detail=f"Остават {left:.2f} € - плащането е по-голямо")
+        raise HTTPException(status_code=400, detail=f"Остават {fmt_eur(left)} - плащането е по-голямо")
     day = business_day(payload.date) if payload.date else today_local()
     if day is None:
         raise HTTPException(status_code=400, detail="Невалидна дата")

@@ -57,7 +57,7 @@ def test_d7_a_credit_note_takes_revenue_vat_and_what_is_owed_off(client):
 
     # No more than is left; never before the invoice; always with its reason.
     too_much = _credit(client, owner, invoice, amount=60)
-    assert too_much.status_code == 400 and "60.00" in too_much.json()["detail"]
+    assert too_much.status_code == 400 and "60,00" in too_much.json()["detail"]
     assert _credit(client, owner, invoice, issue_date="2026-10-01").status_code == 400
     assert _credit(client, owner, invoice, notes="  ").status_code == 400
     # The invoice cannot be cancelled while a credit note to it stands.

@@ -8,6 +8,7 @@ import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
 import { Toast } from '../utils/toast';
 import { isPackSuspect, priceAlertMeaning } from '../utils/priceAlert';
+import { formatMoney } from '../utils/money';
 
 // Surfaces unread price-change alerts, on top of their existing passive
 // listing in Statistics -> Items. Re-checks whenever the user returns to
@@ -129,10 +130,10 @@ export function PriceAlertPopup() {
                       </Text>
                     </View>
                     <View style={styles.alertPrices}>
-                      <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
+                      <Text style={styles.alertOldPrice}>{formatMoney(alert.old_price)}</Text>
                       <Ionicons name="arrow-forward" size={13} color={COLORS.textMuted} />
                       <Text style={[styles.alertNewPrice, isDecrease && styles.alertNewPriceDecrease]}>
-                        {alert.new_price.toFixed(2)}€
+                        {formatMoney(alert.new_price)}
                       </Text>
                     </View>
                     {isPack ? (

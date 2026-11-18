@@ -370,7 +370,7 @@ async def recurring_invoices_signal(company_id: Optional[str], scope: dict, curr
     if not ready:
         return None
     vat = await _vat_registered(company_id)
-    names = ", ".join(f"{t['customer_name']} - {_amounts(t, vat)['total_amount']:.2f} €" for t in ready[:3])
+    names = ", ".join(f"{t['customer_name']} - {fmt_eur(_amounts(t, vat)['total_amount'])}" for t in ready[:3])
     more = f" и още {len(ready) - 3}" if len(ready) > 3 else ""
     count = "1 фактура е готова" if len(ready) == 1 else f"{len(ready)} фактури са готови"
     return {

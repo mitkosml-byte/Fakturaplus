@@ -40,6 +40,7 @@ import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
 import { useOnboardingStore } from '../../src/stores/onboardingStore';
 import { getDescriptionSuggestions } from '../../src/utils/expenseSuggestions';
+import { formatAmount, formatMoney } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -402,7 +403,7 @@ export default function HomeScreen() {
           setRevenueVatRate(pending.vatRate);
         }
         setOcrAdditionNote(
-          t('home.ocrAdditionNote').replace('{amount}', pending.amount.toFixed(2))
+          t('home.ocrAdditionNote').replace('{amount}', formatAmount(pending.amount))
         );
         pendingOcrRevenueRef.current = null;
       } else if (pendingZReportRef.current) {
@@ -772,7 +773,7 @@ export default function HomeScreen() {
                           {summary.total_fiscal_revenue === null ? (
                             <LockedValue textStyle={styles.statValue} fakeText="1240" iconSize={16} />
                           ) : (
-                            <CountUp value={summary.total_fiscal_revenue || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
+                            <CountUp value={summary.total_fiscal_revenue || 0} formatter={(n) => formatMoney(n)} style={styles.statValue} />
                           )}
                           <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
                         </View>
@@ -784,7 +785,7 @@ export default function HomeScreen() {
                           {summary.total_pocket_money === null ? (
                             <LockedValue textStyle={styles.statValue} fakeText="95" iconSize={16} />
                           ) : (
-                            <CountUp value={summary.total_pocket_money || 0} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
+                            <CountUp value={summary.total_pocket_money || 0} formatter={(n) => formatMoney(n)} style={styles.statValue} />
                           )}
                           <Text style={styles.statLabel}>{t('home.pocket')}</Text>
                         </TouchableOpacity>
@@ -797,7 +798,7 @@ export default function HomeScreen() {
                       ) : (
                         <CountUp
                           value={summary.profit || 0}
-                          formatter={(n) => `${n.toFixed(0)}`}
+                          formatter={(n) => formatMoney(n)}
                           style={[styles.statValue, { color: (summary.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
                         />
                       )}
@@ -808,7 +809,7 @@ export default function HomeScreen() {
                         {ledgerRows.map((row, index) => (
                           <View key={row.key} style={[styles.ledgerRow, index > 0 && styles.ledgerRowDivider]}>
                             <Text style={styles.ledgerLabel}>{row.label}</Text>
-                            <Text style={styles.ledgerValue}>{row.value.toFixed(2)} €</Text>
+                            <Text style={styles.ledgerValue}>{formatMoney(row.value)}</Text>
                           </View>
                         ))}
                       </View>
@@ -967,7 +968,7 @@ export default function HomeScreen() {
         title={t('home.importRevenueHistory')}
         fields={[
           { key: 'date', label: t('home.date') },
-          { key: 'fiscal_revenue', label: t('home.fiscalRevenue'), format: (v) => `${Number(v).toFixed(2)} €` },
+          { key: 'fiscal_revenue', label: t('home.fiscalRevenue'), format: (v) => `${formatMoney(Number(v))}` },
         ]}
         onImported={loadData}
       />
@@ -980,7 +981,7 @@ export default function HomeScreen() {
         fields={[
           { key: 'date', label: t('home.date') },
           { key: 'description', label: t('expenses.description') },
-          { key: 'amount', label: t('invoices.total'), format: (v) => `${Number(v).toFixed(2)} €` },
+          { key: 'amount', label: t('invoices.total'), format: (v) => `${formatMoney(Number(v))}` },
         ]}
         onImported={loadData}
       />
@@ -1048,7 +1049,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
   },

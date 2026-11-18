@@ -26,6 +26,7 @@ import { useLocationChoice } from '../src/stores/locationsStore';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { getDescriptionSuggestions } from '../src/utils/expenseSuggestions';
 import { COLORS } from '../src/theme/colors';
+import { formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -269,7 +270,7 @@ export default function OffBookExpensesHistoryScreen() {
 
           <View style={styles.summaryBar}>
             <Text style={styles.summaryLabel}>{t('invoices.count')}: <Text style={styles.summaryValue}>{filtered.length}</Text></Text>
-            <Text style={styles.summaryLabel}>{t('expenses.totalLabel')}: <Text style={[styles.summaryValue, { color: COLORS.warning }]}>{total.toFixed(2)} €</Text></Text>
+            <Text style={styles.summaryLabel}>{t('expenses.totalLabel')}: <Text style={[styles.summaryValue, { color: COLORS.warning }]}>{formatMoney(total)}</Text></Text>
           </View>
 
           {loading ? (
@@ -298,7 +299,7 @@ export default function OffBookExpensesHistoryScreen() {
                         {monthNames[parseInt(monthStr, 10) - 1]} {yearStr}
                       </Text>
                       <Text style={styles.monthHeaderStats}>
-                        {monthExpenses.length} · {monthTotal.toFixed(2)} €
+                        {monthExpenses.length} · {formatMoney(monthTotal)}
                       </Text>
                     </View>
                     {monthExpenses.map((expense) => (
@@ -319,7 +320,7 @@ export default function OffBookExpensesHistoryScreen() {
                             )}
                             <Text style={[styles.expenseDescription, { flexShrink: 1 }]} numberOfLines={1}>{expense.description}</Text>
                           </View>
-                          <Text style={styles.expenseAmount}>{expense.amount.toFixed(2)} €</Text>
+                          <Text style={styles.expenseAmount}>{formatMoney(expense.amount)}</Text>
                         </View>
                         <View style={styles.expenseRowBottom}>
                           <Text style={styles.expenseDate}>{format(new Date(expense.date), 'd MMM yyyy', { locale: dateLocale })}</Text>

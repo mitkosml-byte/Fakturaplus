@@ -10,6 +10,7 @@ import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
 import { ModalBlurBackdrop } from './ModalBlurBackdrop';
 import { toApiMonth } from '../utils/periodRange';
+import { formatMoney } from '../utils/money';
 
 // The loud counterpart to Home's passive wallet teaser - surfaces once per
 // calendar month, only when personal withdrawals have actually crossed the
@@ -111,7 +112,7 @@ export function WalletAlertPopup() {
           <View style={styles.safeRow}>
             <Text style={styles.safeLabel}>{t('wallet.safeToSpend')}</Text>
             <Text style={[styles.safeValue, { color: safeToSpend >= 0 ? COLORS.warning : COLORS.danger }]}>
-              {safeToSpend.toFixed(2)} €
+              {formatMoney(safeToSpend)}
             </Text>
           </View>
 

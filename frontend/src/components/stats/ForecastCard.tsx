@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
 import { InfoButton } from '../InfoButton';
+import { formatMoney } from '../../utils/money';
 
 // Extracted from stats.tsx (Module 1 audit finding #4). Renders the
 // revenue/expense forecast pair plus the lookback-range picker (Module 4
@@ -99,10 +100,10 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
             {revenueNow && (
               <View style={styles.currentMonthCell}>
                 <Text style={styles.forecastLabel}>{t('stats.income')}</Text>
-                <Text style={[styles.currentMonthValue, { color: COLORS.success }]}>{revenueNow.so_far.toFixed(0)} €</Text>
+                <Text style={[styles.currentMonthValue, { color: COLORS.success }]}>{formatMoney(revenueNow.so_far)}</Text>
                 {revenueNow.expected !== null && revenueNow.expected !== undefined && (
                   <Text style={styles.forecastTrend}>
-                    {t('stats.forecastExpectedEnd').replace('{amount}', `${revenueNow.expected.toFixed(0)} €`)}
+                    {t('stats.forecastExpectedEnd').replace('{amount}', `${formatMoney(revenueNow.expected)}`)}
                   </Text>
                 )}
               </View>
@@ -110,10 +111,10 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
             {expenseNow && (
               <View style={styles.currentMonthCell}>
                 <Text style={styles.forecastLabel}>{t('home.totalExpenses')}</Text>
-                <Text style={[styles.currentMonthValue, { color: COLORS.danger }]}>{expenseNow.so_far.toFixed(0)} €</Text>
+                <Text style={[styles.currentMonthValue, { color: COLORS.danger }]}>{formatMoney(expenseNow.so_far)}</Text>
                 {expenseNow.expected !== null && expenseNow.expected !== undefined && (
                   <Text style={styles.forecastTrend}>
-                    {t('stats.forecastAtThisPace').replace('{amount}', `${expenseNow.expected.toFixed(0)} €`)}
+                    {t('stats.forecastAtThisPace').replace('{amount}', `${formatMoney(expenseNow.expected)}`)}
                   </Text>
                 )}
               </View>
@@ -130,7 +131,7 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
                 <Ionicons name="hourglass-outline" size={20} color={COLORS.textMuted} />
                 <Text style={styles.forecastLabel}>{t('stats.forecastAverageOnly')} · {t('stats.forecastRevenue')}</Text>
                 <Text style={[styles.forecastValue, { color: COLORS.textMuted }]}>
-                  {revenueForecast.avg_monthly.toFixed(0)} €
+                  {formatMoney(revenueForecast.avg_monthly)}
                 </Text>
               </>
             ) : (
@@ -138,7 +139,7 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
                 <Ionicons name="trending-up" size={20} color={COLORS.success} />
                 <Text style={styles.forecastLabel}>{t('stats.forecastRevenue')}</Text>
                 <Text style={[styles.forecastValue, { color: COLORS.success }]}>
-                  {revenueForecast.forecast[0].predicted_amount.toFixed(0)} €
+                  {formatMoney(revenueForecast.forecast[0].predicted_amount)}
                 </Text>
                 <Text style={styles.forecastTrend}>{trendLine(revenueForecast)}</Text>
               </>
@@ -152,7 +153,7 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
                 <Ionicons name="hourglass-outline" size={20} color={COLORS.textMuted} />
                 <Text style={styles.forecastLabel}>{t('stats.forecastAverageOnly')} · {t('stats.forecastExpense')}</Text>
                 <Text style={[styles.forecastValue, { color: COLORS.textMuted }]}>
-                  {expenseForecast.avg_monthly.toFixed(0)} €
+                  {formatMoney(expenseForecast.avg_monthly)}
                 </Text>
               </>
             ) : (
@@ -160,7 +161,7 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
                 <Ionicons name="trending-down" size={20} color={COLORS.danger} />
                 <Text style={styles.forecastLabel}>{t('stats.forecastExpense')}</Text>
                 <Text style={[styles.forecastValue, { color: COLORS.danger }]}>
-                  {expenseForecast.forecast[0].predicted_amount.toFixed(0)} €
+                  {formatMoney(expenseForecast.forecast[0].predicted_amount)}
                 </Text>
                 <Text style={styles.forecastTrend}>{trendLine(expenseForecast)}</Text>
               </>

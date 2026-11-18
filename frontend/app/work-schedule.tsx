@@ -23,6 +23,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Avatar, TeamMemberProfileSheet } from '../src/components';
 import { COLORS, CHART_PALETTE } from '../src/theme/colors';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -501,7 +502,7 @@ export default function WorkScheduleScreen() {
 
   const handleMarkPaid = () => {
     if (!selectedUserId || !summary) return;
-    Alert.alert(t('schedule.markPaidTitle'), t('schedule.markPaidConfirm').replace('{amount}', summary.estimated_pay.toFixed(2)), [
+    Alert.alert(t('schedule.markPaidTitle'), t('schedule.markPaidConfirm').replace('{amount}', formatAmount(summary.estimated_pay)), [
       { text: t('common.cancel'), style: 'cancel' },
       {
         text: t('schedule.markPaid'),
@@ -680,7 +681,7 @@ export default function WorkScheduleScreen() {
                     <Text style={styles.summaryLabel}>{t('schedule.hoursThisMonth')}</Text>
                   </View>
                   <View style={styles.summaryItem}>
-                    <Text style={styles.summaryValue}>{summary.estimated_pay.toFixed(2)} €</Text>
+                    <Text style={styles.summaryValue}>{formatMoney(summary.estimated_pay)}</Text>
                     <Text style={styles.summaryLabel}>{t('schedule.estimatedPay')}</Text>
                   </View>
                   <View style={styles.summaryItem}>
@@ -701,7 +702,7 @@ export default function WorkScheduleScreen() {
                     <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
                     <Text style={styles.paidText}>
                       {t('schedule.paidLabel')
-                        .replace('{amount}', schedulePayment.amount.toFixed(2))
+                        .replace('{amount}', formatAmount(schedulePayment.amount))
                         .replace('{date}', format(new Date(schedulePayment.created_at), 'd MMM yyyy', { locale: dateLocale }))}
                     </Text>
                     <TouchableOpacity onPress={handleUndoPayment} disabled={payingBusy} hitSlop={8}>
@@ -887,7 +888,7 @@ export default function WorkScheduleScreen() {
                           <Text style={styles.shiftBadge}>{t(`schedule.repeat_${occ.repeat_pattern}`)}</Text>
                         )}
                         {occ.hourly_rate != null && (
-                          <Text style={styles.shiftMeta}>{occ.hourly_rate.toFixed(2)} €/ч</Text>
+                          <Text style={styles.shiftMeta}>{formatMoney(occ.hourly_rate)}/ч</Text>
                         )}
                       </View>
                       {occ.note ? <Text style={styles.shiftNote}>{occ.note}</Text> : null}

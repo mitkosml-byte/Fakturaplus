@@ -43,7 +43,7 @@ def test_n7_the_month_invoice_is_ready_on_its_day_and_issued_once(client, on_tod
 
     signals = {s["key"]: s for s in client.get("/api/proactive/signals", headers=owner).json()["signals"]}
     assert signals["recurring_invoices"]["title"] == "Фактури за ноември 2026"
-    assert "Гама Трейд ООД - 120.00 €" in signals["recurring_invoices"]["detail"]
+    assert "Гама Трейд ООД - 120,00\u00a0€" in signals["recurring_invoices"]["detail"]
 
     issued = client.post(f"/api/recurring-invoices/{template['id']}/issue", headers=owner)
     assert issued.status_code == 200, issued.text

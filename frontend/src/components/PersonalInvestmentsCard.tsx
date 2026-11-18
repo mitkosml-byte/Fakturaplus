@@ -15,6 +15,7 @@ import { getDescriptionSuggestions } from '../utils/expenseSuggestions';
 import { COLORS } from '../theme/colors';
 import { InfoButton } from './InfoButton';
 import { PersonalExpenseModal } from './home/PersonalExpenseModal';
+import { formatMoney } from '../utils/money';
 
 type Props = { periodState: PeriodState };
 
@@ -187,7 +188,7 @@ export function PersonalInvestmentsCard({ periodState }: Props) {
             <View style={styles.roiStatItem}>
               <Text style={styles.roiStatLabel}>{t('roi.totalInvestment')}</Text>
               <Text style={[styles.roiStatValue, { color: COLORS.danger }]}>
-                {roiData.total_personal_investment.toFixed(2)} €
+                {formatMoney(roiData.total_personal_investment)}
               </Text>
             </View>
             <View style={styles.roiStatItem}>
@@ -196,7 +197,7 @@ export function PersonalInvestmentsCard({ periodState }: Props) {
                 <Ionicons name="lock-closed" size={18} color={COLORS.textMuted} style={{ marginBottom: 4 }} />
               ) : (
                 <Text style={[styles.roiStatValue, { color: roiData.total_profit >= 0 ? COLORS.success : COLORS.danger }]}>
-                  {roiData.total_profit.toFixed(2)} €
+                  {formatMoney(roiData.total_profit)}
                 </Text>
               )}
             </View>

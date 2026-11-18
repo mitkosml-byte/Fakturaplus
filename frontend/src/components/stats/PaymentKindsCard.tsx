@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
 import type { Summary } from '../../types';
+import { formatMoney } from '../../utils/money';
 
 type Props = { summary: Summary; usesTill: boolean };
 
@@ -32,7 +33,7 @@ export function PaymentKindsCard({ summary, usesTill }: Props) {
           {row.value === null ? (
             <Ionicons name="lock-closed" size={14} color={COLORS.textMuted} />
           ) : (
-            <Text style={[styles.value, { color: row.color }]}>{(row.value || 0).toFixed(2)} €</Text>
+            <Text style={[styles.value, { color: row.color }]}>{formatMoney((row.value || 0))}</Text>
           )}
         </View>
       ))}

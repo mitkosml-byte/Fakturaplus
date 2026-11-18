@@ -27,6 +27,7 @@ import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, 
 import { useLocationChoice, useLocationsStore } from '../src/stores/locationsStore';
 import { COLORS } from '../src/theme/colors';
 import { useModules } from '../src/stores/modulesStore';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -406,11 +407,11 @@ export default function BillingDocumentsScreen() {
 
   // Where a bill's or an invoice's money stands, said on its card.
   const paymentLabel = (doc: BillingDocument) => {
-    const left = (doc.amount_left || 0).toFixed(2);
+    const left = formatAmount(doc.amount_left || 0);
     switch (doc.payment_status) {
       case 'paid': return t('billingDocuments.statusPaid');
       case 'partly_paid':
-        return t('billingDocuments.statusPartlyPaid').replace('{paid}', (doc.paid_amount || 0).toFixed(2)).replace('{left}', left);
+        return t('billingDocuments.statusPartlyPaid').replace('{paid}', formatAmount(doc.paid_amount || 0)).replace('{left}', left);
       case 'overdue': return t('billingDocuments.statusOverdue').replace('{left}', left);
       case 'credited': return t('billingDocuments.statusCredited');
       default: return t('billingDocuments.statusOwed');
@@ -439,7 +440,7 @@ export default function BillingDocumentsScreen() {
               // is the customer's to get back.
               Alert.alert(
                 result?.cancelled ? t('billingDocuments.invoiceCancelled') : t('billingDocuments.deleted'),
-                t('billingDocuments.refundAfterCancel').replace('{amount}', (result?.refund_due || 0).toFixed(2)),
+                t('billingDocuments.refundAfterCancel').replace('{amount}', formatAmount((result?.refund_due || 0))),
               );
             } else if (result?.cancelled) {
               Toast.success(t('billingDocuments.invoiceCancelled'));
@@ -547,7 +548,7 @@ export default function BillingDocumentsScreen() {
                     <Text style={[
                       styles.amount, doc.total_amount < 0 && { color: COLORS.danger },
                       doc.cancelled && { textDecorationLine: 'line-through' },
-                    ]}>{doc.total_amount.toFixed(2)} €</Text>
+                    ]}>{formatMoney(doc.total_amount)}</Text>
                   </View>
                   <Text style={styles.customerName} numberOfLines={1}>{doc.customer_name}</Text>
                   {doc.doc_type === 'credit_note' && doc.credited_invoice_number && (
@@ -557,7 +558,7 @@ export default function BillingDocumentsScreen() {
                   )}
                   {doc.doc_type === 'invoice' && (doc.credited_amount || 0) > 0 && (
                     <Text style={styles.creditLine}>
-                      {t('billingDocuments.creditedLine').replace('{amount}', (doc.credited_amount || 0).toFixed(2))}
+                      {t('billingDocuments.creditedLine').replace('{amount}', formatAmount((doc.credited_amount || 0)))}
                     </Text>
                   )}
                   {doc.doc_type === 'quote' && (() => {
@@ -613,7 +614,7 @@ export default function BillingDocumentsScreen() {
                       </View>
                       {(doc.refund_due || 0) > 0 && (
                         <Text style={styles.refundText}>
-                          {t('billingDocuments.refundDue').replace('{amount}', (doc.refund_due || 0).toFixed(2))}
+                          {t('billingDocuments.refundDue').replace('{amount}', formatAmount((doc.refund_due || 0)))}
                         </Text>
                       )}
                     </View>
@@ -665,7 +666,7 @@ export default function BillingDocumentsScreen() {
                 </Text>
                 {creditFor && (
                   <Text style={styles.invoiceHint}>
-                    {creditFor.customer_name} · {t('billingDocuments.creditNoteHint').replace('{left}', creditLeft.toFixed(2))}
+                    {creditFor.customer_name} · {t('billingDocuments.creditNoteHint').replace('{left}', formatAmount(creditLeft))}
                   </Text>
                 )}
 
@@ -692,7 +693,7 @@ export default function BillingDocumentsScreen() {
                 )}
                 {fromQuote && (
                   <Text style={styles.invoiceHint}>
-                    {t('billingDocuments.fromQuote').replace('{amount}', fromQuote.total_amount.toFixed(2))}
+                    {t('billingDocuments.fromQuote').replace('{amount}', formatAmount(fromQuote.total_amount))}
                   </Text>
                 )}
                 {docType === 'quote' && (
@@ -829,7 +830,7 @@ export default function BillingDocumentsScreen() {
                           >
                             {match.fromList && <Ionicons name="pricetag-outline" size={12} color={COLORS.primary} />}
                             <Text style={styles.itemChipText} numberOfLines={1}>
-                              {match.name} · {match.unit_price.toFixed(2)} €
+                              {match.name} · {formatMoney(match.unit_price)}
                             </Text>
                           </TouchableOpacity>
                         ))}
@@ -891,14 +892,14 @@ export default function BillingDocumentsScreen() {
 
                 {isInvoice && (
                   <Text style={styles.subtotalPreview}>
-                    {t('billingDocuments.netAndVat').replace('{net}', formNet.toFixed(2)).replace('{vat}', formVat.toFixed(2))}
+                    {t('billingDocuments.netAndVat').replace('{net}', formatAmount(formNet)).replace('{vat}', formatAmount(formVat))}
                   </Text>
                 )}
-                <Text style={styles.totalPreview}>{t('receivables.amount')}: {formTotal.toFixed(2)} €</Text>
+                <Text style={styles.totalPreview}>{t('receivables.amount')}: {formatMoney(formTotal)}</Text>
                 {fromQuote && docType === 'invoice' && Math.abs(formTotal - fromQuote.total_amount) > 0.01 && (
                   <Text style={styles.quoteDiffers}>
                     {t('billingDocuments.fromQuoteDiffers')
-                      .replace('{quote}', fromQuote.total_amount.toFixed(2)).replace('{total}', formTotal.toFixed(2))}
+                      .replace('{quote}', formatAmount(fromQuote.total_amount)).replace('{total}', formatAmount(formTotal))}
                   </Text>
                 )}
 

@@ -23,6 +23,7 @@ import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, 
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { COLORS } from '../src/theme/colors';
 import { toApiDate } from '../src/utils/periodRange';
+import { formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -515,7 +516,7 @@ export default function PersonalExpensesHistoryScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('roi.totalInvestment')}:</Text>
-              <Text style={[styles.summaryValue, { color: COLORS.danger }]}>{total.toFixed(2)} €</Text>
+              <Text style={[styles.summaryValue, { color: COLORS.danger }]}>{formatMoney(total)}</Text>
             </View>
           </View>
 
@@ -541,7 +542,7 @@ export default function PersonalExpensesHistoryScreen() {
                         {monthNames[parseInt(monthStr, 10) - 1]} {yearStr}
                       </Text>
                       <Text style={styles.monthHeaderStats}>
-                        {monthExpenses.length} · {monthTotal.toFixed(2)} €
+                        {monthExpenses.length} · {formatMoney(monthTotal)}
                       </Text>
                     </View>
                     {monthExpenses.map((expense) => (
@@ -549,7 +550,7 @@ export default function PersonalExpensesHistoryScreen() {
                         <View style={styles.expenseRowTop}>
                           <Text style={styles.expenseDescription} numberOfLines={1}>{expense.description}</Text>
                           <Text style={[styles.expenseAmount, { color: TYPE_COLORS[expense.expense_type] }]}>
-                            {expense.amount.toFixed(2)} €
+                            {formatMoney(expense.amount)}
                           </Text>
                         </View>
                         <View style={styles.expenseRowBottom}>
@@ -606,7 +607,7 @@ export default function PersonalExpensesHistoryScreen() {
                   </View>
                   <CountUp
                     value={walletSummary.safe_to_spend}
-                    formatter={(n) => `${n.toFixed(2)} €`}
+                    formatter={(n) => `${formatMoney(n)}`}
                     style={[styles.safeCardValue, { color: WALLET_STATUS_COLORS[walletSummary.status] }]}
                   />
                   <Text style={styles.safeCardHint}>{t('wallet.safeToSpendHint')}</Text>
@@ -625,7 +626,7 @@ export default function PersonalExpensesHistoryScreen() {
                   )}
                   <View style={styles.safeCardFooter}>
                     <Text style={styles.safeCardFooterText}>
-                      {t('wallet.spentThisMonth')}: {walletSummary.total_spent.toFixed(2)} €
+                      {t('wallet.spentThisMonth')}: {formatMoney(walletSummary.total_spent)}
                     </Text>
                     {walletSummary.spent_percent_of_profit !== null && (
                       <Text style={styles.safeCardFooterText}>
@@ -642,11 +643,11 @@ export default function PersonalExpensesHistoryScreen() {
                     <View style={styles.needsWantsRow}>
                       <View style={styles.needsWantsItem}>
                         <Text style={styles.needsWantsLabel}>{t('wallet.needs')}</Text>
-                        <Text style={[styles.needsWantsValue, { color: COLORS.danger }]}>{walletSummary.needs_total.toFixed(2)} €</Text>
+                        <Text style={[styles.needsWantsValue, { color: COLORS.danger }]}>{formatMoney(walletSummary.needs_total)}</Text>
                       </View>
                       <View style={styles.needsWantsItem}>
                         <Text style={styles.needsWantsLabel}>{t('wallet.wants')}</Text>
-                        <Text style={[styles.needsWantsValue, { color: COLORS.warning }]}>{walletSummary.wants_total.toFixed(2)} €</Text>
+                        <Text style={[styles.needsWantsValue, { color: COLORS.warning }]}>{formatMoney(walletSummary.wants_total)}</Text>
                       </View>
                     </View>
                   </View>
@@ -664,7 +665,7 @@ export default function PersonalExpensesHistoryScreen() {
                             <Ionicons name={WALLET_CATEGORY_ICONS[cat]} size={16} color={WALLET_CATEGORY_COLORS[cat]} />
                           </View>
                           <Text style={styles.categoryRowLabel}>{t(WALLET_CATEGORY_KEYS[cat])}</Text>
-                          <Text style={styles.categoryRowValue}>{amt.toFixed(2)} €</Text>
+                          <Text style={styles.categoryRowValue}>{formatMoney(amt)}</Text>
                         </View>
                       ))}
                   </View>
@@ -679,7 +680,7 @@ export default function PersonalExpensesHistoryScreen() {
                         <Ionicons name="calendar-outline" size={16} color={COLORS.textMuted} />
                         <Text style={styles.upcomingText} numberOfLines={1}>{u.description}</Text>
                         <Text style={styles.upcomingDate}>{u.next_due_date}</Text>
-                        <Text style={styles.upcomingAmount}>{u.amount.toFixed(2)} €</Text>
+                        <Text style={styles.upcomingAmount}>{formatMoney(u.amount)}</Text>
                       </View>
                     ))}
                   </View>
@@ -749,7 +750,7 @@ export default function PersonalExpensesHistoryScreen() {
                             {monthNames[parseInt(monthStr, 10) - 1]} {yearStr}
                           </Text>
                           <Text style={styles.monthHeaderStats}>
-                            {monthEntries.length} · {monthTotal.toFixed(2)} €
+                            {monthEntries.length} · {formatMoney(monthTotal)}
                           </Text>
                         </View>
                         {monthEntries.map((entry) => (
@@ -765,7 +766,7 @@ export default function PersonalExpensesHistoryScreen() {
                                 <Text style={styles.expenseDescription} numberOfLines={1}>{entry.description}</Text>
                               </View>
                               <Text style={[styles.expenseAmount, { color: WALLET_CATEGORY_COLORS[entry.category] }]}>
-                                {entry.amount.toFixed(2)} €
+                                {formatMoney(entry.amount)}
                               </Text>
                             </View>
                             <View style={styles.expenseRowBottom}>

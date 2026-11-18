@@ -15,6 +15,7 @@ import { COLORS } from '../../theme/colors';
 import { useAuth } from '../../contexts/AuthContext';
 import { useModules } from '../../stores/modulesStore';
 import { isPackSuspect, priceAlertMeaning } from '../../utils/priceAlert';
+import { formatAmount, formatMoney } from '../../utils/money';
 
 // Extracted from invoices.tsx (Module 1 audit finding #4). The single
 // largest remaining modal on this screen - view/edit for one invoice,
@@ -260,7 +261,7 @@ export function InvoiceDetailModal({
               <View style={styles.totalSection}>
                 <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
                 <Text style={styles.totalSectionValue}>
-                  {((parseFloat(editAmountWithoutVat.replace(',', '.')) || 0) + (parseFloat(editVatAmount.replace(',', '.')) || 0)).toFixed(2)} €
+                  {formatMoney(((parseFloat(editAmountWithoutVat.replace(',', '.')) || 0) + (parseFloat(editVatAmount.replace(',', '.')) || 0)))}
                 </Text>
               </View>
 
@@ -456,16 +457,16 @@ export function InvoiceDetailModal({
               <View style={styles.detailRow2}>
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.withoutVAT')}</Text>
-                  <Text style={styles.detailSectionValue}>{invoice.amount_without_vat.toFixed(2)} €</Text>
+                  <Text style={styles.detailSectionValue}>{formatMoney(invoice.amount_without_vat)}</Text>
                 </View>
                 <View style={styles.detailSection}>
                   <Text style={styles.detailSectionLabel}>{t('invoices.vatPercent')}</Text>
-                  <Text style={styles.detailSectionValue}>{invoice.vat_amount.toFixed(2)} €</Text>
+                  <Text style={styles.detailSectionValue}>{formatMoney(invoice.vat_amount)}</Text>
                 </View>
               </View>
               <View style={styles.totalSection}>
                 <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
-                <Text style={styles.totalSectionValue}>{invoice.total_amount.toFixed(2)} €</Text>
+                <Text style={styles.totalSectionValue}>{formatMoney(invoice.total_amount)}</Text>
               </View>
 
               {/* Credit notes to this invoice: taken off what is owed; past
@@ -477,10 +478,10 @@ export function InvoiceDetailModal({
                     <Ionicons name="return-down-back" size={18} color={COLORS.primary} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.assetBannerTitle}>
-                        {t('invoices.creditedAmount').replace('{amount}', (invoice.credited_amount || 0).toFixed(2))}
+                        {t('invoices.creditedAmount').replace('{amount}', formatAmount((invoice.credited_amount || 0)))}
                       </Text>
                       {refund > 0.005 && (
-                        <Text style={styles.assetBannerText}>{t('invoices.refundDue').replace('{amount}', refund.toFixed(2))}</Text>
+                        <Text style={styles.assetBannerText}>{t('invoices.refundDue').replace('{amount}', formatAmount(refund))}</Text>
                       )}
                     </View>
                   </View>
@@ -515,16 +516,16 @@ export function InvoiceDetailModal({
                           <View style={styles.paymentProgressBox}>
                             <Text style={styles.paymentProgressText}>
                               {t('invoices.paidOfTotal')
-                                .replace('{paid}', invoice.paid_amount.toFixed(2))
-                                .replace('{total}', invoice.total_amount.toFixed(2))}
+                                .replace('{paid}', formatAmount(invoice.paid_amount))
+                                .replace('{total}', formatAmount(invoice.total_amount))}
                             </Text>
                             {(invoice.credited_amount || 0) > 0 && (
                               <Text style={styles.paymentProgressText}>
-                                {t('invoices.creditedAmount').replace('{amount}', (invoice.credited_amount || 0).toFixed(2))}
+                                {t('invoices.creditedAmount').replace('{amount}', formatAmount((invoice.credited_amount || 0)))}
                               </Text>
                             )}
                             <Text style={styles.paymentRemainingText}>
-                              {t('invoices.remainingAmount')}: {Math.max(0, invoice.total_amount - invoice.paid_amount - (invoice.credited_amount || 0)).toFixed(2)} €
+                              {t('invoices.remainingAmount')}: {formatMoney(Math.max(0, invoice.total_amount - invoice.paid_amount - (invoice.credited_amount || 0)))}
                             </Text>
                             <View style={styles.paymentProgressBar}>
                               <View style={[
@@ -541,7 +542,7 @@ export function InvoiceDetailModal({
                             {(invoice.payments || []).map((payment) => (
                               <View key={payment.id} style={styles.paymentHistoryRow}>
                                 <Text style={styles.paymentHistoryText}>
-                                  {formatDate(payment.date)} · {payment.amount.toFixed(2)} €
+                                  {formatDate(payment.date)} · {formatMoney(payment.amount)}
                                   {payment.method ? ` · ${t(`scan.paymentMethod.${payment.method}`)}` : ''}
                                 </Text>
                                 <TouchableOpacity
@@ -654,10 +655,10 @@ export function InvoiceDetailModal({
                             {item.quantity} {item.unit}
                           </Text>
                           <Text style={[styles.itemRowValue, styles.itemsColRight, { flex: 1 }]}>
-                            {item.unit_price.toFixed(2)}€
+                            {formatMoney(item.unit_price)}
                           </Text>
                           <Text style={[styles.itemRowValue, styles.itemsColRight, styles.itemRowTotal, { flex: 1 }]}>
-                            {lineTotal.toFixed(2)}€
+                            {formatMoney(lineTotal)}
                           </Text>
                         </View>
                       );
@@ -665,7 +666,7 @@ export function InvoiceDetailModal({
 
                     <View style={styles.itemsSumRow}>
                       <Text style={styles.itemsSumLabel}>{t('invoices.itemsSum')}</Text>
-                      <Text style={styles.itemsSumValue}>{itemsSum.toFixed(2)} €</Text>
+                      <Text style={styles.itemsSumValue}>{formatMoney(itemsSum)}</Text>
                     </View>
                     {mismatch && (
                       <View style={styles.itemsMismatchNote}>

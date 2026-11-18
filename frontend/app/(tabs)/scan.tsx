@@ -37,6 +37,7 @@ import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
 import { toApiDate } from '../../src/utils/periodRange';
+import { formatAmount, formatMoney } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -747,7 +748,7 @@ export default function ScanScreen() {
     }
   };
 
-  const money = (value: number) => Math.abs(value).toFixed(2);
+  const money = (value: number) => formatAmount(Math.abs(value));
   const lineName = (index: number | null) => (index != null && items[index]?.name.trim()) || '?';
 
   const headerProblemText = (header: NonNullable<InvoiceDraftCheck['header']>) =>
@@ -1368,9 +1369,9 @@ export default function ScanScreen() {
                             <View style={styles.summaryRow}>
                               <Text style={styles.summaryLabel}>{t('scan.totalAmount')}</Text>
                               <View style={{ flexShrink: 1, alignItems: 'flex-end' }}>
-                                <Text style={[styles.summaryValue, styles.summaryTotal]}>{(parseFloat(totalAmount) || 0).toFixed(2)} €</Text>
+                                <Text style={[styles.summaryValue, styles.summaryTotal]}>{formatMoney((parseFloat(totalAmount) || 0))}</Text>
                                 <Text style={styles.summarySub}>
-                                  {t('scanSummary.amounts').replace('{net}', net.toFixed(2)).replace('{vat}', vat.toFixed(2))}
+                                  {t('scanSummary.amounts').replace('{net}', formatAmount(net)).replace('{vat}', formatAmount(vat))}
                                 </Text>
                               </View>
                             </View>

@@ -478,7 +478,7 @@ def test_n2_what_does_not_add_up_is_refused(free_client):
     assert send(rows[3], [{"kind": "invoice", "id": yavor["id"], "amount": 900}])["applied"] == 0
     assert send(rows[3], [{"kind": "invoice", "id": yavor["id"], "amount": 100}, {"kind": "invoice", "id": yavor["id"], "amount": 100}])["applied"] == 0
     over = send(rows[0], [{"kind": "invoice", "id": yavor["id"], "amount": 1200}])
-    assert over["applied"] == 0 and "Остават 900.00" in over["failed"][0]["message"]
+    assert over["applied"] == 0 and "Остават 900,00" in over["failed"][0]["message"]
     assert send(rows[0], [{"kind": "invoice", "id": depo["id"], "amount": 1200}], date="не е дата")["applied"] == 0
     for invoice in (depo, yavor):
         assert client.get(f"/api/invoices/{invoice['id']}", headers=owner).json()["paid_amount"] == 0

@@ -6,6 +6,7 @@ import { useTranslation, useLanguageStore } from '../../i18n';
 import { Invoice } from '../../types';
 import { COLORS } from '../../theme/colors';
 import DateTimePickerModal from '../AppDateTimePicker';
+import { formatAmount } from '../../utils/money';
 
 export type PaymentMethodChoice = 'bank_transfer' | 'cash' | 'card';
 
@@ -58,7 +59,7 @@ export function PaymentModal({
                   placeholderTextColor={COLORS.textMuted}
                   autoFocus
                 />
-                <Text style={styles.inputHint}>{t('receivables.leftToPay').replace('{left}', left.toFixed(2))}</Text>
+                <Text style={styles.inputHint}>{t('receivables.leftToPay').replace('{left}', formatAmount(left))}</Text>
               </View>
 
               <View style={styles.inputGroup}>

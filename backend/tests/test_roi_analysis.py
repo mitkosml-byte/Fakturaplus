@@ -84,7 +84,7 @@ def test_payback_uses_dashboard_profit_and_names_what_moved():
     assert "лично" in payback["text"] and "печалба" in payback["text"]
     metro = next(m for m in built["analysis"]["movers"] if m["kind"] == "supplier")
     assert metro["label"] == "Метро" and metro["delta"] == 600.0 and metro["profit_effect"] == -600.0
-    assert "+600\u00a0€" in metro["text"]
+    assert "+600,00\u00a0€" in metro["text"]
 
 
 def test_a_running_month_is_compared_on_the_same_days():

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { ReorderItem } from '../../types';
 import { COLORS } from '../../theme/colors';
+import { formatAmount } from '../../utils/money';
 
 // Extracted from stats.tsx (Module 1 audit finding #4). A pattern in
 // purchase timing noticed from data already captured by scanning, not
@@ -30,7 +31,7 @@ export function ReorderNudgesCard({ nudges }: Props) {
               .replace('{item}', n.item_name)
               .replace('{supplier}', n.supplier)
               .replace('{median}', String(n.median_days_between))
-              .replace('{value}', n.avg_order_value.toFixed(0))
+              .replace('{value}', formatAmount(n.avg_order_value))
               .replace('{daysSince}', String(n.days_since_last))}
             {n.recommended_quantity > 0 &&
               t('stats.reorderNudgeQuantity')

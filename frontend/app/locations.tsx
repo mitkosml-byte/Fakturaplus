@@ -24,13 +24,14 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, ChipTabs } from '../src/components';
 import { useLocationsStore } from '../src/stores/locationsStore';
 import { COLORS } from '../src/theme/colors';
+import { formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 type PeriodKey = 'month' | 'lastMonth' | 'year';
 type Draft = { id: string | null; name: string; address: string };
 
-const eur = (value: number) => `${value.toFixed(2)} €`;
+const eur = (value: number) => `${formatMoney(value)}`;
 const iso = (d: Date) => format(d, 'yyyy-MM-dd');
 
 function periodRange(key: PeriodKey): [string, string] {

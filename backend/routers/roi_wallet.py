@@ -74,12 +74,9 @@ def _month_range(year: int, month: int) -> tuple:
     return f"{year}-{month:02d}-01", f"{ny}-{nm:02d}-01"
 
 
-def _eur_text(value: float) -> str:
-    if abs(value) < 0.005:
-        return "0"
-    # Non-breaking spaces: "9 000 €" never splits over two lines.
-    text = f"{value:,.0f}".replace(",", "\u00a0") if abs(value) >= 10 else f"{value:.2f}".replace(".", ",")
-    return text.replace("-", "−")
+def _eur_text(value: float, en: bool = False) -> str:
+    # The one money format (Л11), with a true minus sign.
+    return fmt_amount(value, en).replace("-", "−")
 
 
 async def _roi_month_data(
@@ -219,11 +216,11 @@ def _profit_movers(target: Dict[str, Any], baseline: List[Dict[str, Any]], is_en
         if abs(delta) < max(ROI_MOVER_MIN_EUR, ROI_MOVER_MIN_SHARE * usual):
             continue
         effect = delta if kind == "revenue" else -delta
-        change = ("+" if delta > 0 else "−") + f"{_eur_text(abs(delta))}\u00a0€"
+        change = ("+" if delta > 0 else "−") + f"{_eur_text(abs(delta), is_en)}\u00a0€"
         if usual > 0:
             change += f", {delta / usual * 100:+.0f}%".replace("-", "−")
         text = (
-            f"{label}: {_eur_text(current)}\u00a0€ vs. usually {_eur_text(usual)}\u00a0€ ({change})"
+            f"{label}: {_eur_text(current, True)}\u00a0€ vs. usually {_eur_text(usual, True)}\u00a0€ ({change})"
             if is_en else
             f"{label}: {_eur_text(current)}\u00a0€ при обичайни {_eur_text(usual)}\u00a0€ ({change})"
         )
@@ -256,7 +253,7 @@ async def _price_increase_action(company_id: str, is_en: bool) -> Optional[Dict[
         return None
     top = items[0]
     text = (
-        f"Price rises of the last two months cost ≈ {_eur_text(total)}\u00a0€ a month - most of it "
+        f"Price rises of the last two months cost ≈ {_eur_text(total, True)}\u00a0€ a month - most of it "
         f"\"{top['item_name']}\" at {top['supplier']} ({top.get('change_percent', 0):+.0f}%). "
         "Negotiate the price or compare suppliers."
         if is_en else
@@ -306,7 +303,7 @@ async def _cheaper_supplier_action(company_id: str, is_en: bool) -> Optional[Dic
         if best is None or monthly > best["monthly_eur"]:
             text = (
                 f"\"{name}\" is {share * 100:.0f}% cheaper per {unit_label(unit)} at {cheapest} than at {main} - "
-                f"≈ {_eur_text(monthly)}\u00a0€ a month at your usual quantity."
+                f"≈ {_eur_text(monthly, True)}\u00a0€ a month at your usual quantity."
                 if is_en else
                 f"\"{name}\" е с {share * 100:.0f}% по-евтин на {unit_label(unit)} при {cheapest}, отколкото при {main} – "
                 f"≈ {_eur_text(monthly)}\u00a0€ на месец при обичайното ти количество."
@@ -378,7 +375,7 @@ async def build_roi_analysis(
         if invested > 0:
             coverage = window_profit / invested
             if window_profit <= 0:
-                verdict = (f"the business is at a loss ({_eur_text(window_profit)}\u00a0€), so it is not paying it back yet."
+                verdict = (f"the business is at a loss ({_eur_text(window_profit, True)}\u00a0€), so it is not paying it back yet."
                            if is_en else f"бизнесът е на загуба ({_eur_text(window_profit)}\u00a0€), т.е. вложеното засега не се връща.")
             elif coverage >= 1:
                 times = f"{coverage:.1f}"
@@ -388,8 +385,8 @@ async def build_roi_analysis(
                 verdict = (f"that covers {coverage * 100:.0f}% of it." if is_en
                            else f"това покрива {coverage * 100:.0f}% от него.")
             text = (
-                f"Over the last {ROI_WINDOW_MONTHS} months you put in {_eur_text(invested)}\u00a0€ personally; "
-                f"the business made {_eur_text(window_profit)}\u00a0€ profit - {verdict}"
+                f"Over the last {ROI_WINDOW_MONTHS} months you put in {_eur_text(invested, True)}\u00a0€ personally; "
+                f"the business made {_eur_text(window_profit, True)}\u00a0€ profit - {verdict}"
                 if is_en else
                 f"За последните {ROI_WINDOW_MONTHS} месеца си вложил {_eur_text(invested)}\u00a0€ лично, а бизнесът "
                 f"е изкарал {_eur_text(window_profit)}\u00a0€ печалба – {verdict}"
@@ -403,7 +400,7 @@ async def build_roi_analysis(
             "personal": round(personal, 2), "profit": round(profit, 2), "partial": in_progress,
             "through_day": through_day,
             "text": (
-                f"This month{so_far}: profit {_eur_text(profit)}\u00a0€ against {_eur_text(personal)}\u00a0€ put in."
+                f"This month{so_far}: profit {_eur_text(profit, True)}\u00a0€ against {_eur_text(personal, True)}\u00a0€ put in."
                 if is_en else
                 f"Този месец{so_far}: печалба {_eur_text(profit)}\u00a0€ при вложени {_eur_text(personal)}\u00a0€."
             ),

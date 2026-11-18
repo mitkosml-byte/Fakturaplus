@@ -8,6 +8,7 @@ import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
 import { BottomSheet, PressableScale, Expandable, SuggestionChips } from '..';
 import type { DescriptionSuggestion } from '../../utils/expenseSuggestions';
+import { formatMoney } from '../../utils/money';
 
 // Extracted from index.tsx (Module 1 audit finding #4). Lists off-book
 // expenses recorded for a given day and lets the user add a new one.
@@ -122,7 +123,7 @@ export function ExpenseModal({
                       <Text style={styles.expenseItemDescription}>{expense.description}</Text>
                     </View>
                     <View style={styles.expenseItemRight}>
-                      <Text style={styles.expenseItemAmount}>{expense.amount.toFixed(2)} €</Text>
+                      <Text style={styles.expenseItemAmount}>{formatMoney(expense.amount)}</Text>
                       <TouchableOpacity style={styles.expenseDeleteButton} onPress={() => onDeleteExpense(expense.id)}>
                         <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
                       </TouchableOpacity>
@@ -132,7 +133,7 @@ export function ExpenseModal({
                 <View style={styles.expensesTotalRow}>
                   <Text style={styles.expensesTotalLabel}>{t('expenses.totalForDay')}:</Text>
                   <Text style={styles.expensesTotalValue}>
-                    {dayExpenses.reduce((sum, e) => sum + e.amount, 0).toFixed(2)} €
+                    {formatMoney(dayExpenses.reduce((sum, e) => sum + e.amount, 0))}
                   </Text>
                 </View>
               </>

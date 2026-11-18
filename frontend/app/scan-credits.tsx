@@ -28,6 +28,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
 import { scanBalanceQueryKey } from '../src/queries/useScanBalance';
 import { COLORS } from '../src/theme/colors';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -318,11 +319,11 @@ export default function ScanCreditsScreen() {
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={styles.packageName} numberOfLines={2}>{packageLine(pkg)}</Text>
                       <Text style={[styles.packagePerScan, isBest && { color: COLORS.primaryLight }]}>
-                        {t('scanCredits.perScan').replace('{price}', pkg.price_per_scan.toFixed(2))}
+                        {t('scanCredits.perScan').replace('{price}', formatAmount(pkg.price_per_scan))}
                       </Text>
                     </View>
                     <View style={styles.packageActions}>
-                      <Text style={styles.packagePrice}>{pkg.price_eur.toFixed(2)}&nbsp;&euro;</Text>
+                      <Text style={styles.packagePrice}>{formatMoney(pkg.price_eur)}</Text>
                       {canManageBilling && (
                         <TouchableOpacity
                           style={[styles.buyButton, isBest && styles.buyButtonBest]}
@@ -372,9 +373,9 @@ export default function ScanCreditsScreen() {
                     }}
                   />
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={styles.packagePrice}>{customPriceEur(customQuantity).toFixed(2)}&nbsp;&euro;</Text>
+                    <Text style={styles.packagePrice}>{formatMoney(customPriceEur(customQuantity))}</Text>
                     <Text style={styles.packagePerScan}>
-                      {t('scanCredits.perScan').replace('{price}', (customPriceEur(customQuantity) / customQuantity).toFixed(2))}
+                      {t('scanCredits.perScan').replace('{price}', formatAmount((customPriceEur(customQuantity) / customQuantity)))}
                     </Text>
                   </View>
                 </View>
@@ -431,7 +432,7 @@ export default function ScanCreditsScreen() {
               {packages.map((pkg) => (
                 <TouchableOpacity key={pkg.id} style={styles.modalPackageRow} onPress={() => handleEnableAutoReload(pkg)}>
                   <Text style={styles.modalPackageText}>{packageLine(pkg)}</Text>
-                  <Text style={styles.packagePrice}>{pkg.price_eur.toFixed(2)}&nbsp;&euro;</Text>
+                  <Text style={styles.packagePrice}>{formatMoney(pkg.price_eur)}</Text>
                 </TouchableOpacity>
               ))}
             </View>

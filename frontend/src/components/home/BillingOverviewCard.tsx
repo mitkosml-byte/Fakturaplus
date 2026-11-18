@@ -7,6 +7,7 @@ import { api } from '../../services/api';
 import type { BillingOverview } from '../../types';
 import { COLORS } from '../../theme/colors';
 import { CountUp } from '../CountUp';
+import { formatMoney } from '../../utils/money';
 
 type Props = {
   startDate: string;
@@ -34,7 +35,7 @@ export function BillingOverviewCard({ startDate, endDate, canIssue, refreshSigna
   }, [startDate, endDate, refreshSignal]);
 
   const overdue = (overview?.total_overdue || 0) > 0;
-  const money = (n: number) => `${n.toFixed(2)} €`;
+  const money = (n: number) => `${formatMoney(n)}`;
 
   return (
     <View style={[styles.card, overdue && styles.cardOverdue]}>

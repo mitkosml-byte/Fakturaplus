@@ -20,6 +20,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, Avatar } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -222,7 +223,7 @@ export default function PayRunScreen() {
                       />
                       <Text style={styles.resultLabel}>{r.label}</Text>
                       {r.success ? (
-                        <Text style={styles.resultAmount}>{(r.amount || 0).toFixed(2)} €</Text>
+                        <Text style={styles.resultAmount}>{formatMoney((r.amount || 0))}</Text>
                       ) : (
                         <Text style={styles.resultError}>{r.error}</Text>
                       )}
@@ -259,7 +260,7 @@ export default function PayRunScreen() {
                           <View style={{ flex: 1, marginLeft: 10 }}>
                             <Text style={styles.rowName}>{emp.name}</Text>
                             <Text style={styles.rowMeta}>
-                              {emp.base_salary.toFixed(2)} € {emp.agreement_type === 'net' ? t('payroll.netShort') : t('payroll.grossShort')}
+                              {formatMoney(emp.base_salary)} {emp.agreement_type === 'net' ? t('payroll.netShort') : t('payroll.grossShort')}
                             </Text>
                           </View>
                         </TouchableOpacity>
@@ -281,7 +282,7 @@ export default function PayRunScreen() {
                           <View style={{ flex: 1, marginLeft: 10 }}>
                             <Text style={styles.rowName}>{m.name}</Text>
                             <Text style={styles.rowMeta}>
-                              {m.total_hours}ч · {m.estimated_pay.toFixed(2)} €
+                              {m.total_hours}ч · {formatMoney(m.estimated_pay)}
                             </Text>
                           </View>
                         </TouchableOpacity>
@@ -300,7 +301,7 @@ export default function PayRunScreen() {
                   <ActivityIndicator color="white" />
                 ) : (
                   <Text style={styles.processButtonText}>
-                    {t('payRun.processSelected').replace('{count}', String(selectedEmployeeIds.size + selectedMemberIds.size)).replace('{amount}', totalSelectedAmount.toFixed(2))}
+                    {t('payRun.processSelected').replace('{count}', String(selectedEmployeeIds.size + selectedMemberIds.size)).replace('{amount}', formatAmount(totalSelectedAmount))}
                   </Text>
                 )}
               </TouchableOpacity>

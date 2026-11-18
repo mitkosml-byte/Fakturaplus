@@ -65,7 +65,7 @@ def test_n6_the_program_says_when_and_words_it(client, monkeypatch):
     assert item["label"] == "фактура № 0000000001 от 20.10.2026"
     assert item["document"] == {"id": invoice["id"], "kind": "invoice", "number": "0000000001", "has_pdf": True}
     assert item["subject"] == "Падеж днес - фактура № 0000000001 от 20.10.2026"
-    assert "днес е падежът" in item["message"] and "120.00 €" in item["message"]
+    assert "днес е падежът" in item["message"] and "120,00\u00a0€" in item["message"]
     assert "IBAN: BG80BNBG96611020345678 (Примерна банка)" in item["message"] and item["message"].endswith("Проба ООД")
 
     _on(monkeypatch, date(2026, 11, 10))
@@ -149,7 +149,7 @@ def test_n6_on_home_and_only_for_whoever_enters_revenue(client, monkeypatch, mai
     _on(monkeypatch, date(2026, 11, 3))
     signals = {s["key"]: s for s in client.get("/api/proactive/signals", headers=owner).json()["signals"]}
     reminder = signals["payment_reminders"]
-    assert reminder["route"] == "/payment-reminders" and "Гама Трейд ООД" in reminder["detail"] and "120.00 €" in reminder["detail"]
+    assert reminder["route"] == "/payment-reminders" and "Гама Трейд ООД" in reminder["detail"] and "120,00\u00a0€" in reminder["detail"]
 
     _, viewer = _user(company_id, "staff", ["view_statistics"], "Зрител")
     assert client.get("/api/payment-reminders", headers=viewer).status_code == 403

@@ -7,6 +7,7 @@ import json
 from xml.sax.saxutils import escape as _xml_escape
 
 from services.revenue_vat import vat_parts
+from services.money_text import fmt_amount, fmt_eur
 
 try:
     import openpyxl
@@ -62,7 +63,7 @@ def _document_number(inv: dict) -> str:
 def _money_or_hidden(value: Any) -> str:
     """An amount as the report prints it, or "скрито" where the reader's
     access hides it (None) - never a crash on a hidden field."""
-    return "скрито" if value is None else f"{float(value):.2f} €"
+    return "скрито" if value is None else f"{fmt_eur(float(value))}"
 
 
 def _excel_safe(value):
@@ -217,7 +218,7 @@ class ExportService:
                 _excel_safe(tx.get('description', '')),
                 type_labels.get(tx.get('type', ''), tx.get('type', '')),
                 tx.get('delta', 0),
-                f"{price_eur:.2f} €" if price_eur is not None else '',
+                f"{fmt_eur(price_eur)}" if price_eur is not None else '',
             ]
 
             for col, value in enumerate(data, 1):
@@ -380,7 +381,7 @@ class ExportService:
                 f"{unit_price:.2f}",
                 f"{line_total:.2f}",
             ])
-        data.append(["", "", "", "ОБЩО:", f"{total_amount:.2f} €"])
+        data.append(["", "", "", "ОБЩО:", f"{fmt_eur(total_amount)}"])
 
         table = Table(data, colWidths=[180, 45, 35, 60, 60])
         table.setStyle(TableStyle([
@@ -508,10 +509,10 @@ class ExportService:
         totals: List[List[str]] = []
         for row in document.get("vat_by_rate") or []:
             rate = f"{float(row.get('rate', 0)):g}%"
-            totals.append([f"Данъчна основа {rate}:", f"{abs(float(row.get('base', 0))):.2f} €"])
-            totals.append([f"ДДС {rate}:", f"{abs(float(row.get('vat', 0))):.2f} €"])
+            totals.append([f"Данъчна основа {rate}:", f"{fmt_eur(abs(float(row.get('base', 0))))}"])
+            totals.append([f"ДДС {rate}:", f"{fmt_eur(abs(float(row.get('vat', 0))))}"])
         totals.append(["Сума на известието:" if credit_note else "Сума за плащане:",
-                       f"{abs(float(document.get('total_amount', 0))):.2f} €"])
+                       f"{fmt_eur(abs(float(document.get('total_amount', 0))))}"])
         totals_table = Table(totals, colWidths=[50 * mm, 30 * mm], hAlign='RIGHT')
         totals_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
@@ -1065,7 +1066,7 @@ class ExportService:
             for s in top_suppliers[:10]:
                 rows.append([
                     str(s.get('supplier', ''))[:30],
-                    f"{s.get('total_amount', 0):.2f} €",
+                    f"{fmt_eur(s.get('total_amount', 0))}",
                     str(s.get('invoice_count', 0)),
                 ])
             supplier_table = Table(rows, colWidths=[90*mm, 40*mm, 25*mm])
@@ -1087,7 +1088,7 @@ class ExportService:
             for i in top_items[:10]:
                 rows.append([
                     str(i.get('item_name', ''))[:30],
-                    f"{i.get('total_value', 0):.2f} €",
+                    f"{fmt_eur(i.get('total_value', 0))}",
                     str(i.get('frequency', 0)),
                 ])
             items_table = Table(rows, colWidths=[90*mm, 40*mm, 25*mm])

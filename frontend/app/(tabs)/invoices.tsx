@@ -36,6 +36,7 @@ import { COLORS } from '../../src/theme/colors';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
 import { DURATION, EASING } from '../../src/theme/motion';
 import { toApiDate } from '../../src/utils/periodRange';
+import { formatAmount, formatMoney } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -385,8 +386,8 @@ export default function InvoicesScreen() {
           Alert.alert(
             t('invoices.linesMismatchTitle'),
             t('invoices.linesMismatchText')
-              .replace('{lines}', check.lines.sum.toFixed(2))
-              .replace('{base}', check.lines.base.toFixed(2)),
+              .replace('{lines}', formatAmount(check.lines.sum))
+              .replace('{base}', formatAmount(check.lines.base)),
             [
               { text: t('common.cancel'), style: 'cancel' },
               { text: t('invoices.saveAnyway'), onPress: () => { handleSaveEditedInvoice({ ...checked, lines: true }); } },
@@ -596,7 +597,7 @@ export default function InvoicesScreen() {
             <Text style={styles.supplierName} numberOfLines={1}>{item.supplier}</Text>
           </View>
           <View style={styles.invoiceRowTopRight}>
-            <Text style={styles.totalValueCompact}>{item.total_amount.toFixed(2)} €</Text>
+            <Text style={styles.totalValueCompact}>{formatMoney(item.total_amount)}</Text>
             {/* Explicit, discoverable delete action - the same long-press
                 gesture on the card still works too (and goes through the
                 exact same confirm dialog below), but a visible "X" doesn't
@@ -635,7 +636,7 @@ export default function InvoicesScreen() {
                 <View style={[styles.compactBadge, overdue && styles.overdueBadge]}>
                   <Ionicons name={overdue ? 'alert-circle' : (isPartial ? 'pie-chart-outline' : 'time-outline')} size={11} color={overdue ? COLORS.danger : COLORS.warning} />
                   <Text style={[styles.compactBadgeText, overdue && { color: COLORS.danger }]}>
-                    {statusLabel}{isPartial ? ` (${Math.max(0, item.total_amount - item.paid_amount - credited).toFixed(2)} €)` : ''}
+                    {statusLabel}{isPartial ? ` (${formatMoney(Math.max(0, item.total_amount - item.paid_amount - credited))})` : ''}
                   </Text>
                 </View>
               )}
@@ -694,7 +695,7 @@ export default function InvoicesScreen() {
     <View style={styles.monthHeader}>
       <Text style={styles.monthHeaderTitle}>{section.title}</Text>
       <Text style={styles.monthHeaderStats}>
-        {section.data.length} · {t('invoices.monthlyTotal')} {section.totalAmount.toFixed(2)} €
+        {section.data.length} · {t('invoices.monthlyTotal')} {formatMoney(section.totalAmount)}
       </Text>
     </View>
   );
@@ -911,13 +912,13 @@ export default function InvoicesScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('stats.vat')}:</Text>
-              <Text style={styles.summaryValue}>{totalVat.toFixed(2)} €</Text>
+              <Text style={styles.summaryValue}>{formatMoney(totalVat)}</Text>
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('invoices.total')}:</Text>
               <CountUp
                 value={totalAmount}
-                formatter={(n) => `${n.toFixed(2)} €`}
+                formatter={(n) => `${formatMoney(n)}`}
                 style={[styles.summaryValue, { color: COLORS.primary }]}
               />
             </View>
@@ -972,7 +973,7 @@ export default function InvoicesScreen() {
         fields={[
           { key: 'supplier', label: t('invoices.supplier') },
           { key: 'invoice_number', label: t('invoices.invoiceNo') },
-          { key: 'total_amount', label: t('invoices.total'), format: (v) => `${Number(v).toFixed(2)} €` },
+          { key: 'total_amount', label: t('invoices.total'), format: (v) => `${formatMoney(Number(v))}` },
         ]}
         onImported={loadInvoices}
       />

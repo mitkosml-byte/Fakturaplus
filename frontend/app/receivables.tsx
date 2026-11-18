@@ -24,6 +24,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow, SwipeableRow } from '../src/components';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { COLORS } from '../src/theme/colors';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -205,7 +206,7 @@ export default function ReceivablesScreen() {
         Alert.alert(
           t('receivables.logAsRevenueTitle'),
           t('receivables.logAsRevenueHintDay')
-            .replace('{name}', r.customer_name).replace('{amount}', amount.toFixed(2))
+            .replace('{name}', r.customer_name).replace('{amount}', formatAmount(amount))
             .replace('{date}', format(payDate, 'd MMM', { locale: dateLocale })),
           [
             { text: t('receivables.logAsRevenueSkip'), style: 'cancel' },
@@ -311,7 +312,7 @@ export default function ReceivablesScreen() {
 
           {summary && (
             <View style={styles.summaryBar}>
-              <Text style={styles.summaryLabel}>{t('receivables.totalOwed')}: <Text style={[styles.summaryValue, { color: COLORS.warning }]}>{summary.total_owed.toFixed(2)} €</Text></Text>
+              <Text style={styles.summaryLabel}>{t('receivables.totalOwed')}: <Text style={[styles.summaryValue, { color: COLORS.warning }]}>{formatMoney(summary.total_owed)}</Text></Text>
               {summary.overdue_count > 0 && (
                 <Text style={styles.summaryLabel}>{t('receivables.overdueCount')}: <Text style={[styles.summaryValue, { color: COLORS.danger }]}>{summary.overdue_count}</Text></Text>
               )}
@@ -362,21 +363,21 @@ export default function ReceivablesScreen() {
                   >
                     <View style={styles.rowTop}>
                       <Text style={styles.customerName} numberOfLines={1}>{r.customer_name}</Text>
-                      <Text style={[styles.amount, r.is_paid && styles.amountPaid]}>{r.amount.toFixed(2)} €</Text>
+                      <Text style={[styles.amount, r.is_paid && styles.amountPaid]}>{formatMoney(r.amount)}</Text>
                     </View>
                     {!r.is_paid && (r.paid_amount || 0) > 0 && (
                       <Text style={styles.description}>
-                        {t('receivables.paidSoFar').replace('{paid}', r.paid_amount.toFixed(2)).replace('{left}', leftToPay(r).toFixed(2))}
+                        {t('receivables.paidSoFar').replace('{paid}', formatAmount(r.paid_amount)).replace('{left}', formatAmount(leftToPay(r)))}
                       </Text>
                     )}
                     {(r.credited_amount || 0) > 0 && (
                       <Text style={styles.description}>
-                        {t('receivables.creditedLine').replace('{amount}', (r.credited_amount || 0).toFixed(2))}
+                        {t('receivables.creditedLine').replace('{amount}', formatAmount((r.credited_amount || 0)))}
                       </Text>
                     )}
                     {(r.refund_due || 0) > 0 && (
                       <Text style={[styles.description, { color: COLORS.warning }]}>
-                        {t('receivables.refundDue').replace('{amount}', (r.refund_due || 0).toFixed(2))}
+                        {t('receivables.refundDue').replace('{amount}', formatAmount((r.refund_due || 0)))}
                       </Text>
                     )}
                     {r.description ? <Text style={styles.description} numberOfLines={1}>{r.description}</Text> : null}
@@ -416,7 +417,7 @@ export default function ReceivablesScreen() {
                 <Text style={styles.modalTitle}>{t('receivables.paymentTitle')}</Text>
                 {payingReceivable && (
                   <Text style={styles.description}>
-                    {payingReceivable.customer_name} · {t('receivables.leftToPay').replace('{left}', leftToPay(payingReceivable).toFixed(2))}
+                    {payingReceivable.customer_name} · {t('receivables.leftToPay').replace('{left}', formatAmount(leftToPay(payingReceivable)))}
                   </Text>
                 )}
                 <Text style={styles.inputLabel}>{t('receivables.paymentAmount')}</Text>
@@ -524,7 +525,7 @@ export default function ReceivablesScreen() {
                     {(editingReceivable.payments || []).map((payment) => (
                       <View key={payment.id} style={styles.paymentHistoryRow}>
                         <Text style={styles.paymentHistoryText}>
-                          {format(parseISO(payment.date), 'd MMM yyyy', { locale: dateLocale })} · {payment.amount.toFixed(2)} €
+                          {format(parseISO(payment.date), 'd MMM yyyy', { locale: dateLocale })} · {formatMoney(payment.amount)}
                           {payment.method ? ` · ${t(`scan.paymentMethod.${payment.method}`)}` : ''}
                         </Text>
                         {!editingReceivable.cancelled && (

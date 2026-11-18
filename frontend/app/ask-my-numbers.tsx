@@ -21,6 +21,7 @@ import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -190,10 +191,10 @@ export default function AskMyNumbersScreen() {
                             ].map(({ key, label, data }) => (
                               <View key={key} style={styles.digestPeriod}>
                                 <Text style={styles.digestPeriodLabel}>{label} ({monthLabel(data.label)})</Text>
-                                <Text style={styles.digestRow}>{t('askMyNumbers.revenue')}: {data.revenue.toFixed(2)} €</Text>
-                                <Text style={styles.digestRow}>{t('askMyNumbers.expenses')}: {data.expenses.toFixed(2)} €</Text>
+                                <Text style={styles.digestRow}>{t('askMyNumbers.revenue')}: {formatMoney(data.revenue)}</Text>
+                                <Text style={styles.digestRow}>{t('askMyNumbers.expenses')}: {formatMoney(data.expenses)}</Text>
                                 <Text style={styles.digestRow}>
-                                  {t('askMyNumbers.profit')}: {data.profit === null ? t('askMyNumbers.profitHidden') : `${data.profit.toFixed(2)} €`}
+                                  {t('askMyNumbers.profit')}: {data.profit === null ? t('askMyNumbers.profitHidden') : `${formatMoney(data.profit)}`}
                                 </Text>
                               </View>
                             ))}
@@ -204,7 +205,7 @@ export default function AskMyNumbersScreen() {
                               <Text style={styles.digestSectionLabel}>{t('askMyNumbers.topExpenses')}</Text>
                               {d.top_expenses_this_month.slice(0, 5).map((e, i) => (
                                 <Text key={`${e.name}-${i}`} style={styles.digestRow}>
-                                  {e.name} — {e.amount.toFixed(2)} €
+                                  {e.name} — {formatMoney(e.amount)}
                                 </Text>
                               ))}
                             </View>
@@ -215,7 +216,7 @@ export default function AskMyNumbersScreen() {
                               {t('askMyNumbers.unpaid')
                                 .replace('{count}', String(d.unpaid_invoices.count))
                                 .replace('{overdue}', String(d.unpaid_invoices.overdue_count))
-                                .replace('{amount}', d.unpaid_invoices.total_unpaid_amount.toFixed(2))}
+                                .replace('{amount}', formatAmount(d.unpaid_invoices.total_unpaid_amount))}
                             </Text>
                           )}
 
@@ -224,7 +225,7 @@ export default function AskMyNumbersScreen() {
                               {t('askMyNumbers.receivables')
                                 .replace('{count}', String(d.receivables.unpaid_count))
                                 .replace('{overdue}', String(d.receivables.overdue_count))
-                                .replace('{amount}', d.receivables.total_owed.toFixed(2))}
+                                .replace('{amount}', formatAmount(d.receivables.total_owed))}
                             </Text>
                           )}
 
@@ -232,27 +233,27 @@ export default function AskMyNumbersScreen() {
                             <Text style={styles.digestRow}>
                               {t('askMyNumbers.budget')
                                 .replace('{percent}', String(d.budget.percent_used))
-                                .replace('{limit}', d.budget.expense_limit.toFixed(2))}
+                                .replace('{limit}', formatAmount(d.budget.expense_limit))}
                             </Text>
                           )}
 
                           {d.vat_due_this_month !== null && d.vat_due_this_month !== undefined && (
                             <Text style={styles.digestRow}>
-                              {t('askMyNumbers.vatDue').replace('{amount}', d.vat_due_this_month.toFixed(2))}
+                              {t('askMyNumbers.vatDue').replace('{amount}', formatAmount(d.vat_due_this_month))}
                             </Text>
                           )}
 
                           {d.forecast.revenue && (
                             <Text style={styles.digestRow}>
                               {t('askMyNumbers.forecastRevenue')
-                                .replace('{amount}', d.forecast.revenue.next_month_predicted.toFixed(2))
+                                .replace('{amount}', formatAmount(d.forecast.revenue.next_month_predicted))
                                 .replace('{note}', d.forecast.revenue.trend === 'insufficient_data' ? t('askMyNumbers.forecastInsufficientData') : '')}
                             </Text>
                           )}
                           {d.forecast.expenses && (
                             <Text style={styles.digestRow}>
                               {t('askMyNumbers.forecastExpenses')
-                                .replace('{amount}', d.forecast.expenses.next_month_predicted.toFixed(2))
+                                .replace('{amount}', formatAmount(d.forecast.expenses.next_month_predicted))
                                 .replace('{note}', d.forecast.expenses.trend === 'insufficient_data' ? t('askMyNumbers.forecastInsufficientData') : '')}
                             </Text>
                           )}
@@ -261,7 +262,7 @@ export default function AskMyNumbersScreen() {
                             <Text style={styles.digestRow}>
                               {t('askMyNumbers.roi')
                                 .replace('{roiPercent}', d.roi.roi_percent === null ? '—' : String(d.roi.roi_percent))
-                                .replace('{investment}', d.roi.total_personal_investment.toFixed(2))}
+                                .replace('{investment}', formatAmount(d.roi.total_personal_investment))}
                             </Text>
                           )}
 
@@ -269,7 +270,7 @@ export default function AskMyNumbersScreen() {
                             <Text style={styles.digestRow}>
                               {t('askMyNumbers.assets')
                                 .replace('{count}', String(d.assets.active_count))
-                                .replace('{value}', d.assets.total_net_book_value.toFixed(2))}
+                                .replace('{value}', formatAmount(d.assets.total_net_book_value))}
                             </Text>
                           )}
 
@@ -277,7 +278,7 @@ export default function AskMyNumbersScreen() {
                             <Text style={styles.digestRow}>
                               {t('askMyNumbers.payroll')
                                 .replace('{count}', String(d.payroll.employee_count))
-                                .replace('{amount}', d.payroll.total_employer_cost.toFixed(2))}
+                                .replace('{amount}', formatAmount(d.payroll.total_employer_cost))}
                             </Text>
                           )}
 
@@ -298,7 +299,7 @@ export default function AskMyNumbersScreen() {
                                   {t('askMyNumbers.reorderNudge')
                                     .replace('{item}', n.item_name)
                                     .replace('{days}', String(n.median_days_between))
-                                    .replace('{value}', n.avg_order_value.toFixed(0))
+                                    .replace('{value}', formatAmount(n.avg_order_value))
                                     .replace('{since}', String(n.days_since_last))
                                     .replace('{quantity}', String(n.recommended_quantity))
                                     .replace('{unit}', n.unit)}

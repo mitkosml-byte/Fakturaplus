@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { StaffingEfficiencyStat, StaffingRebalanceSuggestion } from '../../types';
 import { COLORS } from '../../theme/colors';
+import { formatMoney } from '../../utils/money';
 
 // Module: cross-data-source insight #1 - revenue per scheduled labor-hour
 // by weekday (get_staffing_efficiency), combining Work Schedule's own
@@ -49,7 +50,7 @@ export function StaffingEfficiencyCard({ weekdays, suggestion }: Props) {
                   ]}
                 />
               </View>
-              <Text style={styles.valueLabel}>{w.revenue_per_labor_hour.toFixed(0)} €/ч</Text>
+              <Text style={styles.valueLabel}>{formatMoney(w.revenue_per_labor_hour)}/ч</Text>
             </View>
           );
         })}

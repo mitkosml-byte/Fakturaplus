@@ -12,6 +12,7 @@ import { getRoleName, getRoleColor } from '../utils/roles';
 import { COLORS } from '../theme/colors';
 import { BottomSheet } from './BottomSheet';
 import { Avatar } from './Avatar';
+import { formatMoney } from '../utils/money';
 
 type Props = {
   visible: boolean;
@@ -153,7 +154,7 @@ export function TeamMemberProfileSheet({ visible, userId, onClose }: Props) {
                 <Text style={styles.statLabel}>{t('schedule.hoursThisMonth')}</Text>
               </View>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{profile.schedule_summary.estimated_pay.toFixed(2)} €</Text>
+                <Text style={styles.statValue}>{formatMoney(profile.schedule_summary.estimated_pay)}</Text>
                 <Text style={styles.statLabel}>{t('schedule.estimatedPay')}</Text>
               </View>
               <View style={styles.statItem}>

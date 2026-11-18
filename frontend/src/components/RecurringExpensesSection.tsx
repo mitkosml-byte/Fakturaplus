@@ -15,6 +15,7 @@ import { PressableScale } from './PressableScale';
 import type {
   RecurringExpense, RecurringKind, RecurringOccurrence, RecurringOverview, RecurringRecord,
 } from '../types';
+import { formatMoney } from '../utils/money';
 
 type Props = {
   overview: RecurringOverview | null;
@@ -159,7 +160,7 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
     return name.charAt(0).toUpperCase() + name.slice(1);
   };
   const shortDay = (iso?: string | null) => (iso ? format(parseISO(iso), 'd MMM', { locale: dateLocale }) : '');
-  const money = (value: number) => `${value.toFixed(2)} €`;
+  const money = (value: number) => `${formatMoney(value)}`;
   const recordLabel = (record: RecurringRecord) =>
     record.source === 'expense' || (!record.number && record.description)
       ? t('recurring.expenseLabel')

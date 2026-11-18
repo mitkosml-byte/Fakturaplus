@@ -26,6 +26,7 @@ import type { RecurringOverview } from '../src/types';
 import { COLORS } from '../src/theme/colors';
 import { toApiMonth } from '../src/utils/periodRange';
 import { format, parseISO } from 'date-fns';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 export default function BudgetScreen() {
   const { t, dateLocale } = useTranslation();
@@ -206,7 +207,7 @@ export default function BudgetScreen() {
                     <Text style={styles.budgetStatLabel}>{t('budget.spent')}</Text>
                     <CountUp
                       value={budgetStatus.total_spent}
-                      formatter={(n) => `${n.toFixed(2)} €`}
+                      formatter={(n) => `${formatMoney(n)}`}
                       style={[styles.budgetStatValue, { color: COLORS.danger }]}
                     />
                   </View>
@@ -214,7 +215,7 @@ export default function BudgetScreen() {
                     <Text style={styles.budgetStatLabel}>{t('budget.remaining')}</Text>
                     <CountUp
                       value={budgetStatus.remaining}
-                      formatter={(n) => `${n.toFixed(2)} €`}
+                      formatter={(n) => `${formatMoney(n)}`}
                       style={[styles.budgetStatValue, { color: COLORS.success }]}
                     />
                   </View>
@@ -222,7 +223,7 @@ export default function BudgetScreen() {
                     <Text style={styles.budgetStatLabel}>{t('budget.limit')}</Text>
                     <CountUp
                       value={budgetStatus.expense_limit}
-                      formatter={(n) => `${n.toFixed(2)} €`}
+                      formatter={(n) => `${formatMoney(n)}`}
                       style={styles.budgetStatValue}
                     />
                   </View>
@@ -235,7 +236,7 @@ export default function BudgetScreen() {
                       {t('budget.soFarNote').replace('{date}', format(parseISO(budgetStatus.counted_through), 'd MMM', { locale: dateLocale }))}
                       {' '}
                       <Text style={{ color: (budgetStatus.expected_percent ?? 0) >= 100 ? COLORS.danger : COLORS.textSecondary, fontWeight: '600' }}>
-                        {t('budget.expectedMonthEnd').replace('{amount}', budgetStatus.expected_month_end.toFixed(2))}
+                        {t('budget.expectedMonthEnd').replace('{amount}', formatAmount(budgetStatus.expected_month_end))}
                         {budgetStatus.expected_percent != null ? ` (${budgetStatus.expected_percent.toFixed(0)}%)` : ''}
                       </Text>
                     </Text>
@@ -320,7 +321,7 @@ export default function BudgetScreen() {
         title={t('import.button')}
         fields={[
           { key: 'month', label: t('budget.month') },
-          { key: 'expense_limit', label: t('budget.limit'), format: (v) => `${Number(v).toFixed(2)} €` },
+          { key: 'expense_limit', label: t('budget.limit'), format: (v) => `${formatMoney(Number(v))}` },
         ]}
         onImported={loadData}
       />

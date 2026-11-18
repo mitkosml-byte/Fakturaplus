@@ -6,6 +6,7 @@ import { useTranslation } from '../../i18n';
 import { api } from '../../services/api';
 import type { BreakEven } from '../../types';
 import { COLORS } from '../../theme/colors';
+import { formatMoney } from '../../utils/money';
 
 type Props = {
   // May the viewer set up recurring expenses? Then the hint leads there.
@@ -14,7 +15,7 @@ type Props = {
   refreshSignal?: unknown;
 };
 
-const money = (n: number) => `${n.toFixed(2)} €`;
+const money = (n: number) => `${formatMoney(n)}`;
 
 // The day's target (Н5): what the month has to sell to end at zero - its
 // fixed costs over the usual margin - and what that asks of today. One

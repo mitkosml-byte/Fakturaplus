@@ -26,6 +26,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
+import { formatMoney } from '../src/utils/money';
 
 const CATEGORY_SHORT_LABELS: Record<AssetCategory, string> = {
   cat_i: 'I · Сгради',
@@ -326,19 +327,19 @@ export default function AssetsScreen() {
 
         <View style={styles.summaryCard}>
           <Text style={styles.summaryLabel}>{t('assets.netBookValue')}</Text>
-          <Text style={styles.summaryValue}>{(summary?.total_net_book_value || 0).toFixed(2)} €</Text>
+          <Text style={styles.summaryValue}>{formatMoney((summary?.total_net_book_value || 0))}</Text>
           <View style={styles.summaryRow}>
             <View style={styles.summarySubItem}>
               <Text style={styles.summarySubLabel}>{t('assets.acquisitionValue')}</Text>
-              <Text style={styles.summarySubValue}>{(summary?.total_acquisition_value || 0).toFixed(2)} €</Text>
+              <Text style={styles.summarySubValue}>{formatMoney((summary?.total_acquisition_value || 0))}</Text>
             </View>
             <View style={styles.summarySubItem}>
               <Text style={styles.summarySubLabel}>{t('assets.accumulatedDepreciation')}</Text>
-              <Text style={styles.summarySubValue}>{(summary?.total_accumulated_depreciation || 0).toFixed(2)} €</Text>
+              <Text style={styles.summarySubValue}>{formatMoney((summary?.total_accumulated_depreciation || 0))}</Text>
             </View>
             <View style={styles.summarySubItem}>
               <Text style={styles.summarySubLabel}>{t('assets.monthlyDepreciation')}</Text>
-              <Text style={styles.summarySubValue}>{(summary?.monthly_depreciation_total || 0).toFixed(2)} €</Text>
+              <Text style={styles.summarySubValue}>{formatMoney((summary?.monthly_depreciation_total || 0))}</Text>
             </View>
           </View>
         </View>
@@ -391,11 +392,11 @@ export default function AssetsScreen() {
                 <View style={styles.assetFigures}>
                   <View style={styles.assetFigureItem}>
                     <Text style={styles.assetFigureLabel}>{t('assets.netBookValue')}</Text>
-                    <Text style={styles.assetFigureValue}>{asset.net_book_value.toFixed(2)} €</Text>
+                    <Text style={styles.assetFigureValue}>{formatMoney(asset.net_book_value)}</Text>
                   </View>
                   <View style={styles.assetFigureItem}>
                     <Text style={styles.assetFigureLabel}>{t('assets.monthlyDepreciation')}</Text>
-                    <Text style={styles.assetFigureValue}>{asset.monthly_depreciation.toFixed(2)} €</Text>
+                    <Text style={styles.assetFigureValue}>{formatMoney(asset.monthly_depreciation)}</Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -533,7 +534,7 @@ export default function AssetsScreen() {
                                   {taken ? ` · ${t('assets.invoiceTaken')}` : ''}
                                 </Text>
                               </View>
-                              <Text style={styles.invoiceCandidateAmount}>{inv.total_amount.toFixed(2)} €</Text>
+                              <Text style={styles.invoiceCandidateAmount}>{formatMoney(inv.total_amount)}</Text>
                             </TouchableOpacity>
                           );
                         })
@@ -587,11 +588,11 @@ export default function AssetsScreen() {
                 <View style={styles.previewCard}>
                   <View style={styles.previewRow}>
                     <Text style={styles.previewLabel}>{t('assets.accumulatedDepreciation')}</Text>
-                    <Text style={styles.previewValue}>{editingAsset.accumulated_depreciation.toFixed(2)} €</Text>
+                    <Text style={styles.previewValue}>{formatMoney(editingAsset.accumulated_depreciation)}</Text>
                   </View>
                   <View style={[styles.previewRow, styles.previewRowHighlight]}>
                     <Text style={styles.previewLabelBold}>{t('assets.netBookValue')}</Text>
-                    <Text style={styles.previewValueBold}>{editingAsset.net_book_value.toFixed(2)} €</Text>
+                    <Text style={styles.previewValueBold}>{formatMoney(editingAsset.net_book_value)}</Text>
                   </View>
                 </View>
               )}
@@ -674,7 +675,7 @@ export default function AssetsScreen() {
         fields={[
           { key: 'name', label: t('assets.name') },
           { key: 'category', label: t('assets.category') },
-          { key: 'acquisition_value', label: t('assets.acquisitionValue'), format: (v) => `${Number(v).toFixed(2)} €` },
+          { key: 'acquisition_value', label: t('assets.acquisitionValue'), format: (v) => `${formatMoney(Number(v))}` },
         ]}
         onImported={loadData}
       />

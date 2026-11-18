@@ -47,7 +47,7 @@ def test_c7_a_day_by_vat_group_counts_each_rate_on_its_own(client):
 def test_c7_the_groups_and_the_total_cannot_disagree(client):
     _, _, owner = _company()
     wrong = client.post("/api/daily-revenue", headers=owner, json={"date": DAY, "fiscal_revenue": 300, "vat_groups": SPLIT})
-    assert wrong.status_code == 400 and "279.00" in wrong.json()["detail"]
+    assert wrong.status_code == 400 and "279,00" in wrong.json()["detail"]
     assert client.post("/api/daily-revenue", headers=owner, json={"date": DAY, "fiscal_revenue": 279, "vat_groups": SPLIT}).status_code == 200
 
     # A new total with no rate, on a day split by rate: refused - which

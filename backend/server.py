@@ -53,6 +53,7 @@ from services.business_calendar import (
     now_local, stored_day, today_local,
 )
 from services import revenue_vat
+from services.money_text import fmt_amount, fmt_eur
 
 ROOT_DIR = Path(__file__).parent
 
@@ -3243,7 +3244,7 @@ def generate_wallet_advice(
 
     # Upcoming recurring obligations that would eat into what's still safe to spend.
     for item in upcoming:
-        note = f"📅 Предстои плащане „{item['description']}“ ({item['amount']:.2f} €) на {item['next_due_date']}"
+        note = f"📅 Предстои плащане „{item['description']}“ ({fmt_eur(item['amount'])}) на {item['next_due_date']}"
         if safe_to_spend - item["amount"] < 0:
             note += " - текущото „безопасно за теглене“ не го покрива"
         advice.append(note)
@@ -3587,7 +3588,7 @@ async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -
         signals.append({
             "key": "unpaid_invoices", "severity": "critical", "priority": 90,
             "title": "Просрочени фактури към доставчици",
-            "detail": f"{len(overdue)} от {len(unpaid)} неплатени фактури са просрочени - общо {_owed(overdue):.2f} €.",
+            "detail": f"{len(overdue)} от {len(unpaid)} неплатени фактури са просрочени - общо {fmt_eur(_owed(overdue))}.",
             "route": "/(tabs)/invoices?paymentFilter=overdue",
             "fingerprint": "overdue|" + ",".join(sorted(inv["id"] for inv in overdue)),
         })
@@ -3600,7 +3601,7 @@ async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -
             "title": f"{count} просрочени фактури изглеждат платени" if count > 1 else "Просрочена фактура изглежда платена",
             "detail": (
                 f"Купуваш от {names} и след падежа - най-вероятно са платени по банка, "
-                f"но не са отбелязани ({_owed(likely_paid):.2f} €). Отбележи ги като платени?"
+                f"но не са отбелязани ({fmt_eur(_owed(likely_paid))}). Отбележи ги като платени?"
             ),
             "route": "/(tabs)/invoices?paymentFilter=overdue",
             "fingerprint": ",".join(sorted(inv["id"] for inv in likely_paid)),
@@ -3611,7 +3612,7 @@ async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -
         signals.append({
             "key": "unpaid_invoices", "severity": "warning", "priority": 45,
             "title": "Неплатени фактури към доставчици",
-            "detail": f"{len(unpaid)} неплатени фактури на обща стойност {_owed(unpaid):.2f} €.",
+            "detail": f"{len(unpaid)} неплатени фактури на обща стойност {fmt_eur(_owed(unpaid))}.",
             "route": "/(tabs)/invoices?paymentFilter=unpaid",
             "fingerprint": "unpaid|" + ",".join(sorted(inv["id"] for inv in unpaid)),
         })
@@ -3650,18 +3651,18 @@ async def _signal_receivables(company_id, scope, current_user, visibility) -> Op
     top = max(owed_by, key=lambda key: owed_by[key])
     total = sum(owed_by.values())
     customers = _count_bg(len(owed_by), "клиент", "клиента")
-    most = f" Най-много дължи {names[top]} - {owed_by[top]:.2f} €." if len(owed_by) > 1 else f" Дължи {names[top]}."
+    most = f" Най-много дължи {names[top]} - {fmt_eur(owed_by[top])}." if len(owed_by) > 1 else f" Дължи {names[top]}."
     if overdue:
         return {
             "key": "receivables", "severity": "critical", "priority": 85,
             "title": "Просрочени вземания от клиенти",
-            "detail": f"{_count_bg(len(shown), 'просрочено вземане', 'просрочени вземания')} от {customers} - общо {total:.2f} €.{most}",
+            "detail": f"{_count_bg(len(shown), 'просрочено вземане', 'просрочени вземания')} от {customers} - общо {fmt_eur(total)}.{most}",
             "route": "/receivables",
         }
     return {
         "key": "receivables", "severity": "info", "priority": 35,
         "title": "Чакащи плащания от клиенти",
-        "detail": f"{_count_bg(len(shown), 'неплатено вземане', 'неплатени вземания')} от {customers} - общо {total:.2f} €.{most}",
+        "detail": f"{_count_bg(len(shown), 'неплатено вземане', 'неплатени вземания')} от {customers} - общо {fmt_eur(total)}.{most}",
         "route": "/receivables",
     }
 
@@ -3759,12 +3760,12 @@ async def _signal_payments_this_week(company_id, scope, current_user, visibility
         return None
     parts = []
     if due:
-        parts.append(f"{_count_bg(len(due), 'фактура', 'фактури')} за {sum(invoice_left(inv) for inv in due):.2f} €")
+        parts.append(f"{_count_bg(len(due), 'фактура', 'фактури')} за {fmt_eur(sum(invoice_left(inv) for inv in due))}")
     if recurring:
-        named = ", ".join(f"{name} {amount:.2f} €" for name, amount in recurring[:2])
+        named = ", ".join(f"{name} {fmt_eur(amount)}" for name, amount in recurring[:2])
         if len(recurring) > 2:
             rest = recurring[2:]
-            named += f" и още {_count_bg(len(rest), 'периодичен разход', 'периодични разхода')} за {sum(a for _, a in rest):.2f} €"
+            named += f" и още {_count_bg(len(rest), 'периодичен разход', 'периодични разхода')} за {fmt_eur(sum(a for _, a in rest))}"
         parts.append(named)
     when = "Следващата седмица" if next_week else "Тази седмица"
     return {
@@ -4099,11 +4100,11 @@ async def _signal_cash_flow(company_id, scope, current_user, visibility) -> Opti
     biggest = sorted(
         (e for e in flow["events"] if e["amount"] < 0 and e["date"] <= flow["lowest"]["date"]), key=lambda e: e["amount"],
     )[:2]
-    before = ", ".join(f"{e['label']} {abs(e['amount']):.2f} €" for e in biggest)
+    before = ", ".join(f"{e['label']} {fmt_eur(abs(e['amount']))}" for e in biggest)
     days_left = (first - today_local()).days
     detail = (
         f"Около {first.strftime('%d.%m')} парите може да не стигнат: най-ниско "
-        f"{lowest['balance']:.2f} € на {date.fromisoformat(lowest['date']).strftime('%d.%m')}."
+        f"{fmt_eur(lowest['balance'])} на {date.fromisoformat(lowest['date']).strftime('%d.%m')}."
         + (f" Най-големите плащания дотогава: {before}." if before else "")
     )
     return {
@@ -4171,20 +4172,20 @@ async def _signal_budget(company_id, scope, current_user, visibility) -> Optiona
         return {
             "key": "budget", "severity": "critical", "priority": 88,
             "title": "Бюджетът е надхвърлен",
-            "detail": f"Разходите вече са {status['total_spent']:.2f} € при лимит {status['expense_limit']:.2f} €.",
+            "detail": f"Разходите вече са {fmt_eur(status['total_spent'])} при лимит {fmt_eur(status['expense_limit'])}.",
             "route": "/budget",
         }
     if status["is_alert"]:
         return {
             "key": "budget", "severity": "warning", "priority": 65,
             "title": "Приближаваш бюджетния лимит",
-            "detail": f"Разходите са на {status['percent_used']:.0f}% от лимита от {status['expense_limit']:.2f} €.",
+            "detail": f"Разходите са на {status['percent_used']:.0f}% от лимита от {fmt_eur(status['expense_limit'])}.",
             "route": "/budget",
         }
     return None
 
 def _eur(value: float) -> str:
-    return f"{value:,.0f}".replace(",", "\u00a0") if abs(value) >= 10 else f"{value:.2f}".replace(".", ",")
+    return fmt_amount(value)
 
 
 async def _signal_price_alerts(company_id, scope, current_user, visibility) -> Optional[dict]:
@@ -4227,7 +4228,7 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
         top = rises[0]
         others = len(changes) - 1
         detail = (
-            f"\"{top['item_name']}\" при {top['supplier']}: {top['old_price']:.2f} → {top['new_price']:.2f} € "
+            f"\"{top['item_name']}\" при {top['supplier']}: {fmt_amount(top['old_price'])} → {fmt_eur(top['new_price'])} "
             f"({top['change_percent']:+.0f}%), ≈ {_eur(top['monthly_impact'])} € на месец."
         )
         if others > 0:
@@ -4296,7 +4297,7 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> List[d
     # pattern-based suggestion, never urgent enough to rank above an
     # actual money problem, however overdue the pattern looks.
     priority = min(50, round(30 + (overdue_ratio - 1.5) * 10))
-    value_note = f" (обичайно за ~{top['avg_order_value']:.0f} €)" if top.get("avg_order_value") else ""
+    value_note = f" (обичайно за ~{fmt_eur(top['avg_order_value'])})" if top.get("avg_order_value") else ""
     # Recommended quantity turns this from a bare "it's been a while" nudge
     # into something actionable - get_reorder_recommendations' same
     # trend-adjusted suggestion (see _compute_recurring_item_cadences),
@@ -4469,7 +4470,7 @@ async def _signal_schedule_unpaid(company_id, scope, current_user, visibility) -
     return {
         "key": "schedule_unpaid", "severity": "info", "priority": 38,
         "title": "Неплатени часове по график",
-        "detail": f"Екипът е отработил часове на стойност {unpaid:.2f} € този месец, които още не са маркирани като платени.",
+        "detail": f"Екипът е отработил часове на стойност {fmt_eur(unpaid)} този месец, които още не са маркирани като платени.",
         "route": "/pay-run",
     }
 
@@ -4551,9 +4552,9 @@ async def _signal_weak_weekday(company_id, scope, current_user, visibility) -> O
         "fingerprint": str(suggestion["weekday"]),
         "title": "Един ден от седмицата изостава",
         "detail": (
-            f"Оборотът ти в {day_name} е средно {suggestion['avg_revenue']:.0f} € - "
+            f"Оборотът ти в {day_name} е средно {fmt_eur(suggestion['avg_revenue'])} - "
             f"с {suggestion['percent_below_average']}% под обичайния ти ден "
-            f"({suggestion['overall_avg_revenue']:.0f} €). Струва ли си пълен работен ден?"
+            f"({fmt_eur(suggestion['overall_avg_revenue'])}). Струва ли си пълен работен ден?"
         ),
         "route": STATS_ITEMS_ROUTE,
     }
@@ -5152,7 +5153,7 @@ async def send_price_alert_pushes(company_id: str, alerts: List["PriceAlert"]):
     if len(alerts) == 1:
         a = alerts[0]
         title = "Промяна в цена"
-        body = f"{a.item_name} при {a.supplier}: {a.old_price:.2f} → {a.new_price:.2f} € ({a.change_percent:+.1f}%)"
+        body = f"{a.item_name} при {a.supplier}: {fmt_amount(a.old_price)} → {fmt_eur(a.new_price)} ({a.change_percent:+.1f}%)"
         if a.monthly_impact:
             body += f", ≈ {_eur(a.monthly_impact)} € на месец"
     else:
@@ -6431,8 +6432,8 @@ async def _budget_alert_tick():
                 db, recipient_ids,
                 title="Бюджетът е надхвърлен",
                 body=(
-                    f"Разходите за {current_month} вече са {status['total_spent']:.2f} € - "
-                    f"над лимита от {status['expense_limit']:.2f} €."
+                    f"Разходите за {current_month} вече са {fmt_eur(status['total_spent'])} - "
+                    f"над лимита от {fmt_eur(status['expense_limit'])}."
                 ),
                 data={"type": "budget", "month": current_month},
             )
@@ -6446,7 +6447,7 @@ async def _budget_alert_tick():
                 title="Приближаваш бюджетния лимит",
                 body=(
                     f"Разходите за {current_month} достигнаха {status['percent_used']:.0f}% "
-                    f"от лимита от {status['expense_limit']:.2f} €."
+                    f"от лимита от {fmt_eur(status['expense_limit'])}."
                 ),
                 data={"type": "budget", "month": current_month},
             )

@@ -26,6 +26,7 @@ import { AccessDenied, ScreenEnter, LocationPicker } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import PayrollPdfImportModal from '../src/components/PayrollPdfImportModal';
 import { COLORS } from '../src/theme/colors';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 const emptyEmployeeForm = () => ({
   name: '',
@@ -424,7 +425,7 @@ export default function PayrollScreen() {
 
         <View style={styles.totalCostCard}>
           <Text style={styles.totalCostLabel}>{t('payroll.totalCostThisMonth')}</Text>
-          <Text style={styles.totalCostValue}>{totalCostThisMonth.toFixed(2)} €</Text>
+          <Text style={styles.totalCostValue}>{formatMoney(totalCostThisMonth)}</Text>
         </View>
 
         <ScrollView
@@ -460,7 +461,7 @@ export default function PayrollScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.employeeName}>{emp.name}</Text>
                       <Text style={styles.employeePosition}>
-                        {emp.position || t('payroll.noPosition')} · {emp.base_salary.toFixed(0)} €
+                        {emp.position || t('payroll.noPosition')} · {formatMoney(emp.base_salary)}
                         {emp.agreement_type === 'net' ? ` ${t('payroll.netShort')}` : ` ${t('payroll.grossShort')}`}
                       </Text>
                     </View>
@@ -476,11 +477,11 @@ export default function PayrollScreen() {
                       )}
                       <View style={styles.entrySummaryRow}>
                         <Text style={styles.entrySummaryLabel}>{t('payroll.netAmount')}</Text>
-                        <Text style={styles.entrySummaryValue}>{entry.net_amount.toFixed(2)} €</Text>
+                        <Text style={styles.entrySummaryValue}>{formatMoney(entry.net_amount)}</Text>
                       </View>
                       <View style={styles.entrySummaryRow}>
                         <Text style={styles.entrySummaryLabel}>{t('payroll.totalEmployerCost')}</Text>
-                        <Text style={[styles.entrySummaryValue, { color: COLORS.primary }]}>{entry.total_employer_cost.toFixed(2)} €</Text>
+                        <Text style={[styles.entrySummaryValue, { color: COLORS.primary }]}>{formatMoney(entry.total_employer_cost)}</Text>
                       </View>
                       <TouchableOpacity style={styles.countedToggleRow} onPress={() => toggleCountedInExpenses(entry)}>
                         <Ionicons
@@ -685,28 +686,28 @@ export default function PayrollScreen() {
                   <>
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.grossAmount')}</Text>
-                      <Text style={styles.previewValue}>{preview.gross_amount.toFixed(2)} €</Text>
+                      <Text style={styles.previewValue}>{formatMoney(preview.gross_amount)}</Text>
                     </View>
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.employeeContributions')}</Text>
-                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{preview.employee_contributions.toFixed(2)} €</Text>
+                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{formatMoney(preview.employee_contributions)}</Text>
                     </View>
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.incomeTax')}</Text>
-                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{preview.income_tax.toFixed(2)} €</Text>
+                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{formatMoney(preview.income_tax)}</Text>
                     </View>
                     <View style={[styles.previewRow, styles.previewRowHighlight]}>
                       <Text style={styles.previewLabelBold}>{t('payroll.netAmount')}</Text>
-                      <Text style={styles.previewValueBold}>{preview.net_amount.toFixed(2)} €</Text>
+                      <Text style={styles.previewValueBold}>{formatMoney(preview.net_amount)}</Text>
                     </View>
                     <View style={styles.previewDivider} />
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.employerContributions')}</Text>
-                      <Text style={styles.previewValue}>+{preview.employer_contributions.toFixed(2)} €</Text>
+                      <Text style={styles.previewValue}>+{formatMoney(preview.employer_contributions)}</Text>
                     </View>
                     <View style={[styles.previewRow, styles.previewRowHighlight]}>
                       <Text style={styles.previewLabelBold}>{t('payroll.totalEmployerCost')}</Text>
-                      <Text style={[styles.previewValueBold, { color: COLORS.primary }]}>{preview.total_employer_cost.toFixed(2)} €</Text>
+                      <Text style={[styles.previewValueBold, { color: COLORS.primary }]}>{formatMoney(preview.total_employer_cost)}</Text>
                     </View>
                   </>
                 ) : null}
@@ -750,7 +751,7 @@ export default function PayrollScreen() {
                       {version.effective_from === '2000-01'
                         ? t('payroll.ratesFromStart')
                         : t('payroll.ratesVersion').replace('{month}', version.effective_from)}
-                      {` · ${version.min_insurance_income}–${version.max_insurance_income} €`}
+                      {` · ${formatAmount(version.min_insurance_income)}–${formatMoney(version.max_insurance_income)}`}
                     </Text>
                     <TouchableOpacity onPress={() => removeRatesVersion(version.effective_from)} hitSlop={8}>
                       <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
@@ -829,7 +830,7 @@ export default function PayrollScreen() {
         title={t('import.button')}
         fields={[
           { key: 'period_month', label: t('payroll.period'), format: (_v, row) => `${row.period_month}/${row.period_year}` },
-          { key: 'gross_amount', label: t('payroll.grossAmount'), format: (v, row) => `${Number(v ?? row.net_target ?? 0).toFixed(2)} €` },
+          { key: 'gross_amount', label: t('payroll.grossAmount'), format: (v, row) => `${formatMoney(Number(v ?? row.net_target ?? 0))}` },
         ]}
         onImported={loadData}
       />

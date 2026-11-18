@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
+import { formatMoney } from '../../utils/money';
 
 // Extracted from stats.tsx (Module 1 audit finding #4). Weighted purchase-
 // price inflation over a chosen period - pure presentation, the data
@@ -71,10 +72,10 @@ export function PriceInflationCard({
                 <Text style={styles.alertItemName} numberOfLines={1}>{item.item_name}</Text>
                 <Text style={styles.alertSupplier}>{item.supplier} • {item.purchase_count}x</Text>
                 <View style={styles.alertPrices}>
-                  <Text style={styles.alertOldPrice}>{item.start_price.toFixed(2)}€</Text>
+                  <Text style={styles.alertOldPrice}>{formatMoney(item.start_price)}</Text>
                   <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
                   <Text style={[styles.alertNewPrice, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>
-                    {item.end_price.toFixed(2)}€
+                    {formatMoney(item.end_price)}
                   </Text>
                   <View style={[styles.alertChangeBadge, { backgroundColor: item.change_percent >= 0 ? '#EF444420' : '#10B98120' }]}>
                     <Text style={[styles.alertChangeText, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>

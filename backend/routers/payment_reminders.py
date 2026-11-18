@@ -66,17 +66,17 @@ def reminder_text(stage: str, *, company: dict, label: str, left: float, due: da
     sign = f"Поздрави,\n{company.get('name') or ''}".strip()
     already = "Ако вече сте платили, моля, не обръщайте внимание на това писмо.\n\n"
     if stage == "due":
-        body = f"напомняме, че днес е падежът за плащане по {label} - {left:.2f} €.\n\n{pay_line}{already}"
+        body = f"напомняме, че днес е падежът за плащане по {label} - {fmt_eur(left)}.\n\n{pay_line}{already}"
         subject = f"Падеж днес - {label}"
     elif stage == "two_weeks":
         body = (
-            f"плащането по {label} с падеж {due.strftime('%d.%m.%Y')} закъснява с {days_overdue} дни - остават {left:.2f} €. "
+            f"плащането по {label} с падеж {due.strftime('%d.%m.%Y')} закъснява с {days_overdue} дни - остават {fmt_eur(left)}. "
             f"Молим да го направите или да се свържете с нас, ако има въпрос по документа.\n\n{pay_line}"
         )
         subject = f"Просрочено плащане - {label}"
     else:
         body = (
-            f"плащането по {label} с падеж {due.strftime('%d.%m.%Y')} все още не е постъпило - остават {left:.2f} €. "
+            f"плащането по {label} с падеж {due.strftime('%d.%m.%Y')} все още не е постъпило - остават {fmt_eur(left)}. "
             f"Молим да го направите в най-скоро време.\n\n{pay_line}{already}"
         )
         subject = f"Напомняне за плащане - {label}"
@@ -288,7 +288,7 @@ async def payment_reminders_signal(company_id: Optional[str], scope: dict, curre
     oldest = due[0]
     detail = (
         f"{len(due)} {'напомняне чака' if len(due) == 1 else 'напомняния чакат'} да ги прегледате и изпратите - "
-        f"общо {total:.2f} €. Най-старото: {oldest['customer_name']}, {oldest['label']}."
+        f"общо {fmt_eur(total)}. Най-старото: {oldest['customer_name']}, {oldest['label']}."
     )
     return {
         "key": "payment_reminders", "severity": "warning", "priority": 70, "title": "Напомняния за плащане към клиенти",

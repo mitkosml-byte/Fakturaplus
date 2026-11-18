@@ -209,7 +209,7 @@ def _apply_vat_groups(revenue: DailyRevenueCreate, changes: Dict[str, Any], held
         if revenue.fiscal_revenue is not None and abs(revenue.fiscal_revenue - total) > 0.01:
             raise HTTPException(
                 status_code=400,
-                detail=f"Сборът по ставки ДДС ({total:.2f} €) не е равен на фискализирания оборот ({revenue.fiscal_revenue:.2f} €)",
+                detail=f"Сборът по ставки ДДС ({fmt_eur(total)}) не е равен на фискализирания оборот ({fmt_eur(revenue.fiscal_revenue)})",
             )
         changes["fiscal_revenue"] = total
         changes["vat_groups"] = groups if len(groups) > 1 else []

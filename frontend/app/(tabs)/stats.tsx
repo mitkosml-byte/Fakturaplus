@@ -48,6 +48,7 @@ import { SupplierCompareModal } from '../../src/components/stats/SupplierCompare
 import { COLORS } from '../../src/theme/colors';
 import { restrictedDataNote } from '../../src/utils/visibilityNote';
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, interpolate, Extrapolation } from 'react-native-reanimated';
+import { formatAmount, formatMoney } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -689,11 +690,11 @@ export default function StatsScreen() {
     const depreciation = summary?.total_depreciation_expense;
     const parts: string[] = [];
     if (depreciation === null || depreciation === undefined) {
-      parts.push(t('stats.monthlyCostsBoth').replace('{amount}', `${monthlyCostsTotal.toFixed(2)} €`));
+      parts.push(t('stats.monthlyCostsBoth').replace('{amount}', `${formatMoney(monthlyCostsTotal)}`));
     } else {
       const payroll = Math.round((monthlyCostsTotal - depreciation) * 100) / 100;
-      if (payroll >= 0.01) parts.push(t('stats.monthlyPayroll').replace('{amount}', `${payroll.toFixed(2)} €`));
-      if (depreciation >= 0.01) parts.push(t('stats.monthlyDepreciation').replace('{amount}', `${depreciation.toFixed(2)} €`));
+      if (payroll >= 0.01) parts.push(t('stats.monthlyPayroll').replace('{amount}', `${formatMoney(payroll)}`));
+      if (depreciation >= 0.01) parts.push(t('stats.monthlyDepreciation').replace('{amount}', `${formatMoney(depreciation)}`));
     }
     if (!parts.length) return null;
     const costs = parts.join(t('stats.and'));
@@ -865,7 +866,7 @@ export default function StatsScreen() {
               </Text>
               <View style={styles.detailGrid}>
                 <View style={styles.detailItem}>
-                  <Text style={styles.detailValue}>{supplierDetail.overview?.total_amount.toFixed(2)} €</Text>
+                  <Text style={styles.detailValue}>{formatMoney(supplierDetail.overview?.total_amount)}</Text>
                   <Text style={styles.detailLabel}>{t('stats.totalAmount')}</Text>
                 </View>
                 <View style={styles.detailItem}>
@@ -873,11 +874,11 @@ export default function StatsScreen() {
                   <Text style={styles.detailLabel}>{t('stats.invoiceCount')}</Text>
                 </View>
                 <View style={styles.detailItem}>
-                  <Text style={styles.detailValue}>{supplierDetail.overview?.avg_invoice.toFixed(2)} €</Text>
+                  <Text style={styles.detailValue}>{formatMoney(supplierDetail.overview?.avg_invoice)}</Text>
                   <Text style={styles.detailLabel}>{t('stats.avgInvoice')}</Text>
                 </View>
                 <View style={styles.detailItem}>
-                  <Text style={styles.detailValue}>{supplierDetail.overview?.total_vat.toFixed(2)} €</Text>
+                  <Text style={styles.detailValue}>{formatMoney(supplierDetail.overview?.total_vat)}</Text>
                   <Text style={styles.detailLabel}>{t('stats.vat')}</Text>
                 </View>
               </View>
@@ -885,12 +886,12 @@ export default function StatsScreen() {
                 <Text style={styles.detailNote}>
                   {t('stats.creditNotesLine')
                     .replace('{count}', String(supplierDetail.overview?.credit_note_count || 0))
-                    .replace('{amount}', (supplierDetail.overview?.credit_note_total || 0).toFixed(2))}
+                    .replace('{amount}', formatAmount((supplierDetail.overview?.credit_note_total || 0)))}
                 </Text>
               )}
               {(supplierDetail.overview?.assets_total || 0) > 0 && (
                 <Text style={styles.detailNote}>
-                  {t('stats.assetsIncluded').replace('{amount}', (supplierDetail.overview?.assets_total || 0).toFixed(2))}
+                  {t('stats.assetsIncluded').replace('{amount}', formatAmount((supplierDetail.overview?.assets_total || 0)))}
                 </Text>
               )}
               
@@ -1004,7 +1005,7 @@ export default function StatsScreen() {
                       <Text style={styles.anomalyDate}>{anomaly.date}</Text>
                     </View>
                     <View style={styles.anomalyAmount}>
-                      <Text style={styles.anomalyValue}>{anomaly.amount.toFixed(2)} €</Text>
+                      <Text style={styles.anomalyValue}>{formatMoney(anomaly.amount)}</Text>
                       <Text style={styles.anomalyDeviation}>+{anomaly.deviation_percent}%</Text>
                     </View>
                   </View>
@@ -1033,7 +1034,7 @@ export default function StatsScreen() {
                     <Text style={[
                       styles.recentInvoiceAmount,
                       invoice.document_type === 'credit_note' && { color: COLORS.danger },
-                    ]}>{invoice.total_amount.toFixed(2)} €</Text>
+                    ]}>{formatMoney(invoice.total_amount)}</Text>
                   </View>
                 ))}
               </View>
@@ -1156,7 +1157,7 @@ export default function StatsScreen() {
                     </View>
                     <CountUp
                       value={summary?.pace?.avg_per_revenue_day ?? 0}
-                      formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
+                      formatter={(n) => `${formatMoney((Number.isFinite(n) ? n : 0))}`}
                       style={styles.avgTurnoverStatValue}
                     />
                     <Text style={styles.avgTurnoverStatSubtitle}>
@@ -1164,7 +1165,7 @@ export default function StatsScreen() {
                     </Text>
                     {summary?.pace?.is_current && summary.pace.expected_income !== null && (
                       <Text style={[styles.avgTurnoverStatSubtitle, styles.avgTurnoverExpected]}>
-                        {t('home.expectedPeriodEnd').replace('{amount}', `${summary.pace.expected_income.toFixed(2)} €`)}
+                        {t('home.expectedPeriodEnd').replace('{amount}', `${formatMoney(summary.pace.expected_income)}`)}
                       </Text>
                     )}
                   </View>
@@ -1247,7 +1248,7 @@ export default function StatsScreen() {
                     {summary && summary.total_income !== null && (
                       <View style={styles.chartTotal}>
                         <Text style={[styles.chartTotalValue, { color: COLORS.success }]}>
-                          {(summary.total_income || 0).toFixed(2)} €
+                          {formatMoney((summary.total_income || 0))}
                         </Text>
                         {renderTrendBadge(summary.total_income, previousSummary?.total_income, true)}
                       </View>
@@ -1255,7 +1256,7 @@ export default function StatsScreen() {
                   </View>
                   {!!summary?.total_issued_invoices && (
                     <Text style={styles.chartSubNote}>
-                      {t('stats.ofWhichIssuedInvoices').replace('{amount}', summary.total_issued_invoices.toFixed(2))}
+                      {t('stats.ofWhichIssuedInvoices').replace('{amount}', formatAmount(summary.total_issued_invoices))}
                     </Text>
                   )}
                   {windowedIncomeBarData.length > 0 ? (() => {
@@ -1317,7 +1318,7 @@ export default function StatsScreen() {
                     {summary && summary.total_expense !== null && (
                       <View style={styles.chartTotal}>
                         <Text style={[styles.chartTotalValue, { color: COLORS.danger }]}>
-                          {(summary.total_expense || 0).toFixed(2)} €
+                          {formatMoney((summary.total_expense || 0))}
                         </Text>
                         {renderTrendBadge(summary.total_expense, previousSummary?.total_expense, false)}
                       </View>
@@ -1371,13 +1372,13 @@ export default function StatsScreen() {
                     <View style={styles.vatItem}>
                       <Text style={styles.vatLabel}>{t('stats.vatFromSales')}</Text>
                       <Text style={[styles.vatValue, { color: COLORS.danger }]}>
-                        +{summary?.fiscal_vat?.toFixed(2) || '0.00'} €
+                        +{formatMoney(summary?.fiscal_vat)}
                       </Text>
                     </View>
                     <View style={styles.vatItem}>
                       <Text style={styles.vatLabel}>{t('stats.vatCredit')}</Text>
                       <Text style={[styles.vatValue, { color: COLORS.success }]}>
-                        -{summary?.total_invoice_vat?.toFixed(2) || '0.00'} €
+                        -{formatMoney(summary?.total_invoice_vat)}
                       </Text>
                     </View>
                   </View>
@@ -1385,7 +1386,7 @@ export default function StatsScreen() {
                   <View style={styles.vatTotal}>
                     <Text style={styles.vatTotalLabel}>{t('stats.vatToPay')}</Text>
                     <Text style={[styles.vatTotalValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
-                      {summary?.vat_to_pay?.toFixed(2) || '0.00'} €
+                      {formatMoney(summary?.vat_to_pay)}
                     </Text>
                   </View>
                 </View>
@@ -1407,7 +1408,7 @@ export default function StatsScreen() {
                             <View key={s.supplier} style={styles.top3Item}>
                               <Text style={styles.top3Rank}>{idx + 1}</Text>
                               <Text style={styles.top3Name} numberOfLines={1}>{s.supplier}</Text>
-                              <Text style={styles.top3Value}>{s.total_amount.toFixed(0)} €</Text>
+                              <Text style={styles.top3Value}>{formatMoney(s.total_amount)}</Text>
                             </View>
                           ))
                         ) : (
@@ -1421,7 +1422,7 @@ export default function StatsScreen() {
                             <View key={item.item_name} style={styles.top3Item}>
                               <Text style={styles.top3Rank}>{idx + 1}</Text>
                               <Text style={styles.top3Name} numberOfLines={1}>{item.item_name}</Text>
-                              <Text style={styles.top3Value}>{item.total_value.toFixed(0)} €</Text>
+                              <Text style={styles.top3Value}>{formatMoney(item.total_value)}</Text>
                             </View>
                           ))
                         ) : (
@@ -1561,13 +1562,13 @@ export default function StatsScreen() {
                       <View style={styles.supplierTotalsRow}>
                         <View style={styles.supplierTotalItem}>
                           <Text style={styles.supplierTotalValue}>
-                            {supplierOverview.totals.total_amount.toFixed(2)} €
+                            {formatMoney(supplierOverview.totals.total_amount)}
                           </Text>
                           <Text style={styles.supplierTotalLabel}>{t('stats.totalAmount')}</Text>
                         </View>
                         <View style={styles.supplierTotalItem}>
                           <Text style={styles.supplierTotalValue}>
-                            {supplierOverview.totals.total_vat.toFixed(2)} €
+                            {formatMoney(supplierOverview.totals.total_vat)}
                           </Text>
                           <Text style={styles.supplierTotalLabel}>{t('stats.vat')}</Text>
                         </View>
@@ -1588,7 +1589,7 @@ export default function StatsScreen() {
                       </View>
                       {(supplierOverview.totals.assets_total || 0) > 0 && (
                         <Text style={styles.detailNote}>
-                          {t('stats.assetsIncluded').replace('{amount}', (supplierOverview.totals.assets_total || 0).toFixed(2))}
+                          {t('stats.assetsIncluded').replace('{amount}', formatAmount((supplierOverview.totals.assets_total || 0)))}
                         </Text>
                       )}
                     </View>
@@ -1641,7 +1642,7 @@ export default function StatsScreen() {
                             centerLabelComponent={() => (
                               <View style={styles.pieCenter}>
                                 <Text style={styles.pieCenterValue}>
-                                  {supplierOverview.totals.total_amount.toFixed(0)}€
+                                  {formatMoney(supplierOverview.totals.total_amount)}
                                 </Text>
                                 <Text style={styles.pieCenterLabel}>{t('stats.totalAmount')}</Text>
                               </View>
@@ -1777,12 +1778,12 @@ export default function StatsScreen() {
                                   {supplier.supplier}
                                 </Text>
                                 <Text style={styles.supplierMeta}>
-                                  {supplier.invoice_count} {t('stats.invoices')} • {t('stats.avgShort')} {supplier.avg_invoice.toFixed(0)}€
+                                  {supplier.invoice_count} {t('stats.invoices')} • {t('stats.avgShort')} {formatMoney(supplier.avg_invoice)}
                                 </Text>
                               </View>
                               <View style={styles.supplierAmounts}>
                                 <Text style={styles.supplierAmount}>
-                                  {supplier.total_amount.toFixed(2)} €
+                                  {formatMoney(supplier.total_amount)}
                                 </Text>
                                 <View style={styles.dependencyBadge}>
                                   <Text style={[
@@ -1906,7 +1907,7 @@ export default function StatsScreen() {
                           </View>
                           <View style={styles.supplierTotalItem}>
                             <Text style={styles.supplierTotalValue}>
-                              {(itemStats.totals?.total_value || 0).toFixed(0)} €
+                              {formatMoney((itemStats.totals?.total_value || 0))}
                             </Text>
                             <Text style={styles.supplierTotalLabel}>{t('stats.totalValue')}</Text>
                           </View>
@@ -2042,7 +2043,7 @@ export default function StatsScreen() {
                               <Text style={styles.supplierAmount}>
                                 {itemRankingType === 'quantity'
                                   ? `${Number.isInteger(item.quantity) ? item.quantity : item.quantity.toFixed(1)} ${item.unit || ''}`.trim()
-                                  : `${item.total_value.toFixed(2)} €`}
+                                  : `${formatMoney(item.total_value)}`}
                               </Text>
                               <View style={styles.itemTrendBadge}>
                                 <Ionicons 
@@ -2093,7 +2094,7 @@ export default function StatsScreen() {
                               ]}>
                                 {item.trend_percent > 0 ? '+' : ''}{item.trend_percent.toFixed(1)}%
                               </Text>
-                              <Text style={styles.itemAvgPrice}>{t('stats.avgPrice')}: {item.avg_price.toFixed(2)}€</Text>
+                              <Text style={styles.itemAvgPrice}>{t('stats.avgPrice')}: {formatMoney(item.avg_price)}</Text>
                             </View>
                           </TouchableOpacity>
                         ))}
@@ -2162,15 +2163,15 @@ export default function StatsScreen() {
                   <Text style={styles.detailCardTitle}>{t('stats.priceHistory')}</Text>
                   <View style={styles.detailGrid}>
                     <View style={styles.detailItem}>
-                      <Text style={styles.detailValue}>{itemPriceHistory.statistics.avg_price}€</Text>
+                      <Text style={styles.detailValue}>{formatMoney(itemPriceHistory.statistics.avg_price)}</Text>
                       <Text style={styles.detailLabel}>{t('stats.avgPrice')}</Text>
                     </View>
                     <View style={styles.detailItem}>
-                      <Text style={styles.detailValue}>{itemPriceHistory.statistics.min_price}€</Text>
+                      <Text style={styles.detailValue}>{formatMoney(itemPriceHistory.statistics.min_price)}</Text>
                       <Text style={styles.detailLabel}>{t('stats.minPrice')}</Text>
                     </View>
                     <View style={styles.detailItem}>
-                      <Text style={styles.detailValue}>{itemPriceHistory.statistics.max_price}€</Text>
+                      <Text style={styles.detailValue}>{formatMoney(itemPriceHistory.statistics.max_price)}</Text>
                       <Text style={styles.detailLabel}>{t('stats.maxPrice')}</Text>
                     </View>
                     <View style={styles.detailItem}>
@@ -2240,8 +2241,8 @@ export default function StatsScreen() {
                             itemBySupplier.recommendation.compared_per === 'base_unit' &&
                             itemBySupplier.recommendation.avg_base_price != null &&
                             itemBySupplier.recommendation.base_unit
-                              ? `${formatUnitPrice(itemBySupplier.recommendation.avg_base_price)}€/${itemBySupplier.recommendation.base_unit}`
-                              : `${itemBySupplier.recommendation.avg_price}€`
+                              ? `${formatUnitPrice(itemBySupplier.recommendation.avg_base_price)}\u00A0€/${itemBySupplier.recommendation.base_unit}`
+                              : formatMoney(itemBySupplier.recommendation.avg_price)
                           }
                         </Text>
                         {itemBySupplier.recommendation.compared_per === 'base_unit' && itemBySupplier.recommendation.base_unit && (
@@ -2273,10 +2274,10 @@ export default function StatsScreen() {
                         </Text>
                       </View>
                       <View style={styles.supplierComparePrices}>
-                        <Text style={styles.supplierComparePrice}>{sup.avg_price}€{sup.unit ? `/${sup.unit}` : ''}</Text>
+                        <Text style={styles.supplierComparePrice}>{formatMoney(sup.avg_price)}{sup.unit ? `/${sup.unit}` : ''}</Text>
                         {sup.avg_base_price != null && sup.base_unit && Math.abs(sup.avg_base_price - sup.avg_price) > 0.005 ? (
                           <Text style={styles.supplierComparePriceLabel}>
-                            {formatUnitPrice(sup.avg_base_price)}€/{sup.base_unit}
+                            {formatUnitPrice(sup.avg_base_price)}{'\u00A0'}€/{sup.base_unit}
                           </Text>
                         ) : (
                           <Text style={styles.supplierComparePriceLabel}>{t('stats.avgPrice')}</Text>
@@ -2312,7 +2313,7 @@ export default function StatsScreen() {
                           <Text style={styles.supplierCompareMeta}>{size.purchase_count} {t('stats.times')}</Text>
                         </View>
                         <View style={styles.supplierComparePrices}>
-                          <Text style={styles.supplierComparePrice}>{formatUnitPrice(size.avg_base_price)}€/{size.base_unit}</Text>
+                          <Text style={styles.supplierComparePrice}>{formatUnitPrice(size.avg_base_price)}{'\u00A0'}€/{size.base_unit}</Text>
                           {diff != null && (
                             <Text style={[
                               styles.supplierComparePriceLabel,
@@ -2398,7 +2399,7 @@ export default function StatsScreen() {
                         <Text style={styles.recentInvoiceNumber}>№{h.invoice_number}</Text>
                         <Text style={styles.recentInvoiceDate}>{h.date} • {h.supplier}</Text>
                       </View>
-                      <Text style={styles.recentInvoiceAmount}>{h.unit_price.toFixed(2)}€</Text>
+                      <Text style={styles.recentInvoiceAmount}>{formatMoney(h.unit_price)}</Text>
                     </View>
                   ))}
                 </View>

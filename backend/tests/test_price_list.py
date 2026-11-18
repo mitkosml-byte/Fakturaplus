@@ -64,7 +64,7 @@ def test_n8_the_margin_a_price_leaves_and_when_purchases_eat_it(free_client):
     assert (dearer["cost"], dearer["margin_then_percent"], dearer["margin_percent"], dearer["margin_dropped"]) == (1.38, 38.0, 31.0, True)
     assert (dearer["suggested_price"], dearer["suggested_gross"]) == (2.23, 2.68)
     signals = {s["key"]: s for s in client.get("/api/proactive/signals", headers=owner).json()["signals"]}
-    assert signals["margins"]["detail"] == "Маржът на „Бира 0,5 л“ падна от 38% на 31% - за същия марж: 2.68 € с ДДС."
+    assert signals["margins"]["detail"] == "Маржът на „Бира 0,5 л“ падна от 38% на 31% - за същия марж: 2,68\u00a0€ с ДДС."
     assert signals["margins"]["route"] == "/price-list"
     # Nothing changed by itself.
     assert dearer["price"] == 2.0

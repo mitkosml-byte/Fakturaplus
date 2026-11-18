@@ -3,6 +3,8 @@
 // multiple of the usual one - the question "is this a pack of N?", since
 // that is almost always a misread pack rather than a real +500% rise.
 
+import { formatAmount } from './money';
+
 type Translate = (key: string) => string;
 
 export interface PriceMeaningInput {
@@ -25,15 +27,15 @@ export function detectPackMultiple(oldQty: number, oldPrice: number, newQty: num
   return k;
 }
 
+// A price in the alert texts - the one money format (Л11); the texts carry the €.
 export function formatEur(value: number): string {
-  const abs = Math.abs(value);
-  return abs >= 10 ? String(Math.round(value)) : value.toFixed(2);
+  return formatAmount(value);
 }
 
 // A price per kg / l / piece: two decimals, three below 0.10 (a gram-sized
 // price would otherwise read as 0.00).
 export function formatUnitPrice(value: number): string {
-  return Math.abs(value) >= 0.1 ? value.toFixed(2) : value.toFixed(3);
+  return formatAmount(value, Math.abs(value) >= 0.1 ? 2 : 3);
 }
 
 export function isPackSuspect(alert: PriceMeaningInput): boolean {

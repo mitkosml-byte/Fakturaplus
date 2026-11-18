@@ -544,7 +544,7 @@ async def recurring_expense_signals(company_id: Optional[str], current_user: Use
             if occ["state"] == rs.DUE:
                 signals.append({
                     **base, "key": "recurring_due", "severity": "info", "priority": 44,
-                    "title": f"{what} {occ['expected_amount']:.2f} € за {when} - платен ли е?",
+                    "title": f"{what} {fmt_eur(occ['expected_amount'])} за {when} - платен ли е?",
                     "detail": (
                         f"Плаща се на {_short_day(occ['due_date'])}, без фактура. Ако е платен, запиши го като разход - "
                         "тогава влиза в разходите и печалбата за месеца."
@@ -554,9 +554,9 @@ async def recurring_expense_signals(company_id: Optional[str], current_user: Use
             elif occ["state"] == rs.PROBABLE:
                 match = occ["match"]
                 if match["source"] == "expense":
-                    seen = f"разход „{match.get('description')}“ {match['amount']:.2f} € на {_short_day(match.get('date'))}"
+                    seen = f"разход „{match.get('description')}“ {fmt_eur(match['amount'])} на {_short_day(match.get('date'))}"
                 else:
-                    seen = (f"фактура № {match.get('number')} от {match.get('supplier')} за {match['amount']:.2f} € "
+                    seen = (f"фактура № {match.get('number')} от {match.get('supplier')} за {fmt_eur(match['amount'])} "
                             f"на {_short_day(match.get('date'))}")
                 signals.append({
                     **base, "key": "recurring_match", "severity": "info", "priority": 46,
@@ -572,7 +572,7 @@ async def recurring_expense_signals(company_id: Optional[str], current_user: Use
                     "route": "/(tabs)/scan",
                     "title": f"Липсва фактурата за {what.lower()} за {when}",
                     "detail": (
-                        f"Очаква се{supplier} около {_short_day(occ['due_date'])} (обичайно {occ['expected_amount']:.2f} €). "
+                        f"Очаква се{supplier} около {_short_day(occ['due_date'])} (обичайно {fmt_eur(occ['expected_amount'])}). "
                         "Въведи я, когато дойде - тя е разходът, програмата не записва отделен."
                     ),
                     "actions": ["recurring_skip", "snooze"],
@@ -585,8 +585,8 @@ async def recurring_expense_signals(company_id: Optional[str], current_user: Use
                     **base, "key": "recurring_duplicate", "severity": "warning", "priority": 58,
                     "title": f"{what} за {when} - записан два пъти?",
                     "detail": (
-                        f"Има фактура № {invoice.get('number')} от {invoice.get('supplier')} за {invoice['amount']:.2f} € "
-                        f"и записан разход без фактура за {recorded:.2f} €. Ако са едно и също, остави фактурата."
+                        f"Има фактура № {invoice.get('number')} от {invoice.get('supplier')} за {fmt_eur(invoice['amount'])} "
+                        f"и записан разход без фактура за {fmt_eur(recorded)}. Ако са едно и също, остави фактурата."
                     ),
                     "match_source": "invoice", "match_id": invoice["id"],
                     "actions": ["recurring_yes", "recurring_no"],
@@ -612,7 +612,7 @@ async def recurring_expense_signals(company_id: Optional[str], current_user: Use
             "title": f"{item['description']} за {month_label(notice['month'])} дойде с фактура",
             "detail": (
                 f"Фактура № {notice.get('invoice_number')} от {notice.get('supplier')} замени записания без фактура "
-                f"разход ({float(notice.get('expense_amount') or 0):.2f} €), за да не се брои два пъти.{switched}"
+                f"разход ({fmt_eur(float(notice.get('expense_amount') or 0))}), за да не се брои два пъти.{switched}"
             ),
             "actions": ["dismiss"],
         })

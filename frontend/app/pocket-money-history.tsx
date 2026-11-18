@@ -22,6 +22,7 @@ import { PeriodNavigator } from '../src/components/PeriodNavigator';
 import { getPeriodBounds, toApiDate } from '../src/utils/periodRange';
 import { useSharedPeriod } from '../src/utils/sharedPeriod';
 import { COLORS } from '../src/theme/colors';
+import { formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -139,7 +140,7 @@ export default function PocketMoneyHistoryScreen() {
 
           <View style={styles.summaryBar}>
             <Text style={styles.summaryLabel}>{t('invoices.count')}: <Text style={styles.summaryValue}>{revenues.length}</Text></Text>
-            <Text style={styles.summaryLabel}>{t('expenses.totalLabel')}: <Text style={[styles.summaryValue, { color: COLORS.warning }]}>{total.toFixed(2)} €</Text></Text>
+            <Text style={styles.summaryLabel}>{t('expenses.totalLabel')}: <Text style={[styles.summaryValue, { color: COLORS.warning }]}>{formatMoney(total)}</Text></Text>
           </View>
 
           {loading ? (
@@ -168,7 +169,7 @@ export default function PocketMoneyHistoryScreen() {
                         {monthNames[parseInt(monthStr, 10) - 1]} {yearStr}
                       </Text>
                       <Text style={styles.monthHeaderStats}>
-                        {monthRevenues.length} · {monthTotal.toFixed(2)} €
+                        {monthRevenues.length} · {formatMoney(monthTotal)}
                       </Text>
                     </View>
                     {monthRevenues
@@ -177,7 +178,7 @@ export default function PocketMoneyHistoryScreen() {
                       .map((r) => (
                         <View key={r.id} style={styles.card}>
                           <Text style={styles.cardDate}>{format(parseISO(r.date), 'd MMM yyyy', { locale: dateLocale })}</Text>
-                          <Text style={styles.cardAmount}>{r.pocket_money.toFixed(2)} €</Text>
+                          <Text style={styles.cardAmount}>{formatMoney(r.pocket_money)}</Text>
                         </View>
                       ))}
                   </View>

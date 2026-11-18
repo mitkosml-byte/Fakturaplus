@@ -8,6 +8,7 @@ import { useTranslation } from '../i18n';
 import { Employee, PayrollImportPreviewResponse, PayrollImportCommitEntry } from '../types';
 import { ModalBlurBackdrop } from './ModalBlurBackdrop';
 import { COLORS } from '../theme/colors';
+import { formatMoney } from '../utils/money';
 
 interface Props {
   visible: boolean;
@@ -187,9 +188,9 @@ export default function PayrollPdfImportModal({ visible, onClose, employees, onI
                     {!!entry.position && <Text style={styles.rowMeta}>{entry.position}</Text>}
 
                     <View style={styles.amountsRow}>
-                      <Text style={styles.amountText}>{t('payroll.importPdfGross')}: {entry.gross_amount.toFixed(2)} €</Text>
-                      <Text style={styles.amountText}>{t('payroll.importPdfTax')}: {entry.income_tax.toFixed(2)} €</Text>
-                      <Text style={[styles.amountText, styles.amountNet]}>{t('payroll.importPdfNet')}: {entry.net_amount.toFixed(2)} €</Text>
+                      <Text style={styles.amountText}>{t('payroll.importPdfGross')}: {formatMoney(entry.gross_amount)}</Text>
+                      <Text style={styles.amountText}>{t('payroll.importPdfTax')}: {formatMoney(entry.income_tax)}</Text>
+                      <Text style={[styles.amountText, styles.amountNet]}>{t('payroll.importPdfNet')}: {formatMoney(entry.net_amount)}</Text>
                     </View>
 
                     {entry.already_imported ? (

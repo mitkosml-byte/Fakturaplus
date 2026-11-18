@@ -9,6 +9,7 @@ import { Expandable } from './Expandable';
 import { CountUp } from './CountUp';
 import { Skeleton } from './Skeleton';
 import { COLORS } from '../theme/colors';
+import { formatMoney } from '../utils/money';
 
 const STATUS_COLORS: Record<string, string> = {
   ok: COLORS.success,
@@ -81,7 +82,7 @@ export function PersonalWalletTeaser({ refreshSignal }: Props) {
               <Text style={styles.label}>{t('wallet.safeToSpend')}</Text>
               <CountUp
                 value={summary.safe_to_spend}
-                formatter={(n) => `${n.toFixed(2)} €`}
+                formatter={(n) => `${formatMoney(n)}`}
                 style={[styles.value, { color: statusColor }]}
               />
               <Text style={[styles.statusText, { color: statusColor }]}>

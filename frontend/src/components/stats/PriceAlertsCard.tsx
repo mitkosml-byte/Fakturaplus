@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
 import { isPackSuspect, priceAlertMeaning } from '../../utils/priceAlert';
+import { formatMoney } from '../../utils/money';
 
 // Extracted from stats.tsx (Module 1 audit finding #4 - its own named
 // example of a "clean extraction candidate"). Pure presentation + the
@@ -53,9 +54,9 @@ export function PriceAlertsCard({ priceAlerts, unreadAlerts, onOpenSettings, onV
                   {alert.supplier} · {t('priceAlertPopup.invoiceRef').replace('{number}', alert.invoice_number)}
                 </Text>
                 <View style={styles.alertPrices}>
-                  <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
+                  <Text style={styles.alertOldPrice}>{formatMoney(alert.old_price)}</Text>
                   <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
-                  <Text style={[styles.alertNewPrice, isDecrease && { color: COLORS.success }]}>{alert.new_price.toFixed(2)}€</Text>
+                  <Text style={[styles.alertNewPrice, isDecrease && { color: COLORS.success }]}>{formatMoney(alert.new_price)}</Text>
                   {isPack ? (
                     <View style={[styles.alertChangeBadge, { backgroundColor: COLORS.warning + '20' }]}>
                       <Text style={[styles.alertChangeText, { color: COLORS.warning }]}>

@@ -20,6 +20,7 @@ import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
 import { AccessDenied, ScreenEnter, AnimatedEmptyIcon, Avatar } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import { formatMoney } from '../src/utils/money';
 
 type ActionFilter = 'all' | 'create' | 'update' | 'delete' | 'export';
 
@@ -110,7 +111,7 @@ export default function AuditLogScreen() {
     if (entry.entity_type === 'invoice') {
       const supplierBit = d.supplier ? ` – ${d.supplier}` : '';
       const numberBit = d.invoice_number ? ` №${d.invoice_number}` : '';
-      const amountBit = typeof d.total_amount === 'number' ? ` (${d.total_amount.toFixed(2)} €)` : '';
+      const amountBit = typeof d.total_amount === 'number' ? ` (${formatMoney(d.total_amount)})` : '';
       if (entry.action === 'update') {
         const fields = Object.keys(d).join(', ');
         return `${t('auditLog.entityInvoice')}${numberBit}${fields ? `: ${fields}` : ''}`;
@@ -123,17 +124,17 @@ export default function AuditLogScreen() {
       const customer = d.customer_name || d.snapshot?.customer_name;
       const total = typeof d.total_amount === 'number' ? d.total_amount : d.snapshot?.total_amount;
       const customerBit = customer ? ` – ${customer}` : '';
-      const amountBit = typeof total === 'number' ? ` (${total.toFixed(2)} €)` : '';
+      const amountBit = typeof total === 'number' ? ` (${formatMoney(total)})` : '';
       const cancelledBit = d.cancelled ? ` – ${t('billingDocuments.cancelled')}` : '';
       const label = entry.entity_type === 'issued_credit_note' ? t('auditLog.entityIssuedCreditNote') : t('auditLog.entityIssuedInvoice');
       return `${label} №${d.invoice_number || ''}${customerBit}${amountBit}${cancelledBit}`;
     }
     if (entry.entity_type === 'expense') {
-      const amountBit = typeof d.amount === 'number' ? ` (${d.amount.toFixed(2)} €)` : '';
+      const amountBit = typeof d.amount === 'number' ? ` (${formatMoney(d.amount)})` : '';
       return `${t('auditLog.entityExpense')}${d.description ? ` – ${d.description}` : ''}${d.date ? `, ${d.date}` : ''}${amountBit}`;
     }
     if (entry.entity_type === 'payroll') {
-      const amountBit = typeof d.total_employer_cost === 'number' ? ` (${d.total_employer_cost.toFixed(2)} €)` : '';
+      const amountBit = typeof d.total_employer_cost === 'number' ? ` (${formatMoney(d.total_employer_cost)})` : '';
       return `${t('auditLog.entityPayroll')}${d.employee ? ` – ${d.employee}` : ''}${d.period ? `, ${d.period}` : ''}${amountBit}`;
     }
     if (entry.action === 'export') {

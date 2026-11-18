@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, ActivityIn
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
+import { formatMoney } from '../../utils/money';
 
 // Extracted from stats.tsx's renderCompareModal (Module 1 audit finding
 // #4). Pure presentation - compareResult is still fetched/held in
@@ -47,7 +48,7 @@ export function SupplierCompareModal({ visible, onClose, loadingCompare, compare
 
                 <View style={styles.compareBarRow}>
                   <Text style={styles.compareBarLabel}>{t('stats.compareTotalAmount')}</Text>
-                  <Text style={styles.compareBarValue}>{s.total_amount.toFixed(2)} €</Text>
+                  <Text style={styles.compareBarValue}>{formatMoney(s.total_amount)}</Text>
                 </View>
                 <View style={styles.compareBarTrack}>
                   <View style={[styles.compareBarFill, { width: `${(s.total_amount / maxAmount) * 100}%`, backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }]} />
@@ -60,7 +61,7 @@ export function SupplierCompareModal({ visible, onClose, loadingCompare, compare
                   </View>
                   <View style={styles.compareStatItem}>
                     <Text style={styles.compareStatLabel}>{t('stats.compareAvgInvoice')}</Text>
-                    <Text style={styles.compareStatValue}>{s.avg_invoice.toFixed(2)} €</Text>
+                    <Text style={styles.compareStatValue}>{formatMoney(s.avg_invoice)}</Text>
                   </View>
                 </View>
               </View>

@@ -259,7 +259,7 @@ async def add_receivable_payment(
     if existing.get("is_paid") or left <= 0:
         raise HTTPException(status_code=400, detail="Вземането вече е платено")
     if payload.amount > left + 0.01:
-        raise HTTPException(status_code=400, detail=f"Остават {left:.2f} € - плащането е по-голямо")
+        raise HTTPException(status_code=400, detail=f"Остават {fmt_eur(left)} - плащането е по-голямо")
     day = business_day(payload.date) if payload.date else today_local()
     if day is None:
         raise HTTPException(status_code=400, detail="Невалидна дата")
@@ -511,7 +511,7 @@ async def _create_credit_note(payload: BillingDocumentCreate, current_user: User
     amounts = invoice_vat_breakdown(items)
     left = round(float(invoice.get("total_amount") or 0) - float(invoice.get("credited_amount") or 0), 2)
     if amounts["total_amount"] > left + 0.005:
-        raise HTTPException(status_code=400, detail=f"Известието е по-голямо от остатъка по фактурата ({left:.2f} €)")
+        raise HTTPException(status_code=400, detail=f"Известието е по-голямо от остатъка по фактурата ({fmt_eur(left)})")
 
     if payload.external and not payload.invoice_number:
         raise HTTPException(status_code=400, detail="Въведи номера на известието, както е отпечатан")
