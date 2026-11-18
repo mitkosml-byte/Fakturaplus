@@ -237,7 +237,7 @@ export function RevenueModal({
                 placeholder="0.00"
                 placeholderTextColor={COLORS.textMuted}
               />
-              <Text style={styles.inputHint}>{t('home.excludesVAT')}</Text>
+              <Text style={styles.inputHint}>{t('home.pocketHint')}</Text>
             </View>
           )}
 

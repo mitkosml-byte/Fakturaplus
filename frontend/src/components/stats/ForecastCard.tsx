@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';
+import { InfoButton } from '../InfoButton';
 
 // Extracted from stats.tsx (Module 1 audit finding #4). Renders the
 // revenue/expense forecast pair plus the lookback-range picker (Module 4
@@ -50,11 +51,23 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
     return `${icon} ${forecast.trend_percent > 0 ? '+' : ''}${forecast.trend_percent}%`;
   };
 
+  // How the forecast was worked out - behind the "i" (Л10).
+  const notes = [
+    includesCurrentMonth(revenueForecast) ? t('stats.forecastWithCurrentMonth') : '',
+    expenseNow?.payroll_from_last_month ? t('stats.forecastPayrollFromLastMonth') : '',
+    isYearBack(revenueForecast) || isYearBack(expenseForecast)
+      ? t(isYearBack(revenueForecast) && isYearBack(expenseForecast) ? 'stats.forecastYearBackBoth'
+        : isYearBack(revenueForecast) ? 'stats.forecastYearBackRevenue' : 'stats.forecastYearBackExpense')
+      : '',
+    isAverageOnly(revenueForecast) || isAverageOnly(expenseForecast) ? t('stats.forecastInsufficientData') : '',
+  ];
+
   return (
     <View style={styles.forecastSection}>
       <View style={styles.chartHeader}>
         <Ionicons name="analytics" size={22} color={COLORS.primary} />
         <Text style={styles.chartTitle}>{t('stats.forecastTitle')}</Text>
+        <InfoButton title={t('stats.forecastTitle')} lines={notes} style={{ marginLeft: 'auto' }} />
       </View>
 
       <View style={styles.rankingSelector}>
@@ -156,30 +169,6 @@ export function ForecastCard({ revenueForecast, expenseForecast, forecastRangeDa
         )}
       </View>
 
-      {(isYearBack(revenueForecast) || isYearBack(expenseForecast) ||
-        isAverageOnly(revenueForecast) || isAverageOnly(expenseForecast) ||
-        includesCurrentMonth(revenueForecast) || expenseNow?.payroll_from_last_month) && (
-        <View style={styles.forecastNotes}>
-          {includesCurrentMonth(revenueForecast) && (
-            <Text style={styles.forecastNote}>{t('stats.forecastWithCurrentMonth')}</Text>
-          )}
-          {expenseNow?.payroll_from_last_month && (
-            <Text style={styles.forecastNote}>{t('stats.forecastPayrollFromLastMonth')}</Text>
-          )}
-          {(isYearBack(revenueForecast) || isYearBack(expenseForecast)) && (
-            <Text style={styles.forecastNote}>
-              {t(
-                isYearBack(revenueForecast) && isYearBack(expenseForecast) ? 'stats.forecastYearBackBoth'
-                  : isYearBack(revenueForecast) ? 'stats.forecastYearBackRevenue'
-                  : 'stats.forecastYearBackExpense'
-              )}
-            </Text>
-          )}
-          {(isAverageOnly(revenueForecast) || isAverageOnly(expenseForecast)) && (
-            <Text style={styles.forecastNote}>{t('stats.forecastInsufficientData')}</Text>
-          )}
-        </View>
-      )}
     </View>
   );
 }
@@ -231,14 +220,6 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: -4,
     marginBottom: 12,
-  },
-  forecastNotes: {
-    marginTop: 12,
-    gap: 8,
-  },
-  forecastNote: {
-    fontSize: 12,
-    color: COLORS.textMuted,
   },
   forecastRow: {
     flexDirection: 'row',

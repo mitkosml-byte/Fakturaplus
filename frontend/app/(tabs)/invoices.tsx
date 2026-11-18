@@ -544,7 +544,8 @@ export default function InvoicesScreen() {
               Haptics.destructive();
               setInvoices((prev) => prev.filter((inv) => inv.id !== id));
               if (selectedInvoice?.id === id) setSelectedInvoice(null);
-              Toast.success(t('invoices.deletedUndo'));
+              // Where it can be brought back - said once, at the delete (Л10).
+              Toast.success(t(hasPermission('restore_deleted_data') ? 'invoices.deletedRestorable' : 'invoices.deletedUndo'));
             } catch (error: any) {
               Alert.alert(t('common.error'), error.message);
             }
@@ -752,18 +753,6 @@ export default function InvoicesScreen() {
                 </TouchableOpacity>
               )}
             </ScrollView>
-          )}
-
-          {/* Admin-only safety net for the confirm dialog above: whoever
-              holds restore_deleted_data can undo a delete after the fact
-              too, from the full snapshot kept on that invoice's audit log
-              entry - see restore_audit_entry in the backend. */}
-          {hasPermission('restore_deleted_data') && (
-            <TouchableOpacity style={styles.restoreHintBanner} onPress={() => router.push('/audit-log')}>
-              <Ionicons name="time-outline" size={16} color={COLORS.primary} />
-              <Text style={styles.restoreHintText}>{t('invoices.restoreDeletedHint')}</Text>
-              <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
-            </TouchableOpacity>
           )}
 
           <View style={{ marginHorizontal: 16 }}>
@@ -1109,23 +1098,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     gap: 12,
-  },
-  restoreHintBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(139, 92, 246, 0.12)',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-  },
-  restoreHintText: {
-    flex: 1,
-    fontSize: 13,
-    color: COLORS.primary,
-    fontWeight: '500',
   },
   searchInput: {
     flex: 1,

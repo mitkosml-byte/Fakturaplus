@@ -13,6 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { PeriodState, getPeriodBounds } from '../utils/periodRange';
 import { getDescriptionSuggestions } from '../utils/expenseSuggestions';
 import { COLORS } from '../theme/colors';
+import { InfoButton } from './InfoButton';
 import { PersonalExpenseModal } from './home/PersonalExpenseModal';
 
 type Props = { periodState: PeriodState };
@@ -242,7 +243,10 @@ export function PersonalInvestmentsCard({ periodState }: Props) {
               and AI advice on those numbers when asked for. */}
           {roiData.analysis ? (
             <View style={styles.aiInsights}>
-              <Text style={styles.aiInsightsTitle}>{t('roi.analysisTitle')}</Text>
+              <View style={styles.analysisHeader}>
+                <Text style={[styles.aiInsightsTitle, { flex: 1 }]}>{t('roi.analysisTitle')}</Text>
+                <InfoButton title={t('roi.analysisTitle')} lines={roiData.analysis.notes} />
+              </View>
               {roiData.analysis.payback && (
                 <Text style={styles.roiPaybackText}>{roiData.analysis.payback.text}</Text>
               )}
@@ -280,9 +284,6 @@ export function PersonalInvestmentsCard({ periodState }: Props) {
                   ))}
                 </>
               )}
-              {roiData.analysis.notes.map((note: string) => (
-                <Text key={note} style={styles.roiNote}>{note}</Text>
-              ))}
               {roiAdvice?.available && (roiAdvice.advice ? (
                 <View style={styles.roiAdviceBox}>
                   <View style={styles.roiLine}>
@@ -365,6 +366,7 @@ export function PersonalInvestmentsCard({ periodState }: Props) {
 }
 
 const styles = StyleSheet.create({
+  analysisHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   roiSection: {
     backgroundColor: 'rgba(139, 92, 246, 0.1)',
     borderRadius: 16,

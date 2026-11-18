@@ -55,7 +55,11 @@ export function ExpenseModal({
     <BottomSheet visible={visible} onClose={onClose}>
       <View style={styles.modalContent}>
         <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>{t('expenses.title')}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.modalTitle}>{t('expenses.title')}</Text>
+            {/* What "В канала" holds, in one line (Л10). */}
+            <Text style={styles.modalSubtitle}>{t('expenses.subtitle')}</Text>
+          </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <TouchableOpacity style={styles.historyPersonalButton} onPress={onViewHistory}>
               <Ionicons name="time-outline" size={16} color={COLORS.textSecondary} />
@@ -219,6 +223,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
+  modalSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   historyPersonalButton: {
     flexDirection: 'row',
     alignItems: 'center',

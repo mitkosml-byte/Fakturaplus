@@ -823,8 +823,8 @@ export const translations: Translations = {
     en: 'A plain question, answered only from your own data',
   },
   'askMyNumbers.disclaimer': {
-    bg: 'Отговаря само въз основа на въведените данни на тази фирма. Не се свързва с НАП и не вижда нищо извън фирмата ти.',
-    en: "Answers only from this company's own stored data. Never talks to NAP or anything outside your company.",
+    bg: 'Отговаря само по въведените данни на фирмата.',
+    en: 'Answers only from the company\'s own data.',
   },
   'askMyNumbers.placeholder': {
     bg: 'Напиши въпрос...',
@@ -911,8 +911,8 @@ export const translations: Translations = {
     en: ' (little history - plain average)',
   },
   'askMyNumbers.roi': {
-    bg: 'ROI: {roiPercent}% - вложени {investment} €',
-    en: 'ROI: {roiPercent}% - invested {investment} €',
+    bg: 'Възвръщаемост: {roiPercent}% от вложени {investment} €',
+    en: 'Return: {roiPercent}% on {investment} € put in',
   },
   'askMyNumbers.assets': {
     bg: 'Активи: {count} бр., балансова стойност {value} €',
@@ -1080,9 +1080,13 @@ export const translations: Translations = {
   'startHere.issued': { bg: 'Издайте фактура към клиент', en: 'Issue an invoice to a customer' },
   'startHere.hide': { bg: 'Скрий', en: 'Hide' },
   // What a screen does, once, the first time it is opened.
-  'hint.scan': { bg: 'Снимайте фактурата от доставчик - програмата прочита доставчика, сумите и ДДС сама.', en: 'Photograph a supplier invoice - the app reads the supplier, amounts and VAT itself.' },
-  'hint.invoices': { bg: 'Фактурите от доставчици. Докоснете фактура, за да я видите, поправите или платите.', en: 'Supplier invoices. Tap one to see it, correct it or mark it paid.' },
-  'hint.stats': { bg: 'Числата по периоди: приходи, разходи, ДДС и прогноза. Периодът е общ с Главната.', en: 'Numbers by period: income, expenses, VAT and the forecast. The period is shared with Home.' },
+  'hint.invoices': { bg: 'Докоснете фактура, за да я платите.', en: 'Tap an invoice to pay it.' },
+  'hint.stats': { bg: 'Периодът е общ с Главната.', en: 'The period is shared with Home.' },
+  // Shorter texts, the owner's words (Л10).
+  'common.howItWorks': { bg: 'Как се смята', en: 'How it works' },
+  'invoices.deletedRestorable': { bg: 'Фактурата е изтрита — може да я върнете от Дневника на действията.', en: 'Invoice deleted - you can bring it back from the audit log.' },
+  'home.pocketHint': { bg: 'Оборот извън касовия апарат — не влиза в ДДС', en: 'Revenue outside the till - not in VAT' },
+  'expenses.subtitle': { bg: 'Разход без фактура — в брой, дребни покупки', en: 'An expense without an invoice - cash, small purchases' },
   // Statistics without repeats (Л9): the month's costs under the expense chart.
   'stats.monthlyPayroll': { bg: 'заплати {amount}', en: 'salaries {amount}' },
   'stats.monthlyDepreciation': { bg: 'амортизация {amount}', en: 'depreciation {amount}' },
@@ -1248,7 +1252,7 @@ export const translations: Translations = {
   
   // Expenses
   'expenses.title': {
-    bg: 'В канала (разходи)',
+    bg: 'В канала',
     en: 'Expenses (no invoice)',
   },
   'expenses.forDate': {
@@ -1705,8 +1709,8 @@ export const translations: Translations = {
     en: 'Supplier, VAT ID and invoice number',
   },
   'scan.tipAmounts': {
-    bg: 'Обща сума, ДДС и данъчно третиране (стандартна ставка, намалена, обратно начисляване...)',
-    en: 'Total amount, VAT and tax treatment (standard rate, reduced, reverse charge...)',
+    bg: 'Обща сума, ДДС и вид ДДС (стандартна ставка, намалена, обратно начисляване...)',
+    en: 'Total amount, VAT and VAT type (standard rate, reduced, reverse charge...)',
   },
   'scan.tipItems': {
     bg: 'Отделните артикули - и те се сверяват автоматично с предходна цена от същия доставчик',
@@ -1761,8 +1765,8 @@ export const translations: Translations = {
     en: 'Valid EIK',
   },
   'scan.vatTreatment': {
-    bg: 'ДДС третиране',
-    en: 'VAT treatment',
+    bg: 'Вид ДДС',
+    en: 'VAT type',
   },
   'scan.reverseChargeNote': {
     bg: 'При запис ще се генерира автоматично номер на протокол по чл.117 ЗДДС, който трябва да се издаде до 15 дни от датата на доставката.',
@@ -1853,16 +1857,16 @@ export const translations: Translations = {
     en: 'Please try again',
   },
   'scan.subtitle': {
-    bg: 'Използвай OCR за автоматично извличане',
-    en: 'Use OCR for automatic extraction',
+    bg: 'Снимайте фактура — попълва се сама',
+    en: 'Photograph an invoice - it fills itself in',
   },
   'scan.useCameraHint': {
-    bg: 'Използвай камерата',
-    en: 'Use the camera',
+    bg: 'снимайте фактурата сега',
+    en: 'photograph the invoice now',
   },
   'scan.fromGalleryHint': {
-    bg: 'От галерията',
-    en: 'From gallery',
+    bg: 'вече направена снимка',
+    en: 'a photo you already took',
   },
   'scan.invoiceWithPages': {
     bg: 'Фактура с {count} страници',
@@ -2115,8 +2119,8 @@ export const translations: Translations = {
     en: 'No чл.117 protocols',
   },
   'protocols.emptyHint': {
-    bg: 'Появяват се тук, когато маркирате фактура с ДДС третиране "Обратно начисляване"',
-    en: 'Appear here when you mark an invoice with VAT treatment "Reverse charge"',
+    bg: 'Появяват се тук, когато фактура е с вид ДДС „Обратно начисляване“',
+    en: 'Appear here when an invoice has the VAT type "Reverse charge"',
   },
   'vat.standard_20': {
     bg: 'Стандартна 20%',
@@ -2199,10 +2203,6 @@ export const translations: Translations = {
   'invoices.deletedUndo': {
     bg: 'Фактурата е изтрита',
     en: 'Invoice deleted',
-  },
-  'invoices.restoreDeletedHint': {
-    bg: 'Изтрихте фактура по грешка? Възстановете я от Дневника на действията',
-    en: 'Deleted an invoice by mistake? Restore it from the audit log',
   },
 
   // Statistics Screen
@@ -2427,12 +2427,12 @@ export const translations: Translations = {
     en: 'Weekly schedule and holidays for statistics',
   },
   'profile.backup': {
-    bg: 'Износ/импорт на бекъп',
-    en: 'Backup export/import',
+    bg: 'Копие на всички данни',
+    en: 'Copy of all data',
   },
   'profile.backupRestore': {
-    bg: 'Backup & Restore',
-    en: 'Backup & Restore',
+    bg: 'Запазване и връщане от файл',
+    en: 'Save to a file and restore',
   },
   'profile.language': {
     bg: 'Език',
@@ -3086,8 +3086,8 @@ export const translations: Translations = {
   
   // Backup Screen
   'backup.title': {
-    bg: 'Backup & Restore',
-    en: 'Backup & Restore',
+    bg: 'Копие на данните',
+    en: 'Copy of the data',
   },
   'backup.infoTitle': {
     bg: 'Износ на бекъп',
@@ -3252,8 +3252,8 @@ export const translations: Translations = {
     en: 'It helps track income, expenses and automatically calculates VAT.',
   },
   'help.scanTitle': {
-    bg: 'Сканиране на фактури (OCR)',
-    en: 'Invoice Scanning (OCR)',
+    bg: 'Сканиране на фактури',
+    en: 'Scanning invoices',
   },
   'help.dailyRevenueTitle': {
     bg: 'Дневен оборот',
@@ -3458,8 +3458,8 @@ export const translations: Translations = {
     en: 'Expected expense',
   },
   'stats.roiTrendTitle': {
-    bg: 'ROI тренд (последните 6 месеца)',
-    en: 'ROI trend (last 6 months)',
+    bg: 'Възвръщаемост на вложеното по месеци',
+    en: 'Return on what you put in, by month',
   },
   'stats.compare': {
     bg: 'Сравни',
@@ -4578,8 +4578,8 @@ export const translations: Translations = {
 
   // ROI
   'roi.title': {
-    bg: 'ROI Анализ',
-    en: 'ROI Analysis',
+    bg: 'Възвръщаемост на вложеното',
+    en: 'Return on what you put in',
   },
   'roi.totalInvestment': {
     bg: 'Лична инвестиция',
@@ -4594,8 +4594,8 @@ export const translations: Translations = {
     en: 'Profit',
   },
   'roi.roiPercent': {
-    bg: 'ROI',
-    en: 'ROI',
+    bg: 'Възвръщаемост',
+    en: 'Return',
   },
   'roi.profitable': {
     bg: 'Печеливш',
@@ -5656,9 +5656,9 @@ export const translations: Translations = {
     bg: 'на ден от следващия работен ден, за да е месецът на нула',
     en: 'a day from the next working day, for the month to end at zero',
   },
-  'breakEven.missingAtEnd': { bg: 'не достигат до точката на рентабилност за месеца', en: 'short of the month\'s break-even' },
+  'breakEven.missingAtEnd': { bg: 'не достигат, за да покрие месецът разходите си', en: 'short of the month\'s break-even' },
   'breakEven.reachedTitle': { bg: 'Месецът е на плюс', en: 'The month is in profit' },
-  'breakEven.reachedText': { bg: 'над точката на рентабилност - оттук нататък всяка продажба носи печалба', en: 'above break-even - from here on every sale is profit' },
+  'breakEven.reachedText': { bg: 'разходите на месеца са покрити - оттук нататък всяка продажба носи печалба', en: 'above break-even - from here on every sale is profit' },
   'breakEven.monthLine': { bg: 'За месеца: {soFar} от {target}', en: 'This month: {soFar} of {target}' },
   'breakEven.daysLeft': { bg: 'остават {days} работни дни', en: '{days} working days left' },
   'breakEven.howTitle': { bg: 'Откъде идва числото', en: 'Where the number comes from' },

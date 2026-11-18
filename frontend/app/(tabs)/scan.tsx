@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { FirstUseHint } from '../../src/components/FirstUseHint';
+import { InfoButton } from '../../src/components/InfoButton';
 import {
   View,
   Text,
@@ -965,7 +965,6 @@ export default function ScanScreen() {
                 <Text style={styles.subtitle}>{t('scan.subtitle')}</Text>
               </View>
 
-              {capturedImages.length === 0 && <FirstUseHint id="scan" icon="scan" text={t('hint.scan')} />}
               {capturedImages.length === 0 && <ScanCreditsReloadButton />}
 
               {capturedImages.length === 0 && (
@@ -1059,36 +1058,27 @@ export default function ScanScreen() {
           )}
 
           {capturedImages.length === 0 && scanMode === 'purchase' && (
-            <View style={styles.tipsBox}>
-              <View style={styles.tipsHeader}>
-                <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
-                <Text style={styles.tipsTitle}>{t('scan.tipsTitle')}</Text>
-              </View>
-              {[t('scan.tipSupplier'), t('scan.tipAmounts'), t('scan.tipItems'), t('scan.tipPayment')].map((tip, i) => (
-                <View key={i} style={styles.tipRow}>
-                  <Ionicons name="checkmark-circle" size={14} color={COLORS.success} style={{ marginTop: 2 }} />
-                  <Text style={styles.tipText}>{tip}</Text>
-                </View>
-              ))}
-              <Text style={styles.tipsFooter}>{t('scan.tipsFooter')}</Text>
+            <View style={[styles.tipsBox, styles.tipsHeader]}>
+              <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
+              <Text style={[styles.tipsTitle, { flex: 1 }]}>{t('scan.tipsTitle')}</Text>
+              <InfoButton
+                title={t('scan.tipsTitle')}
+                lines={[
+                  [t('scan.tipSupplier'), t('scan.tipAmounts'), t('scan.tipItems'), t('scan.tipPayment')].map((tip) => `• ${tip}`).join('\n'),
+                  t('scan.tipsFooter'),
+                ]}
+              />
             </View>
           )}
 
           {capturedImages.length === 0 && scanMode === 'sales' && (
-            <View style={styles.tipsBox}>
-              <View style={styles.tipsHeader}>
-                <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
-                <Text style={styles.tipsTitle}>{t('scan.salesTipsTitle')}</Text>
-              </View>
-              <View style={styles.tipRow}>
-                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} style={{ marginTop: 2 }} />
-                <Text style={styles.tipText}>{t('scan.salesTip1')}</Text>
-              </View>
-              <View style={styles.tipRow}>
-                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} style={{ marginTop: 2 }} />
-                <Text style={styles.tipText}>{t('scan.salesTip2')}</Text>
-              </View>
-              <Text style={styles.tipsFooter}>{t('scan.salesTipsFooter')}</Text>
+            <View style={[styles.tipsBox, styles.tipsHeader]}>
+              <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
+              <Text style={[styles.tipsTitle, { flex: 1 }]}>{t('scan.salesTipsTitle')}</Text>
+              <InfoButton
+                title={t('scan.salesTipsTitle')}
+                lines={[`• ${t('scan.salesTip1')}\n• ${t('scan.salesTip2')}`, t('scan.salesTipsFooter')]}
+              />
             </View>
           )}
 
@@ -2081,37 +2071,19 @@ const styles = StyleSheet.create({
   tipsBox: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,
-    padding: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     marginTop: 20,
   },
   tipsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
   },
   tipsTitle: {
     fontSize: 15,
     fontWeight: '600',
     color: 'white',
-  },
-  tipRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginBottom: 8,
-  },
-  tipText: {
-    flex: 1,
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    lineHeight: 19,
-  },
-  tipsFooter: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 4,
-    fontStyle: 'italic',
   },
   resultContainer: {
     flex: 1,
