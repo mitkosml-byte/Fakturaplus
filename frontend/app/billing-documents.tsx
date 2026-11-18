@@ -836,43 +836,67 @@ export default function BillingDocumentsScreen() {
                         ))}
                       </View>
                     )}
+                    {/* Quantity, unit, price and VAT side by side, each named
+                        above its field - a filled field has no placeholder
+                        left to say what it is. On a phone they share the
+                        row's width; minWidth 0 lets a web text input shrink
+                        (its built-in width pushed the price off the screen). */}
                     <View style={styles.itemRowFields}>
-                      <TextInput
-                        style={[styles.input, styles.itemSmallInput]}
-                        value={item.quantity}
-                        onChangeText={(v) => updateFormItem(index, { quantity: v })}
-                        keyboardType="decimal-pad"
-                        placeholder={t('scan.qtyPlaceholder')}
-                        placeholderTextColor={COLORS.textMuted}
-                      />
-                      <TextInput
-                        style={[styles.input, styles.itemSmallInput]}
-                        value={item.unit}
-                        onChangeText={(v) => updateFormItem(index, { unit: v })}
-                        placeholder={t('scan.unitPlaceholder')}
-                        placeholderTextColor={COLORS.textMuted}
-                      />
-                      <TextInput
-                        style={[styles.input, styles.itemSmallInput]}
-                        value={item.unit_price}
-                        onChangeText={(v) => updateFormItem(index, { unit_price: v })}
-                        keyboardType="decimal-pad"
-                        placeholder={isInvoice ? t('billingDocuments.priceWithoutVat') : t('scan.pricePlaceholder')}
-                        placeholderTextColor={COLORS.textMuted}
-                      />
-                      {isInvoice && !vatExempt && (
+                      <View style={[styles.itemField, { flex: 0.8 }]}>
+                        <Text style={styles.itemFieldLabel} numberOfLines={1}>{t('invoices.itemQty')}</Text>
                         <TextInput
                           style={[styles.input, styles.itemSmallInput]}
-                          value={item.vat_rate}
-                          onChangeText={(v) => updateFormItem(index, { vat_rate: v.replace(/[^\d.,]/g, '').replace(',', '.') })}
+                          value={item.quantity}
+                          onChangeText={(v) => updateFormItem(index, { quantity: v })}
                           keyboardType="decimal-pad"
-                          placeholder={t('billingDocuments.vatRate')}
                           placeholderTextColor={COLORS.textMuted}
-                          accessibilityLabel={t('billingDocuments.vatRate')}
+                          accessibilityLabel={t('invoices.itemQty')}
                         />
+                      </View>
+                      <View style={[styles.itemField, { flex: 0.8 }]}>
+                        <Text style={styles.itemFieldLabel} numberOfLines={1}>{t('scan.unitPlaceholder')}</Text>
+                        <TextInput
+                          style={[styles.input, styles.itemSmallInput]}
+                          value={item.unit}
+                          onChangeText={(v) => updateFormItem(index, { unit: v })}
+                          placeholderTextColor={COLORS.textMuted}
+                          accessibilityLabel={t('scan.unitPlaceholder')}
+                        />
+                      </View>
+                      <View style={[styles.itemField, { flex: 1.4 }]}>
+                        <Text style={styles.itemFieldLabel} numberOfLines={1}>
+                          {isInvoice ? t('billingDocuments.priceWithoutVat') : t('scan.pricePlaceholder')}
+                        </Text>
+                        <TextInput
+                          style={[styles.input, styles.itemSmallInput]}
+                          value={item.unit_price}
+                          onChangeText={(v) => updateFormItem(index, { unit_price: v })}
+                          keyboardType="decimal-pad"
+                          placeholder="0,00"
+                          placeholderTextColor={COLORS.textMuted}
+                          accessibilityLabel={isInvoice ? t('billingDocuments.priceWithoutVat') : t('scan.pricePlaceholder')}
+                        />
+                      </View>
+                      {isInvoice && !vatExempt && (
+                        <View style={[styles.itemField, { flex: 0.7 }]}>
+                          <Text style={styles.itemFieldLabel} numberOfLines={1}>{t('billingDocuments.vatRate')}</Text>
+                          <TextInput
+                            style={[styles.input, styles.itemSmallInput]}
+                            value={item.vat_rate}
+                            onChangeText={(v) => updateFormItem(index, { vat_rate: v.replace(/[^\d.,]/g, '').replace(',', '.') })}
+                            keyboardType="decimal-pad"
+                            placeholderTextColor={COLORS.textMuted}
+                            accessibilityLabel={t('billingDocuments.vatRate')}
+                          />
+                        </View>
                       )}
                       {formItems.length > 1 && (
-                        <TouchableOpacity onPress={() => removeFormItem(index)}>
+                        <TouchableOpacity
+                          onPress={() => removeFormItem(index)}
+                          style={styles.itemRemove}
+                          accessibilityLabel={t('common.delete')}
+                          hitSlop={6}
+                        >
                           <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
                         </TouchableOpacity>
                       )}
@@ -1044,8 +1068,11 @@ const styles = StyleSheet.create({
     maxWidth: 220,
   },
   itemChipText: { fontSize: 11, color: COLORS.textSecondary, fontWeight: '600' },
-  itemRowFields: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  itemSmallInput: { flex: 1, paddingVertical: 10 },
+  itemRowFields: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
+  itemField: { minWidth: 0 },
+  itemFieldLabel: { color: COLORS.textMuted, fontSize: 11, marginBottom: 4 },
+  itemSmallInput: { minWidth: 0, paddingVertical: 10, paddingHorizontal: 10 },
+  itemRemove: { paddingBottom: 12 },
   addItemButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
   addItemButtonText: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },
   totalPreview: { color: 'white', fontSize: 14, fontWeight: '700', marginTop: 6, textAlign: 'right' },
