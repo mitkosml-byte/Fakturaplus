@@ -62,9 +62,6 @@ export default function HomeScreen() {
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string; revenueDate?: string }>();
 
   const [summary, setSummary] = useState<Summary | null>(null);
-  // Today's revenue, whatever period is shown: the till's and Джобче, as
-  // entered for the business's today (null until it arrives).
-  const [todayRevenue, setTodayRevenue] = useState<{ date: string; fiscal_revenue: number; pocket_money: number } | null>(null);
   // Which period the dashboard cards below are showing - defaults to the
   // current (in-progress) calendar month, matching the previous hardcoded
   // behavior, but lets the user step back to any past day/week/month/year
@@ -190,14 +187,6 @@ export default function HomeScreen() {
 
     await Promise.all([
       (async () => {
-        if (!usesTill) return;
-        try {
-          setTodayRevenue(await api.getTodayRevenue());
-        } catch {
-          // Shown as not entered; the next refresh tries again.
-        }
-      })(),
-      (async () => {
         try {
           const summaryData = await api.getSummary({ start_date, end_date });
           setSummary(summaryData);
@@ -218,7 +207,7 @@ export default function HomeScreen() {
         }
       })(),
     ]);
-  }, [periodState, usesTill]);
+  }, [periodState]);
 
   // Pre-fills the form with whatever is already logged for this date, so
   // saving corrects that value directly instead of adding a delta to it -
@@ -670,7 +659,6 @@ export default function HomeScreen() {
   };
 
   const canSeePocketMoney = hasPermission('view_pocket_money');
-  const todayRevenueTotal = (todayRevenue?.fiscal_revenue || 0) + (todayRevenue?.pocket_money || 0);
 
   const handleAddRevenue = async () => {
     const fiscalTotal = revenueSplitByRate ? rateAmountsTotal(revenueRateAmounts) : parseFloat(fiscalRevenue) || 0;
@@ -1102,30 +1090,6 @@ export default function HomeScreen() {
           </View>
           {usesTill && (
           <>
-          {/* The day's revenue - today's, whichever period the boxes show.
-              A tap opens today's day to enter or correct it. */}
-          <TouchableOpacity
-            style={styles.statItem}
-            onPress={() => {
-              setRevenueDate(todayRevenue ? new Date(`${todayRevenue.date}T00:00:00`) : new Date());
-              setRevenueModalVisible(true);
-            }}
-            disabled={!hasPermission('add_revenue')}
-            accessibilityRole="button"
-            accessibilityLabel={t('home.todayRevenueBox')}
-          >
-            {todayRevenueTotal > 0 ? (
-              <CountUp value={todayRevenueTotal} formatter={(n) => `${n.toFixed(0)}`} style={styles.statValue} />
-            ) : (
-              <Text style={[styles.statValue, { color: COLORS.textMuted }]}>—</Text>
-            )}
-            <Text style={styles.statLabel}>{t('home.todayRevenueBox')}</Text>
-            {todayRevenue && todayRevenueTotal === 0 ? (
-              <Text style={styles.statHint}>{t('home.todayRevenueEmpty')}</Text>
-            ) : (
-              <Text style={[styles.statHint, { color: COLORS.textMuted }]}>{t('home.todayRevenueToday')}</Text>
-            )}
-          </TouchableOpacity>
           <View style={styles.statItem}>
             {summary && summary.total_fiscal_revenue === null ? (
               <LockedValue textStyle={styles.statValue} fakeText="1240" iconSize={16} />
@@ -1148,8 +1112,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
           </>
           )}
-          {/* With the till's boxes the profit closes the grid on its own row. */}
-          <View style={[styles.statItem, { overflow: 'visible' }, usesTill && { width: '100%' }]}>
+          <View style={[styles.statItem, { overflow: 'visible' }]}>
             <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
             {summary && summary.profit === null ? (
               <LockedValue textStyle={styles.statValue} fakeText="380" iconSize={16} />
@@ -1162,6 +1125,17 @@ export default function HomeScreen() {
             )}
             <Text style={styles.statLabel}>{t('home.profit')}</Text>
           </View>
+          {/* The till's and Джобче's revenue added up, for the period shown -
+              a day's turnover when the period is a day. Only for who sees
+              both (else it would only repeat the till's box). */}
+          {usesTill && summary && summary.total_fiscal_revenue !== null && summary.total_pocket_money !== null && (
+            <View style={styles.revenueSumRow}>
+              <Text style={styles.revenueSumLabel}>{t('home.revenueSum')}</Text>
+              <Text style={styles.revenueSumValue}>
+                {((summary.total_fiscal_revenue || 0) + (summary.total_pocket_money || 0)).toFixed(2)} €
+              </Text>
+            </View>
+          )}
         </View>
 
         {restrictedNote && (
@@ -1766,6 +1740,7 @@ const styles = StyleSheet.create({
   },
   statItem: {
     width: '47%',
+    flexGrow: 1,
     backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
@@ -1781,10 +1756,26 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 4,
   },
-  statHint: {
-    fontSize: 11,
-    color: COLORS.warning,
-    marginTop: 2,
+  revenueSumRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  revenueSumLabel: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    flexShrink: 1,
+  },
+  revenueSumValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: 'white',
   },
   restrictedNote: {
     flexDirection: 'row',

@@ -223,6 +223,14 @@ async def export_employee_compliance_excel(
     leave_query["end_date"] = {"$gte": start_date}
     leave_query["start_date"] = {"$lte": end_date}
     leave = await server.db.employee_leave.find(leave_query, {"_id": 0}).sort("start_date", 1).to_list(10000)
+    for entry in leave:
+        # Working days beside the calendar ones: paid leave is counted in
+        # them, and they are the days a sick leave keeps someone from work.
+        try:
+            first, last = business_day(entry.get("start_date")), business_day(entry.get("end_date"))
+        except ValueError:
+            first = last = None
+        entry["working_days"] = leave_working_days(first, last) if first and last and first <= last else None
 
     company_name = ""
     if company_id:

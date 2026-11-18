@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { BusinessLocation, LocationComparison, Deadline, DeadlineInput, PriceList, PriceListEntry, PriceEntryInput, PurchaseItem, SoldItem, PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+import { BusinessLocation, LocationComparison, Deadline, DeadlineInput, PriceList, PriceListEntry, PriceEntryInput, PurchaseItem, SoldItem, PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveEntryInput, LeaveBalance, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
@@ -1762,11 +1762,17 @@ class ApiService {
     return this.fetch(`/employees/${employeeId}/leave-settings`, { method: 'PUT', body: JSON.stringify(settings) });
   }
 
-  async createLeaveEntry(params: { employee_id: string; leave_type: LeaveType; start_date: string; end_date: string; note?: string }): Promise<LeaveEntry> {
+  async createLeaveEntry(params: LeaveEntryInput & { employee_id: string }): Promise<LeaveEntry> {
     return this.fetch('/employees/leave', {
       method: 'POST',
       body: JSON.stringify(params),
     });
+  }
+
+  // A leave entry corrected: what is sent changes (a note, number or reason
+  // sent empty is cleared).
+  async updateLeaveEntry(id: string, params: Partial<LeaveEntryInput>): Promise<LeaveEntry> {
+    return this.fetch(`/employees/leave/${id}`, { method: 'PUT', body: JSON.stringify(params) });
   }
 
   async deleteLeaveEntry(id: string): Promise<void> {

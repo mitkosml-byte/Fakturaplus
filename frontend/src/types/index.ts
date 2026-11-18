@@ -1845,6 +1845,9 @@ export interface HolidayWorkEntry {
 
 export type LeaveType = 'paid' | 'unpaid' | 'sick';
 
+// Why a sick-leave sheet was issued - never the diagnosis.
+export type SickReason = 'illness' | 'work_accident' | 'occupational' | 'family_care' | 'maternity' | 'other';
+
 export interface LeaveEntry {
   id: string;
   company_id: string;
@@ -1853,8 +1856,22 @@ export interface LeaveEntry {
   leave_type: LeaveType;
   start_date: string;
   end_date: string;
-  note?: string;
+  note?: string | null;
+  // A sick leave's sheet as the employer gets it (only on sick leave).
+  sheet_number?: string | null;
+  sick_reason?: SickReason | null;
+  is_continuation?: boolean;
   created_at: string;
+}
+
+export interface LeaveEntryInput {
+  leave_type: LeaveType;
+  start_date: string;
+  end_date: string;
+  note?: string | null;
+  sheet_number?: string | null;
+  sick_reason?: SickReason | null;
+  is_continuation?: boolean;
 }
 
 // Fixed Assets / Дълготрайни активи (ДМА)

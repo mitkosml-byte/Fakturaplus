@@ -16,13 +16,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
-import { format } from 'date-fns';
+import { differenceInCalendarDays, format } from 'date-fns';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFile';
-import { Employee, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveType, LeaveBalance } from '../src/types';
+import { Employee, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveEntryInput, LeaveType, LeaveBalance, SickReason } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, PressableScale } from '../src/components';
@@ -30,13 +30,12 @@ import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
-const LEAVE_TYPES: { value: LeaveType; label: string }[] = [
-  { value: 'paid', label: 'Платена' },
-  { value: 'unpaid', label: 'Неплатена' },
-  { value: 'sick', label: 'Болнична' },
-];
+// Leave is paid or unpaid; sick leave has its own tab, with its sheet.
+const LEAVE_FORM_TYPES: LeaveType[] = ['paid', 'unpaid'];
+const SICK_REASONS: SickReason[] = ['illness', 'work_accident', 'occupational', 'family_care', 'maternity', 'other'];
 
 const toDateStr = (d: Date) => format(d, 'yyyy-MM-dd');
+const dayOf = (text: string) => new Date(`${text}T00:00:00`);
 
 export default function EmployeeAbsencesScreen() {
   const router = useRouter();
@@ -45,7 +44,7 @@ export default function EmployeeAbsencesScreen() {
   const { hasPermission } = useAuth();
 
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'holiday' | 'leave'>('holiday');
+  const [viewMode, setViewMode] = useState<'holiday' | 'leave' | 'sick'>('holiday');
   const [year, setYear] = useState(new Date().getFullYear());
 
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -132,23 +131,37 @@ export default function EmployeeAbsencesScreen() {
     ]);
   };
 
-  // ---- Add leave entry ----
+  // ---- Leave and sick leave: one form, new or corrected ----
   const [leaveModalVisible, setLeaveModalVisible] = useState(false);
+  const [formKind, setFormKind] = useState<'leave' | 'sick'>('leave');
+  const [editingLeave, setEditingLeave] = useState<LeaveEntry | null>(null);
   const [leaveEmployeeId, setLeaveEmployeeId] = useState<string | null>(null);
   const [leaveType, setLeaveType] = useState<LeaveType>('paid');
   const [leaveStart, setLeaveStart] = useState(new Date());
   const [leaveEnd, setLeaveEnd] = useState(new Date());
   const [leaveNote, setLeaveNote] = useState('');
+  const [sheetNumber, setSheetNumber] = useState('');
+  const [sickReason, setSickReason] = useState<SickReason | null>('illness');
+  const [isContinuation, setIsContinuation] = useState(false);
   const [leaveStartPickerVisible, setLeaveStartPickerVisible] = useState(false);
   const [leaveEndPickerVisible, setLeaveEndPickerVisible] = useState(false);
   const [savingLeave, setSavingLeave] = useState(false);
 
-  const openLeaveModal = () => {
-    setLeaveEmployeeId(employees[0]?.id || null);
-    setLeaveType('paid');
-    setLeaveStart(new Date());
-    setLeaveEnd(new Date());
-    setLeaveNote('');
+  const leaveOnly = useMemo(() => leave.filter((e) => e.leave_type !== 'sick'), [leave]);
+  const sickOnly = useMemo(() => leave.filter((e) => e.leave_type === 'sick'), [leave]);
+
+  // An entry tapped opens it to correct (or delete); none starts a new one.
+  const openLeaveForm = (kind: 'leave' | 'sick', entry?: LeaveEntry) => {
+    setFormKind(kind);
+    setEditingLeave(entry ?? null);
+    setLeaveEmployeeId(entry ? entry.employee_id : employees[0]?.id || null);
+    setLeaveType(entry && entry.leave_type !== 'sick' ? entry.leave_type : 'paid');
+    setLeaveStart(entry ? dayOf(entry.start_date) : new Date());
+    setLeaveEnd(entry ? dayOf(entry.end_date) : new Date());
+    setLeaveNote(entry?.note || '');
+    setSheetNumber(entry?.sheet_number || '');
+    setSickReason(entry ? entry.sick_reason ?? null : 'illness');
+    setIsContinuation(!!entry?.is_continuation);
     setLeaveModalVisible(true);
   };
 
@@ -163,10 +176,21 @@ export default function EmployeeAbsencesScreen() {
       Alert.alert(t('common.error'), t('absences.endBeforeStart'));
       return;
     }
+    const entry: LeaveEntryInput = formKind === 'sick'
+      ? {
+        leave_type: 'sick', start_date: startStr, end_date: endStr, note: leaveNote.trim() || null,
+        sheet_number: sheetNumber.trim() || null, sick_reason: sickReason, is_continuation: isContinuation,
+      }
+      : { leave_type: leaveType, start_date: startStr, end_date: endStr, note: leaveNote.trim() || null };
     setSavingLeave(true);
     try {
-      await api.createLeaveEntry({ employee_id: leaveEmployeeId, leave_type: leaveType, start_date: startStr, end_date: endStr, note: leaveNote.trim() || undefined });
+      if (editingLeave) {
+        await api.updateLeaveEntry(editingLeave.id, entry);
+      } else {
+        await api.createLeaveEntry({ employee_id: leaveEmployeeId, ...entry });
+      }
       setLeaveModalVisible(false);
+      Haptics.success();
       await load();
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
@@ -176,7 +200,7 @@ export default function EmployeeAbsencesScreen() {
   };
 
   const deleteLeave = (entry: LeaveEntry) => {
-    Alert.alert(t('common.delete'), t('absences.deleteLeaveConfirm'), [
+    Alert.alert(t('common.delete'), t(entry.leave_type === 'sick' ? 'absences.deleteSickConfirm' : 'absences.deleteLeaveConfirm'), [
       { text: t('common.cancel'), style: 'cancel' },
       {
         text: t('common.delete'),
@@ -184,6 +208,7 @@ export default function EmployeeAbsencesScreen() {
         onPress: async () => {
           try {
             await api.deleteLeaveEntry(entry.id);
+            setLeaveModalVisible(false);
             await load();
           } catch (error: any) {
             Alert.alert(t('common.error'), error.message);
@@ -192,6 +217,12 @@ export default function EmployeeAbsencesScreen() {
       },
     ]);
   };
+
+  const periodText = (entry: LeaveEntry) =>
+    `${format(dayOf(entry.start_date), 'd MMM yyyy', { locale: dateLocale })}`
+    + (entry.start_date !== entry.end_date ? ` - ${format(dayOf(entry.end_date), 'd MMM yyyy', { locale: dateLocale })}` : '');
+  const calendarDays = (start: Date, end: Date) => differenceInCalendarDays(end, start) + 1;
+  const daysText = (days: number) => (days === 1 ? t('absences.calendarDay') : t('absences.calendarDays').replace('{days}', String(days)));
 
   // Working days from start to end (paid leave is counted in them): not a
   // weekend, not an official holiday of the year shown.
@@ -314,6 +345,12 @@ export default function EmployeeAbsencesScreen() {
             >
               <Text style={[styles.modeButtonText, viewMode === 'leave' && styles.modeButtonTextActive]}>{t('absences.leaveTab')}</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeButton, viewMode === 'sick' && styles.modeButtonActive]}
+              onPress={() => setViewMode('sick')}
+            >
+              <Text style={[styles.modeButtonText, viewMode === 'sick' && styles.modeButtonTextActive]}>{t('absences.sickTab')}</Text>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.yearRow}>
@@ -350,7 +387,7 @@ export default function EmployeeAbsencesScreen() {
                     </TouchableOpacity>
                   ))
                 )
-              ) : (
+              ) : viewMode === 'leave' ? (
                 <>
                 {balances.length > 0 && (
                   <View style={styles.balanceSection}>
@@ -374,36 +411,59 @@ export default function EmployeeAbsencesScreen() {
                     ))}
                   </View>
                 )}
-                {leave.length === 0 ? (
+                {leaveOnly.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="airplane-outline" size={48} color={COLORS.border} />
+                    <Text style={styles.emptyText}>{t('absences.noLeave')}</Text>
+                  </View>
+                ) : (
+                  leaveOnly.map((entry) => (
+                    <TouchableOpacity key={entry.id} style={styles.entryCard} onPress={() => openLeaveForm('leave', entry)}>
+                      <View style={styles.entryRow}>
+                        <Text style={styles.entryEmployee}>{entry.employee_name}</Text>
+                        <View style={[styles.leaveTypeBadge, entry.leave_type === 'unpaid' && styles.leaveTypeBadgeUnpaid]}>
+                          <Text style={styles.leaveTypeBadgeText}>{t(`schedule.leaveType_${entry.leave_type}`)}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.entryHolidayName}>{periodText(entry)}</Text>
+                      {!!entry.note && <Text style={styles.entryNote}>{entry.note}</Text>}
+                    </TouchableOpacity>
+                  ))
+                )}
+                </>
+              ) : sickOnly.length === 0 ? (
                 <View style={styles.emptyContainer}>
-                  <Ionicons name="airplane-outline" size={48} color={COLORS.border} />
-                  <Text style={styles.emptyText}>{t('absences.noLeave')}</Text>
+                  <Ionicons name="medkit-outline" size={48} color={COLORS.border} />
+                  <Text style={styles.emptyText}>{t('absences.noSick')}</Text>
                 </View>
               ) : (
-                leave.map((entry) => (
-                  <TouchableOpacity key={entry.id} style={styles.entryCard} onPress={() => deleteLeave(entry)}>
+                sickOnly.map((entry) => (
+                  <TouchableOpacity key={entry.id} style={styles.entryCard} onPress={() => openLeaveForm('sick', entry)}>
                     <View style={styles.entryRow}>
                       <Text style={styles.entryEmployee}>{entry.employee_name}</Text>
-                      <View style={[styles.leaveTypeBadge, entry.leave_type === 'sick' && styles.leaveTypeBadgeSick, entry.leave_type === 'unpaid' && styles.leaveTypeBadgeUnpaid]}>
-                        <Text style={styles.leaveTypeBadgeText}>{LEAVE_TYPES.find((l) => l.value === entry.leave_type)?.label}</Text>
-                      </View>
+                      {!!entry.sick_reason && (
+                        <View style={[styles.leaveTypeBadge, styles.leaveTypeBadgeSick]}>
+                          <Text style={styles.leaveTypeBadgeText}>{t(`absences.reason_${entry.sick_reason}`)}</Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.entryHolidayName}>
-                      {format(new Date(`${entry.start_date}T00:00:00`), 'd MMM yyyy', { locale: dateLocale })}
-                      {entry.start_date !== entry.end_date ? ` - ${format(new Date(`${entry.end_date}T00:00:00`), 'd MMM yyyy', { locale: dateLocale })}` : ''}
+                      {periodText(entry)} · {daysText(calendarDays(dayOf(entry.start_date), dayOf(entry.end_date)))}
+                    </Text>
+                    <Text style={[styles.entryNote, !entry.sheet_number && { color: COLORS.warning }]}>
+                      {entry.sheet_number ? `№ ${entry.sheet_number}` : t('absences.sheetMissing')}
+                      {entry.is_continuation ? ` · ${t('absences.sheetContinuation').toLowerCase()}` : ''}
                     </Text>
                     {!!entry.note && <Text style={styles.entryNote}>{entry.note}</Text>}
                   </TouchableOpacity>
                 ))
-              )}
-                </>
               )}
             </ScrollView>
           )}
 
           <TouchableOpacity
             style={styles.fab}
-            onPress={viewMode === 'holiday' ? openHolidayModal : openLeaveModal}
+            onPress={viewMode === 'holiday' ? openHolidayModal : () => openLeaveForm(viewMode === 'sick' ? 'sick' : 'leave')}
             accessibilityLabel={t('absences.addEntry')}
           >
             <Ionicons name="add" size={28} color="white" />
@@ -468,43 +528,55 @@ export default function EmployeeAbsencesScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Add leave modal */}
+      {/* Leave or sick leave: new, or one tapped to correct */}
       <Modal visible={leaveModalVisible} animationType="fade" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{t('absences.addLeave')}</Text>
+              <Text style={styles.modalTitle}>
+                {formKind === 'sick'
+                  ? t(editingLeave ? 'absences.editSick' : 'absences.addSick')
+                  : t(editingLeave ? 'absences.editLeave' : 'absences.addLeave')}
+              </Text>
               <TouchableOpacity onPress={() => setLeaveModalVisible(false)}>
                 <Ionicons name="close" size={26} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={{ maxHeight: 420 }}>
+            <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled">
               <Text style={styles.fieldLabel}>{t('absences.employee')}</Text>
-              <View style={styles.chipWrap}>
-                {employees.map((emp) => (
-                  <TouchableOpacity
-                    key={emp.id}
-                    style={[styles.chip, leaveEmployeeId === emp.id && styles.chipActive]}
-                    onPress={() => setLeaveEmployeeId(emp.id)}
-                  >
-                    <Text style={[styles.chipText, leaveEmployeeId === emp.id && styles.chipTextActive]}>{emp.name}</Text>
-                  </TouchableOpacity>
-                ))}
-                {employees.length === 0 && <Text style={styles.emptyHint}>{t('absences.noEmployees')}</Text>}
-              </View>
+              {editingLeave ? (
+                <Text style={styles.formEmployee}>{editingLeave.employee_name}</Text>
+              ) : (
+                <View style={styles.chipWrap}>
+                  {employees.map((emp) => (
+                    <TouchableOpacity
+                      key={emp.id}
+                      style={[styles.chip, leaveEmployeeId === emp.id && styles.chipActive]}
+                      onPress={() => setLeaveEmployeeId(emp.id)}
+                    >
+                      <Text style={[styles.chipText, leaveEmployeeId === emp.id && styles.chipTextActive]}>{emp.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  {employees.length === 0 && <Text style={styles.emptyHint}>{t('absences.noEmployees')}</Text>}
+                </View>
+              )}
 
-              <Text style={styles.fieldLabel}>{t('absences.leaveType')}</Text>
-              <View style={styles.chipWrap}>
-                {LEAVE_TYPES.map((lt) => (
-                  <TouchableOpacity
-                    key={lt.value}
-                    style={[styles.chip, leaveType === lt.value && styles.chipActive]}
-                    onPress={() => setLeaveType(lt.value)}
-                  >
-                    <Text style={[styles.chipText, leaveType === lt.value && styles.chipTextActive]}>{lt.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              {formKind === 'leave' && (
+                <>
+                  <Text style={styles.fieldLabel}>{t('absences.leaveType')}</Text>
+                  <View style={styles.chipWrap}>
+                    {LEAVE_FORM_TYPES.map((lt) => (
+                      <TouchableOpacity
+                        key={lt}
+                        style={[styles.chip, leaveType === lt && styles.chipActive]}
+                        onPress={() => setLeaveType(lt)}
+                      >
+                        <Text style={[styles.chipText, leaveType === lt && styles.chipTextActive]}>{t(`schedule.leaveType_${lt}`)}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
 
               <View style={styles.dateRow}>
                 <View style={{ flex: 1 }}>
@@ -523,17 +595,74 @@ export default function EmployeeAbsencesScreen() {
                 </View>
               </View>
 
-              {leaveType === 'paid' && leaveEmployeeId && toDateStr(leaveEnd) >= toDateStr(leaveStart) && (() => {
+              {toDateStr(leaveEnd) >= toDateStr(leaveStart) && (() => {
                 const days = workingDays(leaveStart, leaveEnd);
-                const balance = leaveBalanceOf(leaveEmployeeId);
+                if (formKind === 'sick') {
+                  return (
+                    <Text style={[styles.entryNote, { marginTop: 8 }]}>
+                      {t('absences.sickDaysPreview')
+                        .replace('{calendar}', String(calendarDays(leaveStart, leaveEnd)))
+                        .replace('{working}', String(days))}
+                    </Text>
+                  );
+                }
+                if (leaveType !== 'paid' || !leaveEmployeeId) return null;
+                // A corrected entry is already counted in what is left.
+                const balance = editingLeave ? undefined : leaveBalanceOf(leaveEmployeeId);
                 return (
                   <Text style={[styles.entryNote, { marginTop: 8 }]}>
-                    {t('absences.leaveDaysPreview')
-                      .replace('{days}', String(days))
-                      .replace('{left}', balance ? String(Math.round((balance.remaining - days) * 10) / 10) : '-')}
+                    {balance
+                      ? t('absences.leaveDaysPreview')
+                        .replace('{days}', String(days))
+                        .replace('{left}', String(Math.round((balance.remaining - days) * 10) / 10))
+                      : t('absences.leaveDaysOnly').replace('{days}', String(days))}
                   </Text>
                 );
               })()}
+
+              {formKind === 'sick' && (
+                <>
+                  <Text style={styles.fieldLabel}>{t('absences.sheetNumber')}</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder={t('absences.notePlaceholder')}
+                    placeholderTextColor={COLORS.textMuted}
+                    value={sheetNumber}
+                    onChangeText={setSheetNumber}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    maxLength={30}
+                  />
+
+                  <Text style={styles.fieldLabel}>{t('absences.sickReason')}</Text>
+                  <View style={styles.chipWrap}>
+                    {SICK_REASONS.map((reason) => (
+                      <TouchableOpacity
+                        key={reason}
+                        style={[styles.chip, sickReason === reason && styles.chipActive]}
+                        onPress={() => setSickReason(reason)}
+                      >
+                        <Text style={[styles.chipText, sickReason === reason && styles.chipTextActive]}>{t(`absences.reason_${reason}`)}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={styles.fieldLabel}>{t('absences.sheetKind')}</Text>
+                  <View style={styles.chipWrap}>
+                    {[false, true].map((continuation) => (
+                      <TouchableOpacity
+                        key={String(continuation)}
+                        style={[styles.chip, isContinuation === continuation && styles.chipActive]}
+                        onPress={() => setIsContinuation(continuation)}
+                      >
+                        <Text style={[styles.chipText, isContinuation === continuation && styles.chipTextActive]}>
+                          {t(continuation ? 'absences.sheetContinuation' : 'absences.sheetPrimary')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
 
               <DateTimePickerModal
                 isVisible={leaveStartPickerVisible}
@@ -564,10 +693,17 @@ export default function EmployeeAbsencesScreen() {
                 value={leaveNote}
                 onChangeText={setLeaveNote}
               />
+              {formKind === 'sick' && <Text style={[styles.entryNote, { marginTop: 6 }]}>{t('absences.sickPrivacy')}</Text>}
             </ScrollView>
             <PressableScale style={styles.saveButton} onPress={saveLeave} disabled={savingLeave}>
               {savingLeave ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
             </PressableScale>
+            {editingLeave && (
+              <TouchableOpacity style={styles.deleteButton} onPress={() => deleteLeave(editingLeave)}>
+                <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+                <Text style={styles.deleteButtonText}>{t('common.delete')}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -705,8 +841,10 @@ const styles = StyleSheet.create({
   modeButton: {
     flex: 1,
     paddingVertical: 10,
+    paddingHorizontal: 4,
     borderRadius: 9,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   modeButtonActive: {
     backgroundColor: COLORS.primary,
@@ -715,6 +853,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: COLORS.textSecondary,
+    textAlign: 'center',
   },
   modeButtonTextActive: {
     color: 'white',
@@ -940,5 +1079,24 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 15,
     fontWeight: '600',
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    marginTop: 6,
+  },
+  deleteButtonText: {
+    color: COLORS.danger,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  formEmployee: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
   },
 });

@@ -1044,10 +1044,8 @@ export const translations: Translations = {
     bg: 'Досега: {range}',
     en: 'So far: {range}',
   },
-  // Today's revenue among the boxes, whatever period they show.
-  'home.todayRevenueBox': { bg: 'Дневен оборот', en: 'Daily revenue' },
-  'home.todayRevenueToday': { bg: 'за днес', en: 'today' },
-  'home.todayRevenueEmpty': { bg: 'днес: не е въведен', en: 'today: not entered' },
+  // The till's and Джобче's revenue added up, under the number boxes.
+  'home.revenueSum': { bg: 'Оборот (фискален + джобче)', en: 'Revenue (fiscal + pocket)' },
   'home.expenses': {
     bg: 'В канала',
     en: 'Expenses',
@@ -5173,7 +5171,7 @@ export const translations: Translations = {
   },
 
   'profile.payrollDesc': { bg: 'Служители и месечни ведомости', en: 'Employees and monthly payroll' },
-  'profile.absencesDesc': { bg: 'Работа на празници и отпуски за счетоводителя', en: 'Holiday work and leave for the accountant' },
+  'profile.absencesDesc': { bg: 'Работа на празници, отпуски и болнични за счетоводителя', en: 'Holiday work, leave and sick leave for the accountant' },
   'profile.workSchedule': { bg: 'Работен график', en: 'Work schedule' },
   'profile.workScheduleDesc': { bg: 'Смени и почасово заплащане', en: 'Shifts and hourly pay' },
   'payroll.title': { bg: 'Ведомост за заплати', en: 'Payroll' },
@@ -5562,8 +5560,31 @@ export const translations: Translations = {
 
   // Employee holiday-work + leave tracking (accountant compliance list)
   'absences.title': { bg: 'Празници и отпуски', en: 'Holidays and leave' },
-  'absences.holidayWorkTab': { bg: 'Работа на празници', en: 'Holiday work' },
+  'absences.holidayWorkTab': { bg: 'Празници', en: 'Holiday work' },
   'absences.leaveTab': { bg: 'Отпуски', en: 'Leave' },
+  'absences.sickTab': { bg: 'Болнични', en: 'Sick leave' },
+  'absences.noSick': { bg: 'Няма отбелязани болнични за тази година', en: 'No sick leave logged for this year' },
+  'absences.addSick': { bg: 'Нов болничен', en: 'New sick leave' },
+  'absences.editSick': { bg: 'Болничен', en: 'Sick leave' },
+  'absences.editLeave': { bg: 'Отпуска', en: 'Leave' },
+  'absences.sheetNumber': { bg: '№ на болничния лист', en: 'Sick note number' },
+  'absences.sheetMissing': { bg: 'без № на листа', en: 'no sick note number' },
+  'absences.sheetKind': { bg: 'Лист', en: 'Sick note' },
+  'absences.sheetPrimary': { bg: 'Първичен', en: 'First' },
+  'absences.sheetContinuation': { bg: 'Продължение', en: 'Continuation' },
+  'absences.sickReason': { bg: 'Причина', en: 'Reason' },
+  'absences.reason_illness': { bg: 'Общо заболяване', en: 'Illness' },
+  'absences.reason_work_accident': { bg: 'Трудова злополука', en: 'Work accident' },
+  'absences.reason_occupational': { bg: 'Професионална болест', en: 'Occupational disease' },
+  'absences.reason_family_care': { bg: 'Гледане на болен близък', en: 'Caring for a sick relative' },
+  'absences.reason_maternity': { bg: 'Бременност и раждане', en: 'Pregnancy and childbirth' },
+  'absences.reason_other': { bg: 'Друго', en: 'Other' },
+  'absences.sickDaysPreview': { bg: 'Календарни дни: {calendar} · работни дни: {working}', en: 'Calendar days: {calendar} · working days: {working}' },
+  'absences.calendarDays': { bg: '{days} дни', en: '{days} days' },
+  'absences.calendarDay': { bg: '1 ден', en: '1 day' },
+  'absences.sickPrivacy': { bg: 'Без диагноза и ЕГН - не са нужни тук.', en: 'No diagnosis or personal number - they are not needed here.' },
+  'absences.deleteSickConfirm': { bg: 'Да се изтрие ли болничният?', en: 'Delete this sick leave?' },
+  'absences.leaveDaysOnly': { bg: 'Работни дни: {days}', en: 'Working days: {days}' },
   'absences.noHolidayWork': { bg: 'Няма отбелязана работа на празници за тази година', en: 'No holiday work logged for this year' },
   'absences.noLeave': { bg: 'Няма отбелязани отпуски за тази година', en: 'No leave logged for this year' },
   'absences.balanceTitle': { bg: 'Остатък от платения отпуск', en: 'Paid leave left' },
@@ -5596,7 +5617,7 @@ export const translations: Translations = {
   'absences.deleteHolidayWorkConfirm': { bg: 'Да се изтрие ли записът за работа на празник?', en: 'Delete this holiday-work entry?' },
   'absences.deleteLeaveConfirm': { bg: 'Да се изтрие ли записът за отпуска?', en: 'Delete this leave entry?' },
   'absences.export': { bg: 'Експорт за счетоводителя', en: 'Export for the accountant' },
-  'absences.exportHint': { bg: 'Excel файл с работата на празници и отпуските за избрания период', en: 'Excel file with holiday work and leave for the selected period' },
+  'absences.exportHint': { bg: 'Excel файл с работата на празници, отпуските и болничните за избрания период', en: 'Excel file with holiday work, leave and sick leave for the selected period' },
   'absences.exportExcel': { bg: 'Изтегли Excel', en: 'Download Excel' },
 
   // Messages (team channel + direct messages)

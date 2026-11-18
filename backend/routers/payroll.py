@@ -648,14 +648,44 @@ async def delete_holiday_work(entry_id: str, current_user: User = Depends(get_cu
         raise HTTPException(status_code=404, detail="Записът не е намерен")
     return {"message": "Записът е изтрит"}
 
+def _leave_day(value: Optional[str]) -> str:
+    """A leave's first or last day, as "YYYY-MM-DD"."""
+    try:
+        day = business_day(value)
+    except ValueError:
+        day = None
+    if day is None:
+        raise HTTPException(status_code=400, detail="Невалидна дата")
+    return day.isoformat()
+
+
+def _leave_period(start: Optional[str], end: Optional[str]) -> Tuple[str, str]:
+    first, last = _leave_day(start), _leave_day(end)
+    if last < first:
+        raise HTTPException(status_code=400, detail="Крайната дата е преди началната")
+    return first, last
+
+
+def _sick_sheet(leave_type: LeaveType, sheet_number: Optional[str], sick_reason: Any, is_continuation: Any) -> Dict[str, Any]:
+    """A sick leave's sheet as the employer gets it - its number, the reason
+    and whether it continues an earlier sheet. Another kind of leave has no
+    sheet. Nothing about health is kept: no diagnosis, no personal number."""
+    if leave_type != LeaveType.SICK:
+        return {"sheet_number": None, "sick_reason": None, "is_continuation": False}
+    number = " ".join(str(sheet_number or "").split()) or None
+    return {
+        "sheet_number": number,
+        "sick_reason": SickReason(sick_reason).value if sick_reason else None,
+        "is_continuation": bool(is_continuation),
+    }
+
+
 @router.post("/employees/leave", response_model=EmployeeLeave)
 async def create_leave(payload: EmployeeLeaveCreate, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
     company_id, _ = await get_company_scope(current_user)
     employee = await _get_employee_for_company(payload.employee_id, company_id, current_user)
-
-    if payload.end_date < payload.start_date:
-        raise HTTPException(status_code=400, detail="Крайната дата е преди началната")
+    start_date, end_date = _leave_period(payload.start_date, payload.end_date)
 
     entry = EmployeeLeave(
         company_id=company_id or "",
@@ -663,12 +693,41 @@ async def create_leave(payload: EmployeeLeaveCreate, current_user: User = Depend
         employee_id=payload.employee_id,
         employee_name=employee["name"],
         leave_type=payload.leave_type,
-        start_date=payload.start_date,
-        end_date=payload.end_date,
-        note=payload.note,
+        start_date=start_date,
+        end_date=end_date,
+        note=(payload.note or "").strip() or None,
+        **_sick_sheet(payload.leave_type, payload.sheet_number, payload.sick_reason, payload.is_continuation),
     )
     await server.db.employee_leave.insert_one(entry.model_dump())
     return entry
+
+
+@router.put("/employees/leave/{entry_id}", response_model=EmployeeLeave)
+async def update_leave(entry_id: str, payload: EmployeeLeaveUpdate, current_user: User = Depends(get_current_user)):
+    """A leave entry corrected: its days, kind, note or sick-leave sheet -
+    say the sheet's number added once the sheet arrives. What is sent
+    changes; a note, number or reason sent empty is cleared."""
+    require_permission(current_user, "manage_budget")
+    _, scope = await get_company_scope(current_user)
+    entry = await server.db.employee_leave.find_one({"id": entry_id, **scope}, {"_id": 0})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Записът не е намерен")
+    sent = payload.model_dump(exclude_unset=True)
+    for kept in ("leave_type", "start_date", "end_date", "is_continuation"):
+        if sent.get(kept) is None:
+            sent.pop(kept, None)
+    updated = {**entry, **sent}
+    leave_type = LeaveType(updated["leave_type"])
+    start_date, end_date = _leave_period(updated.get("start_date"), updated.get("end_date"))
+    changes: Dict[str, Any] = {
+        "leave_type": leave_type.value,
+        "start_date": start_date,
+        "end_date": end_date,
+        "note": (updated.get("note") or "").strip() or None,
+        **_sick_sheet(leave_type, updated.get("sheet_number"), updated.get("sick_reason"), updated.get("is_continuation")),
+    }
+    await server.db.employee_leave.update_one({"id": entry_id, **scope}, {"$set": changes})
+    return EmployeeLeave(**{**entry, **changes})
 
 @router.get("/employees/leave-balance")
 async def get_leave_balance(year: Optional[int] = None, current_user: User = Depends(get_current_user)):

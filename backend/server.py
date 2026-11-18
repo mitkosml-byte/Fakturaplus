@@ -3436,11 +3436,14 @@ async def _business_digest_schedule(company_id: Optional[str], start_date: str, 
     today_str = today_local().isoformat()
     on_leave = await db.employee_leave.find(
         {"company_id": company_id, "start_date": {"$lte": today_str}, "end_date": {"$gte": today_str}},
-        {"_id": 0, "employee_name": 1},
+        {"_id": 0, "employee_name": 1, "leave_type": 1},
     ).to_list(100)
     return {
         "total_hours": total_hours, "estimated_pay": total_pay, "unpaid_amount": unpaid,
-        "on_leave_today": [e["employee_name"] for e in on_leave],
+        "on_leave_today": [
+            f"{e['employee_name']} (болничен)" if e.get("leave_type") == LeaveType.SICK.value else e["employee_name"]
+            for e in on_leave
+        ],
     }
 
 async def _business_digest_scan_credits(company_id: Optional[str], user_id: str) -> dict:
@@ -4472,13 +4475,22 @@ async def _signal_team_on_leave(company_id, scope, current_user, visibility) -> 
     today = today_local().isoformat()
     entries = await db.employee_leave.find(
         {"company_id": company_id, "start_date": {"$lte": today}, "end_date": {"$gte": today}},
-        {"_id": 0, "employee_name": 1},
+        {"_id": 0, "employee_name": 1, "leave_type": 1},
     ).to_list(100)
     if not entries:
         return None
+    sick = [e.get("leave_type") == LeaveType.SICK.value for e in entries]
     names = ", ".join(e["employee_name"] for e in entries[:3])
     more = f" и още {len(entries) - 3}" if len(entries) > 3 else ""
-    verb = "е в отпуск" if len(entries) == 1 and not more else "са в отпуск"
+    one = len(entries) == 1
+    if all(sick):
+        verb = "е в болничен" if one else "са в болничен"
+    elif any(sick):
+        # Some on leave, some on sick leave: each sick one is marked.
+        names = ", ".join(f"{e['employee_name']} (болничен)" if is_sick else e["employee_name"] for e, is_sick in zip(entries[:3], sick))
+        verb = "отсъстват"
+    else:
+        verb = "е в отпуск" if one else "са в отпуск"
     return {
         "key": "team_on_leave", "severity": "info", "priority": 25,
         "title": "Екипът днес",
@@ -5640,6 +5652,17 @@ class LeaveType(str, Enum):
     UNPAID = "unpaid"    # Неплатена
     SICK = "sick"         # Болнична
 
+class SickReason(str, Enum):
+    """Why the sick-leave sheet was issued - what the accountant needs to
+    know who pays what. Never the diagnosis: the employer needs no health
+    details, and the program keeps none."""
+    ILLNESS = "illness"              # Общо заболяване
+    WORK_ACCIDENT = "work_accident"  # Трудова злополука
+    OCCUPATIONAL = "occupational"    # Професионална болест
+    FAMILY_CARE = "family_care"      # Гледане на болен член от семейството
+    MATERNITY = "maternity"          # Бременност и раждане
+    OTHER = "other"                  # Друго
+
 class EmployeeLeave(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     company_id: str
@@ -5651,6 +5674,11 @@ class EmployeeLeave(BaseModel):
     start_date: str
     end_date: str
     note: Optional[str] = None
+    # A sick leave's sheet, as the employer gets it: its number, the reason
+    # and whether it continues an earlier sheet (only for sick leave).
+    sheet_number: Optional[str] = None
+    sick_reason: Optional[SickReason] = None
+    is_continuation: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class EmployeeLeaveCreate(BaseModel):
@@ -5659,6 +5687,19 @@ class EmployeeLeaveCreate(BaseModel):
     start_date: str
     end_date: str
     note: Optional[str] = None
+    sheet_number: Optional[str] = Field(default=None, max_length=30)
+    sick_reason: Optional[SickReason] = None
+    is_continuation: bool = False
+
+class EmployeeLeaveUpdate(BaseModel):
+    """A leave entry corrected: what is sent changes (the employee stays)."""
+    leave_type: Optional[LeaveType] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    note: Optional[str] = None
+    sheet_number: Optional[str] = Field(default=None, max_length=30)
+    sick_reason: Optional[SickReason] = None
+    is_continuation: Optional[bool] = None
 
 class LeaveSettingsUpdate(BaseModel):
     """An employee's paid leave: days a year, and the unused days carried

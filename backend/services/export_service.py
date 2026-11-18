@@ -2,7 +2,7 @@
 import io
 import os
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import json
 from xml.sax.saxutils import escape as _xml_escape
 
@@ -887,8 +887,9 @@ class ExportService:
         period_label: str = ""
     ) -> bytes:
         """A list of which employees worked on an official holiday (extra-
-        pay entitlement under Чл. 262 КТ) and which took leave, for an
-        accountant to attach to the required company/personnel documents."""
+        pay entitlement under Чл. 262 КТ), which took leave and which were
+        on sick leave, for an accountant to attach to the required
+        company/personnel documents."""
         if not EXCEL_AVAILABLE:
             raise ImportError("openpyxl is not installed")
 
@@ -905,6 +906,33 @@ class ExportService:
             ws['A2'] = period_label or f"Генерирано: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
 
         LEAVE_TYPE_LABELS = {"paid": "Платена", "unpaid": "Неплатена", "sick": "Болнична"}
+        SICK_REASON_LABELS = {
+            "illness": "Общо заболяване", "work_accident": "Трудова злополука",
+            "occupational": "Професионална болест", "family_care": "Гледане на болен член от семейството",
+            "maternity": "Бременност и раждане", "other": "Друго",
+        }
+
+        def leave_days(entry: dict) -> Tuple[str, str, Any]:
+            """The period as written in Bulgaria and its calendar days."""
+            start_str = str(entry.get("start_date", ""))[:10]
+            end_str = str(entry.get("end_date", ""))[:10]
+            try:
+                start_d = datetime.strptime(start_str, "%Y-%m-%d")
+                end_d = datetime.strptime(end_str, "%Y-%m-%d")
+            except ValueError:
+                return start_str, end_str, ""
+            return start_d.strftime("%d.%m.%Y"), end_d.strftime("%d.%m.%Y"), (end_d - start_d).days + 1
+
+        def write_sheet(sheet, headers: List[str], rows: List[list], widths: List[int]) -> None:
+            for col, header in enumerate(headers, 1):
+                cell = sheet.cell(row=header_row, column=col, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+            for idx, row_values in enumerate(rows, 1):
+                for col, value in enumerate(row_values, 1):
+                    sheet.cell(row=header_row + idx, column=col, value=value)
+            for col, width in zip(range(1, len(headers) + 1), widths):
+                sheet.column_dimensions[get_column_letter(col)].width = width
 
         # ===== Работа на официални празници =====
         ws = wb.active
@@ -931,36 +959,42 @@ class ExportService:
         for col, width in zip(range(1, len(holiday_headers) + 1), [5, 26, 13, 40, 30]):
             ws.column_dimensions[get_column_letter(col)].width = width
 
-        # ===== Отпуски =====
+        # ===== Отпуски (платени и неплатени) =====
         ws2 = wb.create_sheet("Отпуски")
         write_title(ws2, "Отпуски")
-
-        leave_headers = ["№", "Служител", "Вид отсъствие", "От дата", "До дата", "Брой дни", "Бележка"]
-        for col, header in enumerate(leave_headers, 1):
-            cell = ws2.cell(row=header_row, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-
-        for idx, entry in enumerate(leave, 1):
-            row = header_row + idx
-            start_str = str(entry.get("start_date", ""))[:10]
-            end_str = str(entry.get("end_date", ""))[:10]
-            days_count: Any = ""
-            try:
-                start_d = datetime.strptime(start_str, "%Y-%m-%d")
-                end_d = datetime.strptime(end_str, "%Y-%m-%d")
-                days_count = (end_d - start_d).days + 1
-                start_str = start_d.strftime("%d.%m.%Y")
-                end_str = end_d.strftime("%d.%m.%Y")
-            except ValueError:
-                pass
+        leave_rows: List[list] = []
+        for entry in (e for e in leave if e.get("leave_type") != "sick"):
+            start_str, end_str, calendar_days = leave_days(entry)
             leave_type_label = LEAVE_TYPE_LABELS.get(entry.get("leave_type") or "", entry.get("leave_type", ""))
-            row_values = [idx, _excel_safe(entry.get("employee_name", "")), leave_type_label, start_str, end_str, days_count, _excel_safe(entry.get("note") or "")]
-            for col, value in enumerate(row_values, 1):
-                ws2.cell(row=row, column=col, value=value)
+            leave_rows.append([
+                len(leave_rows) + 1, _excel_safe(entry.get("employee_name", "")), leave_type_label, start_str, end_str,
+                calendar_days, entry.get("working_days") if entry.get("working_days") is not None else "",
+                _excel_safe(entry.get("note") or ""),
+            ])
+        write_sheet(
+            ws2, ["№", "Служител", "Вид отпуск", "От дата", "До дата", "Календарни дни", "Работни дни", "Бележка"],
+            leave_rows, [5, 26, 14, 13, 13, 15, 13, 30],
+        )
 
-        for col, width in zip(range(1, len(leave_headers) + 1), [5, 26, 14, 13, 13, 10, 30]):
-            ws2.column_dimensions[get_column_letter(col)].width = width
+        # ===== Болнични =====
+        # The sheet's own details, as the employer gets them - no diagnosis.
+        ws3 = wb.create_sheet("Болнични")
+        write_title(ws3, "Болнични")
+        sick_rows: List[list] = []
+        for entry in (e for e in leave if e.get("leave_type") == "sick"):
+            start_str, end_str, calendar_days = leave_days(entry)
+            sick_rows.append([
+                len(sick_rows) + 1, _excel_safe(entry.get("employee_name", "")), _excel_safe(entry.get("sheet_number") or ""),
+                "Продължение" if entry.get("is_continuation") else "Първичен",
+                SICK_REASON_LABELS.get(entry.get("sick_reason") or "", ""), start_str, end_str,
+                calendar_days, entry.get("working_days") if entry.get("working_days") is not None else "",
+                _excel_safe(entry.get("note") or ""),
+            ])
+        write_sheet(
+            ws3, ["№", "Служител", "№ на болничния лист", "Първичен / продължение", "Причина", "От дата", "До дата",
+                  "Календарни дни", "Работни дни", "Бележка"],
+            sick_rows, [5, 26, 22, 22, 30, 13, 13, 15, 13, 30],
+        )
 
         output = io.BytesIO()
         wb.save(output)
