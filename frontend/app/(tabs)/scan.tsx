@@ -460,7 +460,14 @@ export default function ScanScreen() {
     setOcrCorrections([]);
     setOcrConfidence(null);
     try {
-      applyOcrResult(await api.scanInvoice(images));
+      const result = await api.scanInvoice(images);
+      // The pages as they were read - the sheet straightened and cut out of
+      // the table - shown and kept instead of the photos; a page changed
+      // meanwhile stays as it is.
+      if (result.pages?.some(Boolean)) {
+        setCapturedImages((current) => current.map((image, i) => (image === images[i] && result.pages?.[i]) || image));
+      }
+      applyOcrResult(result);
     } catch (error: any) {
       if (isNetworkError(error)) {
         // The connection dropped on the way: kept, as if offline from the start.

@@ -8,6 +8,7 @@ import re
 from fastapi import APIRouter
 from server import *
 import server
+from services.document_scan import straighten_image_blocks
 
 router = APIRouter(prefix="/api")
 
@@ -128,6 +129,8 @@ async def scan_z_report(request: Request, current_user: User = Depends(get_curre
     company_id, _ = await get_company_scope(current_user)
     if SCAN_CREDITS_ENFORCED and not await scan_credit_service.has_scans_remaining(company_id, current_user.user_id):
         raise HTTPException(status_code=402, detail="Нямате оставащи сканирания. Купете пакет, за да продължите.")
+    # The receipt made to look scanned before it is read (services/document_scan).
+    await straighten_image_blocks(blocks)
     try:
         response = await server.anthropic_client.messages.parse(  # type: ignore[union-attr]  # guarded by AI_FEATURES_ENABLED above
             model="claude-opus-5-5",

@@ -33,6 +33,7 @@ _eik_check_digit,
     _team_channel_id,
 )
 import server
+from services.document_scan import straighten_image_blocks
 
 router = APIRouter(prefix="/api")
 
@@ -103,6 +104,13 @@ async def scan_invoice(request: Request, image_base64: Optional[str] = None, cur
             status_code=402,
             detail="Нямате оставащи сканирания. Купете пакет, за да продължите.",
         )
+
+    # Each photo made to look scanned before it is read: the sheet cut out
+    # of the table, straightened and its shadows evened out
+    # (services/document_scan) - no AI and no cost; a page it cannot find
+    # with confidence is read as it came. After the credit gate, so an
+    # empty balance costs no work either.
+    straightened_pages = await straighten_image_blocks(image_blocks)
 
     prompt_text = (
         "Извлечи всички данни от тази фактура: доставчика (не получателя!), ЕИК ако е видим, номер, дата, суми и ВСИЧКИ редове от таблицата с артикули."
@@ -175,7 +183,8 @@ async def scan_invoice(request: Request, image_base64: Optional[str] = None, cur
             payment_method=corrected.get("payment_method"),
             items=[OCRItemResult(**item) for item in corrected.get("items", [])],
             corrections=correction_result.corrections_made,
-            confidence=correction_result.confidence
+            confidence=correction_result.confidence,
+            pages=straightened_pages if any(straightened_pages) else None,
         )
 
     except HTTPException:

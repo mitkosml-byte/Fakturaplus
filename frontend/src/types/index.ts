@@ -1000,6 +1000,9 @@ export interface OCRResult {
   items?: OCRItemResult[];  // Разпознати продукти от таблицата с артикули
   corrections?: string[];  // AI корекции
   confidence?: number;  // Увереност в резултата
+  // The photos as they were read: each page straightened and cut out of
+  // its background, null where a photo was read as it came.
+  pages?: (string | null)[] | null;
 }
 
 export interface FinancialVisibility {

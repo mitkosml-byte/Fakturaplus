@@ -890,6 +890,10 @@ class OCRResult(BaseModel):
     items: List[OCRItemResult] = []  # Разпознати продукти от таблицата с артикули
     corrections: Optional[List[str]] = None  # Списък с направени корекции
     confidence: Optional[float] = None  # Увереност в резултата (0-1)
+    # The photos as read: each page straightened and cut out of its
+    # background (data URI), None where a photo was read as it came - the
+    # app shows and keeps these instead (services/document_scan).
+    pages: Optional[List[Optional[str]]] = None
 
 # ===================== AUTH HELPERS =====================
 
