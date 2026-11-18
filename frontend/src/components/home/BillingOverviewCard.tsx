@@ -16,23 +16,27 @@ type Props = {
   canIssue: boolean;
   // Changes whenever Home reloads, so the card follows.
   refreshSignal?: unknown;
+  // The overview as Home loaded it (Л14) - given, no request of its own.
+  overview?: BillingOverview | null;
 };
 
 // Home for a business that invoices (У2, У3): what it issued in the period,
 // what customers owe now and what of that is overdue - and "+ Фактура",
 // its main action, one tap away instead of three screens in.
-export function BillingOverviewCard({ startDate, endDate, canIssue, refreshSignal }: Props) {
+export function BillingOverviewCard({ startDate, endDate, canIssue, refreshSignal, overview: loaded }: Props) {
   const { t } = useTranslation();
   const router = useRouter();
-  const [overview, setOverview] = useState<BillingOverview | null>(null);
+  const [fetched, setOverview] = useState<BillingOverview | null>(null);
+  const overview = loaded !== undefined ? loaded : fetched;
 
   useEffect(() => {
+    if (loaded !== undefined) return undefined;
     let cancelled = false;
     api.getBillingOverview(startDate, endDate)
       .then((data) => { if (!cancelled) setOverview(data); })
       .catch(() => { if (!cancelled) setOverview(null); });
     return () => { cancelled = true; };
-  }, [startDate, endDate, refreshSignal]);
+  }, [startDate, endDate, refreshSignal, loaded]);
 
   const overdue = (overview?.total_overdue || 0) > 0;
   const money = (n: number) => `${formatMoney(n)}`;

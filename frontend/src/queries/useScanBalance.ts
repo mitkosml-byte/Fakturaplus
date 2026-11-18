@@ -9,9 +9,10 @@ import { api } from '../services/api';
 // stay mounted), that's two network round trips for one piece of data.
 export const scanBalanceQueryKey = ['scanBalance'] as const;
 
-export function useScanBalance() {
+export function useScanBalance(enabled: boolean = true) {
   return useQuery({
     queryKey: scanBalanceQueryKey,
     queryFn: () => api.getScanBalance(),
+    enabled,
   });
 }

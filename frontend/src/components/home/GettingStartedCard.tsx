@@ -17,16 +17,20 @@ type Props = {
   // Home's numbers refresh it: a step done shows as done.
   refreshSignal?: unknown;
   onStatus?: (status: GettingStarted) => void;
+  // The status as Home loaded it (Л14) - null while loading; given, no
+  // request of its own.
+  status?: GettingStarted | null;
 };
 
 // "Започни оттук" (Л5): an empty Home says what to do first instead of
 // showing zeros - the day's revenue, a supplier invoice from a photo, an
 // invoice to a customer, each only where the business has it - and ticks
 // each off once done. Gone when all are done or when closed.
-export function GettingStartedCard({ companyId, showRevenue, showInvoice, showIssued, onAddRevenue, refreshSignal, onStatus }: Props) {
+export function GettingStartedCard({ companyId, showRevenue, showInvoice, showIssued, onAddRevenue, refreshSignal, onStatus, status: loaded }: Props) {
   const { t } = useTranslation();
   const router = useRouter();
-  const [status, setStatus] = useState<GettingStarted | null>(null);
+  const [fetched, setStatus] = useState<GettingStarted | null>(null);
+  const status = loaded !== undefined ? loaded : fetched;
   const [hidden, setHidden] = useState(true);
   const hiddenKey = companyId ? `getting_started_hidden_${companyId}` : null;
 
@@ -36,6 +40,7 @@ export function GettingStartedCard({ companyId, showRevenue, showInvoice, showIs
   }, [hiddenKey]);
 
   useEffect(() => {
+    if (loaded !== undefined) return undefined;
     let alive = true;
     api.getGettingStarted()
       .then((data) => {

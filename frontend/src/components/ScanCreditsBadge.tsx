@@ -3,6 +3,7 @@ import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useScanBalance } from '../queries/useScanBalance';
+import type { ScanBalance } from '../types';
 import { COLORS } from '../theme/colors';
 
 // Small persistent pill showing remaining scan credits, mounted in the
@@ -14,9 +15,12 @@ import { COLORS } from '../theme/colors';
 // Deliberately teal, not the primary purple every other header icon uses -
 // user feedback was that it blended in and was too easy to miss as an
 // actual tappable entry point to the billing screen.
-export function ScanCreditsBadge() {
+// Home passes the balance it loaded with everything else (Л14) - null
+// while loading - and the badge asks for nothing itself there.
+export function ScanCreditsBadge({ balance: loaded }: { balance?: ScanBalance | null } = {}) {
   const router = useRouter();
-  const { data: balance } = useScanBalance();
+  const { data: fetched } = useScanBalance(loaded === undefined);
+  const balance = loaded !== undefined ? loaded : fetched;
   const remaining = balance?.total_remaining ?? null;
 
   if (remaining === null) return null;

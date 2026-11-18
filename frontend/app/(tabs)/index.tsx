@@ -16,7 +16,9 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
-import { Summary, NonInvoiceExpense, GettingStarted } from '../../src/types';
+import { Summary, NonInvoiceExpense, GettingStarted, HomeData } from '../../src/types';
+import { queryClient } from '../../src/queries/queryClient';
+import { scanBalanceQueryKey } from '../../src/queries/useScanBalance';
 import { format, subDays } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
@@ -59,6 +61,9 @@ export default function HomeScreen() {
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string; revenueDate?: string }>();
 
   const [summary, setSummary] = useState<Summary | null>(null);
+  // Everything else Home shows came in the same answer (Л14).
+  const [home, setHome] = useState<HomeData | null>(null);
+  const showBilling = usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices'));
   const [askText, setAskText] = useState('');
   // An empty question just opens the assistant.
   const askNumbers = () => {
@@ -172,7 +177,15 @@ export default function HomeScreen() {
     await Promise.all([
       (async () => {
         try {
-          const summaryData = await api.getSummary({ start_date, end_date });
+          // Home in one request (Л14): the numbers, the day's review, the
+          // first steps, the invoicing card and the scans left.
+          const data = await api.getHome({ start_date, end_date, with_billing: showBilling });
+          setHome(data);
+          if (data.getting_started) setStartStatus(data.getting_started);
+          // The scans left are kept for the other screens' badges too.
+          if (data.scan_credits) queryClient.setQueryData(scanBalanceQueryKey, data.scan_credits);
+          const summaryData = data.summary;
+          if (!summaryData) return;
           setSummary(summaryData);
           const newProfit = summaryData.profit;
           if (
@@ -191,7 +204,7 @@ export default function HomeScreen() {
         }
       })(),
     ]);
-  }, [periodState]);
+  }, [periodState, showBilling]);
 
   // Pre-fills the form with whatever is already logged for this date, so
   // saving corrects that value directly instead of adding a delta to it -
@@ -699,7 +712,7 @@ export default function HomeScreen() {
                 <Text style={styles.date}>{today}</Text>
               </View>
               <View style={styles.headerActions}>
-                <ScanCreditsBadge />
+                <ScanCreditsBadge balance={home ? home.scan_credits : null} />
                 <TouchableOpacity
                   style={styles.helpButton}
                   onPress={() => router.push('/help')}
@@ -737,8 +750,7 @@ export default function HomeScreen() {
               showInvoice={hasPermission('manage_invoices')}
               showIssued={usesBilling && hasPermission('issue_invoices')}
               onAddRevenue={() => { setRevenueDate(getDefaultActionDate()); setRevenueModalVisible(true); }}
-              refreshSignal={summary}
-              onStatus={setStartStatus}
+              status={home ? home.getting_started : null}
             />
 
             {!nothingYet && (
@@ -855,16 +867,16 @@ export default function HomeScreen() {
             )}
 
             {/* What needs attention: up to two, the rest behind "show more". */}
-            <MorningBriefingCard refreshSignal={summary} />
+            <MorningBriefingCard signals={home ? home.signals ?? [] : null} />
 
             {/* A business that invoices: issued in the period, owed now,
                 overdue (У2) - its "Фактура" is the action above. */}
-            {usesBilling && !nothingYet && (hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
+            {showBilling && !nothingYet && (
               <BillingOverviewCard
                 startDate={toApiDate(getPeriodBounds(periodState).start)}
                 endDate={toApiDate(getPeriodBounds(periodState).end)}
                 canIssue={false}
-                refreshSignal={summary}
+                overview={home ? home.billing_overview : null}
               />
             )}
 

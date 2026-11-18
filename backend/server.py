@@ -7068,6 +7068,10 @@ app.include_router(exports.router)
 from routers import admin
 app.include_router(admin.router)
 
+# Home in one request (Л14) - built from the handlers above.
+from routers import home as home_router
+app.include_router(home_router.router)
+
 _cors_origins_env = os.environ.get("CORS_ORIGINS", "")
 if _cors_origins_env:
     _cors_origins = [origin.strip() for origin in _cors_origins_env.split(",") if origin.strip()]

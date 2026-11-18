@@ -1854,6 +1854,16 @@ export interface GettingStarted {
   issued: boolean;
 }
 
+// Home in one request (Л14): each part as its own endpoint answers it,
+// null where this viewer may not see it.
+export interface HomeData {
+  summary: Summary | null;
+  signals: ProactiveSignal[] | null;
+  getting_started: GettingStarted | null;
+  billing_overview: BillingOverview | null;
+  scan_credits: ScanBalance | null;
+}
+
 export type LeaveType = 'paid' | 'unpaid' | 'sick';
 
 // Why a sick-leave sheet was issued - never the diagnosis.

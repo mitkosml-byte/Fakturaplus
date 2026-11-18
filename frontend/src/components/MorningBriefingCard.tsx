@@ -22,6 +22,9 @@ type Props = {
   // object works) - adding revenue/an expense right on Home should refresh
   // this card's own signals too, not just on the next screen focus.
   refreshSignal?: unknown;
+  // The signals as Home loaded them (Л14) - null while loading. Given, the
+  // card asks for them itself only after an answer on one of them.
+  signals?: ProactiveSignal[] | null;
 };
 
 const SEVERITY_ICON: Record<ProactiveSignal['severity'], keyof typeof Ionicons.glyphMap> = {
@@ -109,12 +112,18 @@ function actionLabelKey(signal: ProactiveSignal, action: ProactiveSignalAction):
   }
 }
 
-export function MorningBriefingCard({ refreshSignal }: Props) {
+export function MorningBriefingCard({ refreshSignal, signals: loaded }: Props) {
   const { t } = useTranslation();
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [signals, setSignals] = useState<ProactiveSignal[]>([]);
+  // Home loads the signals with everything else (Л14): null while loading.
+  useEffect(() => {
+    if (loaded === undefined || loaded === null) return;
+    setSignals(loaded);
+    setLoading(false);
+  }, [loaded]);
   const [expanded, setExpanded] = useState(false);
 
   const refresh = useCallback(() => {
@@ -135,7 +144,7 @@ export function MorningBriefingCard({ refreshSignal }: Props) {
   // request fires again moments later once Home's own load resolves.
   // refresh() is recreated every render - only refreshSignal should retrigger this.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (refreshSignal != null) refresh(); }, [refreshSignal]);
+  useEffect(() => { if (loaded === undefined && refreshSignal != null) refresh(); }, [refreshSignal]);
 
   // The answer is remembered server-side, so the signal doesn't come back
   // tomorrow unchanged; it leaves the list at once and returns if saving fails.
