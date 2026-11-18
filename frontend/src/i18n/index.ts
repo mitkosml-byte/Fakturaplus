@@ -1047,6 +1047,18 @@ export const translations: Translations = {
   // The till's and Джобче's revenue added up, under the number boxes.
   'stats.paymentKinds': { bg: 'Приходи по вид плащане', en: 'Income by payment kind' },
   'home.revenueSum': { bg: 'Оборот (фискален + джобче)', en: 'Revenue (fiscal + pocket)' },
+  // A scanned invoice confirmed in one tap (Л6).
+  'scanSummary.title': { bg: 'Прочетено от снимката', en: 'Read from the photo' },
+  'scanSummary.creditNote': { bg: 'Кредитно известие', en: 'Credit note' },
+  'scanSummary.amounts': { bg: 'без ДДС {net} € · ДДС {vat} €', en: 'net {net} € · VAT {vat} €' },
+  'scanSummary.dueDate': { bg: 'до {date}', en: 'by {date}' },
+  'scanSummary.itemsLabel': { bg: 'Артикули', en: 'Items' },
+  'scanSummary.items': { bg: '{n} реда', en: '{n} lines' },
+  'scanSummary.itemsOne': { bg: '1 ред', en: '1 line' },
+  'scanSummary.pricesUp': { bg: '{n} поскъпнали', en: '{n} went up' },
+  'scanSummary.checkSums': { bg: 'Сумите не се връзват - прегледайте ги', en: "The amounts don't add up - check them" },
+  'scanSummary.dateNotRead': { bg: 'не се прочете', en: 'not read' },
+  'scanSummary.edit': { bg: 'Редактирай всички полета', en: 'Edit all fields' },
   // The first start: one question (Л5).
   'start.question': { bg: 'С какво работите?', en: 'What do you work with?' },
   'start.subtitle': { bg: 'Отбележете каквото ползвате - програмата ще показва само него.', en: 'Tick what you use - the app will show just that.' },
@@ -1060,6 +1072,7 @@ export const translations: Translations = {
   'start.vatHint': { bg: 'ДДС за плащане и фактури с ДДС', en: 'VAT to pay and invoices with VAT' },
   'start.done': { bg: 'Готово', en: 'Done' },
   'start.later': { bg: 'Всичко се променя после от Акаунт → Фирма.', en: 'Change any of it later in Account → Company.' },
+  'start.skip': { bg: 'Пропусни', en: 'Skip' },
   // An empty Home says where to start.
   'startHere.title': { bg: 'Започни оттук', en: 'Start here' },
   'startHere.revenue': { bg: 'Въведете оборота за деня', en: "Enter the day's revenue" },

@@ -147,6 +147,11 @@ export function OnboardingTutorial() {
               {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryBtnText}>{t('start.done')}</Text>}
             </TouchableOpacity>
             <Text style={styles.later}>{t('start.later')}</Text>
+            {/* Skipped: nothing changes - every part stays on and the VAT is
+                asked on Home later, as for a business that never answered. */}
+            <TouchableOpacity onPress={finish} style={styles.skip} disabled={saving}>
+              <Text style={styles.skipText}>{t('start.skip')}</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -246,4 +251,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   later: { color: COLORS.textMuted, fontSize: 12, marginTop: 10, textAlign: 'center' },
+  skip: { paddingTop: 8, paddingHorizontal: 12 },
+  skipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
 });
