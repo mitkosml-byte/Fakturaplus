@@ -491,6 +491,21 @@ export default function BillingDocumentsScreen() {
               contentContainerStyle={{ paddingBottom: 32 }}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
             >
+              {/* What belongs to issuing invoices, one tap each (Л8). */}
+              <View style={styles.toolsRow}>
+                {hasPermission('issue_invoices') && (
+                  <TouchableOpacity style={styles.toolLink} onPress={() => router.push('/recurring-invoices')}>
+                    <Ionicons name="repeat-outline" size={14} color={COLORS.success} />
+                    <Text style={styles.toolLinkText}>{t('recurringInvoices.title')}</Text>
+                  </TouchableOpacity>
+                )}
+                {hasPermission('add_revenue') && (
+                  <TouchableOpacity style={styles.toolLink} onPress={() => router.push('/payment-reminders')}>
+                    <Ionicons name="notifications-outline" size={14} color={COLORS.success} />
+                    <Text style={styles.toolLinkText}>{t('reminders.title')}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
               {documents.length === 0 && (
                 <View style={styles.emptyContainer}>
                   <AnimatedEmptyIcon name="document-text-outline" size={64} color={COLORS.border} />
@@ -971,6 +986,17 @@ const styles = StyleSheet.create({
   customerName: { fontSize: 14, fontWeight: '600', color: 'white', marginBottom: 6 },
   rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   date: { fontSize: 12, color: COLORS.textMuted },
+  toolsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  toolLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  toolLinkText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
   modalContent: { padding: 20, paddingBottom: 30, flexShrink: 1 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: 'white', marginBottom: 16 },
   typeSelector: { flexDirection: 'row', gap: 8, marginBottom: 10 },

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { parseISO, format } from 'date-fns';
 import { api } from '../src/services/api';
 import { BusinessChatDigest } from '../src/types';
@@ -46,6 +46,9 @@ export default function AskMyNumbersScreen() {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  // A question typed on Home's field arrives here and is asked at once.
+  const { q } = useLocalSearchParams<{ q?: string }>();
+  const askedFromHome = useRef<string | null>(null);
 
   const monthLabel = (label: string) => {
     try {
@@ -84,6 +87,14 @@ export default function AskMyNumbersScreen() {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
   };
+
+  useEffect(() => {
+    if (!q || askedFromHome.current === q) return;
+    askedFromHome.current = q;
+    send(q);
+    router.setParams({ q: undefined });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
 
   if (!hasPermission('view_statistics')) {
     return <AccessDenied />;

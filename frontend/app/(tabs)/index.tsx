@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  TextInput,
   ImageBackground,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -58,6 +59,13 @@ export default function HomeScreen() {
   const ocrParams = useLocalSearchParams<{ ocrDate?: string; ocrFiscalRevenue?: string; ocrVatRate?: string; revenueDate?: string }>();
 
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [askText, setAskText] = useState('');
+  // An empty question just opens the assistant.
+  const askNumbers = () => {
+    const question = askText.trim();
+    setAskText('');
+    router.push(question ? { pathname: '/ask-my-numbers', params: { q: question } } : '/ask-my-numbers');
+  };
   // A business that has entered nothing yet sees where to start, not zeros.
   const [startStatus, setStartStatus] = useState<GettingStarted | null>(null);
   const nothingYet = !!startStatus && !startStatus.revenue && !startStatus.invoice && !startStatus.expense && !startStatus.issued;
@@ -816,6 +824,26 @@ export default function HomeScreen() {
             </>
             )}
 
+            {/* The assistant (Л8): ask about your numbers right here - the
+                question opens its answer on the assistant's screen. */}
+            {hasPermission('view_statistics') && (
+              <View style={styles.askField}>
+                <Ionicons name="chatbubbles-outline" size={18} color={COLORS.primary} />
+                <TextInput
+                  style={styles.askInput}
+                  value={askText}
+                  onChangeText={setAskText}
+                  placeholder={t('home.askPlaceholder')}
+                  placeholderTextColor={COLORS.textMuted}
+                  returnKeyType="send"
+                  onSubmitEditing={askNumbers}
+                />
+                <TouchableOpacity onPress={askNumbers} accessibilityLabel={t('askMyNumbers.title')} hitSlop={8}>
+                  <Ionicons name="arrow-forward-circle" size={26} color={COLORS.primary} />
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* What needs attention: up to two, the rest behind "show more". */}
             <MorningBriefingCard refreshSignal={summary} />
 
@@ -1009,6 +1037,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
     marginTop: 4,
+  },
+  askField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.35)',
+    paddingLeft: 14,
+    paddingRight: 8,
+    marginBottom: 16,
+  },
+  askInput: {
+    flex: 1,
+    color: 'white',
+    fontSize: 14,
+    paddingVertical: 12,
   },
   ledger: {
     width: '100%',

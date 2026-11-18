@@ -1083,6 +1083,10 @@ export const translations: Translations = {
   'hint.scan': { bg: 'Снимайте фактурата от доставчик - програмата прочита доставчика, сумите и ДДС сама.', en: 'Photograph a supplier invoice - the app reads the supplier, amounts and VAT itself.' },
   'hint.invoices': { bg: 'Фактурите от доставчици. Докоснете фактура, за да я видите, поправите или платите.', en: 'Supplier invoices. Tap one to see it, correct it or mark it paid.' },
   'hint.stats': { bg: 'Числата по периоди: приходи, разходи, ДДС и прогноза. Периодът е общ с Главната.', en: 'Numbers by period: income, expenses, VAT and the forecast. The period is shared with Home.' },
+  // One place per function (Л8).
+  'home.askPlaceholder': { bg: 'Попитайте за числата си…', en: 'Ask about your numbers…' },
+  'stats.cashFlowSection': { bg: 'какво влиза и излиза в следващите седмици', en: 'what comes in and goes out in the weeks ahead' },
+  'stats.accountantPackSection': { bg: 'всичко за счетоводителя за месеца', en: "everything for the accountant for the month" },
   // Home's actions, each with a word on what it records.
   'home.actionRevenueHint': { bg: 'каса и джобче', en: 'till and pocket' },
   'home.actionExpenseHint': { bg: 'без фактура', en: 'no invoice' },
