@@ -1220,9 +1220,13 @@ export const translations: Translations = {
     bg: 'История на Джобчето по дни',
     en: 'Day-by-day pocket-money history',
   },
+  'historyHub.personalNotebook': {
+    bg: 'Лично тефтерче и вложения',
+    en: 'Personal wallet and investments',
+  },
   'historyHub.personalExpensesDesc': {
-    bg: 'Лични вложения и лично тефтерче',
-    en: 'Personal investments and personal wallet',
+    bg: 'Взетото от фирмата за лични нужди и вложеното в нея',
+    en: 'What was taken from the business for personal needs, and what was put in',
   },
   'pocketMoney.historyTitle': {
     bg: 'История на Джобчето',

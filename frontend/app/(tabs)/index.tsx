@@ -417,13 +417,17 @@ export default function HomeScreen() {
     if (summary.total_expense !== null) {
       ledgerRows.push({ key: 'expense', label: t('home.totalExpenses'), value: summary.total_expense || 0 });
     }
+    // The personal notebook, for whoever may see it: always here - at 0 too,
+    // it is the way into the notebook - and, once something was taken, what
+    // is left in the business after it.
     const personal = summary.personal_withdrawals;
-    if (personal != null && personal > 0) {
+    if (personal != null && uses('wallet')) {
       ledgerRows.push({
-        key: 'personal', label: t('home.personalUse'), value: -personal, tone: COLORS.warning,
+        key: 'personal', label: t('home.personalUse'), value: personal > 0 ? -personal : 0,
+        tone: personal > 0 ? COLORS.warning : undefined,
         onPress: () => router.push({ pathname: '/personal-expenses', params: { tab: 'wallet' } }),
       });
-      if (summary.left_after_personal != null) {
+      if (personal > 0 && summary.left_after_personal != null) {
         ledgerRows.push({
           key: 'left', label: t('home.leftInBusiness'), value: summary.left_after_personal,
           tone: summary.left_after_personal >= 0 ? COLORS.success : COLORS.danger,
@@ -584,7 +588,10 @@ export default function HomeScreen() {
                             accessibilityRole={row.onPress ? 'button' : undefined}
                           >
                             <Text style={styles.ledgerLabel}>{row.label}</Text>
-                            <Text style={[styles.ledgerValue, row.tone ? { color: row.tone } : null]}>{formatMoney(row.value)}</Text>
+                            <View style={styles.ledgerValueWrap}>
+                              <Text style={[styles.ledgerValue, row.tone ? { color: row.tone } : null]}>{formatMoney(row.value)}</Text>
+                              {row.onPress && <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />}
+                            </View>
                           </TouchableOpacity>
                         ))}
                       </View>
@@ -820,6 +827,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: 'white',
   },
+  ledgerValueWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   restrictedNote: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -54,13 +54,17 @@ export default function HistoryHubScreen() {
       iconColor: COLORS.success,
       onPress: () => router.push('/pocket-money-history'),
     }] : []),
+    // The personal notebook (and the owner's investments): named for what
+    // it holds for this viewer, and opening on the notebook when they see it.
     ...(uses('wallet') && (hasPermission('view_personal_investments') || hasPermission('view_personal_wallet')) ? [{
       key: 'personalExpenses',
-      title: t('personal.title'),
+      title: hasPermission('view_personal_wallet') ? t('historyHub.personalNotebook') : t('personal.title'),
       subtitle: t('historyHub.personalExpensesDesc'),
-      icon: 'person-outline' as const,
+      icon: 'book-outline' as const,
       iconColor: COLORS.danger,
-      onPress: () => router.push('/personal-expenses'),
+      onPress: () => (hasPermission('view_personal_wallet')
+        ? router.push({ pathname: '/personal-expenses', params: { tab: 'wallet' } })
+        : router.push('/personal-expenses')),
     }] : []),
     ...(uses('billing') && hasPermission('add_revenue') ? [{
       key: 'receivables',
