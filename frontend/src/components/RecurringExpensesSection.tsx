@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, ActivityIndicator, Switch, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { format, parseISO } from 'date-fns';
+import { addMonths, format, parseISO } from 'date-fns';
 import { api } from '../services/api';
 import { useTranslation } from '../i18n';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,12 +24,22 @@ type Props = {
 
 type Answer = 'record' | 'skip' | 'unskip' | 'yes' | 'no';
 
-// What a business pays every month (rent, subscriptions, utilities): each
-// says whether an invoice comes for it. With one, the invoice is the
-// expense - awaited every month, never recorded twice; without one, the
-// month is recorded as an off-book expense (when the owner says it is paid,
-// or on its day). The backend decides each month's state; this shows it
-// and the one or two answers it needs.
+// How often it is paid: the usual choices, and any other number of months.
+const INTERVAL_CHOICES = [1, 3, 6, 12] as const;
+const MAX_INTERVAL_MONTHS = 36;
+const MAX_PAYMENTS = 600;
+// How far ahead the first payment can be put.
+const START_MONTHS_AHEAD = 36;
+
+const shiftMonth = (key: string, months: number) => format(addMonths(parseISO(`${key}-01`), months), 'yyyy-MM');
+
+// What a business pays regularly (rent, subscriptions, insurance, utilities,
+// installments) - every month or every few months, with an end when it has
+// a number of payments. Each says whether an invoice comes for it. With one,
+// the invoice is the expense - awaited at each payment, never recorded
+// twice; without one, the payment is recorded as an off-book expense (when
+// the owner says it is paid, or on its day). The backend decides each
+// payment's state; this shows it and the one or two answers it needs.
 export function RecurringExpensesSection({ overview, onChanged }: Props) {
   const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
@@ -44,6 +54,11 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
   const [supplierName, setSupplierName] = useState('');
   const [supplierEik, setSupplierEik] = useState('');
   const [autoRecord, setAutoRecord] = useState(false);
+  const [intervalChoice, setIntervalChoice] = useState<number | 'other'>(1);
+  const [otherInterval, setOtherInterval] = useState('');
+  const [startMonth, setStartMonth] = useState('');
+  const [startTouched, setStartTouched] = useState(false);
+  const [paymentsCount, setPaymentsCount] = useState('');
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [knownSuppliers, setKnownSuppliers] = useState<string[]>([]);
@@ -58,6 +73,43 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
 
   const items = overview?.recurring_expenses || [];
   const monthOutlook = overview?.outlook;
+  // This month on the business's clock (the server's), else the phone's.
+  const thisMonth = overview?.month || format(new Date(), 'yyyy-MM');
+
+  // A new one starts with the first month its day comes in from today on -
+  // as the server would set it (an earlier one can still be chosen).
+  const defaultStart = (dayText: string) => {
+    const dayNumber = parseInt(dayText, 10);
+    return dayNumber >= 1 && new Date().getDate() > dayNumber ? shiftMonth(thisMonth, 1) : thisMonth;
+  };
+
+  useEffect(() => {
+    if (modalVisible && !editing && !startTouched) setStartMonth(defaultStart(day));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalVisible, editing, startTouched, day, thisMonth]);
+
+  // The first payment: this month or later - or, for one already saved,
+  // where it already is.
+  const startOptions = useMemo(() => {
+    const options: string[] = [];
+    if (editing && editing.start_month < thisMonth) options.push(editing.start_month);
+    for (let ahead = 0; ahead <= START_MONTHS_AHEAD; ahead += 1) options.push(shiftMonth(thisMonth, ahead));
+    if (startMonth && !options.includes(startMonth)) options.push(startMonth);
+    return options.sort();
+  }, [editing, thisMonth, startMonth]);
+  const startIndex = startOptions.indexOf(startMonth);
+  const moveStart = (step: number) => {
+    const next = startOptions[startIndex + step];
+    if (!next) return;
+    setStartMonth(next);
+    setStartTouched(true);
+  };
+
+  const intervalValue = intervalChoice === 'other' ? parseInt(otherInterval, 10) : intervalChoice;
+  const countValue = paymentsCount.trim() ? Number(paymentsCount.trim()) : null;
+  const lastPayment = startMonth && intervalValue >= 1 && countValue && Number.isInteger(countValue) && countValue >= 1
+    ? shiftMonth(startMonth, (countValue - 1) * intervalValue)
+    : null;
 
   const openForm = (item: RecurringExpense | null) => {
     setEditing(item);
@@ -68,6 +120,13 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
     setSupplierName(item?.supplier_name || '');
     setSupplierEik(item?.supplier_eik || '');
     setAutoRecord(!!item?.auto_record);
+    const interval = item?.interval_months || 1;
+    const usual = (INTERVAL_CHOICES as readonly number[]).includes(interval);
+    setIntervalChoice(usual ? interval : 'other');
+    setOtherInterval(usual ? '' : String(interval));
+    setStartMonth(item ? item.start_month : defaultStart('1'));
+    setStartTouched(false);
+    setPaymentsCount(item?.payments_count ? String(item.payments_count) : '');
     setModalVisible(true);
   };
 
@@ -82,6 +141,14 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
       Alert.alert(t('common.error'), t('recurring.dayRange'));
       return;
     }
+    if (!(Number.isInteger(intervalValue) && intervalValue >= 1 && intervalValue <= MAX_INTERVAL_MONTHS)) {
+      Alert.alert(t('common.error'), t('recurring.intervalRange').replace('{max}', String(MAX_INTERVAL_MONTHS)));
+      return;
+    }
+    if (countValue !== null && !(Number.isInteger(countValue) && countValue >= 1 && countValue <= MAX_PAYMENTS)) {
+      Alert.alert(t('common.error'), t('recurring.countRange'));
+      return;
+    }
     if (kind === 'invoice' && !supplierName.trim() && !supplierEik.trim()) {
       Alert.alert(t('common.error'), t('recurring.supplierRequired'));
       return;
@@ -90,6 +157,10 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
       description: description.trim(), amount: value, day_of_month: dayNumber, kind,
       supplier_name: supplierName.trim() || null, supplier_eik: supplierEik.trim() || null,
       auto_record: kind === 'no_invoice' && autoRecord,
+      interval_months: intervalValue,
+      payments_count: countValue,
+      // Left to the server unless chosen: the first month its day comes in.
+      ...(startTouched ? { start_month: startMonth } : {}),
     };
     setSaving(true);
     try {
@@ -160,6 +231,44 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
     return name.charAt(0).toUpperCase() + name.slice(1);
   };
   const shortDay = (iso?: string | null) => (iso ? format(parseISO(iso), 'd MMM', { locale: dateLocale }) : '');
+  const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+  const monthYear = (key: string) => format(parseISO(`${key}-01`), 'LLLL yyyy', { locale: dateLocale });
+  // "10 February", with the year when it is not this one.
+  const longDay = (iso: string) => {
+    const when = parseISO(iso);
+    const sameYear = when.getFullYear() === parseISO(`${thisMonth}-01`).getFullYear();
+    return format(when, sameYear ? 'd MMMM' : 'd MMMM yyyy', { locale: dateLocale });
+  };
+
+  // "every month on day 5", "every 3 months on day 10", "every year on 10 January".
+  const scheduleText = (item: RecurringExpense) => {
+    const interval = item.interval_months || 1;
+    if (interval === 1) return t('recurring.everyMonthOn').replace('{day}', String(item.day_of_month));
+    if (interval === 12) {
+      const day = String(item.day_of_month).padStart(2, '0');
+      return t('recurring.yearlyOn').replace('{date}', format(parseISO(`${item.start_month}-${day}`), 'd MMMM', { locale: dateLocale }));
+    }
+    return t('recurring.everyNMonthsOn').replace('{n}', String(interval)).replace('{day}', String(item.day_of_month));
+  };
+
+  // Where it stands after this month's line: the next payment, how many are
+  // left, or that they are over. Monthly without an end needs none of it.
+  const nextPaymentText = (item: RecurringExpense): string | null => {
+    const next = item.next_payment;
+    const scheduled = (item.interval_months || 1) > 1 || item.payments_count != null;
+    if (!next) return t('recurring.paymentsOver');
+    if (!scheduled) return item.current ? null : t('recurring.startsIn').replace('{month}', monthName(item.start_month));
+    const parts: string[] = [];
+    if (!item.current || item.current.month !== next.month) {
+      const first = next.month === item.start_month && item.start_month > thisMonth;
+      parts.push((first ? t('recurring.firstPaymentOn') : t('recurring.nextPayment')).replace('{date}', longDay(next.due_date)));
+    }
+    if (item.payments_left === 1) parts.push(t('recurring.lastPayment'));
+    else if (item.payments_left && item.last_month) {
+      parts.push(t('recurring.paymentsLeft').replace('{left}', String(item.payments_left)).replace('{month}', monthYear(item.last_month)));
+    }
+    return parts.length ? capitalized(parts.join(' · ')) : null;
+  };
   const money = (value: number) => `${formatMoney(value)}`;
   const recordLabel = (record: RecurringRecord) =>
     record.source === 'expense' || (!record.number && record.description)
@@ -317,7 +426,9 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
         </TouchableOpacity>
       </View>
 
-      {monthOutlook && items.some((item) => item.is_active) && (
+      {/* Only when something is paid or expected this month - an expense paid
+          every few months may have nothing in it. */}
+      {monthOutlook && monthOutlook.month_total > 0 && items.some((item) => item.is_active) && (
         <Text style={styles.outlookText}>
           {t('recurring.outlook')
             .replace('{total}', money(monthOutlook.month_total))
@@ -338,7 +449,7 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
               <TouchableOpacity style={{ flex: 1 }} onPress={() => openForm(item)}>
                 <Text style={styles.itemTitle}>{item.description}</Text>
                 <Text style={styles.itemMeta}>
-                  {t('recurring.everyMonthOn').replace('{day}', String(item.day_of_month))}
+                  {scheduleText(item)}
                   {' · '}
                   {item.kind === 'invoice'
                     ? t('recurring.withInvoiceFrom').replace('{supplier}', item.supplier_name || item.supplier_eik || '')
@@ -355,10 +466,8 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
             </View>
             {item.is_active && item.previous && <MonthLine occurrence={item.previous} />}
             {item.is_active && item.current && <MonthLine occurrence={item.current} />}
-            {item.is_active && !item.current && (
-              <Text style={styles.monthMuted}>
-                {t('recurring.startsIn').replace('{month}', monthName(item.start_month))}
-              </Text>
+            {item.is_active && nextPaymentText(item) && (
+              <Text style={styles.monthMuted}>{nextPaymentText(item)}</Text>
             )}
           </View>
         ))
@@ -367,7 +476,10 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
       <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <ScrollView keyboardShouldPersistTaps="handled">
+            {/* The fields scroll inside their own margin - the scroll bar
+                runs along the card's edge, clear of them - and Save stays
+                in sight below. */}
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalBody}>
               <Text style={styles.modalTitle}>{editing ? t('recurring.edit') : t('budget.addRecurring')}</Text>
 
               <Text style={styles.inputLabel}>{t('budget.description')}</Text>
@@ -376,22 +488,91 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
                 placeholder={t('budget.descPlaceholder')} placeholderTextColor={COLORS.textMuted}
               />
 
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.inputLabel}>{t('recurring.usualAmount')}</Text>
+              <View style={styles.fieldRow}>
+                <View style={styles.fieldWide}>
+                  <Text style={styles.inputLabel} numberOfLines={1}>{t('recurring.usualAmount')}</Text>
                   <TextInput
                     style={styles.input} value={amount} onChangeText={setAmount} keyboardType="decimal-pad"
-                    placeholder="0.00" placeholderTextColor={COLORS.textMuted}
+                    placeholder="0,00" placeholderTextColor={COLORS.textMuted}
                   />
                 </View>
-                <View style={{ width: 110 }}>
-                  <Text style={styles.inputLabel}>{t('budget.dayOfMonth')}</Text>
+                <View style={styles.fieldNarrow}>
+                  <Text style={styles.inputLabel} numberOfLines={1}>{t('budget.dayOfMonth')}</Text>
                   <TextInput
                     style={styles.input} value={day} onChangeText={setDay} keyboardType="number-pad"
-                    placeholder="1-28" placeholderTextColor={COLORS.textMuted}
+                    placeholder="1–28" placeholderTextColor={COLORS.textMuted} maxLength={2}
                   />
                 </View>
               </View>
+
+              <Text style={styles.inputLabel}>{t('recurring.howOften')}</Text>
+              <View style={styles.choiceRow}>
+                {[...INTERVAL_CHOICES, 'other' as const].map((value) => {
+                  const active = intervalChoice === value;
+                  const label = value === 'other' ? t('recurring.otherInterval')
+                    : value === 1 ? t('recurring.everyMonth')
+                      : value === 12 ? t('recurring.yearly')
+                        : t('recurring.everyNMonths').replace('{n}', String(value));
+                  return (
+                    <TouchableOpacity
+                      key={String(value)}
+                      style={[styles.choiceChip, active && styles.kindChipActive]}
+                      onPress={() => setIntervalChoice(value)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                    >
+                      <Text style={[styles.kindChipText, active && { color: 'white' }]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {intervalChoice === 'other' && (
+                <View style={styles.otherRow}>
+                  <Text style={styles.otherText}>{t('recurring.everyPrefix')}</Text>
+                  <TextInput
+                    style={[styles.input, styles.otherInput]} value={otherInterval} onChangeText={setOtherInterval}
+                    keyboardType="number-pad" placeholder="4" placeholderTextColor={COLORS.textMuted} maxLength={2} autoFocus
+                  />
+                  <Text style={styles.otherText}>{t('recurring.monthsSuffix')}</Text>
+                </View>
+              )}
+
+              <View style={styles.fieldRow}>
+                <View style={styles.fieldGrow}>
+                  <Text style={styles.inputLabel} numberOfLines={1}>{t('recurring.firstPayment')}</Text>
+                  <View style={styles.monthStepper}>
+                    <TouchableOpacity
+                      style={styles.stepButton} onPress={() => moveStart(-1)} disabled={startIndex <= 0}
+                      accessibilityLabel={t('recurring.earlierMonth')}
+                    >
+                      <Ionicons name="chevron-back" size={18} color={startIndex <= 0 ? COLORS.border : COLORS.textSecondary} />
+                    </TouchableOpacity>
+                    <Text style={styles.stepText} numberOfLines={1}>{startMonth ? capitalized(monthYear(startMonth)) : ''}</Text>
+                    <TouchableOpacity
+                      style={styles.stepButton} onPress={() => moveStart(1)} disabled={startIndex >= startOptions.length - 1}
+                      accessibilityLabel={t('recurring.laterMonth')}
+                    >
+                      <Ionicons
+                        name="chevron-forward" size={18}
+                        color={startIndex >= startOptions.length - 1 ? COLORS.border : COLORS.textSecondary}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <View style={styles.fieldCount}>
+                  <Text style={styles.inputLabel} numberOfLines={1}>{t('recurring.paymentsCount')}</Text>
+                  <TextInput
+                    style={styles.input} value={paymentsCount} onChangeText={setPaymentsCount} keyboardType="number-pad"
+                    placeholder={t('recurring.noEnd')} placeholderTextColor={COLORS.textMuted} maxLength={3}
+                  />
+                </View>
+              </View>
+              {lastPayment && (
+                <Text style={[styles.kindHint, styles.scheduleHint, lastPayment < thisMonth && { color: COLORS.warning }]}>
+                  {(lastPayment < thisMonth ? t('recurring.paymentsAlreadyOver') : t('recurring.lastPaymentHint'))
+                    .replace('{month}', monthYear(lastPayment))}
+                </Text>
+              )}
 
               <Text style={styles.inputLabel}>{t('recurring.invoiceComes')}</Text>
               <View style={styles.kindRow}>
@@ -443,16 +624,16 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
                   <Switch value={autoRecord} onValueChange={setAutoRecord} />
                 </View>
               )}
-
-              <View style={styles.modalButtons}>
-                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setModalVisible(false)}>
-                  <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
-                <PressableScale style={styles.modalSaveBtn} onPress={save} disabled={saving}>
-                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
-                </PressableScale>
-              </View>
             </ScrollView>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setModalVisible(false)}>
+                <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+              <PressableScale style={styles.modalSaveBtn} onPress={save} disabled={saving}>
+                {saving ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
+              </PressableScale>
+            </View>
           </View>
         </View>
       </Modal>
@@ -487,14 +668,37 @@ const styles = StyleSheet.create({
   answerBtnStrong: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   answerText: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
   answerTextStrong: { color: 'white' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 20, maxHeight: '90%' },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: 'white', marginBottom: 16 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 12 },
+  modalContent: {
+    backgroundColor: COLORS.surface, borderRadius: 16, maxHeight: '92%', width: '100%', maxWidth: 520,
+    alignSelf: 'center', overflow: 'hidden',
+  },
+  modalBody: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 8 },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: 'white', marginBottom: 12 },
   inputLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 6, marginTop: 6 },
   input: {
     backgroundColor: COLORS.background, borderRadius: 10, padding: 12, color: 'white',
-    borderWidth: 1, borderColor: COLORS.border, marginBottom: 8,
+    borderWidth: 1, borderColor: COLORS.border, marginBottom: 8, minWidth: 0,
   },
+  fieldRow: { flexDirection: 'row', gap: 10 },
+  fieldWide: { flex: 3, minWidth: 0 },
+  fieldNarrow: { flex: 2, minWidth: 0 },
+  fieldGrow: { flex: 1, minWidth: 0 },
+  fieldCount: { width: 108 },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  choiceChip: {
+    paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border,
+  },
+  otherRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
+  otherText: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 8 },
+  otherInput: { width: 64, textAlign: 'center' },
+  monthStepper: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.background, borderRadius: 10,
+    borderWidth: 1, borderColor: COLORS.border, marginBottom: 8, minHeight: 46,
+  },
+  stepButton: { paddingHorizontal: 6, alignSelf: 'stretch', justifyContent: 'center' },
+  stepText: { flex: 1, minWidth: 0, textAlign: 'center', color: 'white', fontSize: 14 },
+  scheduleHint: { marginTop: 0, marginBottom: 4 },
   kindRow: { flexDirection: 'row', gap: 8 },
   kindChip: {
     flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, alignItems: 'center',
@@ -510,7 +714,10 @@ const styles = StyleSheet.create({
   supplierChipText: { fontSize: 12, color: COLORS.textSecondary },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 },
   switchLabel: { fontSize: 14, color: 'white', fontWeight: '600' },
-  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 18 },
+  modalButtons: {
+    flexDirection: 'row', gap: 12, paddingHorizontal: 18, paddingVertical: 12,
+    borderTopWidth: 1, borderTopColor: COLORS.border,
+  },
   modalCancelBtn: {
     flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border,
   },

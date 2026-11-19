@@ -797,8 +797,10 @@ export interface ProactiveSignal {
   is_new?: boolean;
 }
 
-// Recurring expenses: "invoice" - its invoice is the expense, awaited each
-// month; "no_invoice" - recorded as an off-book expense (asked, or on its day).
+// Recurring expenses: "invoice" - its invoice is the expense, awaited at each
+// payment; "no_invoice" - recorded as an off-book expense (asked, or on its
+// day). Paid every month or every few months (interval_months), with an end
+// when it has a number of payments (installments, a lease).
 export type RecurringKind = 'invoice' | 'no_invoice';
 
 export type RecurringState =
@@ -845,9 +847,20 @@ export interface RecurringExpense {
   supplier_eik?: string | null;
   auto_record: boolean;
   is_active: boolean;
+  // The month of its first payment ("YYYY-MM")
   start_month: string;
+  // Every how many months it is paid - 1 every month
+  interval_months: number;
+  // How many payments in all - null for no end
+  payments_count: number | null;
+  last_month: string | null;
+  // No payment this month: null
   current: RecurringOccurrence | null;
   previous: RecurringOccurrence | null;
+  // The next payment still to make - null once they are over
+  next_payment: { month: string; due_date: string } | null;
+  // With an end: how many are left to make
+  payments_left: number | null;
 }
 
 export interface RecurringExpenseInput {
@@ -859,6 +872,9 @@ export interface RecurringExpenseInput {
   supplier_eik?: string | null;
   auto_record?: boolean;
   is_active?: boolean;
+  interval_months?: number;
+  start_month?: string;
+  payments_count?: number | null;
 }
 
 export interface RecurringOverview {

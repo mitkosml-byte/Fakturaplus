@@ -1,5 +1,9 @@
-"""Recurring expenses: what a business pays every month and knows in
-advance - rent, a subscription, insurance, a utility bill.
+"""Recurring expenses: what a business pays regularly and knows in
+advance - rent, a subscription, insurance, a utility bill. Most are paid
+every month; some every few months (insurance in quarterly installments,
+a yearly licence) - every `interval_months` months from the month of the
+first payment, and some only so many times (installments, a lease:
+`payments_count`).
 
 Each one says whether an invoice comes for it:
 
@@ -11,7 +15,8 @@ Each one says whether an invoice comes for it:
   off-book expense itself - when the owner says it is paid, or on its day
   when the owner chose that.
 
-One month of one recurring expense is an occurrence. Whatever already pays
+One payment of one recurring expense - its month - is an occurrence; a
+month without a payment of it has none. Whatever already pays
 an occurrence is looked for first, so the same cost is never counted
 twice: an invoice from its supplier, an invoice or expense linked to it,
 or - when it is only a guess (the same amount, a similar description) - a
@@ -44,6 +49,11 @@ VAT_FACTORS = (1.0, 1.2, 1.09)
 # itself only when the two amounts are this close; otherwise the owner is
 # asked whether they are the same cost.
 REPLACE_BAND = (0.65, 1.35)
+
+# How often it is paid: every month, or every few months - any number of
+# months up to this. And an end, when it has one: a number of payments.
+MAX_INTERVAL_MONTHS = 36
+MAX_PAYMENTS = 600
 
 # Mirrors of server.py's constants (services never import server.py).
 CREDIT_NOTE = "credit_note"
@@ -105,10 +115,85 @@ def start_month_for(day_of_month: int, today: date) -> str:
 
 
 def first_month(item: dict) -> str:
-    if item.get("start_month"):
-        return str(item["start_month"])
-    created = business_day(item.get("created_at")) or current_day()
-    return start_month_for(int(item.get("day_of_month") or 1), created)
+    """The month of its first payment the app follows."""
+    stored = str(item.get("start_month") or "")
+    try:
+        parse_month(stored)
+        return stored
+    except ValueError:  # none saved (or unreadable): from when it was created
+        created = business_day(item.get("created_at")) or current_day()
+        return start_month_for(int(item.get("day_of_month") or 1), created)
+
+
+def shift_month(key: str, months: int) -> str:
+    year, month = parse_month(key)
+    return month_key_of(*add_months(year, month, months))
+
+
+def months_between(first: str, second: str) -> int:
+    """Months from `first` to `second` - negative when `second` is before."""
+    (first_year, first_month_number), (second_year, second_month_number) = parse_month(first), parse_month(second)
+    return (second_year - first_year) * 12 + (second_month_number - first_month_number)
+
+
+def interval_months(item: dict) -> int:
+    """Every how many months it is paid - 1 for every month."""
+    try:
+        months = int(item.get("interval_months") or 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(MAX_INTERVAL_MONTHS, months))
+
+
+def payments_count(item: dict) -> Optional[int]:
+    """How many payments it has in all - None for no end."""
+    try:
+        count = int(item.get("payments_count") or 0)
+    except (TypeError, ValueError):
+        return None
+    return count if count > 0 else None
+
+
+def _payments_before(item: dict, key: str) -> int:
+    """How many of its payments fall in the months before `key`."""
+    steps = months_between(first_month(item), key)
+    return 0 if steps <= 0 else -(-steps // interval_months(item))
+
+
+def is_due_month(item: dict, key: str) -> bool:
+    """Whether a payment of it falls in the month: from its first month
+    on, every interval_months months, up to its last payment."""
+    steps = months_between(first_month(item), key)
+    if steps < 0 or steps % interval_months(item):
+        return False
+    count = payments_count(item)
+    return count is None or steps // interval_months(item) < count
+
+
+def next_due_month(item: dict, from_key: str) -> Optional[str]:
+    """Its first payment month from `from_key` on - None once its payments are over."""
+    done = _payments_before(item, from_key)
+    count = payments_count(item)
+    if count is not None and done >= count:
+        return None
+    return shift_month(first_month(item), done * interval_months(item))
+
+
+def last_month(item: dict) -> Optional[str]:
+    """The month of its last payment - None when it has no end."""
+    count = payments_count(item)
+    if count is None:
+        return None
+    return shift_month(first_month(item), (count - 1) * interval_months(item))
+
+
+def payments_from(item: dict, key: str) -> Optional[int]:
+    """How many of its payments fall in `key` and the months after - None
+    when it has no end."""
+    count = payments_count(item)
+    if count is None:
+        return None
+    return max(0, count - _payments_before(item, key))
 
 
 def has_supplier_eik(item: dict) -> bool:
@@ -206,7 +291,7 @@ def resolve_month(
     items: List[dict], year: int, month: int, records: Dict[str, list], today: Optional[date] = None,
 ) -> Dict[str, dict]:
     """What each recurring expense's occurrence of this month is, keyed by
-    its id - for the expenses that already cover the month (start_month).
+    its id - for the expenses with a payment in the month (is_due_month).
 
     In order: invoices that pay it (linked to it, or from its supplier -
     each invoice to the one expense of that supplier closest in amount),
@@ -215,7 +300,7 @@ def resolve_month(
     its invoice, its invoice late, or due)."""
     today = today or current_day()
     key = month_key_of(year, month)
-    active = [item for item in items if first_month(item) <= key]
+    active = [item for item in items if is_due_month(item, key)]
     by_id = {item["id"]: item for item in active}
     invoices, expenses = records["invoices"], records["expenses"]
     paying_invoices: Dict[str, List[dict]] = {item_id: [] for item_id in by_id}
@@ -388,9 +473,21 @@ async def month_projection(
     return outlook(items, occurrences, through, include_off_book)
 
 
-def known_monthly_total(items: List[dict], include_off_book: bool) -> float:
-    """What the active recurring expenses come to in a month."""
+def known_month_total(items: List[dict], key: str, include_off_book: bool) -> float:
+    """What the active recurring expenses with a payment in the month come to."""
     return round(sum(
         float(item.get("amount") or 0) for item in items
-        if include_off_book or item_kind(item) == INVOICE
+        if (include_off_book or item_kind(item) == INVOICE) and is_due_month(item, key)
+    ), 2)
+
+
+def known_monthly_total(items: List[dict], include_off_book: bool, today: Optional[date] = None) -> float:
+    """What the active recurring expenses come to in an average month: one
+    paid every few months counts its share of each month, one whose
+    payments are over nothing."""
+    today = today or current_day()
+    this_month = month_key_of(today.year, today.month)
+    return round(sum(
+        float(item.get("amount") or 0) / interval_months(item) for item in items
+        if (include_off_book or item_kind(item) == INVOICE) and next_due_month(item, this_month) is not None
     ), 2)

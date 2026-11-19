@@ -263,3 +263,97 @@ def test_d2_one_supplier_two_expenses_each_invoice_to_the_closest():
     occurrences = rs.resolve_month(items, 2026, 11, records, today=TODAY)
     assert [i["id"] for i in occurrences["rent"]["invoices"]] == ["i1"]
     assert [i["id"] for i in occurrences["parking"]["invoices"]] == ["i2"]
+
+
+def test_an_expense_paid_every_few_months_counts_only_in_its_months():
+    """Insurance in four quarterly installments (an invented one): a
+    payment in January, April, July and October - none between them, none
+    after the fourth. Any number of months works the same way."""
+    item = {"id": "ins", "description": "Застраховка", "amount": 150, "day_of_month": 10, "kind": "no_invoice",
+            "start_month": "2027-01", "interval_months": 3, "payments_count": 4}
+    months = [f"2026-{m:02d}" for m in range(11, 13)] + [f"2027-{m:02d}" for m in range(1, 13)] + ["2028-01"]
+    assert [key for key in months if rs.is_due_month(item, key)] == ["2027-01", "2027-04", "2027-07", "2027-10"]
+    assert rs.last_month(item) == "2027-10"
+    assert [rs.next_due_month(item, key) for key in ("2026-11", "2027-01", "2027-02", "2027-11")] == ["2027-01", "2027-01", "2027-04", None]
+    assert [rs.payments_from(item, key) for key in ("2026-11", "2027-02", "2027-11")] == [4, 3, 0]
+
+    # A month without a payment has no occurrence; a month with one asks as every month did.
+    nothing = {"invoices": [], "expenses": []}
+    assert rs.resolve_month([item], 2027, 2, nothing, today=date(2027, 2, 15)) == {}
+    assert rs.resolve_month([item], 2027, 4, nothing, today=date(2027, 4, 15))["ins"]["state"] == rs.DUE
+    # Projections: the whole payment in its own months, nothing between;
+    # an average month carries a third of it, and nothing once it is over.
+    assert rs.known_month_total([item], "2027-04", include_off_book=True) == 150.0
+    assert rs.known_month_total([item], "2027-05", include_off_book=True) == 0.0
+    assert rs.known_monthly_total([item], include_off_book=True, today=date(2027, 2, 1)) == 50.0
+    assert rs.known_monthly_total([item], include_off_book=True, today=date(2027, 11, 1)) == 0.0
+
+    # Without an end it goes on; once a year it is the same month each year.
+    yearly = {**item, "interval_months": 12, "payments_count": None}
+    assert [key for key in months if rs.is_due_month(yearly, key)] == ["2027-01", "2028-01"]
+    assert rs.last_month(yearly) is None and rs.payments_from(yearly, "2027-02") is None
+    # Saved before it could be anything but monthly: every month, as before.
+    monthly = {key: value for key, value in item.items() if key not in ("interval_months", "payments_count")}
+    assert all(rs.is_due_month(monthly, key) for key in months[2:])
+
+
+def test_installments_through_the_screen(client, today):
+    """The owner adds an insurance paid every 3 months, four installments
+    from December: the list says when the next one is and how many are
+    left; November expects nothing from it; a month without a payment and
+    a first payment in a month already gone are refused."""
+    company_id, _, owner = _company()
+    item_id = _create(client, owner, description="Застраховка", amount=150, day_of_month=10, kind="no_invoice",
+                      interval_months=3, start_month="2026-12", payments_count=4)
+    items, body = _listing(client, owner)
+    listed = items[item_id]
+    assert (listed["interval_months"], listed["payments_count"], listed["start_month"], listed["last_month"]) == (3, 4, "2026-12", "2027-09")
+    assert listed["current"] is None and listed["previous"] is None
+    assert listed["next_payment"] == {"month": "2026-12", "due_date": "2026-12-10"} and listed["payments_left"] == 4
+    assert body["outlook"]["month_total"] == 0
+
+    assert client.post(f"/api/recurring-expenses/{item_id}/months/2027-01/record", headers=owner).status_code == 400
+    assert client.put(f"/api/recurring-expenses/{item_id}", headers=owner, json={"start_month": "2026-10"}).status_code == 400
+    assert client.post("/api/recurring-expenses", headers=owner, json={
+        "description": "Лиценз", "amount": 90, "day_of_month": 1, "interval_months": 12, "start_month": "2026-09",
+    }).status_code == 400
+    assert client.post("/api/recurring-expenses", headers=owner, json={
+        "description": "Лиценз", "amount": 90, "day_of_month": 1, "interval_months": 0,
+    }).status_code == 422
+
+    # The first installment is this month after all (its 10th has passed):
+    # asked about, paid, recorded - three left, the next in February.
+    r = client.put(f"/api/recurring-expenses/{item_id}", headers=owner, json={"start_month": "2026-11"})
+    assert r.status_code == 200 and r.json()["recurring_expense"]["last_month"] == "2027-08"
+    items, body = _listing(client, owner)
+    assert items[item_id]["current"]["state"] == rs.DUE and items[item_id]["payments_left"] == 4
+    assert body["outlook"]["month_total"] == 150
+    assert client.post(f"/api/recurring-expenses/{item_id}/months/2026-11/record", headers=owner).status_code == 200
+    items, _ = _listing(client, owner)
+    assert items[item_id]["current"]["state"] == rs.PAID_BY_EXPENSE
+    assert items[item_id]["next_payment"] == {"month": "2027-02", "due_date": "2027-02-10"} and items[item_id]["payments_left"] == 3
+    assert [e["amount"] for e in _linked_expenses(company_id, item_id)] == [150]
+
+    # No end any more: it goes on every 3 months.
+    r = client.put(f"/api/recurring-expenses/{item_id}", headers=owner, json={"payments_count": None})
+    assert r.status_code == 200 and r.json()["recurring_expense"]["payments_count"] is None
+    items, _ = _listing(client, owner)
+    assert items[item_id]["payments_left"] is None and items[item_id]["last_month"] is None
+
+
+def test_the_last_installment_paid_the_expense_is_over(client, today, monkeypatch):
+    _, _, owner = _company()
+    item_id = _create(client, owner, description="Лизинг", amount=420, day_of_month=3, kind="no_invoice",
+                      start_month="2026-11", payments_count=1)
+    rent = _create(client, owner)
+    assert client.post(f"/api/recurring-expenses/{item_id}/months/2026-11/record", headers=owner).status_code == 200
+    items, _ = _listing(client, owner)
+    assert items[item_id]["current"]["state"] == rs.PAID_BY_EXPENSE
+    assert items[item_id]["next_payment"] is None and items[item_id]["payments_left"] == 0
+    # From the next month it is over: nothing expected from it, listed
+    # after the ones still going.
+    monkeypatch.setattr(rs, "current_day", lambda: date(2026, 12, 1))
+    items, body = _listing(client, owner)
+    assert items[item_id]["current"] is None and items[item_id]["next_payment"] is None
+    assert [item["id"] for item in body["recurring_expenses"]] == [rent, item_id]
+    assert body["outlook"]["month_total"] == 800

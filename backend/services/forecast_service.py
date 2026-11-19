@@ -808,12 +808,12 @@ class ForecastService:
         result = _build_forecast(historical, months_ahead, year_back)
         result["current_month"] = current
         # A month ahead holds at least the recurring expenses already known
-        # (a floor, not added on top: the history already carries them).
-        known = recurring_service.known_monthly_total(
-            await recurring_service.active_items(self.db, company_id), include_off_book_expenses,
-        )
-        result["known_recurring_monthly"] = known
+        # to be paid in it (a floor, not added on top: the history already
+        # carries them) - one paid every few months in its own months.
+        items = await recurring_service.active_items(self.db, company_id)
+        result["known_recurring_monthly"] = recurring_service.known_monthly_total(items, include_off_book_expenses)
         for entry in result["forecast"]:
+            known = recurring_service.known_month_total(items, entry["month"], include_off_book_expenses)
             if entry["predicted_amount"] < known:
                 entry.update({
                     "predicted_amount": known, "lower_bound": max(entry["lower_bound"], known),

@@ -445,8 +445,8 @@ export const translations: Translations = {
     en: 'This month: {total} in recurring expenses · paid {paid} · still to come {left}',
   },
   'recurring.emptyHint': {
-    bg: 'Наем, абонаменти, застраховки, сметки – добави ги веднъж и програмата следи всеки месец дали са платени, без да ги брои два пъти.',
-    en: 'Rent, subscriptions, insurance, bills – add them once and the app tracks each month whether they are paid, never counting them twice.',
+    bg: 'Наем, абонаменти, застраховки, сметки, вноски – добави ги веднъж и програмата следи всяко плащане, всеки месец или през няколко месеца, без да го брои два пъти.',
+    en: 'Rent, subscriptions, insurance, bills, installments – add them once and the app tracks every payment, monthly or every few months, never counting it twice.',
   },
   'recurring.everyMonthOn': {
     bg: 'всеки месец на {day}-о',
@@ -497,8 +497,8 @@ export const translations: Translations = {
     en: 'Without invoice',
   },
   'recurring.withInvoiceHint': {
-    bg: 'Фактурата е разходът: програмата не записва нищо отделно. Чака я всеки месец от доставчика, отбелязва месеца като платен и напомня, ако закъснее.',
-    en: 'The invoice is the expense: the app records nothing separately. It waits for it every month from the supplier, marks the month paid and reminds you when it is late.',
+    bg: 'Фактурата е разходът: програмата не записва нищо отделно. Чака я от доставчика при всяко плащане, отбелязва го като платено и напомня, ако закъснее.',
+    en: 'The invoice is the expense: the app records nothing separately. It waits for it from the supplier at each payment, marks it paid and reminds you when it is late.',
   },
   'recurring.withoutInvoiceHint': {
     bg: 'Програмата записва разход без фактура – когато потвърдиш, че е платен, или сама на деня му. Ако все пак дойде фактура за него, тя заменя записа и разходът не се брои два пъти.',
@@ -528,6 +528,38 @@ export const translations: Translations = {
     bg: 'Без да пита. Изключено – на деня пита „Платен ли е?“.',
     en: 'Without asking. Off – on the day it asks “Is it paid?”.',
   },
+  'recurring.howOften': { bg: 'Колко често се плаща', en: 'How often it is paid' },
+  'recurring.everyMonth': { bg: 'Всеки месец', en: 'Every month' },
+  'recurring.everyNMonths': { bg: 'На {n} месеца', en: 'Every {n} months' },
+  'recurring.yearly': { bg: 'Годишно', en: 'Yearly' },
+  'recurring.otherInterval': { bg: 'Друго', en: 'Other' },
+  'recurring.everyPrefix': { bg: 'На всеки', en: 'Every' },
+  'recurring.monthsSuffix': { bg: 'месеца', en: 'months' },
+  'recurring.firstPayment': { bg: 'Първо плащане', en: 'First payment' },
+  'recurring.paymentsCount': { bg: 'Брой плащания', en: 'Payments' },
+  'recurring.noEnd': { bg: 'без край', en: 'no end' },
+  'recurring.earlierMonth': { bg: 'По-ранен месец', en: 'Earlier month' },
+  'recurring.laterMonth': { bg: 'По-късен месец', en: 'Later month' },
+  'recurring.lastPaymentHint': { bg: 'Последно плащане: {month}', en: 'Last payment: {month}' },
+  'recurring.paymentsAlreadyOver': {
+    bg: 'Последното плащане е било през {month} – плащанията вече са приключили.',
+    en: 'The last payment was in {month} – the payments are already over.',
+  },
+  'recurring.intervalRange': {
+    bg: 'Броят месеци трябва да е цяло число от 1 до {max}.',
+    en: 'The number of months must be a whole number from 1 to {max}.',
+  },
+  'recurring.countRange': {
+    bg: 'Броят плащания трябва да е цяло число – или празно, ако няма край.',
+    en: 'The number of payments must be a whole number – or empty when there is no end.',
+  },
+  'recurring.everyNMonthsOn': { bg: 'на всеки {n} месеца на {day}-о', en: 'every {n} months on day {day}' },
+  'recurring.yearlyOn': { bg: 'всяка година на {date}', en: 'every year on {date}' },
+  'recurring.nextPayment': { bg: 'следващо плащане: {date}', en: 'next payment: {date}' },
+  'recurring.firstPaymentOn': { bg: 'първо плащане: {date}', en: 'first payment: {date}' },
+  'recurring.paymentsLeft': { bg: 'остават {left} плащания, до {month}', en: '{left} payments left, until {month}' },
+  'recurring.lastPayment': { bg: 'последно плащане', en: 'the last payment' },
+  'recurring.paymentsOver': { bg: 'Плащанията приключиха', en: 'The payments are over' },
   'scan.creditedInvoiceNumber': {
     bg: 'Към фактура №',
     en: 'For invoice No.',
@@ -4771,8 +4803,8 @@ export const translations: Translations = {
     en: 'Amount (€)',
   },
   'budget.dayOfMonth': {
-    bg: 'Ден от месеца (1-28)',
-    en: 'Day of month (1-28)',
+    bg: 'Ден от месеца',
+    en: 'Day of month',
   },
   'budget.descPlaceholder': {
     bg: 'напр. Наем, Интернет...',

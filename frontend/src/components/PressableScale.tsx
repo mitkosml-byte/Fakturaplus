@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleProp, ViewStyle } from 'react-native';
+import { Pressable, StyleProp, StyleSheet, ViewStyle } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -17,6 +17,28 @@ type Props = {
   accessibilityRole?: 'button';
   testID?: string;
 };
+
+// Where the button sits among its neighbours - its share of a row, its own
+// alignment and width, its margins - belongs to the pressable box; how it
+// looks, to the view inside it, which fills that box. (All of it on the
+// inner view left the box as narrow as its text: a Save next to Cancel,
+// both `flex: 1`, came out half as wide.)
+const PLACEMENT = new Set<string>([
+  'flex', 'flexGrow', 'flexShrink', 'flexBasis', 'alignSelf', 'width', 'minWidth', 'maxWidth',
+  'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight', 'marginHorizontal', 'marginVertical',
+  'marginStart', 'marginEnd',
+]);
+
+function splitStyle(style: StyleProp<ViewStyle>): { placement: ViewStyle; look: ViewStyle } {
+  const placement: Record<string, unknown> = {};
+  const look: Record<string, unknown> = {};
+  Object.entries(StyleSheet.flatten(style) || {}).forEach(([key, value]) => {
+    (PLACEMENT.has(key) ? placement : look)[key] = value;
+  });
+  // A box that takes a share of its row: the look fills all of it.
+  if (placement.flex != null || placement.flexGrow != null) look.flexGrow = 1;
+  return { placement: placement as ViewStyle, look: look as ViewStyle };
+}
 
 // Drop-in replacement for TouchableOpacity on the taps that matter (Save,
 // Buy, Delete) - Motion Design System #9: primary/destructive actions get
@@ -56,8 +78,11 @@ export function PressableScale({
     opacity.value = withTiming(1, { duration: DURATION.micro, easing: EASING.easeOut });
   };
 
+  const { placement, look } = splitStyle(style);
+
   return (
     <Pressable
+      style={placement}
       onPress={onPress}
       onLongPress={onLongPress}
       onPressIn={pressIn}
@@ -67,7 +92,7 @@ export function PressableScale({
       accessibilityRole={accessibilityRole}
       testID={testID}
     >
-      <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>
+      <Animated.View style={[look, animatedStyle]}>{children}</Animated.View>
     </Pressable>
   );
 }

@@ -37,6 +37,9 @@ MONTH_NAMES = [
 ]
 
 
+MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+
+
 class RecurringExpenseIn(BaseModel):
     description: str = Field(min_length=1, max_length=200)
     amount: float = Field(gt=0)
@@ -49,6 +52,14 @@ class RecurringExpenseIn(BaseModel):
     supplier_eik: Optional[str] = Field(default=None, max_length=20)
     # no_invoice only: record it on its day without asking.
     auto_record: bool = False
+    # Every how many months it is paid: 1 every month, 3 quarterly
+    # installments, 12 once a year - any number.
+    interval_months: int = Field(default=1, ge=1, le=rs.MAX_INTERVAL_MONTHS)
+    # The month of its first payment ("YYYY-MM"); by default the first
+    # month its day comes in from today on.
+    start_month: Optional[str] = Field(default=None, pattern=MONTH_PATTERN)
+    # How many payments in all (installments, a lease); none - no end.
+    payments_count: Optional[int] = Field(default=None, ge=1, le=rs.MAX_PAYMENTS)
 
 
 class RecurringExpenseUpdateIn(BaseModel):
@@ -61,6 +72,10 @@ class RecurringExpenseUpdateIn(BaseModel):
     supplier_eik: Optional[str] = Field(default=None, max_length=20)
     auto_record: Optional[bool] = None
     is_active: Optional[bool] = None
+    interval_months: Optional[int] = Field(default=None, ge=1, le=rs.MAX_INTERVAL_MONTHS)
+    start_month: Optional[str] = Field(default=None, pattern=MONTH_PATTERN)
+    # null clears it: no end.
+    payments_count: Optional[int] = Field(default=None, ge=1, le=rs.MAX_PAYMENTS)
 
 
 class RecordMonthIn(BaseModel):
@@ -244,6 +259,11 @@ async def start_recurring_expense_loop():
     asyncio.create_task(_recurring_loop())
 
 
+def _this_month() -> str:
+    today = rs.current_day()
+    return rs.month_key_of(today.year, today.month)
+
+
 def _public(item: dict) -> dict:
     return {
         "id": item["id"], "description": item.get("description"), "amount": item.get("amount"),
@@ -251,7 +271,16 @@ def _public(item: dict) -> dict:
         "kind": rs.item_kind(item), "supplier_name": item.get("supplier_name"), "supplier_eik": item.get("supplier_eik"),
         "auto_record": bool(item.get("auto_record")) and rs.item_kind(item) == rs.NO_INVOICE,
         "is_active": item.get("is_active", True) is not False, "start_month": rs.first_month(item),
+        "interval_months": rs.interval_months(item), "payments_count": rs.payments_count(item),
+        "last_month": rs.last_month(item),
     }
+
+
+def _check_start(month_key: str, unchanged: Optional[str] = None) -> None:
+    """A first payment from this month on - a month already gone was paid
+    (or not) before the app followed it. One already set may stay."""
+    if month_key != unchanged and month_key < _this_month():
+        raise HTTPException(status_code=400, detail="Първото плащане не може да е в минал месец")
 
 
 @router.get("/recurring-expenses")
@@ -272,14 +301,34 @@ async def get_recurring_expenses(current_user: User = Depends(get_current_user))
     current = await resolve_company_month(company_id, scope, year, month, active)
     previous = await resolve_company_month(company_id, scope, prev_year, prev_month, active)
     open_states = {rs.DUE, rs.PROBABLE, rs.INVOICE_MISSING, rs.AWAITING_INVOICE}
+    this_month = rs.month_key_of(year, month)
+    next_month = rs.shift_month(this_month, 1)
+    settled = {rs.PAID_BY_INVOICE, rs.PAID_BY_EXPENSE, rs.SKIPPED}
+
+    def _order(doc: dict) -> Tuple[bool, int]:
+        over = rs.next_due_month(doc, this_month) is None
+        return (doc.get("is_active", True) is False or over, int(doc.get("day_of_month") or 1))
+
     listed = []
-    for item in sorted(every_item, key=lambda doc: (doc.get("is_active", True) is False, int(doc.get("day_of_month") or 1))):
+    for item in sorted(every_item, key=_order):
         before = previous.get(item["id"])
         waiting = before and (
             before["state"] in open_states or before.get("duplicate_suspected")
             or (before.get("duplicate") and not before.get("replace_automatically"))
         )
-        listed.append({**_public(item), "current": current.get(item["id"]), "previous": before if waiting else None})
+        now = current.get(item["id"])
+        # The payments still to make: this month's while it is not paid or
+        # skipped, and the ones after it.
+        upcoming = next_month if now and now["state"] in settled else this_month
+        next_key = rs.next_due_month(item, upcoming)
+        listed.append({
+            **_public(item), "current": now, "previous": before if waiting else None,
+            "next_payment": {
+                "month": next_key, "due_date": rs.due_date(item, *rs.parse_month(next_key)).isoformat(),
+            } if next_key else None,
+            # With an end: how many are left.
+            "payments_left": rs.payments_from(item, upcoming),
+        })
     sees_off_book = get_financial_visibility(current_user)["off_book_expenses"]
     month_outlook = rs.outlook(active, current, today, sees_off_book)
     # Not paid yet - what the rest of the month still brings.
@@ -314,13 +363,15 @@ async def create_recurring_expense(body: RecurringExpenseIn, current_user: User 
         raise HTTPException(status_code=400, detail="No company associated")
     supplier_name, supplier_eik = await _clean_supplier(company_id, body.supplier_name, body.supplier_eik)
     _check_kind(body.kind, supplier_name, supplier_eik)
+    start_month = body.start_month or rs.start_month_for(body.day_of_month, rs.current_day())
+    _check_start(start_month)
     doc = {
         "id": str(uuid.uuid4()), "company_id": company_id, "user_id": current_user.user_id,
         "description": body.description.strip(), "amount": round(body.amount, 2), "day_of_month": body.day_of_month,
         "category": body.category, "kind": body.kind, "supplier_name": supplier_name, "supplier_eik": supplier_eik,
         "auto_record": body.auto_record and body.kind == rs.NO_INVOICE,
         "auto_record_since": rs.current_day().isoformat() if body.auto_record else None, "is_active": True,
-        "start_month": rs.start_month_for(body.day_of_month, rs.current_day()),
+        "start_month": start_month, "interval_months": body.interval_months, "payments_count": body.payments_count,
         "skipped_months": [], "rejected_matches": [], "created_at": datetime.now(timezone.utc),
     }
     await server.db.recurring_expenses.insert_one(dict(doc))
@@ -340,12 +391,18 @@ async def _owned_item(item_id: str, company_id: Optional[str]) -> dict:
     return item
 
 
+# Fields an edit may empty (null): the rest keep their value when null.
+CLEARABLE = ("supplier_name", "supplier_eik", "category", "payments_count")
+
+
 @router.put("/recurring-expenses/{item_id}")
 async def update_recurring_expense(item_id: str, body: RecurringExpenseUpdateIn, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_budget")
     company_id, _ = await get_company_scope(current_user)
     item = await _owned_item(item_id, company_id)
     changes = body.model_dump(exclude_unset=True)
+    if changes.get("start_month"):
+        _check_start(changes["start_month"], unchanged=rs.first_month(item))
     if "description" in changes and changes["description"] is not None:
         changes["description"] = changes["description"].strip()
     if "amount" in changes and changes["amount"] is not None:
@@ -355,14 +412,14 @@ async def update_recurring_expense(item_id: str, body: RecurringExpenseUpdateIn,
             company_id, changes.get("supplier_name", item.get("supplier_name")),
             changes.get("supplier_eik", item.get("supplier_eik")),
         )
-    merged = {**item, **{k: v for k, v in changes.items() if v is not None or k in ("supplier_name", "supplier_eik", "category")}}
+    merged = {**item, **{k: v for k, v in changes.items() if v is not None or k in CLEARABLE}}
     kind = rs.item_kind(merged)
     _check_kind(kind, merged.get("supplier_name"), merged.get("supplier_eik"))
     if kind == rs.INVOICE:
         changes["auto_record"] = False
     if changes.get("auto_record") and not item.get("auto_record"):
         changes["auto_record_since"] = rs.current_day().isoformat()
-    updates = {k: v for k, v in changes.items() if v is not None or k in ("supplier_name", "supplier_eik", "category")}
+    updates = {k: v for k, v in changes.items() if v is not None or k in CLEARABLE}
     if updates:
         await server.db.recurring_expenses.update_one({"id": item_id, "company_id": company_id}, {"$set": updates})
         await audit_service.log_action(
@@ -393,6 +450,8 @@ async def _occurrence(company_id: str, item: dict, month_key: str) -> dict:
         raise HTTPException(status_code=400, detail="Невалиден месец")
     if month_key < rs.first_month(item):
         raise HTTPException(status_code=400, detail="Периодичният разход започва от по-късен месец")
+    if not rs.is_due_month(item, month_key):
+        raise HTTPException(status_code=400, detail="В този месец няма плащане по този разход")
     scope = await company_data_scope(company_id)
     occurrences = await resolve_company_month(company_id, scope, year, month, [item])
     return occurrences[item["id"]]
