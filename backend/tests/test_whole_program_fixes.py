@@ -505,8 +505,16 @@ def test_p3_an_asset_bought_on_an_invoice_is_expensed_once(client):
 def test_z1_z2_p5_schedule_wages_are_payroll_on_the_days_worked_and_double_pay_asks(client):
     company_id, owner_id, owner = _company()
     worker_id, _ = _user(company_id, "staff", [], "Работник")
-    # A manager who may not see off-book expenses still sees wages - they are payroll.
-    _, manager = _user(company_id, "manager", sorted(set(server.ROLE_PERMISSIONS["manager"]) - {"view_off_book_expenses"}), "Управител")
+    # A manager who may not see off-book expenses still sees wages when
+    # they keep the payroll - wages are payroll, not off-book expenses; one
+    # who does not keep the payroll sees neither.
+    _, manager = _user(
+        company_id, "manager",
+        sorted((set(server.ROLE_PERMISSIONS["manager"]) | {"manage_payroll"}) - {"view_off_book_expenses"}), "Управител",
+    )
+    _, manager_without_payroll = _user(
+        company_id, "manager", sorted(set(server.ROLE_PERMISSIONS["manager"]) - {"view_off_book_expenses"}), "Управител 2",
+    )
     for day in ("2026-12-01", "2026-12-08", "2026-12-15"):
         client.post("/api/schedule/shifts", headers=owner, json={
             "user_id": worker_id, "date": day, "start_time": "09:00", "end_time": "17:00", "hourly_rate": 12,
@@ -528,6 +536,10 @@ def test_z1_z2_p5_schedule_wages_are_payroll_on_the_days_worked_and_double_pay_a
     assert after["total_non_invoice_expenses"] == before["total_non_invoice_expenses"]
     seen_by_manager = client.get(f"/api/statistics/summary?{december}", headers=manager).json()
     assert round(seen_by_manager["total_expense"], 2) == round(after["total_expense"] - after["total_non_invoice_expenses"], 2)
+    seen_without_payroll = client.get(f"/api/statistics/summary?{december}", headers=manager_without_payroll).json()
+    assert seen_without_payroll["total_payroll_cost"] is None
+    assert round(seen_without_payroll["total_expense"], 2) == round(
+        after["total_expense"] - after["total_non_invoice_expenses"] - after["total_payroll_cost"], 2)
     # The chart's days carry them on the days worked (December is still
     # ahead, so read the chart's day costs directly).
     by_day = asyncio.run(server.monthly_costs_by_day(company_id, owner_id, Period.parse("2026-12-01", "2026-12-31")))

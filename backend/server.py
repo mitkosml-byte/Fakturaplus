@@ -1214,13 +1214,29 @@ def get_financial_visibility(current_user: User) -> dict:
     that would otherwise include it, not just blanked in the UI, so the
     viewer gets a fully coherent analytical picture for the data they're
     actually allowed to see."""
-    granted = set(current_user.permissions or [])
+    return visibility_from_permissions(current_user.permissions)
+
+
+def visibility_from_permissions(permissions: Optional[List[str]]) -> dict:
+    """get_financial_visibility for a permission list - for a background
+    task writing to a member it has no request of (the budget alert)."""
+    granted = set(permissions or [])
     return {
         "statistics": "view_statistics" in granted,
         "pocket_money": "view_pocket_money" in granted,
         "off_book_expenses": "view_off_book_expenses" in granted,
         "profit": "view_profit" in granted,
         "personal_investments": "view_personal_investments" in granted,
+        # Salaries are seen by whoever keeps the payroll: for anyone else
+        # the payroll is out of every total (expenses, profit, the charts,
+        # the forecast...) as if it were zero - like pocket money and the
+        # expenses without invoice.
+        "payroll": "manage_payroll" in granted,
+        # The personal notebook (company money spent personally): only its
+        # viewers see it, as a line of its own under the profit - "personal
+        # use" and what is left in the business. It is never a business
+        # expense: everyone else's totals are the business's own.
+        "personal_wallet": "view_personal_wallet" in granted,
     }
 
 def restricted_data_note(visibility: dict) -> Optional[str]:
@@ -1229,9 +1245,10 @@ def restricted_data_note(visibility: dict) -> Optional[str]:
     which parts the totals leave out, and so which profit is shown."""
     if not visibility.get("statistics", True):
         return "Общите суми на фирмата са скрити за вашия достъп."
-    left_out = [name for key, name in (("pocket_money", "джобчето"), ("off_book_expenses", "разходите без фактура"))
-                if not visibility.get(key, True)]
-    items = " и ".join(left_out)
+    left_out = [name for key, name in (
+        ("pocket_money", "джобчето"), ("off_book_expenses", "разходите без фактура"), ("payroll", "заплатите"),
+    ) if not visibility.get(key, True)]
+    items = ", ".join(left_out[:-1]) + " и " + left_out[-1] if len(left_out) > 1 else "".join(left_out)
     if not visibility.get("profit", True):
         return (f"Сумите са без {items} - скрити са за вашия достъп. " if left_out else "") + "Печалбата е скрита за вашия достъп."
     if not left_out:
@@ -3055,6 +3072,35 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
         "payroll_cost": await get_payroll_cost_for_period(company_id, user_id, period.start, period.end),
         "depreciation_cost": await get_depreciation_cost_for_period(company_id, user_id, period.start, period.end),
         "revenue_days": sorted(d for d in revenue_days if isinstance(d, str)),
+        # Company money spent personally (the personal notebook) - never a
+        # business expense; only its viewers see it, apart (personal_use).
+        "personal_withdrawals": await personal_withdrawals_for_period(company_id, period),
+    }
+
+
+async def personal_withdrawals_for_period(company_id: Optional[str], period: Period) -> float:
+    """What the personal notebook recorded as company money spent
+    personally, on the days of the period."""
+    if not company_id:
+        return 0.0
+    rows = await db.personal_wallet_entries.aggregate([
+        {"$match": {"company_id": company_id, "date": period.text_filter()}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(ALL_ROWS)
+    return float(rows[0].get("total") or 0) if rows else 0.0
+
+
+def personal_use(totals: Dict[str, Any], profit: Optional[float], visibility: dict) -> Dict[str, Optional[float]]:
+    """The personal notebook beside the business's own numbers, for its
+    viewers only: what was spent personally in the period and - for whoever
+    also sees the profit - what is left in the business after it. Nulls
+    for everyone else: their numbers are the business's alone."""
+    if not visibility.get("personal_wallet"):
+        return {"personal_withdrawals": None, "left_after_personal": None}
+    spent = round(totals.get("personal_withdrawals", 0.0), 2)
+    return {
+        "personal_withdrawals": spent,
+        "left_after_personal": round(profit - spent, 2) if profit is not None else None,
     }
 
 
@@ -3075,15 +3121,16 @@ def round_to_cents_keeping_total(values: List[float]) -> List[float]:
 
 def period_income_expense(totals: Dict[str, Any], visibility: Optional[dict] = None) -> tuple:
     """(income, expense) of period_totals through _profit_formula - with a
-    viewer's visibility, hidden pocket money and off-book expenses count as
-    zero (the same redaction /statistics/summary applies); without one, the
-    real values."""
+    viewer's visibility, hidden pocket money, off-book expenses and payroll
+    count as zero (the same redaction /statistics/summary applies); without
+    one, the real values. The personal notebook is never part of either."""
     show_pocket = visibility is None or visibility["pocket_money"]
     show_off_book = visibility is None or visibility["off_book_expenses"]
+    show_payroll = visibility is None or visibility.get("payroll", True)
     return _profit_formula(
         fiscal_revenue=totals["fiscal_revenue"], pocket_money=totals["pocket_money"] if show_pocket else 0,
         invoice_total=totals["invoice_total"], off_book_expenses=totals["off_book_expenses"] if show_off_book else 0,
-        payroll_cost=totals["payroll_cost"], depreciation_cost=totals["depreciation_cost"],
+        payroll_cost=totals["payroll_cost"] if show_payroll else 0, depreciation_cost=totals["depreciation_cost"],
         issued_invoices=totals.get("issued_invoice_total", 0.0),
     )
 
@@ -3105,23 +3152,27 @@ async def issued_invoices_by_day(scope: dict, period: Period) -> Dict[str, Dict[
     return days
 
 
-async def monthly_costs_by_day(company_id: Optional[str], user_id: str, period: Period) -> Dict[str, Dict[str, float]]:
+async def monthly_costs_by_day(
+    company_id: Optional[str], user_id: str, period: Period, include_payroll: bool = True,
+) -> Dict[str, Dict[str, float]]:
     """Payroll and depreciation falling on each day of the period, in two
     parts ("YYYY-MM-DD" -> {"monthly": EUR, "wages": EUR}): "monthly" is the
     month's payroll and depreciation spread evenly over its days - a cost of
     the month, not of the day, so a day chart keeps it out of its bars;
     "wages" is what Work Schedule paid for the shifts worked that day. A
     chart's days add up to exactly what period_totals counts for the same
-    period."""
+    period. Without `include_payroll` (a viewer who does not keep the
+    payroll) the payroll and the wages are out, as in their totals."""
     per_month: Dict[tuple, float] = {}
     for year, month in period.months():
         whole = Period.month(year, month)
-        per_month[(year, month)] = (
+        payroll = (
             await get_payroll_cost_for_period(company_id, user_id, whole.start, whole.end, include_wages=False)
-            + await get_depreciation_cost_for_period(company_id, user_id, whole.start, whole.end)
+            if include_payroll else 0.0
         )
+        per_month[(year, month)] = payroll + await get_depreciation_cost_for_period(company_id, user_id, whole.start, whole.end)
     # Wages paid by Work Schedule fall on the days that were worked.
-    wages = await schedule_wages_by_day(company_id, user_id, period)
+    wages = await schedule_wages_by_day(company_id, user_id, period) if include_payroll else {}
     return {
         day.isoformat(): {
             "monthly": per_month[(day.year, day.month)] / days_in_month(day.year, day.month),
@@ -3171,14 +3222,17 @@ async def period_pace(
     }
 
 
-async def _compute_month_profit(company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str) -> float:
+async def _compute_month_profit(
+    company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str,
+    visibility: Optional[dict] = None,
+) -> float:
     """Profit for the personal-wallet module, read through period_totals
-    like every other profit in the app - with the real pocket money and
-    off-book expenses: whoever reaches these endpoints already holds a
-    personal-wallet permission, which implies the owner trusts them with
-    exactly this level of financial detail."""
+    like every other profit in the app - the business's own profit, before
+    any personal use (the notebook takes that off itself). With a viewer's
+    visibility, what they may not see (pocket money, off-book expenses, the
+    payroll) is out of it, as out of their totals."""
     totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
-    total_income, total_expense = period_income_expense(totals)
+    total_income, total_expense = period_income_expense(totals, visibility)
     return total_income - total_expense
 
 def generate_wallet_advice(
@@ -3187,8 +3241,8 @@ def generate_wallet_advice(
     wants_total: float,
     category_totals: dict,
     last_month_category_totals: dict,
-    profit_this_month: float,
-    safe_to_spend: float,
+    profit_this_month: Optional[float],
+    safe_to_spend: Optional[float],
     threshold_percent: float,
     spent_percent_of_profit: Optional[float],
     upcoming: list,
@@ -3249,7 +3303,7 @@ def generate_wallet_advice(
     # Upcoming recurring obligations that would eat into what's still safe to spend.
     for item in upcoming:
         note = f"📅 Предстои плащане „{item['description']}“ ({fmt_eur(item['amount'])}) на {item['next_due_date']}"
-        if safe_to_spend - item["amount"] < 0:
+        if safe_to_spend is not None and safe_to_spend - item["amount"] < 0:
             note += " - текущото „безопасно за теглене“ не го покрива"
         advice.append(note)
 
@@ -3285,10 +3339,14 @@ async def _business_digest_period(
     the same figures for the same period."""
     totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
     total_income, total_expense = period_income_expense(totals, visibility)
+    profit = round(total_income - total_expense, 2) if visibility["profit"] else None
     return {
         "revenue": round(total_income, 2),
         "expenses": round(total_expense, 2),
-        "profit": round(total_income - total_expense, 2) if visibility["profit"] else None,
+        "profit": profit,
+        # Company money spent personally and what is left after it - for
+        # viewers of the personal notebook only (null for anyone else).
+        **personal_use(totals, profit, visibility),
         "invoice_count": totals["invoice_count"],
         # Part of revenue: invoices issued to customers (with VAT).
         "issued_invoices": round(totals["issued_invoice_total"], 2),
@@ -3876,8 +3934,14 @@ async def break_even_for(company_id: Optional[str], scope: dict, current_user: U
                        "при този марж няма точка на рентабилност.",
         }
 
-    payroll = await month_payroll(company_id, scope, today.year, today.month, expect=modules["payroll"])
-    wages = await schedule_wages_for_period(company_id, current_user.user_id, month.through(today) or month)
+    # The payroll for whoever keeps it - out of anyone else's fixed costs,
+    # as out of their totals.
+    show_payroll = bool(visibility.get("payroll", True))
+    payroll = (
+        await month_payroll(company_id, scope, today.year, today.month, expect=modules["payroll"])
+        if show_payroll else {"recorded": 0.0, "expected": 0.0}
+    )
+    wages = await schedule_wages_for_period(company_id, current_user.user_id, month.through(today) or month) if show_payroll else 0.0
     depreciation = await get_depreciation_cost_for_period(company_id, current_user.user_id, month.start, month.end)
     recurring_now = await recurring_service.month_projection(db, company_id, scope, today.year, today.month, today, off_book_visible)
     fixed = {
@@ -3907,6 +3971,8 @@ async def break_even_for(company_id: Optional[str], scope: dict, current_user: U
     return {
         "available": True, "month": month_key,
         "fixed_costs": fixed,
+        # The salaries are hidden from this viewer: the fixed costs are without them.
+        "payroll_left_out": not show_payroll and modules["payroll"],
         "margin_percent": round(margin * 100, 1),
         "margin_basis": {"kind": basis, "months": [m["month"] for m in used]},
         **break_even_service.work_out(fixed["total"], margin, income_before, income_today, len(open_days), today in open_days),
@@ -4021,8 +4087,11 @@ async def cash_flow_projection(company_id: Optional[str], scope: dict, current_u
 
     # The month's payroll on its pay day - for whoever has no payroll
     # recorded for that month yet (a recorded one is not expected again).
+    # Only for whoever keeps the payroll: the salaries are theirs to see.
     pay_day = await _cash_flow_pay_day(company, scope)
-    if modules["payroll"]:
+    if modules["payroll"] and not visibility.get("payroll", True):
+        notes.append("Без заплатите - скрити са за вашия достъп.")
+    if modules["payroll"] and visibility.get("payroll", True):
         for year, month in months:
             day = date(year, month, min(pay_day, days_in_month(year, month)))
             if not (today <= day <= end):
@@ -4030,6 +4099,26 @@ async def cash_flow_projection(company_id: Optional[str], scope: dict, current_u
             still_expected = (await month_payroll(company_id, scope, year, month))["expected"]
             if still_expected > 0:
                 events.append(cash_flow_service.CashEvent(day, -still_expected, cash_flow_service.PAYROLL, "Заплати и осигуровки"))
+
+    # Company money spent personally, coming due (the personal notebook's
+    # coming payments) - for its viewers only: it leaves the business's
+    # money all the same.
+    if visibility.get("personal_wallet") and company_id:
+        coming = await db.personal_wallet_entries.find(
+            {
+                "company_id": company_id, "is_recurring": True,
+                "next_due_date": {"$gte": today.isoformat(), "$lte": end.isoformat()},
+                "$or": [{"recurring_until": None}, {"recurring_until": {"$gte": today.isoformat()}}],
+            },
+            {"_id": 0, "description": 1, "amount": 1, "next_due_date": 1},
+        ).to_list(ALL_ROWS)
+        for entry in coming:
+            due = business_day(entry.get("next_due_date"))
+            if due is not None and float(entry.get("amount") or 0) > 0:
+                events.append(cash_flow_service.CashEvent(
+                    due, -float(entry["amount"]), cash_flow_service.PERSONAL,
+                    str(entry.get("description") or "Лично плащане").strip(),
+                ))
 
     # VAT for a month is paid by the 14th of the next one.
     if company_vat_registered(company):
@@ -4169,7 +4258,7 @@ async def _signal_scan_credits(company_id, scope, current_user, visibility) -> O
 async def _signal_budget(company_id, scope, current_user, visibility) -> Optional[dict]:
     if not company_id or "manage_budget" not in set(current_user.permissions or []):
         return None
-    status = await compute_budget_status(company_id, today_local().strftime("%Y-%m"))
+    status = await compute_budget_status(company_id, today_local().strftime("%Y-%m"), visibility)
     if not status:
         return None
     if status["is_exceeded"]:
@@ -4430,7 +4519,8 @@ async def _signal_forecast(company_id, scope, current_user, visibility) -> List[
         company_id, months_ahead=1, include_pocket_money=visibility["pocket_money"]
     )
     expense_forecast = await forecast_service.get_expense_forecast(
-        company_id, months_ahead=1, include_off_book_expenses=visibility["off_book_expenses"]
+        company_id, months_ahead=1, include_off_book_expenses=visibility["off_book_expenses"],
+        include_payroll=visibility.get("payroll", True),
     )
     signals: List[dict] = []
     trend_signal = _forecast_trend_signal(revenue_forecast, expense_forecast)
@@ -5183,11 +5273,14 @@ class BudgetCreate(BaseModel):
 
 
 
-async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
+async def compute_budget_status(company_id: str, month: str, visibility: Optional[dict] = None) -> Optional[dict]:
     """Shared by the live /budget/status endpoint and the background
     threshold-alert tick below, so both agree exactly on what "percent
     used" means (invoices + off-book expenses + payroll + depreciation).
-    Returns None if the company has no budget set for that month."""
+    With a viewer's visibility, what they may not see (off-book expenses,
+    the payroll) is out of their figures, as out of their totals; without
+    one, the whole company's. Returns None if the company has no budget set
+    for that month."""
     budget = await db.budgets.find_one({"company_id": company_id, "month": month}, {"_id": 0})
     if not budget:
         return None
@@ -5206,9 +5299,12 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
     # helpers whenever company_id is set - a placeholder is safe.
     counted = counted_period(whole)
     totals = await period_totals(company_id, scope, "", counted)
-    total_payroll_cost = totals["payroll_cost"]
+    show_off_book = visibility is None or bool(visibility.get("off_book_expenses"))
+    show_payroll = visibility is None or bool(visibility.get("payroll", True))
+    total_payroll_cost = totals["payroll_cost"] if show_payroll else 0.0
     total_depreciation_expense = totals["depreciation_cost"]
-    variable_so_far = totals["invoice_total"] + totals["off_book_expenses"]
+    off_book = totals["off_book_expenses"] if show_off_book else 0.0
+    variable_so_far = totals["invoice_total"] + off_book
     total_spent = variable_so_far + total_payroll_cost + total_depreciation_expense
 
     limit = budget.get("expense_limit", 0)
@@ -5225,10 +5321,10 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
     expected_month_end = None
     if counted.days < whole.days:
         fixed_whole_month = (
-            await get_payroll_cost_for_period(company_id, "", whole.start, whole.end)
+            (await get_payroll_cost_for_period(company_id, "", whole.start, whole.end) if show_payroll else 0.0)
             + await get_depreciation_cost_for_period(company_id, "", whole.start, whole.end)
         )
-        recurring = await recurring_service.month_projection(db, company_id, scope, year, mon, counted.end, True)
+        recurring = await recurring_service.month_projection(db, company_id, scope, year, mon, counted.end, show_off_book)
         paced = max(0.0, variable_so_far - recurring["paid_so_far"])
         expected_month_end = round(paced / counted.days * whole.days + recurring["month_total"] + fixed_whole_month, 2)
 
@@ -5242,8 +5338,8 @@ async def compute_budget_status(company_id: str, month: str) -> Optional[dict]:
         "expense_limit": limit,
         "total_spent": round(total_spent, 2),
         "total_invoice_amount": round(totals["invoice_total"], 2),
-        "total_non_invoice_expenses": round(totals["off_book_expenses"], 2),
-        "total_payroll_cost": round(total_payroll_cost, 2),
+        "total_non_invoice_expenses": round(off_book, 2) if show_off_book else None,
+        "total_payroll_cost": round(total_payroll_cost, 2) if show_payroll else None,
         "total_depreciation_expense": round(total_depreciation_expense, 2),
         "remaining": round(max(0, limit - total_spent), 2),
         "percent_used": round(percent_used, 1),
@@ -6408,56 +6504,77 @@ async def _budget_alert_tick():
     see create_budget) is the dedupe, exactly like calendar's reminder_sent.
 
     Exposed as its own tick function (called from the loop below) so a test
-    can call it directly without sleeping."""
+    can call it directly without sleeping.
+
+    Each member is written with their own figures - what they may not see
+    (off-book expenses, the payroll) is out of them, as out of their screen -
+    and alerted once their own figures cross: alert_sent_to/exceeded_sent_to
+    hold who has been (the old alert_sent/exceeded_sent - sent to everyone
+    of that time)."""
     current_month = today_local().strftime("%Y-%m")
-    pending = await db.budgets.find(
-        {
-            "month": current_month,
-            "$or": [{"alert_sent": {"$ne": True}}, {"exceeded_sent": {"$ne": True}}],
-        },
-        {"_id": 0},
-    ).to_list(1000)
+    budgets = await db.budgets.find({"month": current_month}, {"_id": 0}).to_list(1000)
 
-    for budget in pending:
+    for budget in budgets:
         company_id = budget["company_id"]
-        status = await compute_budget_status(company_id, current_month)
-        if not status:
-            continue
-
-        recipients = await db.users.find(
-            {"company_id": company_id, "permissions": "manage_budget"}, {"_id": 0, "user_id": 1}
+        members = await db.users.find(
+            {"company_id": company_id, "permissions": "manage_budget"}, {"_id": 0, "password_hash": 0},
         ).to_list(100)
-        recipient_ids = [r["user_id"] for r in recipients]
-        if not recipient_ids:
+        if not members:
             continue
+        everyone = [member["user_id"] for member in members]
+        alerted = set(budget.get("alert_sent_to") or (everyone if budget.get("alert_sent") else []))
+        exceeded = set(budget.get("exceeded_sent_to") or (everyone if budget.get("exceeded_sent") else []))
+        statuses: Dict[tuple, Optional[dict]] = {}
+        to_send: Dict[tuple, Dict[str, List[str]]] = {}
+        for member in members:
+            visibility = visibility_from_permissions(sanitize_user(member).get("permissions"))
+            key = (visibility["off_book_expenses"], visibility["payroll"])
+            if key not in statuses:
+                statuses[key] = await compute_budget_status(company_id, current_month, visibility)
+            status = statuses[key]
+            if not status:
+                continue
+            user_id = member["user_id"]
+            if status["is_exceeded"] and user_id not in exceeded:
+                to_send.setdefault(key, {"exceeded": [], "alert": []})["exceeded"].append(user_id)
+            elif status["is_alert"] and not status["is_exceeded"] and user_id not in alerted:
+                to_send.setdefault(key, {"exceeded": [], "alert": []})["alert"].append(user_id)
 
-        if status["is_exceeded"] and not budget.get("exceeded_sent"):
-            await push_service.send_to_users(
-                db, recipient_ids,
-                title="Бюджетът е надхвърлен",
-                body=(
-                    f"Разходите за {current_month} вече са {fmt_eur(status['total_spent'])} - "
-                    f"над лимита от {fmt_eur(status['expense_limit'])}."
-                ),
-                data={"type": "budget", "month": current_month},
-            )
+        for key, groups in to_send.items():
+            status = statuses[key]
+            if not status:
+                continue
+            if groups["exceeded"]:
+                await push_service.send_to_users(
+                    db, groups["exceeded"],
+                    title="Бюджетът е надхвърлен",
+                    body=(
+                        f"Разходите за {current_month} вече са {fmt_eur(status['total_spent'])} - "
+                        f"над лимита от {fmt_eur(status['expense_limit'])}."
+                    ),
+                    data={"type": "budget", "month": current_month},
+                )
+                exceeded.update(groups["exceeded"])
+                alerted.update(groups["exceeded"])
+            if groups["alert"]:
+                await push_service.send_to_users(
+                    db, groups["alert"],
+                    title="Приближаваш бюджетния лимит",
+                    body=(
+                        f"Разходите за {current_month} достигнаха {status['percent_used']:.0f}% "
+                        f"от лимита от {fmt_eur(status['expense_limit'])}."
+                    ),
+                    data={"type": "budget", "month": current_month},
+                )
+                alerted.update(groups["alert"])
+        if to_send:
             await db.budgets.update_one(
                 {"company_id": company_id, "month": current_month},
-                {"$set": {"exceeded_sent": True, "alert_sent": True}},
-            )
-        elif status["is_alert"] and not budget.get("alert_sent"):
-            await push_service.send_to_users(
-                db, recipient_ids,
-                title="Приближаваш бюджетния лимит",
-                body=(
-                    f"Разходите за {current_month} достигнаха {status['percent_used']:.0f}% "
-                    f"от лимита от {fmt_eur(status['expense_limit'])}."
-                ),
-                data={"type": "budget", "month": current_month},
-            )
-            await db.budgets.update_one(
-                {"company_id": company_id, "month": current_month},
-                {"$set": {"alert_sent": True}},
+                {"$set": {
+                    "alert_sent_to": sorted(alerted), "exceeded_sent_to": sorted(exceeded),
+                    # Sent to everyone who manages the budget now.
+                    "alert_sent": set(everyone) <= alerted, "exceeded_sent": set(everyone) <= exceeded,
+                }},
             )
 
 async def _budget_alert_loop():

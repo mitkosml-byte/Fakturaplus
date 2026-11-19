@@ -26,6 +26,8 @@ PAYROLL = "payroll"
 VAT = "vat"
 # An invoice that repeats (routers/recurring_invoices), not issued yet for its month.
 SUBSCRIPTION = "subscription"
+# Company money spent personally, coming due (the personal notebook) - for its viewers only.
+PERSONAL = "personal"
 
 
 @dataclass

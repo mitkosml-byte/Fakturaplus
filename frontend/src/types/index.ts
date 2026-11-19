@@ -26,6 +26,8 @@ export interface BreakEven {
   message?: string;
   month: string;
   fixed_costs?: { payroll: number; recurring: number; depreciation: number; total: number };
+  // The salaries are hidden from this viewer: the fixed costs are without them.
+  payroll_left_out?: boolean;
   margin_percent?: number;
   margin_basis?: { kind: 'last_months' | 'this_month'; months: string[] };
   break_even_income?: number;
@@ -73,8 +75,10 @@ export interface AccountantPack {
 export interface CashFlowEvent {
   date: string;
   amount: number; // money in above zero, out below
-  // subscription: an invoice that repeats, not issued yet for its month.
-  kind: 'receivable' | 'revenue' | 'invoice' | 'recurring' | 'payroll' | 'vat' | 'subscription';
+  // subscription: an invoice that repeats, not issued yet for its month;
+  // personal: company money spent personally, coming due (the personal
+  // notebook) - for its viewers only.
+  kind: 'receivable' | 'revenue' | 'invoice' | 'recurring' | 'payroll' | 'vat' | 'subscription' | 'personal';
   label: string;
   overdue: boolean;
 }
@@ -288,7 +292,8 @@ export interface LocationComparisonRow {
     issued_invoices: number;
     purchases: number;
     off_book: number | null;  // null: hidden from this person
-    payroll: number;
+    // null: the salaries are hidden from this viewer.
+    payroll: number | null;
   };
   team: number;
 }
@@ -1030,6 +1035,12 @@ export interface FinancialVisibility {
   off_book_expenses: boolean;
   profit: boolean;
   personal_investments: boolean;
+  // The salaries: for whoever keeps the payroll - out of everyone else's
+  // totals (expenses, profit, charts, forecast...), like pocket money.
+  payroll?: boolean;
+  // The personal notebook (company money spent personally): its viewers
+  // see it beside the profit - never as a business expense.
+  personal_wallet?: boolean;
 }
 
 export interface Summary {
@@ -1053,6 +1064,11 @@ export interface Summary {
   total_income: number | null;
   total_expense: number | null;
   profit: number | null;
+  // The personal notebook beside the profit, for its viewers only (null for
+  // anyone else): company money spent personally in the period, and what
+  // is left in the business after it (null without the profit too).
+  personal_withdrawals?: number | null;
+  left_after_personal?: number | null;
   invoice_count: number | null;
   total_cash_revenue: number | null;
   total_card_revenue: number | null;
@@ -2120,8 +2136,9 @@ export interface PersonalWalletSummary {
   category_totals: Partial<Record<PersonalWalletCategory, number>>;
   needs_total: number;
   wants_total: number;
-  profit_this_month: number;
-  safe_to_spend: number;
+  // Measured against the profit: null for a viewer who does not see the profit.
+  profit_this_month: number | null;
+  safe_to_spend: number | null;
   threshold_percent: number;
   spent_percent_of_profit: number | null;
   status: 'ok' | 'warning' | 'danger';

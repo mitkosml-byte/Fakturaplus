@@ -62,6 +62,7 @@ async def get_expense_forecast(
         company_id, months_ahead,
         include_off_book_expenses=visibility["off_book_expenses"],
         lookback_days=lookback_days, start_date=start_date, end_date=end_date,
+        include_payroll=visibility["payroll"],
     )
 
 @router.get("/forecast/revenue")

@@ -101,7 +101,7 @@ async def build_business_chat_digest(current_user: User) -> dict:
 
     budget = None
     if company_id and "manage_budget" in set(current_user.permissions or []):
-        budget_status = await compute_budget_status(company_id, today.strftime("%Y-%m"))
+        budget_status = await compute_budget_status(company_id, today.strftime("%Y-%m"), visibility)
         if budget_status:
             budget = {
                 "expense_limit": budget_status["expense_limit"],
@@ -163,9 +163,10 @@ async def build_business_chat_digest(current_user: User) -> dict:
     if "manage_budget" in perms:
         assets = await _business_digest_assets(scope)
 
-    # Payroll headcount/cost - gated by manage_budget, same as /payroll.
+    # Payroll headcount/cost - for whoever keeps the payroll (manage_payroll),
+    # same as /payroll; out of everyone else's totals too.
     payroll = None
-    if "manage_budget" in perms:
+    if "manage_payroll" in perms:
         payroll = await _business_digest_payroll(company_id, current_user.user_id, scope, this_month_start, this_month_end)
 
     # Work Schedule hours/unpaid amount/who's on leave - gated by
@@ -300,7 +301,10 @@ async def ask_my_numbers(
         "дневната цел отговаряй с инструмента break_even. Цитирай само числа "
         "от данните - никога измислени или закръглени наизуст. Полетата, които са null (budget, receivables, "
         "roi, assets, payroll, schedule, personal_wallet), както и profit: null, означават, че този потребител "
-        "няма права да ги вижда - кажи му го ясно, вместо да твърдиш, че данните липсват изобщо. Ако въпросът е "
+        "няма права да ги вижда - кажи му го ясно, вместо да твърдиш, че данните липсват изобщо; приходите и "
+        "разходите му са без това, което не вижда (payroll null: разходите и печалбата са без заплатите). "
+        "personal_withdrawals са пари на фирмата, похарчени лично (личното тефтерче) - не са разход на фирмата, "
+        "а left_after_personal е печалбата след тях: колко остава във фирмата. Ако въпросът е "
         "извън данните на фирмата (НАП, данъчни декларации, конкуренти, обща информация), кажи ясно, че не "
         "разполагаш с такава информация, вместо да гадаеш. forecast.*.trend == 'insufficient_data' означава "
         "под 4 месеца история - next_month_predicted е просто средното, не истинска тенденция; кажи го изрично. "

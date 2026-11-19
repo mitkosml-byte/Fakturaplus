@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { api } from '../src/services/api';
@@ -106,7 +106,9 @@ export default function PersonalExpensesHistoryScreen() {
   const canAddWallet = hasPermission('add_personal_wallet_entries');
   const canManageWallet = hasPermission('manage_personal_wallet');
 
-  const [activeMainTab, setActiveMainTab] = useState<MainTab>('investments');
+  // Opened from Home's "personal use" line: straight to the notebook.
+  const { tab } = useLocalSearchParams<{ tab?: string }>();
+  const [activeMainTab, setActiveMainTab] = useState<MainTab>(tab === 'wallet' ? 'wallet' : 'investments');
 
   // ===================== Investments (business ROI) - unchanged =====================
   const [loading, setLoading] = useState(true);
@@ -605,12 +607,18 @@ export default function PersonalExpensesHistoryScreen() {
                       </Text>
                     </View>
                   </View>
-                  <CountUp
-                    value={walletSummary.safe_to_spend}
-                    formatter={(n) => `${formatMoney(n)}`}
-                    style={[styles.safeCardValue, { color: WALLET_STATUS_COLORS[walletSummary.status] }]}
-                  />
-                  <Text style={styles.safeCardHint}>{t('wallet.safeToSpendHint')}</Text>
+                  {walletSummary.safe_to_spend === null ? (
+                    <Text style={[styles.safeCardValue, { color: COLORS.textMuted }]}>—</Text>
+                  ) : (
+                    <CountUp
+                      value={walletSummary.safe_to_spend}
+                      formatter={(n) => `${formatMoney(n)}`}
+                      style={[styles.safeCardValue, { color: WALLET_STATUS_COLORS[walletSummary.status] }]}
+                    />
+                  )}
+                  <Text style={styles.safeCardHint}>
+                    {walletSummary.safe_to_spend === null ? t('wallet.profitHidden') : t('wallet.safeToSpendHint')}
+                  </Text>
                   {walletSummary.spent_percent_of_profit !== null && (
                     <View style={styles.progressTrack}>
                       <View

@@ -1544,6 +1544,8 @@ def test_business_chat_digest_permission_matrix():
     full_permissions = [
         "view_statistics", "add_revenue", "manage_budget", "view_personal_investments",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_wallet",
+        # The payroll is for whoever keeps it (since payroll split off the budget).
+        "manage_payroll",
     ]
     restricted_permissions = ["view_statistics"]  # none of the gated extras
 

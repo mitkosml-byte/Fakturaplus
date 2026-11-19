@@ -59,7 +59,7 @@ export function WalletAlertPopup() {
     try {
       const summary = await api.getPersonalWalletSummary();
       if (summary.status === 'danger' && dismissedMonthRef.current !== currentMonthKey()) {
-        setSafeToSpend(summary.safe_to_spend);
+        setSafeToSpend(summary.safe_to_spend ?? 0);
         setSpentPercent(summary.spent_percent_of_profit);
         setVisible(true);
       }

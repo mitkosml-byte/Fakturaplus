@@ -83,7 +83,9 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   manage_company: { bg: 'Настройки на фирмата', en: 'Company settings' },
   view_audit_log: { bg: 'Одит лог', en: 'Audit log' },
   manage_budget: { bg: 'Бюджет, ДМА, график и отсъствия', en: 'Budget, fixed assets, schedule and absences' },
-  manage_payroll: { bg: 'Заплати и ведомости (и плащане по график)', en: 'Salaries and payroll (and schedule pay)' },
+  // Whoever keeps the payroll also sees the salaries in the totals - for
+  // anyone else they are out of every sum (get_financial_visibility).
+  manage_payroll: { bg: 'Заплати и ведомости (вижда ги и в сумите; плащане по график)', en: 'Salaries and payroll (sees them in the totals too; schedule pay)' },
   export_data: { bg: 'Износ на данни (Excel/PDF)', en: 'Export data (Excel/PDF)' },
   view_statistics: { bg: 'Разширена статистика', en: 'Advanced statistics' },
   manage_invoices: { bg: 'Фактури', en: 'Invoices' },
@@ -97,7 +99,7 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   team_collaboration: { bg: 'Календар и съобщения', en: 'Calendar and messages' },
   manage_billing: { bg: 'Плащания и кредити за сканиране', en: 'Billing and scan credits' },
   restore_deleted_data: { bg: 'Възстановяване на изтрити фактури', en: 'Restore deleted invoices' },
-  view_personal_wallet: { bg: 'Вижда личното тефтерче', en: 'Sees the personal wallet' },
+  view_personal_wallet: { bg: 'Вижда личното тефтерче (и „Лично ползване“ под печалбата)', en: 'Sees the personal wallet (and "Personal use" under the profit)' },
   add_personal_wallet_entries: { bg: 'Добавя в личното тефтерче', en: 'Adds to the personal wallet' },
   manage_personal_wallet: { bg: 'Коригира личното тефтерче', en: 'Edits the personal wallet' },
 };

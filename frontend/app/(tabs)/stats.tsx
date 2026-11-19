@@ -1359,6 +1359,25 @@ export default function StatsScreen() {
                     </View>
                   )}
                   {!!monthlyCostsNote && <Text style={styles.chartNote}>{monthlyCostsNote}</Text>}
+                  {/* The personal notebook beside the business's own numbers -
+                      only for whoever sees it, never one of the expenses. */}
+                  {summary?.personal_withdrawals != null && summary.personal_withdrawals > 0 && (
+                    <TouchableOpacity
+                      style={styles.personalUseRow}
+                      onPress={() => router.push({ pathname: '/personal-expenses', params: { tab: 'wallet' } })}
+                      accessibilityRole="button"
+                    >
+                      <Ionicons name="wallet-outline" size={16} color={COLORS.warning} />
+                      <Text style={styles.personalUseText}>
+                        {summary.left_after_personal != null
+                          ? t('stats.personalUseLine')
+                            .replace('{amount}', formatMoney(-summary.personal_withdrawals))
+                            .replace('{left}', formatMoney(summary.left_after_personal))
+                          : t('stats.personalUseOnly').replace('{amount}', formatMoney(-summary.personal_withdrawals))}
+                      </Text>
+                      <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 {/* Not registered for VAT: no VAT breakdown */}
@@ -2537,6 +2556,23 @@ const styles = StyleSheet.create({
   avgTurnoverExpected: {
     marginTop: 6,
     color: COLORS.info,
+  },
+  personalUseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+  },
+  personalUseText: {
+    flex: 1,
+    minWidth: 0,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
   },
   chartNote: {
     fontSize: 11,

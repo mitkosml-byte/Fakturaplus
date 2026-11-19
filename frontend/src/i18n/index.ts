@@ -1040,6 +1040,14 @@ export const translations: Translations = {
     bg: 'разходите без фактура',
     en: 'expenses without an invoice',
   },
+  'visibility.payroll': {
+    bg: 'заплатите',
+    en: 'the payroll',
+  },
+  'visibility.listSeparator': {
+    bg: ', ',
+    en: ', ',
+  },
   'visibility.and': {
     bg: ' и ',
     en: ' and ',
@@ -4445,6 +4453,24 @@ export const translations: Translations = {
     bg: 'Печалба за месеца минус вече изтегленото минус предстоящи задължения',
     en: "This month's profit minus what's already withdrawn minus upcoming obligations",
   },
+  'wallet.profitHidden': {
+    bg: 'Печалбата е скрита за вашия достъп – тук са само записите и сумите им.',
+    en: 'The profit is hidden for your access level – only the entries and their sums are here.',
+  },
+  'home.personalUse': { bg: 'Лично ползване', en: 'Personal use' },
+  'home.leftInBusiness': { bg: 'Остава във фирмата', en: 'Left in the business' },
+  'stats.personalUseLine': {
+    bg: 'Лично ползване (тефтерчето): {amount} · остава във фирмата {left}',
+    en: 'Personal use (the notebook): {amount} · left in the business {left}',
+  },
+  'stats.personalUseOnly': {
+    bg: 'Лично ползване (тефтерчето): {amount}',
+    en: 'Personal use (the notebook): {amount}',
+  },
+  'breakEven.payrollHidden': {
+    bg: 'Без заплатите – скрити са за вашия достъп.',
+    en: 'Without the payroll – hidden for your access level.',
+  },
   'wallet.spentThisMonth': {
     bg: 'Изтеглено този месец',
     en: 'Withdrawn this month',
@@ -5785,6 +5811,7 @@ export const translations: Translations = {
   'cashFlow.payDaySaved': { bg: 'Денят за заплати е запазен', en: 'Pay day saved' },
   'cashFlow.fromStatement': { bg: 'Обнови от банково извлечение', en: 'Update from a bank statement' },
   'cashFlow.kind.subscription': { bg: 'Абонамент', en: 'Subscription' },
+  'cashFlow.kind.personal': { bg: 'Лично', en: 'Personal' },
 
   // Scanning without a connection (Н12)
   'scanQueue.offlineTitle': { bg: 'Няма връзка с интернет', en: 'No internet connection' },

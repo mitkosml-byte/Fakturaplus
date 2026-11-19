@@ -663,8 +663,10 @@ export default function HomeScreen() {
     }] : []),
   ];
   // Under the boxes: the period's revenue (with a till, the till and
-  // Джобче added up - for who sees both) and its expenses.
-  const ledgerRows: { key: string; label: string; value: number }[] = [];
+  // Джобче added up - for who sees both) and its expenses; for whoever sees
+  // the personal notebook, the company money spent personally and what is
+  // left in the business after it - never a business expense.
+  const ledgerRows: { key: string; label: string; value: number; tone?: string; onPress?: () => void }[] = [];
   if (summary) {
     if (usesTill) {
       if (summary.total_fiscal_revenue !== null && summary.total_pocket_money !== null) {
@@ -675,6 +677,19 @@ export default function HomeScreen() {
     }
     if (summary.total_expense !== null) {
       ledgerRows.push({ key: 'expense', label: t('home.totalExpenses'), value: summary.total_expense || 0 });
+    }
+    const personal = summary.personal_withdrawals;
+    if (personal != null && personal > 0) {
+      ledgerRows.push({
+        key: 'personal', label: t('home.personalUse'), value: -personal, tone: COLORS.warning,
+        onPress: () => router.push({ pathname: '/personal-expenses', params: { tab: 'wallet' } }),
+      });
+      if (summary.left_after_personal != null) {
+        ledgerRows.push({
+          key: 'left', label: t('home.leftInBusiness'), value: summary.left_after_personal,
+          tone: summary.left_after_personal >= 0 ? COLORS.success : COLORS.danger,
+        });
+      }
     }
   }
   // Which totals - and so which profit - this viewer sees; the "no
@@ -819,10 +834,16 @@ export default function HomeScreen() {
                     {ledgerRows.length > 0 && (
                       <View style={styles.ledger}>
                         {ledgerRows.map((row, index) => (
-                          <View key={row.key} style={[styles.ledgerRow, index > 0 && styles.ledgerRowDivider]}>
+                          <TouchableOpacity
+                            key={row.key}
+                            style={[styles.ledgerRow, index > 0 && styles.ledgerRowDivider]}
+                            onPress={row.onPress}
+                            disabled={!row.onPress}
+                            accessibilityRole={row.onPress ? 'button' : undefined}
+                          >
                             <Text style={styles.ledgerLabel}>{row.label}</Text>
-                            <Text style={styles.ledgerValue}>{formatMoney(row.value)}</Text>
-                          </View>
+                            <Text style={[styles.ledgerValue, row.tone ? { color: row.tone } : null]}>{formatMoney(row.value)}</Text>
+                          </TouchableOpacity>
                         ))}
                       </View>
                     )}

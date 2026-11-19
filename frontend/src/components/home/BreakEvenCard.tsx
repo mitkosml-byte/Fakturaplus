@@ -123,6 +123,7 @@ export function BreakEvenCard({ canManageBudget, refreshSignal }: Props) {
           <Text style={styles.note}>
             {data.margin_basis?.kind === 'this_month' ? t('breakEven.marginThisMonth') : t('breakEven.marginLastMonths')}
           </Text>
+          {data.payroll_left_out && <Text style={styles.note}>{t('breakEven.payrollHidden')}</Text>}
           <Text style={styles.note}>{t('breakEven.formula')}</Text>
         </View>
       )}

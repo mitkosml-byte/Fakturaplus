@@ -172,7 +172,8 @@ def _month_totals(month: Dict[str, Any], visibility: dict, through_day: Optional
     pocket = sum(v for d, v in month["pocket_by_day"].items() if upto(d)) if visibility["pocket_money"] else 0.0
     invoice_total = sum(amount for d, _, amount in month["invoices"] if upto(d))
     off_book = sum(amount for d, amount in month["off_book"] if upto(d))
-    payroll = month["payroll"] if through_day is None else 0.0
+    # The payroll for whoever keeps it, as in their totals.
+    payroll = month["payroll"] if through_day is None and visibility.get("payroll", True) else 0.0
     depreciation = month["depreciation"] if through_day is None else 0.0
     income, expense = _profit_formula(
         fiscal_revenue=fiscal, pocket_money=pocket, invoice_total=invoice_total,
@@ -793,7 +794,8 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
     needs_total = sum(v for k, v in category_totals.items() if k in {c.value for c in WALLET_NEEDS_CATEGORIES})
     wants_total = sum(v for k, v in category_totals.items() if k in {c.value for c in WALLET_WANTS_CATEGORIES})
 
-    profit_this_month = await _compute_month_profit(company_id, scope, current_user.user_id, start_date, end_date)
+    visibility = get_financial_visibility(current_user)
+    profit_this_month = await _compute_month_profit(company_id, scope, current_user.user_id, start_date, end_date, visibility)
 
     today_str = now.strftime("%Y-%m-%d")
     two_weeks_str = (now + timedelta(days=14)).strftime("%Y-%m-%d")
@@ -815,8 +817,11 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
     settings = await server.db.personal_wallet_settings.find_one({"company_id": company_id}, {"_id": 0})
     threshold_percent = settings.get("alert_threshold_percent", 80.0) if settings else 80.0
 
-    safe_to_spend = round(profit_this_month - total_spent - upcoming_due_total, 2)
-    spent_percent_of_profit = round(total_spent / profit_this_month * 100, 1) if profit_this_month > 0 else None
+    # Everything measured against the profit is for whoever sees the
+    # profit: anyone else gets the notebook's own records and sums.
+    sees_profit = bool(visibility["profit"])
+    safe_to_spend: Optional[float] = round(profit_this_month - total_spent - upcoming_due_total, 2) if sees_profit else None
+    spent_percent_of_profit = round(total_spent / profit_this_month * 100, 1) if sees_profit and profit_this_month > 0 else None
 
     status = "ok"
     if spent_percent_of_profit is not None:
@@ -824,13 +829,13 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
             status = "danger"
         elif spent_percent_of_profit >= threshold_percent * 0.6:
             status = "warning"
-    elif profit_this_month <= 0 and total_spent > 0:
+    elif sees_profit and profit_this_month <= 0 and total_spent > 0:
         status = "danger"
 
     advice = generate_wallet_advice(
         total_spent=total_spent, needs_total=needs_total, wants_total=wants_total,
         category_totals=category_totals, last_month_category_totals=prev_category_totals,
-        profit_this_month=profit_this_month, safe_to_spend=safe_to_spend,
+        profit_this_month=profit_this_month if sees_profit else None, safe_to_spend=safe_to_spend,
         threshold_percent=threshold_percent, spent_percent_of_profit=spent_percent_of_profit,
         upcoming=upcoming_docs,
     )
@@ -842,7 +847,7 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
         "category_totals": {k: round(v, 2) for k, v in category_totals.items()},
         "needs_total": round(needs_total, 2),
         "wants_total": round(wants_total, 2),
-        "profit_this_month": round(profit_this_month, 2),
+        "profit_this_month": round(profit_this_month, 2) if sees_profit else None,
         "safe_to_spend": safe_to_spend,
         "threshold_percent": threshold_percent,
         "spent_percent_of_profit": spent_percent_of_profit,

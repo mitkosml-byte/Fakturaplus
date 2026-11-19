@@ -270,6 +270,15 @@ def _robust_trend(amounts: List[float]) -> tuple:
     return slope, fitted_last, round(trend_percent, 1), trend_label
 
 
+def _expense_counted(expense: dict, include_off_book_expenses: bool, include_payroll: bool) -> bool:
+    """A record of db.expenses in a viewer's expense forecast: wages paid
+    through Work Schedule are payroll (for who keeps the payroll), every
+    other one an expense without invoice (for who may see those)."""
+    if expense.get("kind") == "schedule_wages":
+        return include_payroll
+    return include_off_book_expenses
+
+
 def _build_forecast(
     historical: List[Dict], months_ahead: int, year_back: Optional[Dict[str, Any]] = None
 ) -> Dict:
@@ -546,7 +555,9 @@ class ForecastService:
             "days_elapsed": today.day, "days_in_month": month.days,
         }
 
-    async def _current_month_expenses(self, company_id: str, scope: dict, include_off_book_expenses: bool) -> Dict[str, Any]:
+    async def _current_month_expenses(
+        self, company_id: str, scope: dict, include_off_book_expenses: bool, include_payroll: bool = True,
+    ) -> Dict[str, Any]:
         """The month in progress: expenses so far - the same as
         /statistics/summary counts for it (invoices and off-book expenses to
         date, plus the elapsed days' share of the month's payroll and
@@ -561,13 +572,13 @@ class ForecastService:
         ).to_list(None)
         variable = sum(float(i.get("total_amount", 0)) for i in invoices)
         # Off-book expenses only for who may see them; wages paid through
-        # Work Schedule are payroll - always counted.
+        # Work Schedule are payroll - for who keeps the payroll.
         expenses = await self.db.expenses.find(
             {**scope, "date": Period(month.start, today).text_filter()}, {"_id": 0, "amount": 1, "kind": 1},
         ).to_list(None)
         variable += sum(
             float(e.get("amount", 0)) for e in expenses
-            if include_off_book_expenses or e.get("kind") == "schedule_wages"
+            if _expense_counted(e, include_off_book_expenses, include_payroll)
         )
 
         async def _payroll(year: int, mon: int) -> Optional[float]:
@@ -578,7 +589,7 @@ class ForecastService:
             counted = [float(e.get("total_employer_cost", 0)) for e in entries if e.get("counted_in_expenses") is not False]
             return sum(counted) if counted else None
 
-        payroll = await _payroll(today.year, today.month)
+        payroll = await _payroll(today.year, today.month) if include_payroll else 0.0
         payroll_estimated = payroll is None
         if payroll is None:
             previous = Period.month_of(month.start - timedelta(days=1)).start
@@ -602,7 +613,7 @@ class ForecastService:
 
     async def _expense_monthly_totals(
         self, company_id: str, scope: dict, window_start: datetime, window_end: datetime,
-        include_off_book_expenses: bool,
+        include_off_book_expenses: bool, include_payroll: bool = True,
     ) -> tuple:
         """(monthly expense totals in [window_start, window_end), the date of
         the company's first recorded expense)."""
@@ -618,19 +629,20 @@ class ForecastService:
 
         # Non-invoice expenses (date is stored as a "YYYY-MM-DD" string):
         # off-book ones only for who may see them; wages paid through Work
-        # Schedule are payroll - always counted.
+        # Schedule are payroll - for who keeps the payroll.
         expenses = await self.db.expenses.find(
             {**scope, "date": {"$gte": window_start_str, "$lt": window_end_str}},
             {"_id": 0, "date": 1, "amount": 1, "kind": 1}
         ).to_list(None)
-        expenses = [e for e in expenses if include_off_book_expenses or e.get("kind") == "schedule_wages"]
+        expenses = [e for e in expenses if _expense_counted(e, include_off_book_expenses, include_payroll)]
 
         # Payroll cost (gross + employer contributions + benefits) - usually
-        # the most stable, predictable expense a business has
+        # the most stable, predictable expense a business has; for who
+        # keeps the payroll.
         payroll_entries = await self.db.payroll_entries.find(
             {"company_id": company_id},
             {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1, "counted_in_expenses": 1}
-        ).to_list(None)
+        ).to_list(None) if include_payroll else []
 
         # Aggregate by month
         monthly_totals: Dict[str, float] = defaultdict(float)
@@ -740,7 +752,9 @@ class ForecastService:
             y, m = _ym_add(y, m, 1)
         return known
 
-    async def _year_back(self, company_id: str, kind: str, include_hidden: bool) -> Optional[Dict[str, Any]]:
+    async def _year_back(
+        self, company_id: str, kind: str, include_hidden: bool, include_payroll: bool = True,
+    ) -> Optional[Dict[str, Any]]:
         """_year_back_analysis over the company's last SEASONAL_HISTORY_MONTHS
         whole months, whatever window the forecast itself was asked for:
         months the company had not started yet, a partial first month and
@@ -755,7 +769,7 @@ class ForecastService:
             if first:
                 first = first.replace(tzinfo=None)
         else:
-            totals, first = await self._expense_monthly_totals(company_id, scope, start, end, include_hidden)
+            totals, first = await self._expense_monthly_totals(company_id, scope, start, end, include_hidden, include_payroll)
         if not first or not totals:
             return None
         first_month = max(first.strftime("%Y-%m"), start.strftime("%Y-%m"))
@@ -774,8 +788,13 @@ class ForecastService:
         lookback_days: Optional[int] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        include_payroll: bool = True,
     ) -> Dict:
         """Predict future expenses based on historical data.
+
+        include_payroll=False leaves the payroll (and the wages paid through
+        Work Schedule) out, for a viewer who does not keep the payroll -
+        the same rule as their totals.
 
         include_off_book_expenses=False excludes db.expenses ("в канала")
         from the monthly totals, for a caller whose viewer lacks
@@ -794,7 +813,7 @@ class ForecastService:
         window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
         scope = await self._company_scope(company_id)
         monthly_totals, first = await self._expense_monthly_totals(
-            company_id, scope, window_start, window_end, include_off_book_expenses
+            company_id, scope, window_start, window_end, include_off_book_expenses, include_payroll
         )
         _drop_partial_first_month(monthly_totals, first)
 
@@ -803,8 +822,8 @@ class ForecastService:
         # The month in progress is reported (so far, and its end at the pace
         # so far) but not fed into the history: invoices come in lumps, and a
         # mid-month pace of them says too little to move a forecast.
-        current = await self._current_month_expenses(company_id, scope, include_off_book_expenses)
-        year_back = await self._year_back(company_id, "expense", include_off_book_expenses)
+        current = await self._current_month_expenses(company_id, scope, include_off_book_expenses, include_payroll)
+        year_back = await self._year_back(company_id, "expense", include_off_book_expenses, include_payroll)
         result = _build_forecast(historical, months_ahead, year_back)
         result["current_month"] = current
         # A month ahead holds at least the recurring expenses already known

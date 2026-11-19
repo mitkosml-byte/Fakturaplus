@@ -170,11 +170,16 @@ async def get_summary(
         "fiscal_vat": _redact(round(fiscal_vat, 2)),
         "vat_to_pay": _redact(round(vat_to_pay, 2)),
         "total_non_invoice_expenses": round(total_expenses, 2) if show_stats and visibility["off_book_expenses"] else None,
-        "total_payroll_cost": _redact(round(total_payroll_cost, 2)),
+        # The payroll: for whoever keeps it (manage_payroll) - out of
+        # everyone else's totals, like pocket money.
+        "total_payroll_cost": round(total_payroll_cost, 2) if show_stats and visibility["payroll"] else None,
         "total_depreciation_expense": _redact(round(total_depreciation_expense, 2)),
         "total_income": _redact(round(total_income, 2)),
         "total_expense": _redact(round(total_expense, 2)),
         "profit": _redact(profit),
+        # The personal notebook beside the profit, for its viewers only:
+        # company money spent personally and what is left after it.
+        **({key: _redact(value) for key, value in personal_use(totals, profit, visibility).items()}),
         "invoice_count": _redact(totals["invoice_count"]),
         "total_cash_revenue": _redact(round(total_cash_revenue, 2)),
         "total_card_revenue": _redact(round(total_card_revenue, 2)),
@@ -253,7 +258,7 @@ async def get_chart_data(
     expenses = await server.db.expenses.find(
         {**scope, "date": shown.text_filter(), **NOT_WAGES}, {"_id": 0, "date": 1, "amount": 1}
     ).to_list(ALL_ROWS) if visibility["off_book_expenses"] else []
-    costs_by_day = await monthly_costs_by_day(company_id, current_user.user_id, shown)
+    costs_by_day = await monthly_costs_by_day(company_id, current_user.user_id, shown, include_payroll=visibility["payroll"])
 
     from collections import defaultdict
     days: Dict[str, Dict[str, Any]] = {}

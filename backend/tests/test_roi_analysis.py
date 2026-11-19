@@ -14,7 +14,11 @@ from routers import roi_wallet
 from routers.roi_wallet import RoiAdvice, build_roi_analysis, get_roi_advice
 from services import forecast_service as fs
 
-PERMS = ["view_personal_investments", "view_profit", "view_statistics", "view_pocket_money", "view_off_book_expenses"]
+PERMS = [
+    "view_personal_investments", "view_profit", "view_statistics", "view_pocket_money", "view_off_book_expenses",
+    # The owner keeps the payroll: the salaries are in the profit.
+    "manage_payroll",
+]
 
 
 def _company():
@@ -79,6 +83,11 @@ def test_payback_uses_dashboard_profit_and_names_what_moved():
     days = calendar.monthrange(*target)[1]
     revenue = 200.0 * days
     assert built["target"]["profit"] == revenue - 2600.0 - 2500.0  # payroll counted
+    # Whoever does not keep the payroll sees the profit without it, as on
+    # their Home - the salaries are not theirs to see.
+    no_payroll = server.User(**{**user.model_dump(), "permissions": [p for p in PERMS if p != "manage_payroll"]})
+    without = asyncio.run(build_roi_analysis(no_payroll, target[0], target[1]))
+    assert without["target"]["profit"] == revenue - 2600.0
     payback = built["analysis"]["payback"]
     assert payback["invested"] == 3000.0
     assert "лично" in payback["text"] and "печалба" in payback["text"]

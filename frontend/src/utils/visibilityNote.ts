@@ -18,7 +18,12 @@ export function restrictedDataNote(
   const leftOut: string[] = [];
   if (visibility.pocket_money === false) leftOut.push(t('visibility.pocketMoney'));
   if (visibility.off_book_expenses === false) leftOut.push(t('visibility.offBookExpenses'));
-  const items = leftOut.join(t('visibility.and'));
+  // The salaries are seen by whoever keeps the payroll.
+  if (visibility.payroll === false) leftOut.push(t('visibility.payroll'));
+  // "a, b and c"
+  const items = leftOut.length > 1
+    ? `${leftOut.slice(0, -1).join(t('visibility.listSeparator'))}${t('visibility.and')}${leftOut[leftOut.length - 1]}`
+    : leftOut.join('');
 
   if (visibility.profit === false) {
     return leftOut.length

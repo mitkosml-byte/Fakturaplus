@@ -70,7 +70,7 @@ async def create_budget(budget: BudgetCreate, current_user: User = Depends(get_c
                 # should let the threshold alert fire again even if it
                 # already fired once this month under the previous, higher
                 # limit, instead of staying silent for the rest of the month.
-                "$unset": {"alert_sent": "", "exceeded_sent": ""},
+                "$unset": {"alert_sent": "", "exceeded_sent": "", "alert_sent_to": "", "exceeded_sent_to": ""},
             }
         )
     else:
@@ -98,7 +98,8 @@ async def get_budget_status(current_user: User = Depends(get_current_user)):
         return {"has_budget": False}
 
     current_month = today_local().strftime("%Y-%m")
-    status = await compute_budget_status(company_id, current_month)
+    # This viewer's figures: what they may not see is out of them.
+    status = await compute_budget_status(company_id, current_month, get_financial_visibility(current_user))
     return status if status else {"has_budget": False}
 
 # Recurring expenses moved to routers/recurring.py.

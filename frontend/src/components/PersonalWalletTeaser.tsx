@@ -80,11 +80,15 @@ export function PersonalWalletTeaser({ refreshSignal }: Props) {
           ) : summary ? (
             <>
               <Text style={styles.label}>{t('wallet.safeToSpend')}</Text>
-              <CountUp
-                value={summary.safe_to_spend}
-                formatter={(n) => `${formatMoney(n)}`}
-                style={[styles.value, { color: statusColor }]}
-              />
+              {summary.safe_to_spend === null ? (
+                <Text style={[styles.value, { color: COLORS.textMuted }]}>—</Text>
+              ) : (
+                <CountUp
+                  value={summary.safe_to_spend}
+                  formatter={(n) => `${formatMoney(n)}`}
+                  style={[styles.value, { color: statusColor }]}
+                />
+              )}
               <Text style={[styles.statusText, { color: statusColor }]}>
                 {t(STATUS_KEYS[summary.status])}
               </Text>

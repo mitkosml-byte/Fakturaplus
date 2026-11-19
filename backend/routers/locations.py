@@ -197,7 +197,8 @@ async def compare_locations(company_id: Optional[str], scope: dict, user: User, 
     )
     invoices = await _sum_by_location(server.db.invoices, {**scope, "date": period.datetime_filter(), **NOT_AN_ASSET}, "total_amount")
     expenses = await _sum_by_location(server.db.expenses, {**scope, "date": period.text_filter(), **NOT_WAGES}, "amount")
-    payroll = await _payroll_by_location(company_id, user.user_id, period)
+    # The payroll for whoever keeps it - out of anyone else's figures.
+    payroll = await _payroll_by_location(company_id, user.user_id, period) if visibility["payroll"] else {}
     team = {
         row["_id"]: int(row["count"]) for row in await server.db.employees.aggregate([
             {"$match": {"company_id": company_id, "active": {"$ne": False}, "location_id": {"$nin": [None, ""]}}},
@@ -220,7 +221,7 @@ async def compare_locations(company_id: Optional[str], scope: dict, user: User, 
             "parts": {
                 "till": round(fiscal.get(lid, 0.0), 2), "issued_invoices": round(issued.get(lid, 0.0), 2),
                 "purchases": round(invoices.get(lid, 0.0), 2), "off_book": round(expenses.get(lid, 0.0), 2) if show_off_book else None,
-                "payroll": round(payroll.get(lid, 0.0), 2),
+                "payroll": round(payroll.get(lid, 0.0), 2) if visibility["payroll"] else None,
             },
             "team": team.get(lid, 0),
         })
