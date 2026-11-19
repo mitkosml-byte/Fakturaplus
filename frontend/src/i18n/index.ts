@@ -980,6 +980,44 @@ export const translations: Translations = {
   },
 
   // Home Screen
+  'dayCard.morning': { bg: 'Добро утро', en: 'Good morning' },
+  'dayCard.day': { bg: 'Добър ден', en: 'Good afternoon' },
+  'dayCard.evening': { bg: 'Добър вечер', en: 'Good evening' },
+  'dayCard.night': { bg: 'Здравей', en: 'Hello' },
+  'dayCard.weatherLine': { bg: '{label}, {min}°–{max}° · {place}', en: '{label}, {min}°–{max}° · {place}' },
+  'dayCard.effectLower': {
+    bg: 'В дъждовни дни оборотът ти обикновено е с {percent}% по-нисък',
+    en: 'On wet days your revenue is usually {percent}% lower',
+  },
+  'dayCard.effectHigher': {
+    bg: 'В дъждовни дни оборотът ти обикновено е с {percent}% по-висок',
+    en: 'On wet days your revenue is usually {percent}% higher',
+  },
+  'dayCard.attribution': { bg: 'Времето: {source}', en: 'Weather: {source}' },
+  'birthday.title': { bg: 'Рожден ден', en: 'Birthday' },
+  'birthday.notSet': { bg: 'Не е въведен', en: 'Not set' },
+  'birthday.explain': {
+    bg: 'Само ден и месец, никога годината. На този ден екипът го вижда на началния екран, а собственикът и управителят ти пращат поздрав. По желание – можеш да го махнеш по всяко време.',
+    en: 'Day and month only, never the year. On the day the team sees it on the home screen and the owner and manager send you a greeting. Optional – you can remove it any time.',
+  },
+  'birthday.day': { bg: 'Ден', en: 'Day' },
+  'birthday.month': { bg: 'Месец', en: 'Month' },
+  'birthday.remove': { bg: 'Махни', en: 'Remove' },
+  'birthday.invalid': { bg: 'Невалидна дата – провери деня и месеца.', en: 'Invalid date – check the day and month.' },
+  'birthday.saved': { bg: 'Рожденият ден е запазен', en: 'Birthday saved' },
+  'birthday.dayHint': { bg: 'ДД', en: 'DD' },
+  'birthday.monthHint': { bg: 'ММ', en: 'MM' },
+  'teamMoments.title': { bg: 'Поводи в екипа', en: 'Team moments' },
+  'teamMoments.birthdays': { bg: 'Поздрав за рожден ден', en: 'Birthday greeting' },
+  'teamMoments.birthdaysHint': {
+    bg: 'На рождения ден на колега му идва съобщение от собственика и управителя.',
+    en: "On a colleague's birthday they get a message from the owner and the manager.",
+  },
+  'teamMoments.holidays': { bg: 'Напомняне за празници', en: 'Holiday reminder' },
+  'teamMoments.holidaysHint': {
+    bg: 'Ден преди официален празник в екипния чат пише дали почивате или работите по график.',
+    en: 'The day before a public holiday the team chat says whether you are closed or open as scheduled.',
+  },
   'home.welcome': {
     bg: 'Добре дошли!',
     en: 'Welcome!',

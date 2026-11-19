@@ -25,7 +25,8 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 import { ModulesPicker } from '../src/components/ModulesPicker';
-import { useModulesStore } from '../src/stores/modulesStore';
+import { useModulesStore, useModules } from '../src/stores/modulesStore';
+import { TeamMomentsSettings } from '../src/components/TeamMomentsSettings';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -53,6 +54,7 @@ export default function CompanySettingsScreen() {
   // invoices. null = not answered yet (a VAT number implies "yes").
   const [vatRegistered, setVatRegistered] = useState<boolean | null>(null);
   const canEditModules = useModulesStore((state) => state.canEdit);
+  const { uses } = useModules();
 
   const loadCompany = useCallback(async () => {
     try {
@@ -199,6 +201,9 @@ export default function CompanySettingsScreen() {
                   <ModulesPicker />
                 </View>
               )}
+
+              {/* Birthdays and holidays in the team - the owner's choice. */}
+              {company && canEditModules && uses('team') && <TeamMomentsSettings />}
 
               {/* Join Existing Company via Invitation - always available, not
                   just for users without a company, since an accountant with

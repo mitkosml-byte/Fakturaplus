@@ -1897,6 +1897,35 @@ export interface HomeData {
   getting_started: GettingStarted | null;
   billing_overview: BillingOverview | null;
   scan_credits: ScanBalance | null;
+  day_card?: DayCardData | null;
+}
+
+// The day card (backend routers/day_card): a greeting, the weather where
+// the business is, one line for the day, what the role needs today and one
+// spark - every number only for whoever may see it.
+export type WeatherKind = 'clear' | 'partly' | 'cloudy' | 'fog' | 'rain' | 'sleet' | 'snow' | 'thunder';
+
+export interface DayCardItem {
+  key: string;
+  icon: string;
+  text: string;
+  route: string | null;
+}
+
+export interface DayCardData {
+  date: string;
+  greeting: { part: 'morning' | 'day' | 'evening' | 'night'; name: string };
+  weather: {
+    now: number | null; min: number; max: number; kind: WeatherKind; now_kind: WeatherKind;
+    precipitation_mm: number; place: string; label: string;
+    // How wet days move this business's revenue, from its own days - for
+    // whoever sees the revenue, once there are enough of them.
+    effect_percent: number | null;
+  } | null;
+  line: { text: string; source: 'ai' | 'template' } | null;
+  focus: DayCardItem[];
+  spark: DayCardItem | null;
+  attribution?: string;
 }
 
 export type LeaveType = 'paid' | 'unpaid' | 'sick';

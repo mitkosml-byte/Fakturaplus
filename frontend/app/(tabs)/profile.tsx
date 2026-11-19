@@ -27,6 +27,7 @@ import { Company, CompanyMembership } from '../../src/types';
 import { getRoleName as sharedGetRoleName, getRoleColor } from '../../src/utils/roles';
 import { Avatar } from '../../src/components/Avatar';
 import { AvatarCropModal } from '../../src/components/AvatarCropModal';
+import { BirthdaySheet } from '../../src/components/BirthdaySheet';
 import { COLORS } from '../../src/theme/colors';
 
 // A profile picture is a small icon shown everywhere (team list, chat,
@@ -93,11 +94,23 @@ export default function ProfileScreen() {
   // Tab screens stay mounted, so returning from company-settings after an
   // edit doesn't remount this screen - only re-fetching on focus picks up
   // the change without needing a manual pull-to-refresh.
+  // One's own birthday (day and month) - see BirthdaySheet.
+  const [birthday, setBirthday] = useState<string | null>(null);
+  const [showBirthday, setShowBirthday] = useState(false);
+  const loadBirthday = useCallback(async () => {
+    try {
+      setBirthday((await api.getMyBirthday()).birthday);
+    } catch {
+      setBirthday(null);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       loadCompany();
       loadMemberships();
-    }, [loadCompany, loadMemberships])
+      loadBirthday();
+    }, [loadCompany, loadMemberships, loadBirthday])
   );
 
   const onRefresh = useCallback(async () => {
@@ -244,6 +257,16 @@ export default function ProfileScreen() {
   };
 
   const getRoleName = (role: string) => sharedGetRoleName(role, language);
+
+  // "11-19" as "19 ноември".
+  const birthdayText = (value: string) => {
+    const months = language === 'en'
+      ? ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+      : ['януари', 'февруари', 'март', 'април', 'май', 'юни', 'юли', 'август', 'септември', 'октомври', 'ноември', 'декември'];
+    const month = months[Number(value.slice(0, 2)) - 1] || '';
+    const day = Number(value.slice(3));
+    return language === 'en' ? `${month} ${day}` : `${day} ${month}`;
+  };
 
   interface MenuItemDef {
     key: string;
@@ -392,6 +415,15 @@ export default function ProfileScreen() {
       label: t('profile.category.settings'),
       icon: 'settings-outline',
       items: [
+        {
+          key: 'birthday',
+          title: t('birthday.title'),
+          subtitle: birthday ? birthdayText(birthday) : t('birthday.notSet'),
+          icon: 'gift-outline',
+          iconBg: 'rgba(236, 72, 153, 0.15)',
+          iconColor: '#EC4899',
+          onPress: () => setShowBirthday(true),
+        },
         {
           key: 'notifications',
           title: t('profile.notifications'),
@@ -607,6 +639,13 @@ export default function ProfileScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <BirthdaySheet
+        visible={showBirthday}
+        birthday={birthday}
+        onClose={() => setShowBirthday(false)}
+        onSaved={setBirthday}
+      />
 
       {/* Company Switcher Modal */}
       <Modal

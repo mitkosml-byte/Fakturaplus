@@ -170,6 +170,7 @@ async def lifespan(app: FastAPI):
     await start_scan_credit_depletion_loop()
     await start_recurring_expense_loop()
     await start_backup_email_loop()
+    await team_moments_router.start_team_moments_loop()
     await create_indexes()
     await run_data_migrations()
     yield
@@ -7192,6 +7193,10 @@ app.include_router(admin.router)
 # Home in one request (Л14) - built from the handlers above.
 from routers import home as home_router
 app.include_router(home_router.router)
+from routers import day_card as day_card_router
+app.include_router(day_card_router.router)
+from routers import team_moments as team_moments_router
+app.include_router(team_moments_router.router)
 
 _cors_origins_env = os.environ.get("CORS_ORIGINS", "")
 if _cors_origins_env:

@@ -20,7 +20,6 @@ import { Summary, NonInvoiceExpense, GettingStarted, HomeData } from '../../src/
 import { queryClient } from '../../src/queries/queryClient';
 import { scanBalanceQueryKey } from '../../src/queries/useScanBalance';
 import { format, subDays } from 'date-fns';
-import { bg } from 'date-fns/locale';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
@@ -37,6 +36,7 @@ import type { VatGroupAmount, ZReportResult } from '../../src/types';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCard';
 import { GettingStartedCard } from '../../src/components/home/GettingStartedCard';
+import { DayCard } from '../../src/components/home/DayCard';
 import { pickScanImage } from '../../src/utils/scanImage';
 import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
@@ -179,7 +179,7 @@ export default function HomeScreen() {
         try {
           // Home in one request (Л14): the numbers, the day's review, the
           // first steps, the invoicing card and the scans left.
-          const data = await api.getHome({ start_date, end_date, with_billing: showBilling });
+          const data = await api.getHome({ start_date, end_date, with_billing: showBilling, language });
           setHome(data);
           if (data.getting_started) setStartStatus(data.getting_started);
           // The scans left are kept for the other screens' badges too.
@@ -204,7 +204,7 @@ export default function HomeScreen() {
         }
       })(),
     ]);
-  }, [periodState, showBilling]);
+  }, [periodState, showBilling, language]);
 
   // Pre-fills the form with whatever is already logged for this date, so
   // saving corrects that value directly instead of adding a delta to it -
@@ -645,7 +645,6 @@ export default function HomeScreen() {
     submitExpense();
   };
 
-  const today = format(new Date(), "d MMMM yyyy 'г.'" , { locale: bg });
   // The day's actions, in the order a day goes: the till's revenue, an
   // expense, an invoice to a customer.
   const homeActions: { key: string; label: string; hint: string; icon: keyof typeof Ionicons.glyphMap; color: string; onPress: () => void }[] = [
@@ -721,23 +720,25 @@ export default function HomeScreen() {
                 attention. VAT, the average, payment kinds, the break-even and
                 personal investments are in Statistics; the language and the
                 days off in Account. */}
-            <View style={styles.header}>
-              <View style={{ flexShrink: 1 }}>
-                <Text style={styles.greeting}>{t('home.welcome')}</Text>
-                <Text style={styles.date}>{today}</Text>
-              </View>
-              <View style={styles.headerActions}>
-                <ScanCreditsBadge balance={home ? home.scan_credits : null} />
-                <TouchableOpacity
-                  style={styles.helpButton}
-                  onPress={() => router.push('/help')}
-                  accessibilityLabel={t('tutorial.helpButtonLabel')}
-                  hitSlop={6}
-                >
-                  <Ionicons name="help" size={18} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-              </View>
-            </View>
+            {/* The day card instead of "Welcome!": a personal greeting, the
+                weather where the business is, one line for the day and what
+                the day holds for this person. */}
+            <DayCard
+              data={home?.day_card}
+              right={(
+                <>
+                  <ScanCreditsBadge balance={home ? home.scan_credits : null} />
+                  <TouchableOpacity
+                    style={styles.helpButton}
+                    onPress={() => router.push('/help')}
+                    accessibilityLabel={t('tutorial.helpButtonLabel')}
+                    hitSlop={6}
+                  >
+                    <Ionicons name="help" size={18} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                </>
+              )}
+            />
 
             {/* The day's actions first - each only for who may do it (a
                 button whose only outcome is a refusal is not shown). */}
@@ -1039,14 +1040,6 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 16,
-  },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   helpButton: {
     width: 34,
     height: 34,
@@ -1056,16 +1049,6 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  greeting: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  date: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginTop: 4,
   },
   statsGrid: {
     flexDirection: 'row',

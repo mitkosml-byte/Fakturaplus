@@ -155,7 +155,14 @@ async def list_conversations(current_user: User = Depends(get_current_user)):
         picture = other["picture"] if other else None
         result.append(await summarize(c["id"], name, picture))
 
-    result.sort(key=lambda c: c["last_message_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    # The database gives its dates without a time zone: one conversation
+    # with messages and one without could not be ordered (500).
+    def _latest(conversation: dict) -> datetime:
+        moment = conversation["last_message_at"]
+        if moment is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+    result.sort(key=_latest, reverse=True)
     return result
 
 @router.post("/messages/dm/start")

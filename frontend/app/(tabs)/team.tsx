@@ -7,6 +7,8 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { useTranslation } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
 import { useModules } from '../../src/stores/modulesStore';
+import { DayCard } from '../../src/components/home/DayCard';
+import { useDayCard } from '../../src/queries/useDayCard';
 
 // New tab (navigation-architecture review, 2026-10): Calendar and Messages
 // used to live as two unrelated entries buried inside Profile's "company"
@@ -29,12 +31,16 @@ type CardDef = {
 };
 
 export default function TeamScreen() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const router = useRouter();
-  const { hasPermission } = useAuth();
+  const { hasPermission, isLoading: authLoading } = useAuth();
   const { uses } = useModules();
   const team = uses('team');
   const payroll = uses('payroll');
+  // Whoever has no Home (no statistics) lands here: the day card greets
+  // them here instead - their shift, the weather, the team's day.
+  const landsHere = !authLoading && !hasPermission('view_statistics');
+  const { data: dayCard } = useDayCard(language, landsHere);
 
   const cards: CardDef[] = [
     // Not permission-gated, unlike every other card here - a work
@@ -101,6 +107,7 @@ export default function TeamScreen() {
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
           <ScrollView style={styles.scrollView}>
+            {landsHere && <DayCard data={dayCard} />}
             <View style={styles.header}>
               <Text style={styles.title}>{t('team.title')}</Text>
               <Text style={styles.subtitle}>{t('team.subtitle')}</Text>

@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { BusinessLocation, LocationComparison, Deadline, DeadlineInput, PriceList, PriceListEntry, PriceEntryInput, PurchaseItem, SoldItem, PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveEntryInput, LeaveBalance, GettingStarted, HomeData, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+import { BusinessLocation, LocationComparison, Deadline, DeadlineInput, PriceList, PriceListEntry, PriceEntryInput, PurchaseItem, SoldItem, PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveEntryInput, LeaveBalance, GettingStarted, HomeData, DayCardData, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
@@ -960,11 +960,35 @@ class ApiService {
   }
 
   // Everything Home shows, in one request (Л14).
-  async getHome(params: { start_date: string; end_date: string; with_billing: boolean }): Promise<HomeData> {
+  async getHome(params: { start_date: string; end_date: string; with_billing: boolean; language?: string }): Promise<HomeData> {
     const query = new URLSearchParams({
       start_date: params.start_date, end_date: params.end_date, with_billing: String(params.with_billing),
+      language: params.language || 'bg',
     });
     return this.fetch(`/home?${query.toString()}`);
+  }
+
+  // The day card on its own - for whoever has no Home (Team shows it).
+  async getDayCard(language: string): Promise<DayCardData> {
+    return this.fetch(`/day-card?language=${language === 'en' ? 'en' : 'bg'}`);
+  }
+
+  // One's own birthday: "MM-DD", day and month only; null takes it away.
+  async getMyBirthday(): Promise<{ birthday: string | null }> {
+    return this.fetch('/auth/me/birthday');
+  }
+
+  async setMyBirthday(birthday: string | null): Promise<{ birthday: string | null }> {
+    return this.fetch('/auth/me/birthday', { method: 'PUT', body: JSON.stringify({ birthday }) });
+  }
+
+  // Whether the app greets birthdays and reminds of holidays in the team chat.
+  async getTeamMoments(): Promise<{ birthdays: boolean; holidays: boolean }> {
+    return this.fetch('/company/team-moments');
+  }
+
+  async setTeamMoments(changes: { birthdays?: boolean; holidays?: boolean }): Promise<{ birthdays: boolean; holidays: boolean }> {
+    return this.fetch('/company/team-moments', { method: 'PUT', body: JSON.stringify(changes) });
   }
 
   async updateCompany(company: Partial<Company>): Promise<Company> {
