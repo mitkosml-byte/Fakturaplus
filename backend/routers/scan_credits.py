@@ -143,6 +143,14 @@ async def scan_invoice(request: Request, image_base64: Optional[str] = None, cur
 
         raw_result = extracted.model_dump()
 
+        # The town on an invoice to the business, for the weather on the
+        # day card - never in the way of the scan.
+        try:
+            from routers.day_card import remember_place_from_scan
+            await remember_place_from_scan(company_id, raw_result)
+        except Exception as error:
+            logger.warning(f"Place from the scan not kept: {error}")
+
         # Apply AI correction module (доставчик/продукти нормализиране и сливане)
         correction_result = await correct_ocr_data(raw_result, company_id)
         corrected = correction_result.corrected

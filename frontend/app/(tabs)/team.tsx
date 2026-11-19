@@ -40,7 +40,7 @@ export default function TeamScreen() {
   // Whoever has no Home (no statistics) lands here: the day card greets
   // them here instead - their shift, the weather, the team's day.
   const landsHere = !authLoading && !hasPermission('view_statistics');
-  const { data: dayCard } = useDayCard(language, landsHere);
+  const { data: dayCard, refetch: refetchDayCard } = useDayCard(language, landsHere);
 
   const cards: CardDef[] = [
     // Not permission-gated, unlike every other card here - a work
@@ -107,7 +107,7 @@ export default function TeamScreen() {
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['top']}>
           <ScrollView style={styles.scrollView}>
-            {landsHere && <DayCard data={dayCard} />}
+            {landsHere && <DayCard data={dayCard} onPlaceSet={() => { refetchDayCard(); }} />}
             <View style={styles.header}>
               <Text style={styles.title}>{t('team.title')}</Text>
               <Text style={styles.subtitle}>{t('team.subtitle')}</Text>

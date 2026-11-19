@@ -2353,6 +2353,7 @@ class ClaudeInvoiceExtraction(BaseModel):
     )
     buyer: Optional[str] = Field(default=None, description="Името на получателя/купувача, както е на фактурата")
     buyer_eik: Optional[str] = Field(default=None, description="ЕИК/Булстат на получателя/купувача, ако е видим")
+    buyer_city: Optional[str] = Field(default=None, description="Само населеното място от адреса на получателя/купувача, напр. \"Пловдив\", ако е видимо")
     invoice_date: Optional[str] = Field(default=None, description="Дата на издаване, формат YYYY-MM-DD")
     payment_due_date: Optional[str] = Field(default=None, description="Срок/падеж за плащане, формат YYYY-MM-DD, само ако е изрично отпечатан на фактурата")
     amount_without_vat: float = Field(description="Данъчна основа / обща сума без ДДС")

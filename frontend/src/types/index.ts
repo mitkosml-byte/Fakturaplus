@@ -1917,7 +1917,7 @@ export interface DayCardData {
   greeting: { part: 'morning' | 'day' | 'evening' | 'night'; name: string };
   weather: {
     now: number | null; min: number; max: number; kind: WeatherKind; now_kind: WeatherKind;
-    precipitation_mm: number; place: string; label: string;
+    precipitation_mm: number; place: string | null; label: string;
     // How wet days move this business's revenue, from its own days - for
     // whoever sees the revenue, once there are enough of them.
     effect_percent: number | null;
@@ -1926,6 +1926,9 @@ export interface DayCardData {
   focus: DayCardItem[];
   spark: DayCardItem | null;
   attribution?: string;
+  // Nothing the business entered tells where it is (no city, address,
+  // site or scanned invoice to it): a manager can show the weather "here".
+  place_missing?: boolean;
 }
 
 export type LeaveType = 'paid' | 'unpaid' | 'sick';

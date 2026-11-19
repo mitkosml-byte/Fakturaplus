@@ -984,6 +984,12 @@ export const translations: Translations = {
   'dayCard.day': { bg: 'Добър ден', en: 'Good afternoon' },
   'dayCard.evening': { bg: 'Добър вечер', en: 'Good evening' },
   'dayCard.night': { bg: 'Здравей', en: 'Hello' },
+  'dayCard.locate': { bg: 'Покажи времето тук', en: 'Show the weather here' },
+  'dayCard.locateHint': {
+    bg: 'С местоположението на устройството, закръглено до около 1 км – само за времето.',
+    en: "With this device's location, rounded to about 1 km – for the weather only.",
+  },
+  'dayCard.locateFailed': { bg: 'Няма достъп до местоположението', en: 'No access to the location' },
   'dayCard.weatherLine': { bg: '{label}, {min}°–{max}° · {place}', en: '{label}, {min}°–{max}° · {place}' },
   'dayCard.effectLower': {
     bg: 'В дъждовни дни оборотът ти обикновено е с {percent}% по-нисък',

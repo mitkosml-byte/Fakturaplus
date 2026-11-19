@@ -725,6 +725,7 @@ export default function HomeScreen() {
                 the day holds for this person. */}
             <DayCard
               data={home?.day_card}
+              onPlaceSet={loadData}
               right={(
                 <>
                   <ScanCreditsBadge balance={home ? home.scan_credits : null} />

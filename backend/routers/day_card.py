@@ -15,10 +15,11 @@ import asyncio
 import json
 import statistics
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 from server import *
 import server
@@ -54,6 +55,14 @@ USUAL_WEEKS = 8
 DAY_LINE_MODEL = "claude-opus-5-5"
 _writing: set = set()
 
+# Where the business is: a place not yet looked up is looked up while the
+# card waits this long; what takes longer goes on and is kept for next time.
+PLACE_WAIT = 2.5
+# A name OpenStreetMap did not know (or could not be asked about) is asked
+# again after this long.
+GEOCODE_RETRY = timedelta(hours=6)
+_resolving: Dict[str, "asyncio.Task[Optional[dict]]"] = {}
+
 
 def _t(english: bool, bg: str, en: str) -> str:
     return en if english else bg
@@ -65,30 +74,104 @@ def _day_text(day: date, english: bool) -> str:
 
 # ---- The weather where the business is.
 
-async def _place(company: dict) -> Optional[dict]:
-    """Where the business is, for the weather: its city, found once and kept
-    on the company (asked again only when the city changes, or a day after
-    it could not be found)."""
+async def _place_plan(company: dict) -> List[Tuple[str, Any]]:
+    """Where the business is, in the order it is believed - nothing typed
+    for the weather: the city it gave, a point a manager chose on a device
+    there, its address, the address of its first site, and the address its
+    suppliers write on the invoices to it (kept when one is scanned)."""
+    plan: List[Tuple[str, Any]] = []
     city = (company.get("city") or "").strip()
-    if not city:
-        return None
-    place = company.get("weather_place") or {}
-    if place.get("city") == city:
-        if place.get("lat") is not None:
-            return place
-        failed_at = place.get("failed_at")
-        if isinstance(failed_at, datetime) and datetime.now(timezone.utc) - _aware(failed_at) < timedelta(days=1):
-            return None
-    async with httpx.AsyncClient() as http:
-        found = await dc.geocode_city(http, city)
-    if not found:
-        await server.db.companies.update_one({"id": company["id"]}, {"$set": {"weather_place": {
-            "city": city, "lat": None, "lon": None, "failed_at": datetime.now(timezone.utc)}}})
-        return None
-    lat, lon, name = found
-    place = {"city": city, "lat": round(lat, 3), "lon": round(lon, 3), "name": name}
-    await server.db.companies.update_one({"id": company["id"]}, {"$set": {"weather_place": place}})
-    return place
+    if city:
+        plan.append(("city", city))
+    point = company.get("weather_point") or {}
+    if point.get("lat") is not None and point.get("lon") is not None:
+        plan.append(("point", point))
+    plan += [("address", query) for query in dc.place_queries(company.get("address"))]
+    sites = await server.db.locations.find(
+        {"company_id": company["id"], "is_active": {"$ne": False}, "address": {"$nin": [None, ""]}},
+        {"_id": 0, "address": 1},
+    ).sort("created_at", 1).limit(1).to_list(1)
+    if sites:
+        plan += [("site", query) for query in dc.place_queries(sites[0].get("address"))]
+    hint = ((company.get("weather_hint") or {}).get("city") or "").strip()
+    if hint:
+        plan.append(("invoice", hint))
+    unique: List[Tuple[str, Any]] = []
+    for source, value in plan:
+        if source == "point" or _place_key(value) not in {_place_key(v) for s_, v in unique if s_ != "point"}:
+            unique.append((source, value))
+    return unique
+
+
+def _place_key(query: str) -> str:
+    return " ".join(str(query).lower().split())
+
+
+async def _known_place(query: str) -> Tuple[str, Optional[dict]]:
+    """A name looked up before, by any business: ("hit", place), ("miss",
+    None) while a miss is fresh, or ("unknown", None)."""
+    doc = await server.db.geocode_cache.find_one({"_id": _place_key(query)})
+    if not doc:
+        return "unknown", None
+    if doc.get("lat") is not None:
+        return "hit", doc
+    if datetime.now(timezone.utc) - _aware(doc["at"]) < GEOCODE_RETRY:
+        return "miss", None
+    return "unknown", None
+
+
+def _as_place(source: str, found: dict) -> dict:
+    return {"lat": found["lat"], "lon": found["lon"], "name": found.get("name"), "source": source}
+
+
+async def _resolve(plan: List[Tuple[str, Any]]) -> Optional[dict]:
+    try:
+        async with httpx.AsyncClient() as http:
+            for source, value in plan:
+                if source == "point":
+                    return _as_place(source, value)
+                state, found = await _known_place(value)
+                if state == "miss":
+                    continue
+                if state == "unknown":
+                    located = await dc.geocode_city(http, value)
+                    found = {"_id": _place_key(value), "at": datetime.now(timezone.utc)}
+                    if located:
+                        found.update(lat=round(located[0], 3), lon=round(located[1], 3), name=located[2])
+                    await server.db.geocode_cache.replace_one({"_id": found["_id"]}, found, upsert=True)
+                    if not located:
+                        continue
+                return _as_place(source, found or {})
+    except Exception as error:
+        logger.warning(f"Place of the business not found: {error}")
+    return None
+
+
+async def _place(company: dict, plan: List[Tuple[str, Any]]) -> Tuple[str, Optional[dict]]:
+    """("found", place), ("pending", None) while a lookup goes on, or
+    ("none", None) when nothing tells where the business is."""
+    for source, value in plan:
+        if source == "point":
+            return "found", _as_place(source, value)
+        state, found = await _known_place(value)
+        if state == "hit" and found:
+            return "found", _as_place(source, found)
+        if state == "unknown":
+            break
+    else:
+        return "none", None
+    # A likelier name not looked up yet: looked up now, briefly.
+    key = company["id"]
+    task = _resolving.get(key)
+    if task is None:
+        task = asyncio.create_task(_resolve(plan))
+        _resolving[key] = task
+        task.add_done_callback(lambda _done: _resolving.pop(key, None))
+    try:
+        place = await asyncio.wait_for(asyncio.shield(task), timeout=PLACE_WAIT)
+    except asyncio.TimeoutError:
+        return "pending", None
+    return ("found", place) if place else ("none", None)
 
 
 def _aware(moment: datetime) -> datetime:
@@ -116,14 +199,16 @@ async def _forecast(place: dict) -> Optional[dict]:
     return kept
 
 
-async def _weather(company: dict, today: date) -> Optional[dict]:
-    place = await _place(company)
+async def _weather(company: dict, plan: List[Tuple[str, Any]], today: date) -> Tuple[Optional[dict], bool]:
+    """The day's weather where the business is, and whether nothing at all
+    tells where that is."""
+    state, place = await _place(company, plan)
     if not place:
-        return None
+        return None, state == "none"
     forecast = await _forecast(place)
     weather = dc.day_weather(forecast or {}, today, now_local()) if forecast else None
     if not weather:
-        return None
+        return None, False
     # The day as it was forecast, kept: from these the business learns how
     # the weather moves its revenue (services/day_card.weather_effect).
     await server.db.weather_days.update_one(
@@ -132,7 +217,7 @@ async def _weather(company: dict, today: date) -> Optional[dict]:
                   "precipitation_mm": weather["precipitation_mm"]}},
         upsert=True,
     )
-    return {**weather, "place": place.get("name") or place.get("city")}
+    return {**weather, "place": place.get("name")}, False
 
 
 # ---- Revenue the viewer may see, by day.
@@ -414,7 +499,7 @@ async def build_day_card(current_user: User, language: str = "bg") -> dict:
     card: Dict[str, Any] = {
         "date": today.isoformat(),
         "greeting": {"part": dc.part_of_day(now_local()), "name": dc.first_name(current_user.name)},
-        "weather": None, "line": None, "focus": [], "spark": None,
+        "weather": None, "line": None, "focus": [], "spark": None, "place_missing": False,
     }
     if not company_id:
         card["line"] = {"text": dc.template_line(None, today, current_user.user_id, english), "source": "template"}
@@ -422,7 +507,7 @@ async def build_day_card(current_user: User, language: str = "bg") -> dict:
     company = await server.db.companies.find_one({"id": company_id}, {"_id": 0}) or {"id": company_id}
     visibility = get_financial_visibility(current_user)
 
-    weather = await _weather(company, today)
+    weather, card["place_missing"] = await _weather(company, await _place_plan(company), today)
     # The till's revenue the viewer may see - for the focus, the spark and
     # the weather's effect; nothing of it for whoever has no statistics.
     revenue: Optional[Dict[str, float]] = None
@@ -444,6 +529,53 @@ async def build_day_card(current_user: User, language: str = "bg") -> dict:
     card["focus"] = await _focus(current_user, company, scope, today, english, revenue)
     card["spark"] = await _spark(current_user, company, today, english, revenue)
     return card
+
+
+class WeatherPointInput(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+@router.put("/company/weather-place")
+async def set_weather_place(body: WeatherPointInput, current_user: User = Depends(get_current_user)):
+    """The weather where the business is, from a device there - for when
+    nothing the business entered tells where it is. Rounded to about a
+    kilometre and kept for the business, never for the person."""
+    require_permission(current_user, "manage_company")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+    lat, lon = round(body.lat, 2), round(body.lon, 2)
+    async with httpx.AsyncClient() as http:
+        name = await dc.reverse_geocode(http, lat, lon)
+    await server.db.companies.update_one(
+        {"id": company_id},
+        {"$set": {"weather_point": {"lat": lat, "lon": lon, "name": name, "at": datetime.now(timezone.utc)}}},
+    )
+    return {"lat": lat, "lon": lon, "name": name}
+
+
+def _digits(value: Any) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+async def remember_place_from_scan(company_id: Optional[str], extraction: dict) -> None:
+    """An invoice to the business carries its address: the town in it is
+    kept for the weather - only from an invoice whose buyer is the business
+    itself, by its EIK or VAT number."""
+    city = " ".join(str(extraction.get("buyer_city") or "").split())[:80]
+    buyer = _digits(extraction.get("buyer_eik"))
+    if not company_id or len(city) < 2 or not buyer:
+        return
+    company = await server.db.companies.find_one(
+        {"id": company_id}, {"_id": 0, "eik": 1, "vat_number": 1, "weather_hint": 1},
+    )
+    if not company or buyer not in {_digits(company.get("eik")), _digits(company.get("vat_number"))} - {""}:
+        return
+    if (company.get("weather_hint") or {}).get("city") != city:
+        await server.db.companies.update_one(
+            {"id": company_id}, {"$set": {"weather_hint": {"city": city, "at": datetime.now(timezone.utc)}}},
+        )
 
 
 @router.get("/day-card")

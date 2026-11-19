@@ -973,6 +973,12 @@ class ApiService {
     return this.fetch(`/day-card?language=${language === 'en' ? 'en' : 'bg'}`);
   }
 
+  // The weather where the business is, from this device - rounded to about
+  // a kilometre before it leaves it.
+  async setWeatherPlace(lat: number, lon: number): Promise<{ lat: number; lon: number; name: string | null }> {
+    return this.fetch('/company/weather-place', { method: 'PUT', body: JSON.stringify({ lat, lon }) });
+  }
+
   // One's own birthday: "MM-DD", day and month only; null takes it away.
   async getMyBirthday(): Promise<{ birthday: string | null }> {
     return this.fetch('/auth/me/birthday');

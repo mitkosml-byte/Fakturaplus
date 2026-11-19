@@ -4,18 +4,23 @@ what the viewer's role needs today and one small spark - a birthday, a
 name day, a holiday, a record.
 
 Free by design. The forecast is MET Norway's (free, commercial use allowed
-with attribution "MET Norway"), the place of the business's city comes
-from OpenStreetMap's Nominatim once and is kept; everything else is the
-business's own data. The only paid part, optional, is one line a day per
-business written by the AI from nothing confidential (routers/day_card).
+with attribution "MET Norway"); where the business is comes by itself -
+from its city or address, its site's address, the address its suppliers
+write on the invoices to it, or a device there - and is found on
+OpenStreetMap's Nominatim once and kept. Everything else is the business's
+own data. The only paid part, optional, is one line a day per business
+written by the AI from nothing confidential (routers/day_card).
 
-This module is pure - no database - apart from the two fetchers, which
-take an HTTP client so the tests can stand in for the services."""
+This module is pure - no database - apart from the fetchers, which take an
+HTTP client so the tests can stand in for the services."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import re
 import statistics
+import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -27,6 +32,7 @@ logger = logging.getLogger(__name__)
 USER_AGENT = "FakturaPlus/1.0 (+https://fakturaplus-frontend.onrender.com)"
 FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
 GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 # How long a forecast is kept before it is asked for again.
 FORECAST_TTL = timedelta(hours=2)
 REQUEST_TIMEOUT = 4.0
@@ -136,12 +142,38 @@ async def fetch_forecast(http, lat: float, lon: float) -> Optional[Dict[str, Any
         return None
 
 
+# OpenStreetMap's geocoder asks for one request a second at most.
+_turn_lock: Optional[asyncio.Lock] = None
+_last_turn = 0.0
+
+
+async def _wait_turn() -> None:
+    global _turn_lock, _last_turn
+    if _turn_lock is None:
+        _turn_lock = asyncio.Lock()
+    async with _turn_lock:
+        delay = _last_turn + 1.05 - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        _last_turn = time.monotonic()
+
+
+def _town(address: Dict[str, Any]) -> Optional[str]:
+    for key in ("city", "town", "village", "hamlet", "municipality", "county", "state"):
+        if address.get(key):
+            return str(address[key])
+    return None
+
+
 async def geocode_city(http, city: str, country: str = "bg") -> Optional[Tuple[float, float, str]]:
-    """(lat, lon, the place's name) of a city, from OpenStreetMap - asked once
-    per business and kept."""
+    """(lat, lon, the town's name) of a town or an address, from
+    OpenStreetMap - asked once per place and kept."""
     try:
+        await _wait_turn()
         response = await http.get(
-            GEOCODE_URL, params={"q": city, "countrycodes": country, "format": "json", "limit": 1},
+            GEOCODE_URL,
+            params={"q": city, "countrycodes": country, "format": "json", "limit": 1,
+                    "addressdetails": 1, "accept-language": "bg"},
             headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT,
         )
         if response.status_code != 200:
@@ -149,10 +181,84 @@ async def geocode_city(http, city: str, country: str = "bg") -> Optional[Tuple[f
         rows = response.json()
         if not rows:
             return None
-        return float(rows[0]["lat"]), float(rows[0]["lon"]), str(rows[0].get("display_name") or city).split(",")[0]
+        row = rows[0]
+        name = _town(row.get("address") or {}) or str(row.get("display_name") or city).split(",")[0]
+        return float(row["lat"]), float(row["lon"]), name
     except Exception as error:
         logger.warning(f"Geocoding unreachable: {error}")
         return None
+
+
+async def reverse_geocode(http, lat: float, lon: float) -> Optional[str]:
+    """The name of the town at a point, from OpenStreetMap."""
+    try:
+        await _wait_turn()
+        response = await http.get(
+            REVERSE_URL,
+            params={"lat": f"{lat:.2f}", "lon": f"{lon:.2f}", "format": "jsonv2", "zoom": 10, "accept-language": "bg"},
+            headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT,
+        )
+        if response.status_code != 200:
+            return None
+        return _town((response.json() or {}).get("address") or {})
+    except Exception as error:
+        logger.warning(f"Reverse geocoding unreachable: {error}")
+        return None
+
+
+# ---- Where the business is, from an address as people write it.
+
+# "гр. Пловдив", "град Пловдив", "с. Лозен", "к.к. Слънчев бряг".
+_SETTLEMENT = re.compile(r"(?:^|[\s,;(])(?:гр|град|с|село|к\.?\s?к)(?:\.\s*|\s+)([^\d,;()]{2,60})", re.IGNORECASE)
+# What comes after the town's name in an address: the street, the block...
+_AFTER_TOWN = re.compile(
+    r"\s+(?:ул|улица|бул|булевард|ж\.?\s?к|кв|пл|бл|вх|ет|ап|общ|община|обл|област|п\.?\s?к)(?:\.|\s|$)|\s+№",
+    re.IGNORECASE,
+)
+_STREET_START = re.compile(r"^(?:ул|улица|бул|булевард|ж\.?\s?к|кв|пл|бл|вх|ет|ап|общ|обл|п\.?\s?к)(?:\.|\s|$)", re.IGNORECASE)
+_COUNTRY = {"българия", "bulgaria", "bg", "република българия"}
+
+
+def _town_name(text: str) -> Optional[str]:
+    name = _AFTER_TOWN.split(" " + text.strip(), maxsplit=1)[0]
+    name = " ".join(name.split()).strip(" .-")
+    return name if 2 <= len(name) <= 40 and name.lower() not in _COUNTRY else None
+
+
+_PREFIX = re.compile(r"^(?:гр|град|с|село|к\.?\s?к)(?:\.\s*|\s+)", re.IGNORECASE)
+# The town beside its postcode: "4000 Пловдив", "Пловдив 4000".
+_AFTER_CODE = re.compile(r"(?<!\d)\d{4}\s+([^\d,;()]{2,40})")
+_BEFORE_CODE = re.compile(r"(?:^|[,;])\s*([^\d,;()]{2,40}?)\s+\d{4}(?!\d)")
+
+
+def place_queries(address: Optional[str]) -> List[str]:
+    """What to look up for an address, likeliest first: the town it names
+    ("гр. Пловдив", "с. Лозен"), the town beside its postcode ("4000
+    Пловдив"), else a part of it without a number ("..., Бургас"), and
+    last the whole address. The lookup itself tells which guess is a place."""
+    text = " ".join(str(address or "").split())
+    if not text:
+        return []
+    found: List[Optional[str]] = []
+    named = _SETTLEMENT.search(text)
+    if named:
+        found.append(_town_name(named.group(1)))
+    for pattern in (_AFTER_CODE, _BEFORE_CODE):
+        coded = pattern.search(text)
+        if coded:
+            found.append(_town_name(_PREFIX.sub("", coded.group(1).strip())))
+    if not any(found):
+        plain = [part.strip() for part in re.split(r"[,;]", text)
+                 if part.strip() and not re.search(r"\d", part) and not _STREET_START.match(part.strip())
+                 and part.strip().lower() not in _COUNTRY]
+        if plain:
+            found += [_town_name(plain[0]), _town_name(plain[-1])]
+    found.append(text[:200])
+    queries: List[str] = []
+    for query in found:
+        if query and query.lower() not in {seen.lower() for seen in queries}:
+            queries.append(query)
+    return queries[:4]
 
 
 def part_of_day(moment: datetime) -> str:

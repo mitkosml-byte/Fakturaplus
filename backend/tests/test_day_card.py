@@ -35,20 +35,34 @@ def _forecast(day: date, kind_symbol: str = "rain", temps=(8, 14)):
     return {"properties": {"timeseries": steps}}
 
 
+# Places the stand-in geocoder knows; anything else it does not find.
+TOWNS = {"софия": (42.6977, 23.3219), "пловдив": (42.1354, 24.7453), "варна": (43.2141, 27.9147),
+         "бургас": (42.5048, 27.4626)}
+
+
 @pytest.fixture
 def weather(monkeypatch):
-    calls = {"geocode": 0, "forecast": 0}
+    calls = {"geocode": 0, "forecast": 0, "asked": []}
 
     async def geocode(_http, city, country="bg"):
         calls["geocode"] += 1
-        return (42.6977, 23.3219, "София")
+        calls["asked"].append(city)
+        town = city.strip().lower()
+        return (*TOWNS[town], city.strip()) if town in TOWNS else None
+
+    async def reverse(_http, lat, lon):
+        return "Пловдив"
 
     async def forecast(_http, lat, lon):
         calls["forecast"] += 1
         return _forecast(server.today_local())
 
     monkeypatch.setattr(dc, "geocode_city", geocode)
+    monkeypatch.setattr(dc, "reverse_geocode", reverse)
     monkeypatch.setattr(dc, "fetch_forecast", forecast)
+    # Places and forecasts are kept for every business: each test starts clean.
+    asyncio.run(server.db.geocode_cache.delete_many({}))
+    asyncio.run(server.db.weather_cache.delete_many({}))
     return calls
 
 
@@ -228,3 +242,109 @@ def test_every_tap_opens_what_the_viewer_may_open(client, weather):
     theirs = client.get("/api/day-card", headers=cashier).json()
     assert all(item["key"] != "missing_revenue" for item in theirs["focus"])
     assert theirs["spark"]["key"] == "birthday" and theirs["spark"]["route"] is None
+
+
+
+def test_the_town_is_read_from_an_address_as_people_write_it():
+    assert dc.place_queries("гр. Пловдив, ул. Иван Вазов 12")[0] == "Пловдив"
+    assert dc.place_queries("ул. Витоша 15, 1000 София")[0] == "София"
+    assert dc.place_queries("с. Лозен, общ. Столична, обл. София")[0] == "Лозен"
+    assert dc.place_queries("к.к. Слънчев бряг, хотел Изгрев")[0] == "Слънчев бряг"
+    assert dc.place_queries("бул. България 1, Бургас")[0] == "Бургас"
+    assert dc.place_queries("ПЛОВДИВ 4000 бул. Руски 15")[0] == "ПЛОВДИВ"
+    assert dc.place_queries("Банско, ул. Пирин 2, България")[0] == "Банско"
+    # Nothing that names a town: the whole address is asked, as it is.
+    assert dc.place_queries("ж.к. Младост 1, бл. 12, вх. А") == ["ж.к. Младост 1, бл. 12, вх. А"]
+    assert dc.place_queries("") == [] and dc.place_queries(None) == []
+
+
+def test_the_place_comes_from_what_the_business_already_has(client, weather):
+    # Its address - the town in it is looked up, nothing typed for it.
+    company_id, _, owner = _company()
+    asyncio.run(server.db.companies.update_one(
+        {"id": company_id}, {"$set": {"address": "гр. Пловдив, ул. Иван Вазов 12"}}))
+    card = client.get("/api/day-card", headers=owner).json()
+    assert card["weather"]["place"] == "Пловдив" and card["place_missing"] is False
+    assert weather["asked"] == ["Пловдив"]
+
+    # Another business in the same town: the town is not asked about again.
+    other_id, _, other = _company()
+    asyncio.run(server.db.companies.update_one(
+        {"id": other_id}, {"$set": {"address": "ул. Главна 1, 4000 Пловдив"}}))
+    assert client.get("/api/day-card", headers=other).json()["weather"]["place"] == "Пловдив"
+    assert weather["asked"] == ["Пловдив"]
+
+    # No address, but a site with one.
+    site_id, _, site_owner = _company()
+    asyncio.run(server.db.locations.insert_one({
+        "id": "loc_" + site_id, "company_id": site_id, "name": "Център", "address": "бул. България 1, Бургас",
+        "created_at": datetime.now(timezone.utc)}))
+    assert client.get("/api/day-card", headers=site_owner).json()["weather"]["place"] == "Бургас"
+
+    # An address that names no town the map knows: the whole of it is asked
+    # once, then nothing more for a while - and the card says the place is
+    # still missing.
+    unknown_id, _, unknown = _company()
+    asyncio.run(server.db.companies.update_one(
+        {"id": unknown_id}, {"$set": {"address": "ж.к. Нищо 1, бл. 12"}}))
+    first = client.get("/api/day-card", headers=unknown).json()
+    assert first["weather"] is None and first["place_missing"] is True
+    asked = len(weather["asked"])
+    client.get("/api/day-card", headers=unknown)
+    assert len(weather["asked"]) == asked
+
+
+def test_a_manager_shows_the_weather_here_when_nothing_tells(client, weather):
+    company_id, _, owner = _company()
+    _, cashier = _user(company_id, "staff", ["add_revenue"], "Ивана Касиерова")
+    card = client.get("/api/day-card", headers=owner).json()
+    assert card["weather"] is None and card["place_missing"] is True
+
+    point = {"lat": 42.145678, "lon": 24.749912}
+    assert client.put("/api/company/weather-place", headers=cashier, json=point).status_code == 403
+    saved = client.put("/api/company/weather-place", headers=owner, json=point).json()
+    # About a kilometre, no closer - and for the business, not the person.
+    assert saved == {"lat": 42.15, "lon": 24.75, "name": "Пловдив"}
+    kept = asyncio.run(server.db.companies.find_one({"id": company_id}, {"_id": 0, "weather_point": 1}))["weather_point"]
+    assert set(kept) == {"lat", "lon", "name", "at"}
+
+    card = client.get("/api/day-card", headers=cashier).json()
+    assert card["weather"]["place"] == "Пловдив" and card["place_missing"] is False
+
+
+def test_the_town_on_a_scanned_invoice_to_the_business(client, weather, monkeypatch):
+    from types import SimpleNamespace
+    import base64
+    from routers import scan_credits
+    from tests.test_document_scan import _photo
+    company_id, _, owner = _company()
+    asyncio.run(server.db.companies.update_one(
+        {"id": company_id}, {"$set": {"eik": "131071587", "vat_number": "BG131071587"}}))
+    buyers = [("BG131071587", "Варна"), ("204000000", "Русе")]
+
+    class FakeMessages:
+        async def parse(self, **_kwargs):
+            buyer_eik, buyer_city = buyers.pop(0)
+            extraction = server.ClaudeInvoiceExtraction(
+                supplier="Доставчик Проба ЕООД", invoice_number="0000000124", invoice_date="2026-11-10",
+                buyer="Проба ООД", buyer_eik=buyer_eik, buyer_city=buyer_city,
+                amount_without_vat=100, vat_amount=20, total_amount=120,
+            )
+            return SimpleNamespace(parsed_output=extraction, usage=SimpleNamespace(input_tokens=1, output_tokens=1))
+
+    async def no_log(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(server, "AI_FEATURES_ENABLED", True)
+    monkeypatch.setattr(server, "anthropic_client", SimpleNamespace(messages=FakeMessages()))
+    monkeypatch.setattr(scan_credits, "anthropic_client", server.anthropic_client, raising=False)
+    monkeypatch.setattr(scan_credits, "log_ai_usage", no_log)
+    photo = "data:image/jpeg;base64," + base64.b64encode(_photo()).decode()
+
+    # An invoice to this business: its town is kept.
+    assert client.post("/api/ocr/scan", headers=owner, json={"image_base64s": [photo]}).status_code == 200
+    # An invoice to someone else (another EIK): not.
+    assert client.post("/api/ocr/scan", headers=owner, json={"image_base64s": [photo]}).status_code == 200
+    company = asyncio.run(server.db.companies.find_one({"id": company_id}, {"_id": 0, "weather_hint": 1}))
+    assert company["weather_hint"]["city"] == "Варна"
+    assert client.get("/api/day-card", headers=owner).json()["weather"]["place"] == "Варна"
