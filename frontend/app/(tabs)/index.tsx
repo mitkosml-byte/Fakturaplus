@@ -19,7 +19,7 @@ import { api } from '../../src/services/api';
 import { Summary, NonInvoiceExpense, GettingStarted, HomeData } from '../../src/types';
 import { queryClient } from '../../src/queries/queryClient';
 import { scanBalanceQueryKey } from '../../src/queries/useScanBalance';
-import { format, subDays } from 'date-fns';
+import { format } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
@@ -31,18 +31,16 @@ import Animated from 'react-native-reanimated';
 import { PeriodState, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
 import { COLORS } from '../../src/theme/colors';
 import { restrictedDataNote } from '../../src/utils/visibilityNote';
-import { RevenueModal, rateAmountsTotal } from '../../src/components/home/RevenueModal';
-import type { VatGroupAmount, ZReportResult } from '../../src/types';
+import { useRevenueEntry } from '../../src/components/home/useRevenueEntry';
 import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCard';
 import { GettingStartedCard } from '../../src/components/home/GettingStartedCard';
 import { DayCard } from '../../src/components/home/DayCard';
-import { pickScanImage } from '../../src/utils/scanImage';
 import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
 import { useOnboardingStore } from '../../src/stores/onboardingStore';
 import { getDescriptionSuggestions } from '../../src/utils/expenseSuggestions';
-import { formatAmount, formatMoney } from '../../src/utils/money';
+import { formatMoney } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -110,21 +108,10 @@ export default function HomeScreen() {
   }, [periodState]);
 
   const [refreshing, setRefreshing] = useState(false);
-  const [revenueModalVisible, setRevenueModalVisible] = useState(false);
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
   const [importRevenueModalVisible, setImportRevenueModalVisible] = useState(false);
   const [importExpenseModalVisible, setImportExpenseModalVisible] = useState(false);
 
-  // Revenue form
-  const [fiscalRevenue, setFiscalRevenue] = useState('');
-  const [pocketMoney, setPocketMoney] = useState('');
-  const [cardRevenue, setCardRevenue] = useState('');
-  const [revenueVatRate, setRevenueVatRate] = useState(20);
-  // The day's till sales by VAT rate (rate -> typed amount), as the till's
-  // daily report gives them - used instead of one total at one rate.
-  const [revenueSplitByRate, setRevenueSplitByRate] = useState(false);
-  const [revenueRateAmounts, setRevenueRateAmounts] = useState<Record<number, string>>({});
-  const [revenueDate, setRevenueDate] = useState(new Date());
   // Shared across the revenue/expense/personal-expense modals below - only
   // one is ever open at a time, and this guards against a rapid double-tap
   // on Save creating a duplicate record.
@@ -133,8 +120,6 @@ export default function HomeScreen() {
   // picked, the one used last on this device. Nothing shows without locations.
   const { fallback: defaultLocation } = useLocationChoice();
   const rememberLocation = useLocationsStore((state) => state.remember);
-  const [revenueLocationPick, setRevenueLocationPick] = useState<string | null | undefined>(undefined);
-  const revenueLocation = revenueLocationPick === undefined ? defaultLocation : revenueLocationPick;
   const [expenseLocationPick, setExpenseLocationPick] = useState<string | null | undefined>(undefined);
   const expenseLocation = expenseLocationPick === undefined ? defaultLocation : expenseLocationPick;
 
@@ -152,7 +137,6 @@ export default function HomeScreen() {
   const [expenseSuggestionSource, setExpenseSuggestionSource] = useState<NonInvoiceExpense[]>([]);
   
   // Date picker states
-  const [isRevenueDatePickerVisible, setRevenueDatePickerVisible] = useState(false);
   const [isExpenseDatePickerVisible, setExpenseDatePickerVisible] = useState(false);
 
   // Celebrates a genuine milestone - the period crossing from non-profitable
@@ -206,85 +190,14 @@ export default function HomeScreen() {
     ]);
   }, [periodState, showBilling, language]);
 
-  // Pre-fills the form with whatever is already logged for this date, so
-  // saving corrects that value directly instead of adding a delta to it -
-  // opening the form for a date with nothing logged yet leaves it at 0.
-  // Returns what it found (or null) so callers - like the OCR hand-off
-  // below - can react to whether the day already had something logged.
-  // A day's VAT split into the form: by rate when the day has its groups,
-  // else one total at one rate.
-  const showRevenueVat = useCallback((groups: VatGroupAmount[] | undefined, rate: number | undefined) => {
-    setRevenueVatRate(rate ?? 20);
-    if (groups && groups.length > 0) {
-      setRevenueSplitByRate(true);
-      setRevenueRateAmounts(Object.fromEntries(groups.map((g) => [g.rate_percent, g.amount.toFixed(2)])));
-    } else {
-      setRevenueSplitByRate(false);
-      setRevenueRateAmounts({});
-    }
-  }, []);
+  // The day's revenue form - the same one Team opens for whoever enters the
+  // revenue but has no Home.
+  const revenueEntry = useRevenueEntry({
+    defaultDate: getDefaultActionDate,
+    onSaved: loadData,
+    onImportHistory: () => setImportRevenueModalVisible(true),
+  });
 
-  // With locations, the day of the location picked (none picked: what no
-  // location holds) - the part a save replaces.
-  const fetchRevenueDay = useCallback(async (date: Date, locationId: string | null) => {
-    try {
-      return await api.getRevenueByDate(format(date, 'yyyy-MM-dd'), locationId);
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const showRevenueDay = useCallback((data: Awaited<ReturnType<typeof api.getRevenueByDate>> | null) => {
-    setFiscalRevenue(data && data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
-    setPocketMoney(data && data.pocket_money > 0 ? data.pocket_money.toString() : '');
-    setCardRevenue(data && data.card_revenue > 0 ? data.card_revenue.toString() : '');
-    showRevenueVat(data?.vat_groups ?? [], data?.vat_rate_percent ?? 20);
-  }, [showRevenueVat]);
-
-  // Switches the form between one rate and the day by rate, keeping what
-  // is typed: the total goes to its rate, or the split adds up to the
-  // total at the rate of most of it.
-  const toggleRevenueSplitByRate = () => {
-    if (revenueSplitByRate) {
-      const amounts = Object.entries(revenueRateAmounts).map(([rate, value]) => [Number(rate), parseFloat(value) || 0] as const);
-      const total = rateAmountsTotal(revenueRateAmounts);
-      const largest = amounts.reduce((best, item) => (item[1] > best[1] ? item : best), [revenueVatRate, 0] as const);
-      setFiscalRevenue(total > 0 ? total.toFixed(2) : '');
-      setRevenueVatRate(largest[0]);
-      setRevenueRateAmounts({});
-      setRevenueSplitByRate(false);
-    } else {
-      setRevenueRateAmounts(fiscalRevenue ? { [revenueVatRate]: fiscalRevenue } : {});
-      setRevenueSplitByRate(true);
-    }
-  };
-
-  // One-tap "copy yesterday's split forward" for a steady-traffic day -
-  // reuses the same getRevenueByDate call loadCurrentDayRevenue already
-  // makes, just for revenueDate - 1, and overwrites the form the same way
-  // opening the modal pre-fills it.
-  const [copyingYesterday, setCopyingYesterday] = useState(false);
-  const handleCopyYesterday = async () => {
-    setCopyingYesterday(true);
-    try {
-      const yesterdayStr = format(subDays(revenueDate, 1), 'yyyy-MM-dd');
-      const data = await api.getRevenueByDate(yesterdayStr, revenueLocation);
-      if (!data || (data.fiscal_revenue === 0 && data.card_revenue === 0 && data.pocket_money === 0)) {
-        Alert.alert(t('home.sameAsYesterday'), t('home.sameAsYesterdayEmpty'));
-        return;
-      }
-      setFiscalRevenue(data.fiscal_revenue > 0 ? data.fiscal_revenue.toString() : '');
-      setPocketMoney(data.pocket_money > 0 ? data.pocket_money.toString() : '');
-      setCardRevenue(data.card_revenue > 0 ? data.card_revenue.toString() : '');
-      showRevenueVat(data.vat_groups, data.vat_rate_percent);
-      Haptics.success();
-      Toast.success(t('home.sameAsYesterdayApplied'));
-    } catch {
-      Alert.alert(t('home.sameAsYesterday'), t('home.sameAsYesterdayEmpty'));
-    } finally {
-      setCopyingYesterday(false);
-    }
-  };
 
   // Tab screens stay mounted, so returning here (e.g. after scanning and
   // saving a new invoice) doesn't remount the screen - only re-fetching on
@@ -320,119 +233,6 @@ export default function HomeScreen() {
     wasOnboardingOpen.current = onboardingOpen;
   }, [onboardingOpen, loadData]);
 
-  // Set by the scan screen's "sales" mode hand-off (see the effect below) -
-  // a ref, not state, so consuming it doesn't itself retrigger the load
-  // effect it's read from.
-  const pendingOcrRevenueRef = useRef<{ amount: number; vatRate: 20 | 9 | 0 } | null>(null);
-  const [ocrAdditionNote, setOcrAdditionNote] = useState<string | null>(null);
-
-  // The till's daily report read from a photo (Н3): the whole day as the
-  // report gives it - it replaces what the form holds (a report is the
-  // day's total, not something added to it). For another day than the
-  // form's, it waits until that day is loaded, then fills it.
-  const pendingZReportRef = useRef<ZReportResult | null>(null);
-  const [scanningReport, setScanningReport] = useState(false);
-  const applyZReport = (report: ZReportResult) => {
-    setFiscalRevenue(report.fiscal_revenue > 0 ? report.fiscal_revenue.toFixed(2) : '');
-    setCardRevenue(report.card_revenue != null && report.card_revenue > 0 ? report.card_revenue.toFixed(2) : '');
-    // Several rates: the day by rate. One: that rate. None read: the form
-    // keeps the rate it has (the server says to check it).
-    if (report.vat_groups.length > 1) {
-      showRevenueVat(report.vat_groups, report.vat_groups[0].rate_percent);
-    } else if (report.vat_groups.length === 1) {
-      showRevenueVat([], report.vat_groups[0].rate_percent);
-    }
-    setOcrAdditionNote(
-      report.report_number
-        ? t('home.zReportApplied').replace('{number}', report.report_number)
-        : t('home.zReportAppliedNoNumber')
-    );
-    if (report.warnings.length > 0) {
-      Alert.alert(t('home.zReportCheck'), report.warnings.join('\n\n'));
-    }
-  };
-  const scanReportFrom = async (source: 'camera' | 'library') => {
-    let image: string | null = null;
-    try {
-      image = await pickScanImage(source);
-    } catch {
-      Alert.alert(t('common.error'), t('scan.cameraError'));
-      return;
-    }
-    if (!image) return;
-    setScanningReport(true);
-    try {
-      const report = await api.scanZReport([image]);
-      const sameDay = !report.date || report.date === format(revenueDate, 'yyyy-MM-dd');
-      if (sameDay) {
-        applyZReport(report);
-      } else {
-        pendingZReportRef.current = report;
-        setRevenueDate(new Date(`${report.date}T00:00:00`));
-      }
-      Haptics.success();
-    } catch (error: any) {
-      Alert.alert(t('common.error'), error.message);
-    } finally {
-      setScanningReport(false);
-    }
-  };
-  const handleScanReport = () => {
-    Alert.alert(t('home.scanReport'), t('home.scanReportHint'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      { text: t('scan.fromGallery'), onPress: () => scanReportFrom('library') },
-      { text: t('scan.takePhoto'), onPress: () => scanReportFrom('camera') },
-    ]);
-  };
-
-  // Load current day revenue when revenue modal opens or date changes, then
-  // fold in a pending OCR-scanned sale on top of whatever was already
-  // there - never replacing it - so scanning a receipt for a day that
-  // already has manually-logged sales adds to the total instead of erasing it.
-  useEffect(() => {
-    if (!revenueModalVisible) return;
-    let stale = false;
-    (async () => {
-      const existing = await fetchRevenueDay(revenueDate, revenueLocation);
-      // Another day or location was picked meanwhile - its own load shows it.
-      if (stale) return;
-      showRevenueDay(existing);
-      const pending = pendingOcrRevenueRef.current;
-      if (pending) {
-        const existingFiscal = existing?.fiscal_revenue || 0;
-        const existingRate = existing?.vat_rate_percent ?? 20;
-        const existingGroups = existing?.vat_groups || [];
-        if (existingGroups.length > 0 || (existingFiscal > 0 && existingRate !== pending.vatRate)) {
-          // A sale at another rate than the rest of the day: the day by
-          // rate, the sale added to its own rate's sales.
-          const amounts: Record<number, number> = existingGroups.length > 0
-            ? Object.fromEntries(existingGroups.map((g) => [g.rate_percent, g.amount]))
-            : { [existingRate]: existingFiscal };
-          amounts[pending.vatRate] = (amounts[pending.vatRate] || 0) + pending.amount;
-          setRevenueRateAmounts(Object.fromEntries(Object.entries(amounts).map(([rate, amount]) => [rate, amount.toFixed(2)])));
-          setRevenueSplitByRate(true);
-        } else {
-          setFiscalRevenue((existingFiscal + pending.amount).toFixed(2));
-          setRevenueVatRate(pending.vatRate);
-        }
-        setOcrAdditionNote(
-          t('home.ocrAdditionNote').replace('{amount}', formatAmount(pending.amount))
-        );
-        pendingOcrRevenueRef.current = null;
-      } else if (pendingZReportRef.current) {
-        const report = pendingZReportRef.current;
-        pendingZReportRef.current = null;
-        applyZReport(report);
-      } else {
-        setOcrAdditionNote(null);
-      }
-    })();
-    // t() is a plain function from useTranslation(), recreated on every
-    // render (not memoized) - listing it here would refire this effect on
-    // every render and re-fetch/overwrite the addition it just applied.
-    return () => { stale = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revenueModalVisible, revenueDate, revenueLocation, fetchRevenueDay, showRevenueDay]);
 
   // Hand-off from the scan screen's "sales" mode: a receipt/invoice the
   // business itself issued was recognized there, and its amount/date/VAT
@@ -444,9 +244,7 @@ export default function HomeScreen() {
     const amount = parseFloat(ocrParams.ocrFiscalRevenue) || 0;
     const vatRateNum = parseInt(ocrParams.ocrVatRate || '20', 10);
     const vatRate: 20 | 9 | 0 = vatRateNum === 9 ? 9 : vatRateNum === 0 ? 0 : 20;
-    pendingOcrRevenueRef.current = { amount, vatRate };
-    setRevenueDate(new Date(`${ocrParams.ocrDate}T00:00:00`));
-    setRevenueModalVisible(true);
+    revenueEntry.openWithSale(new Date(`${ocrParams.ocrDate}T00:00:00`), { amount, vatRate });
     // Deferred to the next tick - calling this in the same pass as a
     // fresh navigation (e.g. this screen just mounted from the hand-off
     // itself) can fire before Expo Router's root layout has finished
@@ -462,8 +260,7 @@ export default function HomeScreen() {
   // the same modal on the exact day that has nothing entered yet.
   useEffect(() => {
     if (!ocrParams.revenueDate || ocrParams.ocrDate || !/^\d{4}-\d{2}-\d{2}$/.test(ocrParams.revenueDate)) return;
-    setRevenueDate(new Date(`${ocrParams.revenueDate}T00:00:00`));
-    setRevenueModalVisible(true);
+    revenueEntry.open(new Date(`${ocrParams.revenueDate}T00:00:00`));
     const clearParamsTimeout = setTimeout(() => {
       router.setParams({ revenueDate: undefined });
     }, 0);
@@ -534,63 +331,6 @@ export default function HomeScreen() {
     );
   };
 
-  // Dismissing without saving must not leave revenueDate pointing at
-  // whatever day was last browsed with the prev/next arrows or the date
-  // picker - otherwise the NEXT tap of the "Дневен оборот" quick action
-  // silently reopens on that stale day instead of the one matching the
-  // currently-viewed period, and a correction typed there lands on the
-  // wrong date while the dashboard you're looking at looks unchanged.
-  const closeRevenueModal = () => {
-    setRevenueModalVisible(false);
-    setRevenueLocationPick(undefined);
-    setRevenueDate(getDefaultActionDate());
-  };
-
-  const canSeePocketMoney = hasPermission('view_pocket_money');
-
-  const handleAddRevenue = async () => {
-    const fiscalTotal = revenueSplitByRate ? rateAmountsTotal(revenueRateAmounts) : parseFloat(fiscalRevenue) || 0;
-    if (!fiscalTotal && !pocketMoney) {
-      Alert.alert(t('common.error'), t('msg.enterAtLeastOne'));
-      return;
-    }
-    if (isSubmittingForm) return;
-
-    // By rate, the till total is the sum of the rates (the server adds them
-    // up); else one total at one rate.
-    const vatGroups = Object.entries(revenueRateAmounts)
-      .map(([rate, value]) => ({ rate_percent: Number(rate), amount: Math.round((parseFloat(value) || 0) * 100) / 100 }))
-      .filter((group) => group.amount > 0);
-    setIsSubmittingForm(true);
-    try {
-      await api.createDailyRevenue({
-        date: format(revenueDate, 'yyyy-MM-dd'),
-        ...(revenueSplitByRate && vatGroups.length > 0
-          ? { vat_groups: vatGroups }
-          : { fiscal_revenue: fiscalTotal, vat_rate_percent: revenueVatRate, vat_groups: [] }),
-        // Only someone who sees pocket money sets it - for anyone else the
-        // field is hidden and the day keeps what it holds.
-        ...(canSeePocketMoney ? { pocket_money: parseFloat(pocketMoney) || 0 } : {}),
-        card_revenue: parseFloat(cardRevenue) || 0,
-        location_id: revenueLocation,
-      });
-      if (revenueLocation) rememberLocation(revenueLocation);
-      setRevenueLocationPick(undefined);
-      setRevenueModalVisible(false);
-      setFiscalRevenue('');
-      setPocketMoney('');
-      setCardRevenue('');
-      showRevenueVat([], 20);
-      setRevenueDate(getDefaultActionDate());
-      loadData();
-      Haptics.success();
-      Toast.success(t('msg.revenueSaved'));
-    } catch (error: any) {
-      Alert.alert(t('common.error'), error.message);
-    } finally {
-      setIsSubmittingForm(false);
-    }
-  };
 
   const submitExpense = async () => {
     setIsSubmittingForm(true);
@@ -650,7 +390,7 @@ export default function HomeScreen() {
   const homeActions: { key: string; label: string; hint: string; icon: keyof typeof Ionicons.glyphMap; color: string; onPress: () => void }[] = [
     ...(usesTill && hasPermission('add_revenue') ? [{
       key: 'revenue', label: t('home.dailyRevenue'), hint: t('home.actionRevenueHint'), icon: 'cash' as const, color: COLORS.success,
-      onPress: () => { setRevenueDate(getDefaultActionDate()); setRevenueModalVisible(true); },
+      onPress: () => revenueEntry.open(),
     }] : []),
     ...(hasPermission('add_expenses') ? [{
       key: 'expense', label: t('home.expenses'), hint: t('home.actionExpenseHint'), icon: 'remove-circle' as const, color: COLORS.warning,
@@ -766,7 +506,7 @@ export default function HomeScreen() {
               showRevenue={usesTill && hasPermission('add_revenue')}
               showInvoice={hasPermission('manage_invoices')}
               showIssued={usesBilling && hasPermission('issue_invoices')}
-              onAddRevenue={() => { setRevenueDate(getDefaultActionDate()); setRevenueModalVisible(true); }}
+              onAddRevenue={() => revenueEntry.open()}
               status={home ? home.getting_started : null}
             />
 
@@ -907,47 +647,7 @@ export default function HomeScreen() {
                 справки, and the day's review says when it needs a look. */}
       </ScrollView>
 
-      {/* Revenue Modal */}
-      <RevenueModal
-        visible={revenueModalVisible}
-        onClose={closeRevenueModal}
-        date={revenueDate}
-        onChangeDate={setRevenueDate}
-        isDatePickerVisible={isRevenueDatePickerVisible}
-        onOpenDatePicker={() => setRevenueDatePickerVisible(true)}
-        onCloseDatePicker={() => setRevenueDatePickerVisible(false)}
-        dateLocale={dateLocale}
-        language={language}
-        onCopyYesterday={handleCopyYesterday}
-        copyingYesterday={copyingYesterday}
-        onScanReport={handleScanReport}
-        scanningReport={scanningReport}
-        ocrAdditionNote={ocrAdditionNote}
-        fiscalRevenue={fiscalRevenue}
-        onChangeFiscalRevenue={setFiscalRevenue}
-        cardRevenue={cardRevenue}
-        onChangeCardRevenue={setCardRevenue}
-        vatRate={revenueVatRate}
-        onChangeVatRate={setRevenueVatRate}
-        splitByRate={revenueSplitByRate}
-        onToggleSplitByRate={toggleRevenueSplitByRate}
-        rateAmounts={revenueRateAmounts}
-        onChangeRateAmount={(rate, value) => setRevenueRateAmounts((prev) => ({ ...prev, [rate]: value }))}
-        pocketMoney={pocketMoney}
-        onChangePocketMoney={setPocketMoney}
-        showPocketMoney={canSeePocketMoney}
-        isSubmitting={isSubmittingForm}
-        onSubmit={handleAddRevenue}
-        onImportHistory={() => { closeRevenueModal(); setImportRevenueModalVisible(true); }}
-        locationSlot={
-          <LocationPicker
-            value={revenueLocation}
-            onChange={setRevenueLocationPick}
-            noneLabel={t('locations.noneShared')}
-            hint={revenueLocation === null ? t('locations.revenueNoneHint') : t('locations.revenueHint')}
-          />
-        }
-      />
+      {revenueEntry.modal}
 
       {/* Expense Modal */}
       <ExpenseModal

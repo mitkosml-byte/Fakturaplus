@@ -1,14 +1,15 @@
-import React from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ImageBackground } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useTranslation } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
 import { useModules } from '../../src/stores/modulesStore';
 import { DayCard } from '../../src/components/home/DayCard';
 import { useDayCard } from '../../src/queries/useDayCard';
+import { useRevenueEntry } from '../../src/components/home/useRevenueEntry';
 
 // New tab (navigation-architecture review, 2026-10): Calendar and Messages
 // used to live as two unrelated entries buried inside Profile's "company"
@@ -41,6 +42,20 @@ export default function TeamScreen() {
   // them here instead - their shift, the weather, the team's day.
   const landsHere = !authLoading && !hasPermission('view_statistics');
   const { data: dayCard, refetch: refetchDayCard } = useDayCard(language, landsHere);
+  // Whoever enters the till's revenue but has no Home enters it here - the
+  // same form as on Home, opening on today.
+  const entersRevenue = landsHere && uses('till') && hasPermission('add_revenue');
+  const today = useCallback(() => new Date(), []);
+  const revenueEntry = useRevenueEntry({ defaultDate: today, onSaved: () => { refetchDayCard(); } });
+  // The day card's "yesterday's revenue isn't entered" opens the form on that day.
+  const params = useLocalSearchParams<{ revenueDate?: string }>();
+  useEffect(() => {
+    if (!entersRevenue || !params.revenueDate || !/^\d{4}-\d{2}-\d{2}$/.test(params.revenueDate)) return;
+    revenueEntry.open(new Date(`${params.revenueDate}T00:00:00`));
+    const clearParamsTimeout = setTimeout(() => router.setParams({ revenueDate: undefined }), 0);
+    return () => clearTimeout(clearParamsTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.revenueDate, entersRevenue]);
 
   const cards: CardDef[] = [
     // Not permission-gated, unlike every other card here - a work
@@ -108,10 +123,24 @@ export default function TeamScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
           <ScrollView style={styles.scrollView}>
             {landsHere && <DayCard data={dayCard} onPlaceSet={() => { refetchDayCard(); }} />}
-            <View style={styles.header}>
-              <Text style={styles.title}>{t('team.title')}</Text>
-              <Text style={styles.subtitle}>{t('team.subtitle')}</Text>
-            </View>
+            {entersRevenue && (
+              <TouchableOpacity style={styles.revenueAction} onPress={() => revenueEntry.open()} accessibilityRole="button">
+                <View style={styles.revenueIcon}>
+                  <Ionicons name="cash" size={24} color="white" />
+                </View>
+                <View style={styles.cardContent}>
+                  <Text style={styles.revenueTitle}>{t('home.dailyRevenue')}</Text>
+                  <Text style={styles.revenueHint}>{t('team.revenueHint')}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="white" />
+              </TouchableOpacity>
+            )}
+            {cards.length > 0 && (
+              <View style={styles.header}>
+                <Text style={styles.title}>{t('team.title')}</Text>
+                <Text style={styles.subtitle}>{t('team.subtitle')}</Text>
+              </View>
+            )}
 
             {cards.map((card) => (
               <TouchableOpacity
@@ -130,6 +159,7 @@ export default function TeamScreen() {
               </TouchableOpacity>
             ))}
           </ScrollView>
+          {revenueEntry.modal}
         </SafeAreaView>
       </View>
     </ImageBackground>
@@ -154,6 +184,25 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 20,
   },
+  revenueAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: COLORS.success,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+  },
+  revenueIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  revenueTitle: { fontSize: 17, fontWeight: '800', color: 'white' },
+  revenueHint: { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
   title: {
     fontSize: 28,
     fontWeight: 'bold',

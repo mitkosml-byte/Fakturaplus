@@ -251,11 +251,12 @@ async def _focus(user: User, company: dict, scope: dict, today: date, english: b
     # it), or how it went (for whoever sees the revenue).
     if modules["till"] and ("add_revenue" in perms or revenue is not None):
         entered = await server.db.daily_revenue.find_one({**scope, "date": yesterday.isoformat()}, {"_id": 1}) is not None
-        # Opens the revenue form on yesterday, on Home - so only for whoever
-        # has Home (the statistics); without it there is nowhere to tap to.
-        if not entered and yesterday_open and "add_revenue" in perms and "view_statistics" in perms:
+        # Opens the revenue form on yesterday - on Home, or on Team for
+        # whoever enters the revenue but has no Home (no statistics).
+        if not entered and yesterday_open and "add_revenue" in perms:
+            screen = "/" if "view_statistics" in perms else "/team"
             items.append({"key": "missing_revenue", "priority": 90, "icon": "create-outline",
-                          "route": f"/?revenueDate={yesterday.isoformat()}",
+                          "route": f"{screen}?revenueDate={yesterday.isoformat()}",
                           "text": _t(english, "Вчерашният оборот не е въведен", "Yesterday's revenue isn't entered")})
         elif entered and revenue is not None and yesterday.isoformat() in revenue:
             same_weekday = sorted(

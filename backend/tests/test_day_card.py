@@ -222,10 +222,10 @@ def test_the_ai_line_is_written_once_a_day_from_nothing_confidential(client, wea
 
 
 def test_every_tap_opens_what_the_viewer_may_open(client, weather):
-    """Yesterday's revenue not entered: the owner's line opens the revenue
-    form on that day; a cashier without Home (no statistics) has nowhere to
-    tap to, so the line is not theirs. A birthday opens the messages only
-    for whoever uses the team chat."""
+    """Yesterday's revenue not entered: the line opens the revenue form on
+    that day - on Home for the owner, on Team for a cashier without Home (no
+    statistics). A birthday opens the messages only for whoever uses the
+    team chat."""
     company_id, _, owner = _company()
     _, cashier = _user(company_id, "staff", ["add_revenue"], "Ивана Касиерова")
     worker_id, _ = _user(company_id, "staff", ["team_collaboration"], "Мария Пробна")
@@ -240,7 +240,10 @@ def test_every_tap_opens_what_the_viewer_may_open(client, weather):
     assert mine["spark"]["key"] == "birthday" and mine["spark"]["route"] == "/messages"
 
     theirs = client.get("/api/day-card", headers=cashier).json()
-    assert all(item["key"] != "missing_revenue" for item in theirs["focus"])
+    [cashier_missing] = [item for item in theirs["focus"] if item["key"] == "missing_revenue"]
+    assert cashier_missing["route"] == f"/team?revenueDate={yesterday}"
+    # Still no amount anywhere on the cashier's card.
+    assert "€" not in str(theirs)
     assert theirs["spark"]["key"] == "birthday" and theirs["spark"]["route"] is None
 
 

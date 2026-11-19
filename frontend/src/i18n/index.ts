@@ -984,6 +984,7 @@ export const translations: Translations = {
   'dayCard.day': { bg: 'Добър ден', en: 'Good afternoon' },
   'dayCard.evening': { bg: 'Добър вечер', en: 'Good evening' },
   'dayCard.night': { bg: 'Здравей', en: 'Hello' },
+  'team.revenueHint': { bg: 'Въведи касата за деня', en: "Enter the day's till" },
   'dayCard.locate': { bg: 'Покажи времето тук', en: 'Show the weather here' },
   'dayCard.locateHint': {
     bg: 'С местоположението на устройството, закръглено до около 1 км – само за времето.',
