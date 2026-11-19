@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import {
+  ScrollView,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -83,7 +83,9 @@ export default function ExportScreen() {
           <View style={{ width: 40 }} />
         </View>
 
-        <View style={styles.content}>
+        {/* Scrolls: on a phone the cards are taller than the screen, and
+            without it they ran out under it (a white band on the web). */}
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
           <Text style={styles.subtitle}>{t('export.subtitle')}</Text>
 
           {/* The month's pack for the accountant: everything in one go */}
@@ -195,7 +197,7 @@ export default function ExportScreen() {
             <Text style={styles.statsLinkText}>{t('export.statsExportHint')}</Text>
             <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </View>
     </ScreenEnter>
@@ -226,9 +228,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
-  content: {
+  scroll: {
     flex: 1,
+  },
+  content: {
     padding: 20,
+    paddingBottom: 40,
   },
   subtitle: {
     fontSize: 14,

@@ -2263,7 +2263,7 @@ export const translations: Translations = {
     en: 'Year',
   },
   'periodNav.range': {
-    bg: 'Диапазон',
+    bg: 'От–до',
     en: 'Range',
   },
   'periodNav.previous': {

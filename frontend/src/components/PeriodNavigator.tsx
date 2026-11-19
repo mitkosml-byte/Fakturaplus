@@ -96,6 +96,7 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
     <View style={styles.container}>
       <View style={styles.modeRow}>
         <ChipTabs
+          compact
           active={state.mode}
           onChange={selectMode}
           options={MODES.map((m) => ({ key: m, label: modeLabel(m) }))}

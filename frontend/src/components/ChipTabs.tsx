@@ -16,6 +16,9 @@ type Props<T extends string> = {
   options: ChipTabOption<T>[];
   active: T;
   onChange: (key: T) => void;
+  // Many short tabs in a narrow row (the period's Ден…От–до): a smaller
+  // label and less padding, so five fit on a 360px phone.
+  compact?: boolean;
 };
 
 // Motion Design System: "Category tab / chip switch" - a sliding pill
@@ -23,7 +26,7 @@ type Props<T extends string> = {
 // independently swapping its own background instantly. First built for
 // Profile's category selector; reused here for Stats' tab and period
 // rows instead of duplicating the same pill-tracking logic three times.
-export function ChipTabs<T extends string>({ options, active, onChange }: Props<T>) {
+export function ChipTabs<T extends string>({ options, active, onChange, compact = false }: Props<T>) {
   const rowRef = useRef<View>(null);
   const chipRefs = useRef<Partial<Record<string, any>>>({});
   const pillX = useSharedValue(0);
@@ -84,7 +87,7 @@ export function ChipTabs<T extends string>({ options, active, onChange }: Props<
         <TouchableOpacity
           key={opt.key}
           ref={(node) => { chipRefs.current[opt.key] = node; }}
-          style={styles.chip}
+          style={[styles.chip, compact && styles.chipCompact]}
           onPress={() => onChange(opt.key)}
         >
           {opt.icon && (
@@ -97,7 +100,7 @@ export function ChipTabs<T extends string>({ options, active, onChange }: Props<
               )}
             </View>
           )}
-          <Text style={[styles.chipText, active === opt.key && styles.chipTextActive]}>{opt.label}</Text>
+          <Text style={[styles.chipText, compact && styles.chipTextCompact, active === opt.key && styles.chipTextActive]}>{opt.label}</Text>
         </TouchableOpacity>
       ))}
     </View>
@@ -111,6 +114,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 4,
     gap: 4,
+    // Never wider than the box it sits in: on a narrow phone the row used
+    // to grow to its labels' natural width and stick out of its card,
+    // cutting off the last tab.
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   pill: {
     position: 'absolute',
@@ -149,6 +158,8 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: 'white',
   },
+  chipCompact: { paddingHorizontal: 2 },
+  chipTextCompact: { fontSize: 13 },
   badge: {
     position: 'absolute',
     top: -6,
