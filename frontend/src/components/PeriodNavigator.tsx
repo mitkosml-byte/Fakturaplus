@@ -203,9 +203,9 @@ const styles = StyleSheet.create({
     padding: 8,
     marginBottom: 16,
   },
+  // A column, not a row: the tabs then take exactly the card's width (a
+  // row let them grow to their labels' width and stick out on 360 px).
   modeRow: {
-    flexDirection: 'row',
-    gap: 4,
     marginBottom: 8,
   },
   modeChip: {

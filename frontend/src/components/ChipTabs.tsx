@@ -114,11 +114,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 4,
     gap: 4,
-    // Never wider than the box it sits in: on a narrow phone the row used
-    // to grow to its labels' natural width and stick out of its card,
-    // cutting off the last tab.
-    flexGrow: 1,
-    flexShrink: 1,
+    // Never wider than the box it sits in: the chips shrink (minWidth 0)
+    // rather than push the row past its card on a narrow phone. No flexGrow
+    // here - in the column most screens put it in, that stretched the row
+    // down the whole screen (Statistics' Suppliers and Items).
     minWidth: 0,
   },
   pill: {
