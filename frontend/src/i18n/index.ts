@@ -4668,6 +4668,7 @@ export const translations: Translations = {
     bg: 'Лично тефтерче',
     en: 'Personal wallet',
   },
+  'wallet.openShort': { bg: 'Отвори', en: 'Open' },
   'wallet.homeTeaserOpen': {
     bg: 'Отвори тефтерчето',
     en: 'Open wallet',

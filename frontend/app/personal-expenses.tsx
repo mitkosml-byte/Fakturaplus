@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -107,7 +107,7 @@ export default function PersonalExpensesHistoryScreen() {
   const canManageWallet = hasPermission('manage_personal_wallet');
 
   // Opened from Home's "personal use" line: straight to the notebook.
-  const { tab } = useLocalSearchParams<{ tab?: string }>();
+  const { tab, add } = useLocalSearchParams<{ tab?: string; add?: string }>();
   const [activeMainTab, setActiveMainTab] = useState<MainTab>(tab === 'wallet' ? 'wallet' : 'investments');
 
   // ===================== Investments (business ROI) - unchanged =====================
@@ -300,6 +300,16 @@ export default function PersonalExpensesHistoryScreen() {
     setWalletAmountError(false);
     setWalletDescriptionError(false);
   };
+
+  // Opened from Home's notebook card with "add": straight to a new entry.
+  useEffect(() => {
+    if (add !== '1' || !canAddWallet) return;
+    resetWalletForm();
+    setWalletModalVisible(true);
+    const clearParamsTimeout = setTimeout(() => router.setParams({ add: undefined }), 0);
+    return () => clearTimeout(clearParamsTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [add, canAddWallet]);
 
   const openEditWalletEntry = (entry: PersonalWalletEntry) => {
     setEditingEntryId(entry.id);

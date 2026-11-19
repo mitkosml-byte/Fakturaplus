@@ -1898,6 +1898,8 @@ export interface HomeData {
   billing_overview: BillingOverview | null;
   scan_credits: ScanBalance | null;
   day_card?: DayCardData | null;
+  // The personal notebook's month - null for whoever may not see it.
+  personal_wallet?: PersonalWalletSummary | null;
 }
 
 // The day card (backend routers/day_card): a greeting, the weather where

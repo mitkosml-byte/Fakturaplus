@@ -36,6 +36,7 @@ import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCard';
 import { GettingStartedCard } from '../../src/components/home/GettingStartedCard';
 import { DayCard } from '../../src/components/home/DayCard';
+import { PersonalWalletCard } from '../../src/components/home/PersonalWalletCard';
 import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
 import { useOnboardingStore } from '../../src/stores/onboardingStore';
@@ -417,17 +418,18 @@ export default function HomeScreen() {
     if (summary.total_expense !== null) {
       ledgerRows.push({ key: 'expense', label: t('home.totalExpenses'), value: summary.total_expense || 0 });
     }
-    // The personal notebook, for whoever may see it: always here - at 0 too,
-    // it is the way into the notebook - and, once something was taken, what
-    // is left in the business after it.
+    // The period's personal use and what is left in the business after it,
+    // once something was taken - except for this month, which the notebook
+    // card right below already shows (the same two numbers twice otherwise).
     const personal = summary.personal_withdrawals;
-    if (personal != null && uses('wallet')) {
+    const notebookCardShows = uses('wallet') && hasPermission('view_personal_wallet') && !!home?.personal_wallet;
+    const thisMonth = periodState.mode === 'month' && periodState.offset === 0;
+    if (personal != null && personal > 0 && !(notebookCardShows && thisMonth)) {
       ledgerRows.push({
-        key: 'personal', label: t('home.personalUse'), value: personal > 0 ? -personal : 0,
-        tone: personal > 0 ? COLORS.warning : undefined,
+        key: 'personal', label: t('home.personalUse'), value: -personal, tone: COLORS.warning,
         onPress: () => router.push({ pathname: '/personal-expenses', params: { tab: 'wallet' } }),
       });
-      if (personal > 0 && summary.left_after_personal != null) {
+      if (summary.left_after_personal != null) {
         ledgerRows.push({
           key: 'left', label: t('home.leftInBusiness'), value: summary.left_after_personal,
           tone: summary.left_after_personal >= 0 ? COLORS.success : COLORS.danger,
@@ -614,6 +616,15 @@ export default function HomeScreen() {
               </View>
             )}
             </>
+            )}
+
+            {/* The personal notebook, right under the main numbers - for
+                whoever may see it. */}
+            {uses('wallet') && hasPermission('view_personal_wallet') && home?.personal_wallet && (
+              <PersonalWalletCard
+                summary={home.personal_wallet}
+                canAdd={hasPermission('add_personal_wallet_entries')}
+              />
             )}
 
             {/* The assistant (Л8): ask about your numbers right here - the
