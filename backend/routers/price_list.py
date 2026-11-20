@@ -366,13 +366,17 @@ async def margins_signal(company_id: Optional[str], scope: dict, current_user: U
     dropped.sort(key=lambda e: (e["margin_then_percent"] - e["margin_percent"]), reverse=True)
     top = dropped[0]
     vat = await _vat_registered(company_id)
-    price = f"{fmt_eur(top['suggested_gross'])}" + (" с ДДС" if vat else "")
-    more = f" И още {len(dropped) - 1} {'цена' if len(dropped) == 2 else 'цени'}." if len(dropped) > 1 else ""
+    price = f"{tr_eur(top['suggested_gross'])}" + (tr(" с ДДС", " incl. VAT") if vat else "")
+    more = (tr(f" И още {len(dropped) - 1} {'цена' if len(dropped) == 2 else 'цени'}.",
+               f" And {len(dropped) - 1} more {'price' if len(dropped) == 2 else 'prices'}.")
+            if len(dropped) > 1 else "")
     return {
-        "key": "margins", "severity": "warning", "priority": 58, "title": "Покупните цени поскъпнаха",
-        "detail": (
+        "key": "margins", "severity": "warning", "priority": 58, "title": tr("Покупните цени поскъпнаха", "Purchase prices went up"),
+        "detail": tr(
             f"Маржът на „{top['name']}“ падна от {top['margin_then_percent']:.0f}% на {top['margin_percent']:.0f}% - "
-            f"за същия марж: {price}.{more}"
+            f"за същия марж: {price}.{more}",
+            f"The margin on \"{top['name']}\" fell from {top['margin_then_percent']:.0f}% to {top['margin_percent']:.0f}% - "
+            f"for the same margin: {price}.{more}",
         ),
         "route": "/price-list",
         "fingerprint": "margins|" + "|".join(sorted(f"{e['id']}:{e['cost']}" for e in dropped)),

@@ -1419,8 +1419,9 @@ class ApiService {
   // Proactive Second Brain engine (Module 11 Finding #1) - one ranked
   // signal list over forecast/price-alert/scan-credit/budget/reorder/
   // receivables, feeding the Home morning-briefing card.
-  async getProactiveSignals(): Promise<{ signals: ProactiveSignal[] }> {
-    return this.fetch('/proactive/signals');
+  // Written in the app's language.
+  async getProactiveSignals(language: string): Promise<{ signals: ProactiveSignal[] }> {
+    return this.fetch(`/proactive/signals?lang=${language === 'en' ? 'en' : 'bg'}`);
   }
 
   // Marks several unpaid invoices fully paid at once (the "these overdue

@@ -410,9 +410,11 @@ async def mark_new_signals(user_id: str, signals: List[dict]) -> None:
 
 
 @router.get("/proactive/signals")
-async def list_proactive_signals(current_user: User = Depends(get_current_user)):
-    signals = await get_proactive_signals(current_user)
+async def list_proactive_signals(current_user: User = Depends(get_current_user), lang: Optional[str] = None):
+    """The daily review, written in the app's language (lang: "en" or "bg")."""
+    signals = await get_proactive_signals(current_user, english=lang == "en")
     await mark_new_signals(current_user.user_id, signals)
+    await remember_app_language(current_user.user_id, lang)
     return {"signals": signals}
 
 

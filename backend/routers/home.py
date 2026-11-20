@@ -38,11 +38,12 @@ async def get_home(
     end_date: Optional[str] = None,
     # The invoicing card is worked out only where Home shows it.
     with_billing: bool = False,
-    # The day card's texts.
-    language: str = "bg",
+    # The language the app shows: the day card's and the review's texts.
+    language: Optional[str] = None,
     current_user: User = Depends(get_current_user),
 ):
     """Everything Home shows for the period, in one answer."""
+    lang = "en" if language == "en" else "bg"
     async def nothing() -> None:
         return None
 
@@ -50,12 +51,12 @@ async def get_home(
     sees_notebook = "view_personal_wallet" in set(current_user.permissions or [])
     summary, signals, started, billing, credits, day_card, notebook = await asyncio.gather(
         _part(get_summary(start_date=start_date, end_date=end_date, current_month_only=True, current_user=current_user)),
-        _part(list_proactive_signals(current_user=current_user)),
+        _part(list_proactive_signals(current_user=current_user, lang=lang if language else None)),
         _part(getting_started(current_user=current_user)),
         _part(get_billing_overview(start_date=start_date, end_date=end_date, current_user=current_user))
         if with_billing else nothing(),
         _part(get_scan_credits(current_user=current_user)),
-        _day_card(current_user, "en" if language == "en" else "bg"),
+        _day_card(current_user, lang),
         _quiet(get_personal_wallet_summary(current_user=current_user), "Personal notebook")
         if sees_notebook else nothing(),
     )

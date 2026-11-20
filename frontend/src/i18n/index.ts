@@ -1861,11 +1861,11 @@ export const translations: Translations = {
   },
   'scan.reverseChargeNote': {
     bg: 'При запис ще се генерира автоматично номер на протокол по чл.117 ЗДДС, който трябва да се издаде до 15 дни от датата на доставката.',
-    en: 'Saving will auto-assign a чл.117 self-billing protocol number, due within 15 days of the supply date.',
+    en: 'Saving will auto-assign an Art. 117 self-billing protocol number, due within 15 days of the supply date.',
   },
   'scan.protocolAssigned': {
     bg: 'Издаден протокол по чл.117 №',
-    en: 'Issued чл.117 protocol №',
+    en: 'Issued Art. 117 protocol No.',
   },
   'scan.documentType': {
     bg: 'Вид документ',
@@ -2187,7 +2187,7 @@ export const translations: Translations = {
   },
   'profile.protocols': {
     bg: 'Протоколи по чл.117',
-    en: 'чл.117 protocols',
+    en: 'Art. 117 protocols',
   },
   'profile.protocolsDesc': {
     bg: 'Самоначислен ДДС и срокове за подаване',
@@ -2195,7 +2195,7 @@ export const translations: Translations = {
   },
   'protocols.title': {
     bg: 'Протоколи по чл.117',
-    en: 'чл.117 protocols',
+    en: 'Art. 117 protocols',
   },
   'protocols.overdueSingular': {
     bg: 'протокол е просрочен',
@@ -2207,7 +2207,7 @@ export const translations: Translations = {
   },
   'protocols.empty': {
     bg: 'Няма протоколи по чл.117',
-    en: 'No чл.117 protocols',
+    en: 'No Art. 117 protocols',
   },
   'protocols.emptyHint': {
     bg: 'Появяват се тук, когато фактура е с вид ДДС „Обратно начисляване“',
@@ -4961,7 +4961,7 @@ export const translations: Translations = {
   },
   'export.vatLedgerDesc': {
     bg: 'Работен дневник по ЗДДС за счетоводителя, групиран по ставки — основа за справка-декларацията',
-    en: "Working ЗДДС ledger for the accountant, grouped by VAT rate — the base for the monthly return",
+    en: "Working VAT ledger for the accountant, grouped by VAT rate — the base for the monthly return",
   },
   'export.lastMonth': {
     bg: 'Миналия месец',
@@ -6161,7 +6161,7 @@ export const translations: Translations = {
   'recurringInvoices.endMonth': { bg: 'Последен месец (ГГГГ-ММ, по желание)', en: 'Last month (YYYY-MM, optional)' },
   'recurringInvoices.active': { bg: 'Активна', en: 'Active' },
   'recurringInvoices.lines': { bg: 'Редове', en: 'Lines' },
-  'recurringInvoices.monthHint': { bg: '„{месец}“ в ред или бележка става месецът: „Абонамент за ноември 2026“.', en: '"{месец}" in a line or note becomes the month: "Subscription for November 2026".' },
+  'recurringInvoices.monthHint': { bg: '„{месец}“ в ред или бележка става месецът: „Абонамент за ноември 2026“.', en: '"{month}" in a line or note becomes the month: "Subscription for November 2026".' },
   'recurringInvoices.notes': { bg: 'Бележка', en: 'Note' },
   'recurringInvoices.addLine': { bg: 'Добави ред', en: 'Add a line' },
   'recurringInvoices.history': { bg: 'Издадени: {list}', en: 'Issued: {list}' },

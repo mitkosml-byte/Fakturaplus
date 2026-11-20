@@ -113,7 +113,7 @@ function actionLabelKey(signal: ProactiveSignal, action: ProactiveSignalAction):
 }
 
 export function MorningBriefingCard({ refreshSignal, signals: loaded }: Props) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
@@ -128,11 +128,11 @@ export function MorningBriefingCard({ refreshSignal, signals: loaded }: Props) {
 
   const refresh = useCallback(() => {
     setLoading(true);
-    api.getProactiveSignals()
+    api.getProactiveSignals(language)
       .then((data) => setSignals(data.signals || []))
       .catch(() => setSignals([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [language]);
 
   // Home's own useFocusEffect(loadData) already fires on every focus and
   // always ends in a fresh `summary` object (its new refreshSignal), so a

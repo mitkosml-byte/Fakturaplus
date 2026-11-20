@@ -286,12 +286,15 @@ async def payment_reminders_signal(company_id: Optional[str], scope: dict, curre
         return None
     total = sum(item["amount_left"] for item in due)
     oldest = due[0]
-    detail = (
+    detail = tr(
         f"{len(due)} {'напомняне чака' if len(due) == 1 else 'напомняния чакат'} да ги прегледате и изпратите - "
-        f"общо {fmt_eur(total)}. Най-старото: {oldest['customer_name']}, {oldest['label']}."
+        f"общо {tr_eur(total)}. Най-старото: {oldest['customer_name']}, {oldest['label']}.",
+        f"{len(due)} {'reminder waits' if len(due) == 1 else 'reminders wait'} for you to look over and send - "
+        f"{tr_eur(total)} in all. The oldest: {oldest['customer_name']}.",
     )
     return {
-        "key": "payment_reminders", "severity": "warning", "priority": 70, "title": "Напомняния за плащане към клиенти",
+        "key": "payment_reminders", "severity": "warning", "priority": 70,
+        "title": tr("Напомняния за плащане към клиенти", "Payment reminders to customers"),
         "detail": detail, "route": "/payment-reminders",
         "fingerprint": "reminders|" + "|".join(sorted(f"{item['receivable_id']}:{item['stage']}" for item in due)),
     }

@@ -370,11 +370,13 @@ async def recurring_invoices_signal(company_id: Optional[str], scope: dict, curr
     if not ready:
         return None
     vat = await _vat_registered(company_id)
-    names = ", ".join(f"{t['customer_name']} - {fmt_eur(_amounts(t, vat)['total_amount'])}" for t in ready[:3])
-    more = f" и още {len(ready) - 3}" if len(ready) > 3 else ""
-    count = "1 фактура е готова" if len(ready) == 1 else f"{len(ready)} фактури са готови"
+    names = ", ".join(f"{t['customer_name']} - {tr_eur(_amounts(t, vat)['total_amount'])}" for t in ready[:3])
+    more = tr_and_more(len(ready) - 3)
+    count = (tr("1 фактура е готова", "1 invoice is ready") if len(ready) == 1
+             else tr(f"{len(ready)} фактури са готови", f"{len(ready)} invoices are ready"))
     return {
-        "key": "recurring_invoices", "severity": "info", "priority": 62, "title": f"Фактури за {month_label(month)}",
-        "detail": f"{count} за издаване: {names}{more}.", "route": "/recurring-invoices",
+        "key": "recurring_invoices", "severity": "info", "priority": 62,
+        "title": tr(f"Фактури за {month_label(month)}", f"Invoices for {tr_month(int(month[:4]), int(month[5:7]))}"),
+        "detail": tr(f"{count} за издаване: {names}{more}.", f"{count} to issue: {names}{more}."), "route": "/recurring-invoices",
         "fingerprint": f"recurring_invoices|{month}|" + "|".join(sorted(t["id"] for t in ready)),
     }

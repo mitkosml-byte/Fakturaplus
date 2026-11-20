@@ -344,12 +344,21 @@ async def accountant_pack_signal(company_id: Optional[str], scope: dict, current
     if not (counts["purchases"] or counts["revenue_days"] or counts["issued_invoices"]):
         return None
     warnings = [c for c in summary["checks"] if c["severity"] == "warning"]
-    detail = (
-        f"Документите за {summary['label'].lower()} са готови за счетоводителя: "
-        f"{_count_bg(counts['purchases'], 'покупка', 'покупки')}, {_count_bg(counts['issued_invoices'], 'издадена фактура', 'издадени фактури')}."
-        + (f" Преди да ги изпратиш: {warnings[0]['message'][0].lower()}{warnings[0]['message'][1:]}" if warnings else "")
-    )
+    if signals_in_english():
+        detail = (
+            f"The documents for {tr_month(period.start.year, period.start.month)} are ready for the accountant: "
+            f"{tr_count(counts['purchases'], '', '', 'purchase', 'purchases')}, "
+            f"{tr_count(counts['issued_invoices'], '', '', 'issued invoice', 'issued invoices')}."
+            + (" Before sending them, look at the notes in the pack." if warnings else "")
+        )
+    else:
+        detail = (
+            f"Документите за {summary['label'].lower()} са готови за счетоводителя: "
+            f"{_count_bg(counts['purchases'], 'покупка', 'покупки')}, {_count_bg(counts['issued_invoices'], 'издадена фактура', 'издадени фактури')}."
+            + (f" Преди да ги изпратиш: {warnings[0]['message'][0].lower()}{warnings[0]['message'][1:]}" if warnings else "")
+        )
     return {
-        "key": "accountant_pack", "severity": "info", "priority": 45, "title": "Месечен пакет за счетоводителя",
+        "key": "accountant_pack", "severity": "info", "priority": 45,
+        "title": tr("Месечен пакет за счетоводителя", "Monthly pack for the accountant"),
         "detail": detail, "route": f"/accountant-pack?month={month}", "fingerprint": f"pack|{month}",
     }

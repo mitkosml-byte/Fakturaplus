@@ -637,6 +637,7 @@ async def remember_place_from_scan(company_id: Optional[str], extraction: dict) 
 
 
 @router.get("/day-card")
-async def get_day_card(language: str = "bg", current_user: User = Depends(get_current_user)):
+async def get_day_card(language: Optional[str] = None, current_user: User = Depends(get_current_user)):
     """The day card for whoever opens the app - Home has it in /api/home."""
+    await remember_app_language(current_user.user_id, language)
     return await build_day_card(current_user, "en" if language == "en" else "bg")

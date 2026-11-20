@@ -196,12 +196,13 @@ def _when(view: dict) -> str:
     day = date.fromisoformat(view["due_date"]).strftime("%d.%m")
     days = view["days_left"]
     if days < 0:
-        return f"просрочен с {-days} {'ден' if days == -1 else 'дни'} ({day})"
+        return tr(f"просрочен с {-days} {'ден' if days == -1 else 'дни'} ({day})",
+                  f"{-days} {'day' if days == -1 else 'days'} overdue ({day})")
     if days == 0:
-        return f"днес ({day})"
+        return tr(f"днес ({day})", f"today ({day})")
     if days == 1:
-        return f"утре ({day})"
-    return f"след {days} дни ({day})"
+        return tr(f"утре ({day})", f"tomorrow ({day})")
+    return tr(f"след {days} дни ({day})", f"in {days} days ({day})")
 
 
 async def deadlines_signal(company_id: Optional[str], scope: dict, current_user: User) -> Optional[dict]:
@@ -217,10 +218,10 @@ async def deadlines_signal(company_id: Optional[str], scope: dict, current_user:
         return None
     first = near[0]
     overdue = [v for v in near if v["status"] == "overdue"]
-    more = f" И още {len(near) - 1}." if len(near) > 1 else ""
+    more = tr(f" И още {len(near) - 1}.", f" And {len(near) - 1} more.") if len(near) > 1 else ""
     return {
         "key": "deadlines", "severity": "critical" if overdue else "warning", "priority": 80 if overdue else 64,
-        "title": "Просрочен срок" if overdue else "Наближава срок",
+        "title": tr("Просрочен срок", "Deadline passed") if overdue else tr("Наближава срок", "Deadline coming up"),
         "detail": f"{first['title']} - {_when(first)}.{more}", "route": "/deadlines",
         "fingerprint": "deadlines|" + "|".join(f"{v['id']}:{v['due_date']}:{v['status']}" for v in near),
     }

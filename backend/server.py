@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
+import contextvars
 import math
 import logging
 from contextlib import asynccontextmanager
@@ -3581,6 +3582,55 @@ PROACTIVE_PUSH_WORTHY_PRIORITY = 70
 def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
+
+# The language the signals are written in: the viewer's app language. Home
+# and GET /proactive/signals pass it; the morning push takes the one the
+# person's app last said (users.language). Every builder writes its words
+# through tr(bulgarian, english) and its amounts through tr_eur - one switch
+# for one computation, a context variable, so a request in the other
+# language at the same moment never sees it.
+_SIGNALS_ENGLISH: contextvars.ContextVar[bool] = contextvars.ContextVar("signals_english", default=False)
+_MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August",
+              "September", "October", "November", "December"]
+_WEEKDAY_NAMES_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def signals_in_english() -> bool:
+    return _SIGNALS_ENGLISH.get()
+
+
+def tr(bg: str, en: str) -> str:
+    """A signal's words in the viewer's language."""
+    return en if _SIGNALS_ENGLISH.get() else bg
+
+
+def tr_eur(value: Optional[float]) -> str:
+    return fmt_eur(value, _SIGNALS_ENGLISH.get())
+
+
+def tr_amount(value: Optional[float]) -> str:
+    return fmt_amount(value, _SIGNALS_ENGLISH.get())
+
+
+def tr_count(count: int, bg_one: str, bg_many: str, en_one: str, en_many: str) -> str:
+    """"1 фактура", "3 фактури" - "1 invoice", "3 invoices"."""
+    return f"{count} {tr(bg_one if count == 1 else bg_many, en_one if count == 1 else en_many)}"
+
+
+def tr_day(day: date) -> str:
+    """"21 ноември" - "21 November"."""
+    return tr(f"{day.day} {_MONTHS_BG_GENITIVE[day.month - 1]}", f"{day.day} {_MONTHS_EN[day.month - 1]}")
+
+
+def tr_month(year: int, month: int) -> str:
+    """"ноември 2026" - "November 2026" (in a sentence)."""
+    return tr(f"{_MONTHS_BG_GENITIVE[month - 1]} {year}", f"{_MONTHS_EN[month - 1]} {year}")
+
+
+def tr_and_more(count: int) -> str:
+    """" и още 2" - " and 2 more"; nothing for none."""
+    return tr(f" и още {count}", f" and {count} more") if count > 0 else ""
+
 async def _latest_invoice_date_by_supplier(scope: dict, suppliers: set) -> Dict[str, datetime]:
     """Newest invoice date per supplier (keys lower-cased), one indexed
     query per supplier - only ever asked for the few with overdue invoices."""
@@ -3651,21 +3701,28 @@ async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -
     if overdue:
         signals.append({
             "key": "unpaid_invoices", "severity": "critical", "priority": 90,
-            "title": "Просрочени фактури към доставчици",
-            "detail": f"{len(overdue)} от {len(unpaid)} неплатени фактури са просрочени - общо {fmt_eur(_owed(overdue))}.",
+            "title": tr("Просрочени фактури към доставчици", "Overdue supplier invoices"),
+            "detail": tr(
+                f"{len(overdue)} от {len(unpaid)} неплатени фактури са просрочени - общо {tr_eur(_owed(overdue))}.",
+                f"{len(overdue)} of {len(unpaid)} unpaid {'invoice' if len(unpaid) == 1 else 'invoices'} "
+                f"{'is' if len(overdue) == 1 else 'are'} overdue - {tr_eur(_owed(overdue))} in all.",
+            ),
             "route": "/(tabs)/invoices?paymentFilter=overdue",
             "fingerprint": "overdue|" + ",".join(sorted(inv["id"] for inv in overdue)),
         })
     if likely_paid:
         suppliers = sorted({inv.get("supplier") or "" for inv in likely_paid} - {""})
-        names = ", ".join(suppliers[:3]) + (f" и още {len(suppliers) - 3}" if len(suppliers) > 3 else "")
+        names = ", ".join(suppliers[:3]) + tr_and_more(len(suppliers) - 3)
         count = len(likely_paid)
         signals.append({
             "key": "invoices_likely_paid", "severity": "info", "priority": 50,
-            "title": f"{count} просрочени фактури изглеждат платени" if count > 1 else "Просрочена фактура изглежда платена",
-            "detail": (
+            "title": (tr(f"{count} просрочени фактури изглеждат платени", f"{count} overdue invoices look paid") if count > 1
+                      else tr("Просрочена фактура изглежда платена", "An overdue invoice looks paid")),
+            "detail": tr(
                 f"Купуваш от {names} и след падежа - най-вероятно са платени по банка, "
-                f"но не са отбелязани ({fmt_eur(_owed(likely_paid))}). Отбележи ги като платени?"
+                f"но не са отбелязани ({tr_eur(_owed(likely_paid))}). Отбележи ги като платени?",
+                f"You kept buying from {names} after the due date - most likely paid by bank "
+                f"but not marked ({tr_eur(_owed(likely_paid))}). Mark them as paid?",
             ),
             "route": "/(tabs)/invoices?paymentFilter=overdue",
             "fingerprint": ",".join(sorted(inv["id"] for inv in likely_paid)),
@@ -3675,8 +3732,11 @@ async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -
     if not overdue and not likely_paid:
         signals.append({
             "key": "unpaid_invoices", "severity": "warning", "priority": 45,
-            "title": "Неплатени фактури към доставчици",
-            "detail": f"{len(unpaid)} неплатени фактури на обща стойност {fmt_eur(_owed(unpaid))}.",
+            "title": tr("Неплатени фактури към доставчици", "Unpaid supplier invoices"),
+            "detail": tr(
+                f"{len(unpaid)} неплатени фактури на обща стойност {tr_eur(_owed(unpaid))}.",
+                f"{tr_count(len(unpaid), '', '', 'unpaid invoice', 'unpaid invoices')} - {tr_eur(_owed(unpaid))} in all.",
+            ),
             "route": "/(tabs)/invoices?paymentFilter=unpaid",
             "fingerprint": "unpaid|" + ",".join(sorted(inv["id"] for inv in unpaid)),
         })
@@ -3714,19 +3774,22 @@ async def _signal_receivables(company_id, scope, current_user, visibility) -> Op
         names.setdefault(customer_of(r), (r.get("customer_name") or "").strip())
     top = max(owed_by, key=lambda key: owed_by[key])
     total = sum(owed_by.values())
-    customers = _count_bg(len(owed_by), "клиент", "клиента")
-    most = f" Най-много дължи {names[top]} - {fmt_eur(owed_by[top])}." if len(owed_by) > 1 else f" Дължи {names[top]}."
+    customers = tr_count(len(owed_by), "клиент", "клиента", "customer", "customers")
+    most = (tr(f" Най-много дължи {names[top]} - {tr_eur(owed_by[top])}.", f" {names[top]} owes the most - {tr_eur(owed_by[top])}.")
+            if len(owed_by) > 1 else tr(f" Дължи {names[top]}.", f" Owed by {names[top]}."))
     if overdue:
+        debts = tr_count(len(shown), "просрочено вземане", "просрочени вземания", "overdue payment", "overdue payments")
         return {
             "key": "receivables", "severity": "critical", "priority": 85,
-            "title": "Просрочени вземания от клиенти",
-            "detail": f"{_count_bg(len(shown), 'просрочено вземане', 'просрочени вземания')} от {customers} - общо {fmt_eur(total)}.{most}",
+            "title": tr("Просрочени вземания от клиенти", "Overdue payments from customers"),
+            "detail": tr(f"{debts} от {customers} - общо {tr_eur(total)}.{most}", f"{debts} from {customers} - {tr_eur(total)} in all.{most}"),
             "route": "/receivables",
         }
+    debts = tr_count(len(shown), "неплатено вземане", "неплатени вземания", "unpaid payment", "unpaid payments")
     return {
         "key": "receivables", "severity": "info", "priority": 35,
-        "title": "Чакащи плащания от клиенти",
-        "detail": f"{_count_bg(len(shown), 'неплатено вземане', 'неплатени вземания')} от {customers} - общо {fmt_eur(total)}.{most}",
+        "title": tr("Чакащи плащания от клиенти", "Payments due from customers"),
+        "detail": tr(f"{debts} от {customers} - общо {tr_eur(total)}.{most}", f"{debts} from {customers} - {tr_eur(total)} in all.{most}"),
         "route": "/receivables",
     }
 
@@ -3748,16 +3811,18 @@ async def _signal_backup(company_id, scope, current_user, visibility) -> Optiona
         days = (today_local() - last_day).days if last_day else 0
         if days < BACKUP_REMIND_DAYS:
             return None
-        detail = f"Последният архив е отпреди {days} дни. Създай нов и го пази извън приложението."
+        detail = tr(f"Последният архив е отпреди {days} дни. Създай нов и го пази извън приложението.",
+                    f"Your last backup is {days} days old. Make a new one and keep it outside the app.")
         fingerprint = f"backup|{last_day}"
     else:
         entered = await db.invoices.count_documents(scope) + await db.daily_revenue.count_documents(scope)
         if entered < 20:
             return None
-        detail = "Още нямаш архив на данните си. Създай го и го пази извън приложението - на телефона или в облака."
+        detail = tr("Още нямаш архив на данните си. Създай го и го пази извън приложението - на телефона или в облака.",
+                    "You have no backup of your data yet. Make one and keep it outside the app - on your phone or in the cloud.")
         fingerprint = "backup|none"
     return {
-        "key": "backup", "severity": "info", "priority": 30, "title": "Архив на данните",
+        "key": "backup", "severity": "info", "priority": 30, "title": tr("Архив на данните", "Data backup"),
         "detail": detail, "route": "/backup", "fingerprint": fingerprint,
     }
 
@@ -3772,8 +3837,10 @@ async def _signal_two_factor(company_id, scope, current_user, visibility) -> Opt
     if entered < 20:
         return None
     return {
-        "key": "two_factor", "severity": "info", "priority": 28, "title": "Защити входа",
-        "detail": "Включи втора стъпка при вход - код от телефона след паролата. Някой с паролата ти пак няма да влезе.",
+        "key": "two_factor", "severity": "info", "priority": 28, "title": tr("Защити входа", "Protect your sign-in"),
+        "detail": tr("Включи втора стъпка при вход - код от телефона след паролата. Някой с паролата ти пак няма да влезе.",
+                     "Turn on a second step at sign-in - a code from your phone after the password. "
+                     "Someone with your password still won't get in."),
         "route": "/account-security", "fingerprint": "two_factor|off",
     }
 
@@ -3824,18 +3891,22 @@ async def _signal_payments_this_week(company_id, scope, current_user, visibility
         return None
     parts = []
     if due:
-        parts.append(f"{_count_bg(len(due), 'фактура', 'фактури')} за {fmt_eur(sum(invoice_left(inv) for inv in due))}")
+        parts.append(tr_count(len(due), "фактура", "фактури", "invoice", "invoices")
+                     + tr(" за ", " for ") + tr_eur(sum(invoice_left(inv) for inv in due)))
     if recurring:
-        named = ", ".join(f"{name} {fmt_eur(amount)}" for name, amount in recurring[:2])
+        named = ", ".join(f"{name} {tr_eur(amount)}" for name, amount in recurring[:2])
         if len(recurring) > 2:
             rest = recurring[2:]
-            named += f" и още {_count_bg(len(rest), 'периодичен разход', 'периодични разхода')} за {fmt_eur(sum(a for _, a in rest))}"
+            named += (tr(" и още ", " and ")
+                      + tr_count(len(rest), "периодичен разход", "периодични разхода", "more recurring expense", "more recurring expenses")
+                      + tr(" за ", " for ") + tr_eur(sum(a for _, a in rest)))
         parts.append(named)
-    when = "Следващата седмица" if next_week else "Тази седмица"
+    when = tr("Следващата седмица", "Next week") if next_week else tr("Тази седмица", "This week")
     return {
         "key": "payments_this_week", "severity": "info", "priority": 55,
-        "title": "Плащания следващата седмица" if next_week else "Плащания тази седмица",
-        "detail": f"{when} (до {end.strftime('%d.%m')}) плащаш {' и '.join(parts)}.",
+        "title": tr("Плащания следващата седмица", "Payments next week") if next_week else tr("Плащания тази седмица", "Payments this week"),
+        "detail": tr(f"{when} (до {end.strftime('%d.%m')}) плащаш {' и '.join(parts)}.",
+                     f"{when} (through {end.strftime('%d.%m')}) you pay {' and '.join(parts)}."),
         "route": "/(tabs)/invoices?paymentFilter=unpaid",
         "fingerprint": f"{start.isoformat()}|" + ",".join(sorted(inv["id"] for inv in due))
                        + "|" + ",".join(sorted(f"{i}:{y}-{m}" for i, y, m in seen_items)),
@@ -4181,6 +4252,24 @@ async def cash_flow_projection(company_id: Optional[str], scope: dict, current_u
     return result
 
 
+# The names the cash flow gives a payment with none of its own, in English.
+_CASH_LABELS_EN = {
+    "Доставчик": "Supplier", "Клиент": "Customer", "Периодичен разход": "Recurring expense",
+    "Лично плащане": "Personal payment", "Заплати и осигуровки": "Salaries and insurance",
+}
+
+
+def _cash_event_label(event: dict) -> str:
+    """A payment's name in a signal: its own (a supplier, a description), or
+    the cash flow's word for it in the viewer's language."""
+    label = str(event.get("label") or "")
+    if not signals_in_english():
+        return label
+    if event.get("kind") == cash_flow_service.VAT:
+        return "VAT"
+    return _CASH_LABELS_EN.get(label, label)
+
+
 async def _signal_cash_flow(company_id, scope, current_user, visibility) -> Optional[dict]:
     """Will the money last the next 30 days? Weeks before it runs short:
     the day it goes below zero, how low, and the biggest payments before it.
@@ -4195,16 +4284,18 @@ async def _signal_cash_flow(company_id, scope, current_user, visibility) -> Opti
     biggest = sorted(
         (e for e in flow["events"] if e["amount"] < 0 and e["date"] <= flow["lowest"]["date"]), key=lambda e: e["amount"],
     )[:2]
-    before = ", ".join(f"{e['label']} {fmt_eur(abs(e['amount']))}" for e in biggest)
+    before = ", ".join(f"{_cash_event_label(e)} {tr_eur(abs(e['amount']))}" for e in biggest)
     days_left = (first - today_local()).days
-    detail = (
-        f"Около {first.strftime('%d.%m')} парите може да не стигнат: най-ниско "
-        f"{fmt_eur(lowest['balance'])} на {date.fromisoformat(lowest['date']).strftime('%d.%m')}."
-        + (f" Най-големите плащания дотогава: {before}." if before else "")
+    lowest_day = date.fromisoformat(lowest['date']).strftime('%d.%m')
+    detail = tr(
+        f"Около {first.strftime('%d.%m')} парите може да не стигнат: най-ниско {tr_eur(lowest['balance'])} на {lowest_day}."
+        + (f" Най-големите плащания дотогава: {before}." if before else ""),
+        f"Around {first.strftime('%d.%m')} the money may run short: lowest {tr_eur(lowest['balance'])} on {lowest_day}."
+        + (f" The biggest payments before then: {before}." if before else ""),
     )
     return {
         "key": "cash_flow", "severity": "critical" if days_left <= 7 else "warning",
-        "priority": 88 if days_left <= 7 else 70, "title": "Паричен поток", "detail": detail,
+        "priority": 88 if days_left <= 7 else 70, "title": tr("Паричен поток", "Cash flow"), "detail": detail,
         "route": "/cash-flow", "fingerprint": f"cash_flow|{flow['first_negative']}",
     }
 
@@ -4251,11 +4342,12 @@ async def _signal_scan_credits(company_id, scope, current_user, visibility) -> O
     severity = "critical" if days <= 1 else "warning"
     priority = 92 if days <= 1 else (75 if days <= 3 else 55)
     body = (
-        "Кредитите ти за сканиране вече са на привършване." if days <= 0 else
-        f"При текущия темп кредитите ти за сканиране ще свършат за около {days} {'ден' if days == 1 else 'дни'}."
+        tr("Кредитите ти за сканиране вече са на привършване.", "Your scan credits are about to run out.") if days <= 0 else
+        tr(f"При текущия темп кредитите ти за сканиране ще свършат за около {days} {'ден' if days == 1 else 'дни'}.",
+           f"At the current pace your scan credits run out in about {days} {'day' if days == 1 else 'days'}.")
     )
     return {"key": "scan_credits", "severity": severity, "priority": priority,
-            "title": "Кредитите за сканиране свършват", "detail": body, "route": "/scan-credits"}
+            "title": tr("Кредитите за сканиране свършват", "Scan credits are running out"), "detail": body, "route": "/scan-credits"}
 
 async def _signal_budget(company_id, scope, current_user, visibility) -> Optional[dict]:
     if not company_id or "manage_budget" not in set(current_user.permissions or []):
@@ -4266,15 +4358,17 @@ async def _signal_budget(company_id, scope, current_user, visibility) -> Optiona
     if status["is_exceeded"]:
         return {
             "key": "budget", "severity": "critical", "priority": 88,
-            "title": "Бюджетът е надхвърлен",
-            "detail": f"Разходите вече са {fmt_eur(status['total_spent'])} при лимит {fmt_eur(status['expense_limit'])}.",
+            "title": tr("Бюджетът е надхвърлен", "Budget exceeded"),
+            "detail": tr(f"Разходите вече са {tr_eur(status['total_spent'])} при лимит {tr_eur(status['expense_limit'])}.",
+                         f"Expenses are already {tr_eur(status['total_spent'])} against a limit of {tr_eur(status['expense_limit'])}."),
             "route": "/budget",
         }
     if status["is_alert"]:
         return {
             "key": "budget", "severity": "warning", "priority": 65,
-            "title": "Приближаваш бюджетния лимит",
-            "detail": f"Разходите са на {status['percent_used']:.0f}% от лимита от {fmt_eur(status['expense_limit'])}.",
+            "title": tr("Приближаваш бюджетния лимит", "Nearing the budget limit"),
+            "detail": tr(f"Разходите са на {status['percent_used']:.0f}% от лимита от {tr_eur(status['expense_limit'])}.",
+                         f"Expenses are at {status['percent_used']:.0f}% of the {tr_eur(status['expense_limit'])} limit."),
             "route": "/budget",
         }
     return None
@@ -4312,28 +4406,32 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
     pack_note = ""
     if packs:
         p = packs[0]
-        pack_note = (
+        pack_note = tr(
             f"\"{p['item_name']}\" във фактура {p.get('invoice_number', '')}: цената е точно "
-            f"{p.get('pack_multiple')}× обичайната - стек ли е?"
+            f"{p.get('pack_multiple')}× обичайната - стек ли е?",
+            f"\"{p['item_name']}\" on invoice {p.get('invoice_number', '')}: the price is exactly "
+            f"{p.get('pack_multiple')}× the usual - is it a pack?",
         )
         if len(packs) > 1:
-            pack_note += f" (+{len(packs) - 1} още за проверка)"
+            pack_note += tr(f" (+{len(packs) - 1} още за проверка)", f" (+{len(packs) - 1} more to check)")
 
     if rises:
         top = rises[0]
         others = len(changes) - 1
-        detail = (
-            f"\"{top['item_name']}\" при {top['supplier']}: {fmt_amount(top['old_price'])} → {fmt_eur(top['new_price'])} "
-            f"({top['change_percent']:+.0f}%), ≈ {_eur(top['monthly_impact'])} € на месец."
+        change = f"{tr_amount(top['old_price'])} → {tr_eur(top['new_price'])} ({top['change_percent']:+.0f}%)"
+        detail = tr(
+            f"\"{top['item_name']}\" при {top['supplier']}: {change}, ≈ {tr_amount(top['monthly_impact'])} € на месец.",
+            f"\"{top['item_name']}\" from {top['supplier']}: {change}, ≈ {tr_amount(top['monthly_impact'])} € a month.",
         )
         if others > 0:
-            detail += f" Още {others} промени."
+            detail += tr(f" Още {others} промени.", f" {others} more {'change' if others == 1 else 'changes'}.")
         if pack_note:
-            detail += f" Провери и: {pack_note}"
+            detail += tr(f" Провери и: {pack_note}", f" Also check: {pack_note}")
         return {
             "key": "price_alerts", "severity": "warning" if monthly_total >= 100 else "info",
             "priority": min(75, round(45 + min(30, monthly_total / 20))),
-            "title": f"Доставките поскъпват с ≈ {_eur(monthly_total)} € на месец",
+            "title": tr(f"Доставките поскъпват с ≈ {tr_amount(monthly_total)} € на месец",
+                        f"Supplies cost ≈ {tr_amount(monthly_total)} € a month more"),
             "detail": detail,
             "route": STATS_ITEMS_ROUTE,
             "fingerprint": fingerprint,
@@ -4341,7 +4439,7 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
     if packs:
         return {
             "key": "price_alerts", "severity": "info", "priority": 48,
-            "title": "Провери опаковка във фактура",
+            "title": tr("Провери опаковка във фактура", "Check a pack on an invoice"),
             "detail": pack_note[0].upper() + pack_note[1:] if pack_note else "",
             "route": STATS_ITEMS_ROUTE,
             "fingerprint": fingerprint,
@@ -4349,8 +4447,9 @@ async def _signal_price_alerts(company_id, scope, current_user, visibility) -> O
     # Only falls or alerts from before money impact was measured
     return {
         "key": "price_alerts", "severity": "info", "priority": 40,
-        "title": "Промени в цените на доставчици",
-        "detail": f"{len(changes)} непрочетени известия за промяна в цените.",
+        "title": tr("Промени в цените на доставчици", "Supplier price changes"),
+        "detail": tr(f"{len(changes)} непрочетени известия за промяна в цените.",
+                     f"{tr_count(len(changes), '', '', 'unread price change alert', 'unread price change alerts')}."),
         "route": STATS_ITEMS_ROUTE,
         "fingerprint": fingerprint,
     }
@@ -4369,10 +4468,12 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> List[d
         item = stale[0]
         signals.append({
             "key": "reorder_stale", "severity": "info", "priority": 30,
-            "title": f"Още ли купуваш \"{item['item_name']}\"?",
-            "detail": (
+            "title": tr(f"Още ли купуваш \"{item['item_name']}\"?", f"Do you still buy \"{item['item_name']}\"?"),
+            "detail": tr(
                 f"Поръчваше го на всеки {item['median_days_between']} дни, а последната покупка беше "
-                f"преди {item['days_since_last']} дни. Ако вече не го купуваш, спирам напомнянията за него."
+                f"преди {item['days_since_last']} дни. Ако вече не го купуваш, спирам напомнянията за него.",
+                f"You ordered it every {item['median_days_between']} days, and the last purchase was "
+                f"{item['days_since_last']} days ago. If you no longer buy it, I'll stop the reminders for it.",
             ),
             "route": STATS_ITEMS_ROUTE,
             "fingerprint": f"{item['item_key']}|{item['last_purchase_date']}",
@@ -4392,19 +4493,24 @@ async def _signal_reorder(company_id, scope, current_user, visibility) -> List[d
     # pattern-based suggestion, never urgent enough to rank above an
     # actual money problem, however overdue the pattern looks.
     priority = min(50, round(30 + (overdue_ratio - 1.5) * 10))
-    value_note = f" (обичайно за ~{fmt_eur(top['avg_order_value'])})" if top.get("avg_order_value") else ""
+    value_note = (tr(f" (обичайно за ~{tr_eur(top['avg_order_value'])})", f" (usually ~{tr_eur(top['avg_order_value'])})")
+                  if top.get("avg_order_value") else "")
     # Recommended quantity turns this from a bare "it's been a while" nudge
     # into something actionable - get_reorder_recommendations' same
     # trend-adjusted suggestion (see _compute_recurring_item_cadences),
     # just for the single most-worth-surfacing item here.
     quantity_note = (
-        f" Препоръчано количество: ~{top['recommended_quantity']} {top['unit'].rstrip('.')}."
+        tr(f" Препоръчано количество: ~{top['recommended_quantity']} {top['unit'].rstrip('.')}.",
+           f" Suggested quantity: ~{top['recommended_quantity']} {top['unit'].rstrip('.')}.")
         if top.get("recommended_quantity") else ""
     )
     signals.append({
         "key": "reorder", "severity": "info", "priority": priority,
-        "title": "Време е за нова поръчка",
-        "detail": f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни{value_note} - вече мина {top['days_since_last']}.{quantity_note}",
+        "title": tr("Време е за нова поръчка", "Time to reorder"),
+        "detail": tr(
+            f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни{value_note} - вече мина {top['days_since_last']}.{quantity_note}",
+            f"\"{top['item_name']}\" is usually ordered every {top['median_days_between']} days{value_note} - it has been {top['days_since_last']}.{quantity_note}",
+        ),
         "route": STATS_ITEMS_ROUTE,
         # Done = until it is bought again (the day count in the text
         # changes daily, so the text itself can't identify it)
@@ -4434,8 +4540,9 @@ def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Op
         if vs_last_year is not None and vs_last_year <= -YEAR_BACK_WARNING_PERCENT:
             return {
                 "key": "forecast_revenue", "severity": "warning", "priority": 60,
-                "title": "Оборотът е под миналогодишния",
-                "detail": f"През последните месеци оборотът ти е с около {abs(vs_last_year):.0f}% по-нисък от същите месеци миналата година.",
+                "title": tr("Оборотът е под миналогодишния", "Revenue is below last year's"),
+                "detail": tr(f"През последните месеци оборотът ти е с около {abs(vs_last_year):.0f}% по-нисък от същите месеци миналата година.",
+                             f"In recent months your revenue has been about {abs(vs_last_year):.0f}% lower than in the same months last year."),
                 "route": STATS_OVERVIEW_ROUTE,
                 "fingerprint": f"below_last_year|{month}",
             }
@@ -4446,8 +4553,9 @@ def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Op
     ):
         return {
             "key": "forecast_revenue", "severity": "warning", "priority": 60,
-            "title": "Оборотът показва низходяща тенденция",
-            "detail": f"Оборотът ти намалява с около {abs(revenue_forecast['trend_percent']):.0f}% спрямо предходния период.",
+            "title": tr("Оборотът показва низходяща тенденция", "Revenue is trending down"),
+            "detail": tr(f"Оборотът ти намалява с около {abs(revenue_forecast['trend_percent']):.0f}% спрямо предходния период.",
+                         f"Your revenue is down about {abs(revenue_forecast['trend_percent']):.0f}% on the previous period."),
             "route": STATS_OVERVIEW_ROUTE,
             "fingerprint": f"decreasing|{month}",
         }
@@ -4456,8 +4564,9 @@ def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Op
         if vs_last_year is not None and vs_last_year >= YEAR_BACK_WARNING_PERCENT:
             return {
                 "key": "forecast_expense", "severity": "warning", "priority": 58,
-                "title": "Разходите са над миналогодишните",
-                "detail": f"През последните месеци разходите ти са с около {vs_last_year:.0f}% по-високи от същите месеци миналата година.",
+                "title": tr("Разходите са над миналогодишните", "Expenses are above last year's"),
+                "detail": tr(f"През последните месеци разходите ти са с около {vs_last_year:.0f}% по-високи от същите месеци миналата година.",
+                             f"In recent months your expenses have been about {vs_last_year:.0f}% higher than in the same months last year."),
                 "route": STATS_OVERVIEW_ROUTE,
                 "fingerprint": f"above_last_year|{month}",
             }
@@ -4468,8 +4577,9 @@ def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Op
     ):
         return {
             "key": "forecast_expense", "severity": "warning", "priority": 58,
-            "title": "Разходите показват възходяща тенденция",
-            "detail": f"Разходите ти нарастват с около {abs(expense_forecast['trend_percent']):.0f}% спрямо предходния период.",
+            "title": tr("Разходите показват възходяща тенденция", "Expenses are trending up"),
+            "detail": tr(f"Разходите ти нарастват с около {abs(expense_forecast['trend_percent']):.0f}% спрямо предходния период.",
+                         f"Your expenses are up about {abs(expense_forecast['trend_percent']):.0f}% on the previous period."),
             "route": STATS_OVERVIEW_ROUTE,
             "fingerprint": f"increasing|{month}",
         }
@@ -4490,21 +4600,29 @@ def _year_back_notice(kind: str, forecast: dict) -> Optional[dict]:
     deviation = last_year / average - 1
     if abs(deviation) < YEAR_BACK_NOTICE_MIN_DEVIATION or (kind == "expense" and deviation < 0):
         return None
-    month_name = _MONTHS_BG_GENITIVE[int(next_month["month"][5:7]) - 1]
+    month_index = int(next_month["month"][5:7]) - 1
+    month_name = tr(_MONTHS_BG_GENITIVE[month_index], _MONTHS_EN[month_index])
     percent = round(abs(deviation) * 100)
-    forecast_text = f"Прогнозата за {month_name}: около {_eur(next_month['predicted_amount'])} €."
+    forecast_text = tr(f"Прогнозата за {month_name}: около {tr_amount(next_month['predicted_amount'])} €.",
+                       f"The forecast for {month_name}: about {tr_amount(next_month['predicted_amount'])} €.")
     if kind == "revenue" and deviation > 0:
-        title = "Предстои по-силен месец"
-        detail = (f"Миналата година през {month_name} оборотът беше с {percent}% над средния ти месец. "
-                  f"{forecast_text} Планирай навреме покупките и работата.")
+        title = tr("Предстои по-силен месец", "A stronger month is coming")
+        detail = tr(f"Миналата година през {month_name} оборотът беше с {percent}% над средния ти месец. "
+                    f"{forecast_text} Планирай навреме покупките и работата.",
+                    f"Last year in {month_name} revenue was {percent}% above your average month. "
+                    f"{forecast_text} Plan purchases and work in time.")
     elif kind == "revenue":
-        title = "Предстои по-слаб месец"
-        detail = (f"Миналата година през {month_name} оборотът беше с {percent}% под средния ти месец. "
-                  f"{forecast_text} Планирай навреме плащанията и паричния поток.")
+        title = tr("Предстои по-слаб месец", "A weaker month is coming")
+        detail = tr(f"Миналата година през {month_name} оборотът беше с {percent}% под средния ти месец. "
+                    f"{forecast_text} Планирай навреме плащанията и паричния поток.",
+                    f"Last year in {month_name} revenue was {percent}% below your average month. "
+                    f"{forecast_text} Plan payments and cash flow in time.")
     else:
-        title = "Предстои месец с повече разходи"
-        detail = (f"Миналата година през {month_name} разходите бяха с {percent}% над средния ти месец. "
-                  f"{forecast_text} Провери навреме какво предстои за плащане.")
+        title = tr("Предстои месец с повече разходи", "A month with more expenses is coming")
+        detail = tr(f"Миналата година през {month_name} разходите бяха с {percent}% над средния ти месец. "
+                    f"{forecast_text} Провери навреме какво предстои за плащане.",
+                    f"Last year in {month_name} expenses were {percent}% above your average month. "
+                    f"{forecast_text} Check in time what is coming up to pay.")
     return {
         "key": f"year_back_{kind}", "severity": "info", "priority": 42 if kind == "revenue" else 40,
         "title": title, "detail": detail, "route": STATS_OVERVIEW_ROUTE,
@@ -4565,8 +4683,9 @@ async def _signal_schedule_unpaid(company_id, scope, current_user, visibility) -
         return None
     return {
         "key": "schedule_unpaid", "severity": "info", "priority": 38,
-        "title": "Неплатени часове по график",
-        "detail": f"Екипът е отработил часове на стойност {fmt_eur(unpaid)} този месец, които още не са маркирани като платени.",
+        "title": tr("Неплатени часове по график", "Unpaid scheduled hours"),
+        "detail": tr(f"Екипът е отработил часове на стойност {tr_eur(unpaid)} този месец, които още не са маркирани като платени.",
+                     f"The team has worked hours worth {tr_eur(unpaid)} this month that are not marked as paid yet."),
         "route": "/pay-run",
     }
 
@@ -4585,20 +4704,21 @@ async def _signal_team_on_leave(company_id, scope, current_user, visibility) -> 
         return None
     sick = [e.get("leave_type") == LeaveType.SICK.value for e in entries]
     names = ", ".join(e["employee_name"] for e in entries[:3])
-    more = f" и още {len(entries) - 3}" if len(entries) > 3 else ""
+    more = tr_and_more(len(entries) - 3)
     one = len(entries) == 1
     if all(sick):
-        verb = "е в болничен" if one else "са в болничен"
+        verb = tr("е в болничен", "is on sick leave") if one else tr("са в болничен", "are on sick leave")
     elif any(sick):
         # Some on leave, some on sick leave: each sick one is marked.
-        names = ", ".join(f"{e['employee_name']} (болничен)" if is_sick else e["employee_name"] for e, is_sick in zip(entries[:3], sick))
-        verb = "отсъстват"
+        sick_mark = tr(" (болничен)", " (sick leave)")
+        names = ", ".join(f"{e['employee_name']}{sick_mark}" if is_sick else e["employee_name"] for e, is_sick in zip(entries[:3], sick))
+        verb = tr("отсъстват", "are away")
     else:
-        verb = "е в отпуск" if one else "са в отпуск"
+        verb = tr("е в отпуск", "is on leave") if one else tr("са в отпуск", "are on leave")
     return {
         "key": "team_on_leave", "severity": "info", "priority": 25,
-        "title": "Екипът днес",
-        "detail": f"{names}{more} {verb} днес.",
+        "title": tr("Екипът днес", "The team today"),
+        "detail": tr(f"{names}{more} {verb} днес.", f"{names}{more} {verb} today."),
         "route": "/work-schedule",
     }
 
@@ -4619,15 +4739,34 @@ async def _signal_personal_wallet(company_id, scope, current_user, visibility) -
     severity = "critical" if summary["status"] == "danger" else "warning"
     return {
         "key": "personal_wallet", "severity": severity, "priority": 80 if severity == "critical" else 55,
-        "title": "Личните тегления надхвърлят безопасния лимит" if severity == "critical" else "Личните тегления се доближават до лимита",
-        "detail": summary["advice"][0],
+        "title": (tr("Личните тегления надхвърлят безопасния лимит", "Personal withdrawals are over the safe limit")
+                  if severity == "critical" else
+                  tr("Личните тегления се доближават до лимита", "Personal withdrawals are nearing the limit")),
+        "detail": summary["advice"][0] if not signals_in_english() else _wallet_detail_en(summary, severity),
         "route": "/personal-expenses",
         "fingerprint": f"{summary['status']}|{now_local():%Y-%m}",
     }
 
+def _wallet_detail_en(summary: dict, severity: str) -> str:
+    """The personal notebook's warning in English (its own advice is written in Bulgarian)."""
+    spent = summary.get("spent_percent_of_profit")
+    limit = summary.get("threshold_percent")
+    if spent is None:
+        return "Look at the personal notebook: this month's withdrawals need attention."
+    if severity == "critical":
+        return (f"Personal withdrawals are already {spent:.0f}% of the month's profit"
+                + (f" (limit {limit:.0f}%)" if limit is not None else "") + " - the business risks overspending.")
+    return f"Personal withdrawals have reached {spent:.0f}% of the profit - watch them closely until the end of the month."
+
+
 # Bulgarian weekday names, index 0=Monday matching Python's own
 # datetime.weekday() - shared by both weekday-pattern signals below.
 _WEEKDAY_NAMES_BG = ["понеделник", "вторник", "сряда", "четвъртък", "петък", "събота", "неделя"]
+
+
+def _weekday_name(weekday: int) -> str:
+    """"петък" - "Fridays" (as in "on Fridays")."""
+    return tr(_WEEKDAY_NAMES_BG[weekday], f"{_WEEKDAY_NAMES_EN[weekday]}s")
 
 async def _signal_weak_weekday(company_id, scope, current_user, visibility) -> Optional[dict]:
     """Module: cross-data-source insight #2 - a weekday open every week
@@ -4642,15 +4781,18 @@ async def _signal_weak_weekday(company_id, scope, current_user, visibility) -> O
     suggestion = await _weak_day_suggestion(company_id)
     if not suggestion:
         return None
-    day_name = _WEEKDAY_NAMES_BG[suggestion["weekday"]]
+    day_name = _weekday_name(suggestion["weekday"])
     return {
         "key": "weak_weekday", "severity": "info", "priority": 35,
         "fingerprint": str(suggestion["weekday"]),
-        "title": "Един ден от седмицата изостава",
-        "detail": (
-            f"Оборотът ти в {day_name} е средно {fmt_eur(suggestion['avg_revenue'])} - "
+        "title": tr("Един ден от седмицата изостава", "One weekday lags behind"),
+        "detail": tr(
+            f"Оборотът ти в {day_name} е средно {tr_eur(suggestion['avg_revenue'])} - "
             f"с {suggestion['percent_below_average']}% под обичайния ти ден "
-            f"({fmt_eur(suggestion['overall_avg_revenue'])}). Струва ли си пълен работен ден?"
+            f"({tr_eur(suggestion['overall_avg_revenue'])}). Струва ли си пълен работен ден?",
+            f"Your revenue on {day_name} averages {tr_eur(suggestion['avg_revenue'])} - "
+            f"{suggestion['percent_below_average']}% below your usual day "
+            f"({tr_eur(suggestion['overall_avg_revenue'])}). Is a full working day worth it?",
         ),
         "route": STATS_ITEMS_ROUTE,
     }
@@ -4669,18 +4811,23 @@ async def _signal_staffing_mismatch(company_id, scope, current_user, visibility)
     suggestion = await _staffing_rebalance_suggestion(company_id)
     if not suggestion:
         return None
-    over_name = _WEEKDAY_NAMES_BG[suggestion["overstaffed_weekday"]]
-    under_name = _WEEKDAY_NAMES_BG[suggestion["understaffed_weekday"]]
+    over_name = _weekday_name(suggestion["overstaffed_weekday"])
+    under_name = _weekday_name(suggestion["understaffed_weekday"])
     return {
         "key": "staffing_mismatch", "severity": "info", "priority": 36,
         "fingerprint": f"{suggestion['overstaffed_weekday']}|{suggestion['understaffed_weekday']}",
-        "title": "Графикът не пасва на оборота",
-        "detail": (
+        "title": tr("Графикът не пасва на оборота", "The schedule doesn't fit the revenue"),
+        "detail": tr(
             f"В {over_name} имаш пълен екип, но оборотът на отработен час е само "
             f"{suggestion['overstaffed_percent_of_average']}% от средното; в {under_name} "
             f"същият екип изкарва {suggestion['understaffed_percent_of_average']}%. "
             f"Обмисли да преместиш ~{suggestion['suggested_hours_to_move']} часа от "
-            f"{over_name} към {under_name}."
+            f"{over_name} към {under_name}.",
+            f"On {over_name} you have a full team, but revenue per worked hour is only "
+            f"{suggestion['overstaffed_percent_of_average']}% of the average; on {under_name} "
+            f"the same team makes {suggestion['understaffed_percent_of_average']}%. "
+            f"Consider moving ~{suggestion['suggested_hours_to_move']} hours from "
+            f"{over_name} to {under_name}.",
         ),
         "route": STATS_ITEMS_ROUTE,
     }
@@ -4691,15 +4838,17 @@ _MONTHS_BG_GENITIVE = [
 ]
 
 def _bg_day_list(dates: List[str]) -> str:
-    """'2026-11-02', '2026-11-05', '2026-11-09' -> '2, 5 и 9 ноември'."""
+    """'2026-11-02', '2026-11-05', '2026-11-09' -> '2, 5 и 9 ноември'
+    ('2, 5 and 9 November' in English signals)."""
+    months = _MONTHS_EN if signals_in_english() else _MONTHS_BG_GENITIVE
     parsed = [datetime.strptime(d, "%Y-%m-%d") for d in dates]
     if len({(p.year, p.month) for p in parsed}) == 1:
         parts = [str(p.day) for p in parsed]
-        suffix = f" {_MONTHS_BG_GENITIVE[parsed[0].month - 1]}"
+        suffix = f" {months[parsed[0].month - 1]}"
     else:
-        parts = [f"{p.day} {_MONTHS_BG_GENITIVE[p.month - 1]}" for p in parsed]
+        parts = [f"{p.day} {months[p.month - 1]}" for p in parsed]
         suffix = ""
-    joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " и " + parts[-1]
+    joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + tr(" и ", " and ") + parts[-1]
     return joined + suffix
 
 async def _signal_vat_registration(company_id, scope, current_user, visibility) -> Optional[dict]:
@@ -4713,10 +4862,12 @@ async def _signal_vat_registration(company_id, scope, current_user, visibility) 
         return None
     return {
         "key": "vat_registration", "severity": "info", "priority": 30,
-        "title": "Регистрирана ли е фирмата по ЗДДС?",
-        "detail": (
+        "title": tr("Регистрирана ли е фирмата по ЗДДС?", "Is the business registered for VAT?"),
+        "detail": tr(
             "От отговора зависи дали програмата показва ДДС за плащане и дали издадените фактури са с ДДС. "
-            "Отбележи го в настройките на фирмата - прагът и регистрацията остават работа на счетоводителя."
+            "Отбележи го в настройките на фирмата - прагът и регистрацията остават работа на счетоводителя.",
+            "The answer decides whether the app shows VAT to pay and whether your issued invoices carry VAT. "
+            "Set it in the company settings - the threshold and the registration stay with your accountant.",
         ),
         "route": "/company-settings",
     }
@@ -4736,15 +4887,18 @@ async def _signal_missing_revenue(company_id, scope, current_user, visibility) -
     shown = missing[-5:]
     days_text = _bg_day_list(shown)
     if len(missing) > len(shown):
-        days_text = f"{days_text} (и още {len(missing) - len(shown)})"
+        days_text = tr(f"{days_text} (и още {len(missing) - len(shown)})", f"{days_text} (and {len(missing) - len(shown)} more)")
     many = len(missing) >= 3
     return {
         "key": "missing_revenue", "severity": "warning" if many else "info",
         "priority": 55 if many else 40,
-        "title": f"Липсва оборот за {_bg_day_list([missing[-1]])}" if len(missing) == 1 else f"Липсва оборот за {len(missing)} дни",
-        "detail": (
+        "title": (tr(f"Липсва оборот за {_bg_day_list([missing[-1]])}", f"Revenue missing for {_bg_day_list([missing[-1]])}")
+                  if len(missing) == 1 else tr(f"Липсва оборот за {len(missing)} дни", f"Revenue missing for {len(missing)} days")),
+        "detail": tr(
             f"Няма въведен оборот за {days_text}. Без тях седмичните изводи "
-            "и прогнозите не са точни - въведи ги или отбележи деня като почивен."
+            "и прогнозите не са точни - въведи ги или отбележи деня като почивен.",
+            f"No revenue entered for {days_text}. Without it the weekly insights "
+            "and forecasts are off - enter it or mark the day as closed.",
         ),
         "route": f"/(tabs)?revenueDate={missing[-1]}",
         "fingerprint": missing[-1],
@@ -4767,10 +4921,12 @@ async def _signal_payroll_rates_year(company_id, scope, current_user, visibility
     return {
         "key": "payroll_rates_year", "severity": "info", "priority": 34, "route": "/payroll",
         "fingerprint": f"payroll_rates_{today.year}",
-        "title": f"Осигурителните ставки за {today.year}",
-        "detail": (
+        "title": tr(f"Осигурителните ставки за {today.year}", f"Insurance rates for {today.year}"),
+        "detail": tr(
             "В началото на годината обикновено се променят минималният и максималният осигурителен доход. "
-            "Провери ставките и ги запиши „в сила от“ януари - ведомостите от миналата година остават със своите."
+            "Провери ставките и ги запиши „в сила от“ януари - ведомостите от миналата година остават със своите.",
+            "The minimum and maximum insurable income usually change at the start of the year. "
+            "Check the rates and save them as effective from January - last year's payrolls keep theirs.",
         ),
     }
 
@@ -4820,11 +4976,24 @@ SIGNAL_DISMISS_DAYS = 90
 def signal_fingerprint(signal: dict) -> str:
     """What a "done" on this signal refers to. A builder gives its own
     when its text changes daily for the same situation (days counters);
-    otherwise the text itself identifies the situation."""
-    raw = signal.get("fingerprint") or f"{signal['title']}|{signal['detail']}"
+    otherwise the text itself identifies the situation - its Bulgarian
+    text, whichever language shows it, so a "done" holds in both."""
+    raw = signal.get("fingerprint") or signal.get("_text_fingerprint") or f"{signal['title']}|{signal['detail']}"
     return hashlib.sha1(f"{signal['key']}|{raw}".encode()).hexdigest()[:16]
 
-async def get_proactive_signals(current_user: User) -> List[dict]:
+
+async def _run_signal_builder(builder, company_id, scope, current_user: User, visibility: dict) -> List[dict]:
+    """One builder's signals as a list - none when it failed (logged)."""
+    try:
+        produced = await builder(company_id, scope, current_user, visibility)
+    except Exception:
+        logger.exception(f"Proactive engine: {builder.__name__} failed")
+        return []
+    if isinstance(produced, list):
+        return [s for s in produced if s]
+    return [produced] if produced else []
+
+async def get_proactive_signals(current_user: User, english: bool = False) -> List[dict]:
     """Computes and ranks every signal this viewer is allowed to see - shared
     by GET /proactive/signals (the Home card) and the daily digest push
     tick below. Each builder softly skips itself (returns None) when the
@@ -4837,23 +5006,37 @@ async def get_proactive_signals(current_user: User) -> List[dict]:
     Remembers what this viewer said about each signal (signal_states): a
     snoozed signal stays away for SIGNAL_SNOOZE_DAYS, a dismissed one until
     its fingerprint changes - before this, every signal came back every
-    day however many times it had been seen and dealt with."""
+    day however many times it had been seen and dealt with.
+
+    Written in English for an app in English (english), in Bulgarian
+    otherwise - the keys, routes and fingerprints are the same in both."""
     company_id, scope = await get_company_scope(current_user)
     visibility = get_financial_visibility(current_user)
     signals: List[dict] = []
-    for builder in _PROACTIVE_SIGNAL_BUILDERS:
-        try:
-            produced = await builder(company_id, scope, current_user, visibility)
-            if isinstance(produced, list):
-                signals.extend(s for s in produced if s)
-            elif produced:
-                signals.append(produced)
-        except Exception:
-            logger.exception(f"Proactive engine: {builder.__name__} failed")
+    language = _SIGNALS_ENGLISH.set(english)
+    try:
+        for builder in _PROACTIVE_SIGNAL_BUILDERS:
+            produced = await _run_signal_builder(builder, company_id, scope, current_user, visibility)
+            if english and any(not s.get("fingerprint") for s in produced):
+                # A signal told apart by its text is told apart by the
+                # Bulgarian one: the builder once more in Bulgarian.
+                in_bulgarian = _SIGNALS_ENGLISH.set(False)
+                try:
+                    twins = {s["key"]: s for s in await _run_signal_builder(builder, company_id, scope, current_user, visibility)}
+                finally:
+                    _SIGNALS_ENGLISH.reset(in_bulgarian)
+                for s in produced:
+                    twin = twins.get(s["key"])
+                    if not s.get("fingerprint") and twin:
+                        s["_text_fingerprint"] = f"{twin['title']}|{twin['detail']}"
+            signals.extend(produced)
+    finally:
+        _SIGNALS_ENGLISH.reset(language)
 
     for s in signals:
         explicit = bool(s.get("fingerprint"))
         s["fingerprint"] = signal_fingerprint(s)
+        s.pop("_text_fingerprint", None)
         s.setdefault("actions", ["snooze"] if s["key"] in SNOOZE_ONLY_SIGNALS else ["snooze", "dismiss"])
         # What "new" is judged on (see routers/ai_insights.mark_new_signals):
         # the builder's own fingerprint names a situation (a new price
@@ -4891,15 +5074,31 @@ def periodic_day_is_today(days: List[int], today: date) -> bool:
     last = days_in_month(today.year, today.month)
     return any(min(d, last) == today.day for d in days if isinstance(d, int) and d >= 1)
 
-def review_summary_text(signals: List[dict]) -> str:
+def review_summary_text(signals: List[dict], english: bool = False) -> str:
     """The daily review in one line: what waits (top three), or that nothing does."""
     if not signals:
-        return "Всичко е наред – в Дневния преглед няма нищо, което чака действие."
+        return ("All good – nothing in the Daily briefing waits for you." if english
+                else "Всичко е наред – в Дневния преглед няма нищо, което чака действие.")
     top = [s["title"] for s in signals[:3]]
-    body = "Чака те: " + "; ".join(top) + "."
+    body = ("Waiting for you: " if english else "Чака те: ") + "; ".join(top) + "."
     if len(signals) > len(top):
-        body += f" И още {len(signals) - len(top)} в Дневния преглед."
+        more = len(signals) - len(top)
+        body += f" And {more} more in the Daily briefing." if english else f" И още {more} в Дневния преглед."
     return body
+
+
+def app_in_english(user_doc: Optional[dict]) -> bool:
+    """The language the person's app last said it shows (users.language)."""
+    return bool(user_doc) and (user_doc or {}).get("language") == "en"
+
+
+async def remember_app_language(user_id: str, language: Optional[str]) -> None:
+    """Keeps the language the person's app shows, for what the program
+    writes to them on its own (the morning push). Written only when it
+    changes."""
+    if language not in ("bg", "en"):
+        return
+    await db.users.update_one({"user_id": user_id, "language": {"$ne": language}}, {"$set": {"language": language}})
 
 async def _morning_push_tick(now: Optional[datetime] = None):
     """The morning push: once per person per day, at the hour they chose on
@@ -4959,8 +5158,9 @@ async def _morning_push_tick(now: Optional[datetime] = None):
         user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
         if not user_doc:
             continue
+        english = app_in_english(user_doc)
         try:
-            signals = await get_proactive_signals(User(**sanitize_user(dict(user_doc))))
+            signals = await get_proactive_signals(User(**sanitize_user(dict(user_doc))), english)
         except Exception:
             logger.exception(f"Morning push: signals failed for {user_id}")
             continue
@@ -4968,7 +5168,8 @@ async def _morning_push_tick(now: Optional[datetime] = None):
         sent_key = None
         if periodic_due:
             await push_service.send_to_user(
-                db, user_id, title="Периодично напомняне", body=review_summary_text(signals),
+                db, user_id, title="Reminder" if english else "Периодично напомняне",
+                body=review_summary_text(signals, english),
                 data={"type": "periodic_reminder", "route": "/(tabs)"},
             )
             await db.notification_settings.update_one(
@@ -4978,9 +5179,14 @@ async def _morning_push_tick(now: Optional[datetime] = None):
         elif signals and signals[0]["priority"] >= PROACTIVE_PUSH_WORTHY_PRIORITY:
             top = signals[0]
             others = len(signals) - 1
-            body = top["detail"] if others <= 0 else f"{top['detail']} (+{others} друго изискващо внимание)"
+            if others <= 0:
+                body = top["detail"]
+            elif english:
+                body = f"{top['detail']} (+{others} more to look at)"
+            else:
+                body = f"{top['detail']} (+{others} друго изискващо внимание)"
             await push_service.send_to_user(
-                db, user_id, title=f"Днешен преглед: {top['title']}", body=body,
+                db, user_id, title=f"{'Daily briefing' if english else 'Днешен преглед'}: {top['title']}", body=body,
                 data={"type": "proactive_digest", "signal_key": top["key"], "route": top.get("route") or "/(tabs)"},
             )
             sent_key = top["key"]
@@ -6612,18 +6818,23 @@ async def start_backup_email_loop():
 PERIODIC_REMINDER_FALLBACK = "Отвори Дневния преглед във Фактура+ и виж какво чака действие."
 
 
+PERIODIC_REMINDER_FALLBACK_EN = "Open the Daily briefing in Fakturaplus to see what waits for you."
+
+
 async def periodic_reminder_body(user_id: str) -> str:
     """What waits for this user today - the top of Home's daily review -
-    instead of a reminder that only said today was one of the chosen days."""
+    instead of a reminder that only said today was one of the chosen days.
+    In the language the person's app shows."""
     user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not user_doc:
         return PERIODIC_REMINDER_FALLBACK
+    english = app_in_english(user_doc)
     try:
-        signals = await get_proactive_signals(User(**sanitize_user(dict(user_doc))))
+        signals = await get_proactive_signals(User(**sanitize_user(dict(user_doc))), english)
     except Exception:
         logger.exception(f"Periodic reminder: signals failed for {user_id}")
-        return PERIODIC_REMINDER_FALLBACK
-    return review_summary_text(signals)
+        return PERIODIC_REMINDER_FALLBACK_EN if english else PERIODIC_REMINDER_FALLBACK
+    return review_summary_text(signals, english)
 
 
 async def _scan_credit_depletion_tick():
