@@ -1230,6 +1230,9 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
     original_name_by_canonical: Dict[str, str] = {}
     unit_by_canonical: Dict[str, str] = {}
     first_seen: Dict[str, datetime] = {}
+    # The supplier each item was last bought from - where its next order goes.
+    last_seen: Dict[str, datetime] = {}
+    last_supplier: Dict[str, str] = {}
     for r in records:
         date = r.get("invoice_date")
         if not isinstance(date, datetime):
@@ -1239,6 +1242,9 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
         aware_date = _aware(date)
         if canonical not in first_seen or aware_date < first_seen[canonical]:
             first_seen[canonical] = aware_date
+        if canonical not in last_seen or aware_date >= last_seen[canonical]:
+            last_seen[canonical] = aware_date
+            last_supplier[canonical] = r["supplier"]
         groups[canonical].append((date, r.get("unit_price", 0) * r.get("quantity", 0), r.get("quantity", 0)))
         suppliers_by_item[canonical].add(r["supplier"])
         original_name_by_canonical[canonical] = r["item_name"]
@@ -1329,6 +1335,8 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
         items.append({
             "item_name": canonical_display.get(canonical, original_name_by_canonical[canonical]),
             "supplier": supplier_display,
+            "last_supplier": last_supplier.get(canonical) or next(iter(suppliers)),
+            "suppliers_count": len(suppliers),
             "unit": unit_by_canonical.get(canonical, "бр"),
             "median_days_between": round(median_gap),
             "days_since_last": days_since_last,
@@ -1418,6 +1426,83 @@ async def get_reorder_recommendations(current_user: User = Depends(get_current_u
         del n["_impact_score"]
         del n["_overdue_ratio"]
     return {"items": items}
+
+# Due within this many days: "soon" in the ordering plan.
+REORDER_SOON_DAYS = 2
+_PLAN_RANK = {"order": 0, "soon": 1, "ok": 2}
+
+
+@router.get("/items/reorder-plan")
+async def get_reorder_plan(current_user: User = Depends(get_current_user)):
+    """The ordering assistant in one place: every item with an established
+    rhythm, grouped by the supplier it was last bought from - "order" (its
+    usual gap has passed), "soon" (due within REORDER_SOON_DAYS) or "ok" -
+    with how many items each supplier has to order and what that order is
+    usually worth, the suppliers with something to order first. Apart, the
+    items far past their rhythm: more likely dropped than forgotten, so
+    asked about ("still using it?"), never given a quantity to order."""
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"suppliers": [], "stale": []}
+
+    groups: Dict[str, dict] = {}
+    stale: List[dict] = []
+    for item in await _compute_recurring_item_cadences(company_id):
+        ratio = item.pop("_overdue_ratio")
+        item.pop("_impact_score", None)
+        item.pop("is_overdue", None)
+        is_stale = item.pop("is_stale")
+        item["days_until_due"] = item["median_days_between"] - item["days_since_last"]
+        if is_stale:
+            stale.append(item)
+            continue
+        due_in = item["days_until_due"]
+        item["status"] = "order" if due_in <= 0 else "soon" if due_in <= REORDER_SOON_DAYS else "ok"
+        item["_ratio"] = ratio
+        group = groups.setdefault(item["last_supplier"], {"supplier": item["last_supplier"], "items": []})
+        group["items"].append(item)
+
+    suppliers = []
+    for group in groups.values():
+        group["items"].sort(key=lambda n: (_PLAN_RANK[n["status"]], -n["_ratio"]))
+        for item in group["items"]:
+            del item["_ratio"]
+        due = [n for n in group["items"] if n["status"] in ("order", "soon")]
+        group["to_order"] = sum(1 for n in due if n["status"] == "order")
+        group["soon"] = sum(1 for n in due if n["status"] == "soon")
+        group["order_value"] = round(sum(n["avg_order_value"] for n in due), 2)
+        group["status"] = group["items"][0]["status"]
+        suppliers.append(group)
+    suppliers.sort(key=lambda g: (_PLAN_RANK[g["status"]], -g["to_order"], -g["order_value"], g["supplier"].lower()))
+    stale.sort(key=lambda n: n["avg_order_value"], reverse=True)
+    return {"suppliers": suppliers, "stale": stale}
+
+
+class ReorderHide(BaseModel):
+    item_key: str = Field(min_length=1, max_length=300)
+
+
+@router.post("/items/reorder-plan/hide")
+async def hide_from_reorder_plan(body: ReorderHide, current_user: User = Depends(get_current_user)):
+    """"Still using it?" - "no": the item leaves the ordering plan (and the
+    reminders) until it is bought again; company-wide, a fact about the
+    business. The same answer as the day's review question."""
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+    item_key = body.item_key.strip().lower()
+    await server.db.item_preferences.update_one(
+        {"company_id": company_id, "item_key": item_key},
+        {"$set": {
+            "company_id": company_id, "item_key": item_key,
+            "discontinued_at": datetime.now(timezone.utc), "discontinued_by": current_user.user_id,
+        }},
+        upsert=True,
+    )
+    return {"hidden": item_key}
+
 
 @router.post("/items/ai-merge")
 @limiter.limit("10/minute")

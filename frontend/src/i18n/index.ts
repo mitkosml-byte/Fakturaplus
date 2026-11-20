@@ -4026,29 +4026,44 @@ export const translations: Translations = {
     bg: 'Обща инфлация на цените',
     en: 'Overall Price Inflation',
   },
-  'stats.reorderNudgesTitle': {
-    bg: 'Може би е време да поръчаш пак',
-    en: 'Might be time to reorder',
+  // Orders (ReorderPlanCard): by supplier, what is due and how much.
+  'reorder.title': { bg: 'Поръчки', en: 'Orders' },
+  'reorder.subtitle': {
+    bg: 'По доставчици – кое е време да поръчате и колко, по ритъма на досегашните покупки.',
+    en: 'By supplier – what is due and how much, from the rhythm of your purchases so far.',
   },
-  'stats.reorderNudgeLine': {
-    bg: '{item} ({supplier}) - обикновено на всеки {median} дни за ~{value} €, последно преди {daysSince} дни',
-    en: '{item} ({supplier}) - usually every {median} days for ~{value} €, last bought {daysSince} days ago',
+  'reorder.toOrder': { bg: '{count} за поръчка', en: '{count} to order' },
+  'reorder.soon': { bg: '{count} скоро', en: '{count} soon' },
+  'reorder.allGood': { bg: 'наред', en: 'all good' },
+  'reorder.itemOne': { bg: '1 артикул', en: '1 item' },
+  'reorder.itemMany': { bg: '{count} артикула', en: '{count} items' },
+  'reorder.statusOrder': { bg: 'Поръчай', en: 'Order' },
+  'reorder.statusSoon': { bg: 'Скоро', en: 'Soon' },
+  'reorder.statusOk': { bg: 'Наред', en: 'OK' },
+  'reorder.rhythm': {
+    bg: 'на всеки {median} дни · последно преди {days} дни',
+    en: 'every {median} days · last {days} days ago',
   },
-  'stats.reorderNudgeQuantity': {
-    bg: ' Препоръчано количество: ~{quantity} {unit}.',
-    en: ' Suggested quantity: ~{quantity} {unit}.',
+  'reorder.alsoOthers': { bg: 'купувано и от други доставчици', en: 'also bought from other suppliers' },
+  'reorder.copy': { bg: 'Копирай поръчката', en: 'Copy the order' },
+  'reorder.copied': {
+    bg: 'Поръчката е копирана – поставете я във Viber или имейл',
+    en: 'Order copied – paste it into Viber or an email',
   },
-  'stats.reorderRecommendationsTitle': {
-    bg: 'Помощник за поръчки',
-    en: 'Ordering assistant',
+  'reorder.orderFor': { bg: 'Поръчка за {supplier}:', en: 'Order for {supplier}:' },
+  'reorder.staleTitle': { bg: 'Отдавна не е поръчвано ({count})', en: 'Not ordered for a long time ({count})' },
+  'reorder.staleHint': {
+    bg: 'Още ли ги ползвате? Скритите се появяват пак, ако ги купите отново.',
+    en: 'Still using them? Hidden ones come back once bought again.',
   },
-  'stats.reorderRecommendationsSubtitle': {
-    bg: 'Препоръчано количество за всеки артикул с установен ритъм на поръчки, напасано към скорошния ти оборот.',
-    en: 'A recommended order quantity for every item with an established ordering pattern, adjusted to your recent revenue.',
+  'reorder.staleRhythm': {
+    bg: '{supplier} · обикновено на всеки {median} дни · последно преди {days} дни',
+    en: '{supplier} · usually every {median} days · last {days} days ago',
   },
-  'stats.reorderRecommendationLine': {
-    bg: '{item} ({supplier}) - поръчвай ~{quantity} {unit} на всеки {median} дни (последно преди {daysSince} дни)',
-    en: '{item} ({supplier}) - order ~{quantity} {unit} every {median} days (last bought {daysSince} days ago)',
+  'reorder.hide': { bg: 'Скрий', en: 'Hide' },
+  'reorder.hidden': {
+    bg: 'Скрито – появява се пак, ако го купите отново',
+    en: 'Hidden – it comes back once bought again',
   },
   // Full weekday names, index 0=Monday matching the backend's own
   // Python date.weekday() convention (and ClosedDaysCalendar's existing

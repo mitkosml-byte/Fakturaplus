@@ -34,8 +34,7 @@ import { getPeriodBounds, getComparablePrevious, toApiDate } from '../../src/uti
 import { useSharedPeriod } from '../../src/utils/sharedPeriod';
 import { differenceInCalendarDays, format, parseISO } from 'date-fns';
 import { PriceAlertsCard } from '../../src/components/stats/PriceAlertsCard';
-import { ReorderNudgesCard } from '../../src/components/stats/ReorderNudgesCard';
-import { ReorderRecommendationsCard } from '../../src/components/stats/ReorderRecommendationsCard';
+import { ReorderPlanCard } from '../../src/components/stats/ReorderPlanCard';
 import { WeekdayRevenueCard } from '../../src/components/stats/WeekdayRevenueCard';
 import { StaffingEfficiencyCard } from '../../src/components/stats/StaffingEfficiencyCard';
 import { ForecastCard } from '../../src/components/stats/ForecastCard';
@@ -198,8 +197,7 @@ export default function StatsScreen() {
   const [previousSummary, setPreviousSummary] = useState<Summary | null>(null);
   const [topSuppliers, setTopSuppliers] = useState<SupplierStats[]>([]);
   const [topItems, setTopItems] = useState<any[]>([]);
-  const [reorderNudges, setReorderNudges] = useState<Awaited<ReturnType<typeof api.getReorderNudges>>['nudges']>([]);
-  const [reorderRecommendations, setReorderRecommendations] = useState<Awaited<ReturnType<typeof api.getReorderRecommendations>>['items']>([]);
+  const [reorderPlan, setReorderPlan] = useState<Awaited<ReturnType<typeof api.getReorderPlan>> | null>(null);
   const [weekdayRevenue, setWeekdayRevenue] = useState<Awaited<ReturnType<typeof api.getWeekdayRevenuePattern>>['weekdays']>([]);
   const [weakDaySuggestion, setWeakDaySuggestion] = useState<Awaited<ReturnType<typeof api.getWeekdayRevenuePattern>>['weak_day_suggestion']>(null);
   const [staffingEfficiency, setStaffingEfficiency] = useState<Awaited<ReturnType<typeof api.getStaffingEfficiency>>['weekdays']>([]);
@@ -242,16 +240,14 @@ export default function StatsScreen() {
         // The top 3 of the same period as the cards above.
         const bounds = getPeriodBounds(summaryPeriodState);
         const range = { start_date: toApiDate(bounds.start), end_date: toApiDate(bounds.end) };
-        const [supplierData, itemData, nudgesData, recommendationsData] = await Promise.all([
+        const [supplierData, itemData, planData] = await Promise.all([
           api.getSupplierOverview(range),
           api.getItemStatistics({ ...range, top_n: 3 }),
-          api.getReorderNudges(),
-          api.getReorderRecommendations(),
+          api.getReorderPlan(),
         ]);
         setTopSuppliers((supplierData.top_by_amount || []).slice(0, 3));
         setTopItems(itemData.top_by_value || []);
-        setReorderNudges(nudgesData.nudges || []);
-        setReorderRecommendations(recommendationsData.items || []);
+        setReorderPlan(planData);
       } catch (error) {
         console.error('Error loading top suppliers/items:', error);
       }
@@ -1944,15 +1940,11 @@ export default function StatsScreen() {
                       </View>
                     )}
 
-                    {/* Reorder nudges - a pattern in purchase timing
-                        noticed from data already captured by scanning,
-                        not inventory/stock tracking. */}
-                    <ReorderNudgesCard nudges={reorderNudges} />
-
-                    {/* Standing ordering assistant - every recurring item
-                        with an established cadence, not just the overdue
-                        ones the nudges card above alerts on. */}
-                    <ReorderRecommendationsCard items={reorderRecommendations} />
+                    {/* Orders: by supplier, what to order now, soon or
+                        not yet - from the rhythm of the scanned purchases,
+                        not stock tracking. One card instead of the two that
+                        repeated each other. */}
+                    <ReorderPlanCard plan={reorderPlan} />
 
                     {/* Cross-data-source insight #2: revenue bucketed by
                         weekday over the trailing 8 weeks, highlighting a

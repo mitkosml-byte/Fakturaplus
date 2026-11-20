@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { BusinessLocation, LocationComparison, Deadline, DeadlineInput, PriceList, PriceListEntry, PriceEntryInput, PurchaseItem, SoldItem, PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveEntryInput, LeaveBalance, GettingStarted, HomeData, DayCardData, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderItem,
+import { BusinessLocation, LocationComparison, Deadline, DeadlineInput, PriceList, PriceListEntry, PriceEntryInput, PurchaseItem, SoldItem, PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveEntryInput, LeaveBalance, GettingStarted, HomeData, DayCardData, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderPlan,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
 import { useLanguageStore } from '../i18n';
@@ -1271,15 +1271,15 @@ class ApiService {
     return this.fetch(`/statistics/items${query ? `?${query}` : ''}`);
   }
 
-  async getReorderNudges(): Promise<{ nudges: ReorderItem[] }> {
-    return this.fetch('/items/reorder-nudges');
+  // The ordering plan: by supplier, what to order now, soon or not yet;
+  // apart, the items long not bought (asked about, never ordered).
+  async getReorderPlan(): Promise<ReorderPlan> {
+    return this.fetch('/items/reorder-plan');
   }
 
-  // Standing ordering assistant - every recurring item with an
-  // established cadence (not just the overdue ones getReorderNudges
-  // surfaces), each with a trend-adjusted recommended order quantity.
-  async getReorderRecommendations(): Promise<{ items: ReorderItem[] }> {
-    return this.fetch('/items/reorder-recommendations');
+  // "No longer used": out of the plan until bought again.
+  async hideFromReorderPlan(itemKey: string): Promise<{ hidden: string }> {
+    return this.fetch('/items/reorder-plan/hide', { method: 'POST', body: JSON.stringify({ item_key: itemKey }) });
   }
 
   // Average revenue per weekday over the trailing 8 weeks, plus (when a

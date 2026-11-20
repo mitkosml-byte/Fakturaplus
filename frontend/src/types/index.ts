@@ -1115,6 +1115,35 @@ export interface ReorderItem {
   trend_ratio: number;
 }
 
+// The ordering plan (backend get_reorder_plan): items by the supplier they
+// were last bought from - to order now, soon or not yet; apart, the items
+// long not bought (no status: asked about, never ordered).
+export type ReorderStatus = 'order' | 'soon' | 'ok';
+
+export interface ReorderPlanItem extends ReorderItem {
+  item_key: string;
+  last_supplier: string;
+  suppliers_count: number;
+  // Negative: this many days past its usual gap.
+  days_until_due: number;
+  status?: ReorderStatus;
+}
+
+export interface ReorderPlanSupplier {
+  supplier: string;
+  status: ReorderStatus;
+  to_order: number;
+  soon: number;
+  // What the due items are usually bought for.
+  order_value: number;
+  items: ReorderPlanItem[];
+}
+
+export interface ReorderPlan {
+  suppliers: ReorderPlanSupplier[];
+  stale: ReorderPlanItem[];
+}
+
 export interface WeekdayRevenueStat {
   weekday: number; // 0=Monday..6=Sunday, matches date.weekday()
   avg_revenue: number;
