@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { useTranslation } from '../../i18n';
 import { api } from '../../services/api';
 import { Alert } from '../../utils/alert';
@@ -14,11 +15,13 @@ import type { ReorderPlan, ReorderPlanItem, ReorderPlanSupplier, ReorderStatus }
 const STATUS_COLOR: Record<ReorderStatus, string> = {
   order: COLORS.danger,
   soon: COLORS.warning,
+  ordered: COLORS.info,
   ok: COLORS.textMuted,
 };
 const STATUS_KEY: Record<ReorderStatus, string> = {
   order: 'reorder.statusOrder',
   soon: 'reorder.statusSoon',
+  ordered: 'reorder.statusOrdered',
   ok: 'reorder.statusOk',
 };
 const STALE_KEY = '__stale__';
@@ -28,15 +31,18 @@ const named = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 
 type Props = {
   plan: ReorderPlan | null;
+  // After "Поръчано" (or its undo): the plan again.
+  onChanged?: () => void;
 };
 
 // The ordering assistant in one card (it used to be two that repeated each
 // other): the suppliers first, closed, each saying how many items are due
 // and what the order is usually worth - the ones with something to order
 // on top - opening on its items, the quantity in bold; one tap copies the
-// order to send. Apart, the items long not bought: asked about, never
-// ordered, hidden once no longer used (back when bought again).
-export function ReorderPlanCard({ plan }: Props) {
+// order to send, another marks it "Поръчано" so nobody orders it twice.
+// Apart, the items long not bought: asked about, never ordered, hidden once
+// no longer used (back when bought again).
+export function ReorderPlanCard({ plan, onChanged }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
@@ -55,16 +61,37 @@ export function ReorderPlanCard({ plan }: Props) {
     if (group.to_order > 0) parts.push(t('reorder.toOrder').replace('{count}', String(group.to_order)));
     if (group.soon > 0) parts.push(t('reorder.soon').replace('{count}', String(group.soon)));
     if (parts.length > 0 && group.order_value > 0) parts.push(`~${formatMoney(group.order_value)}`);
+    if (parts.length === 0 && group.ordered > 0) {
+      const latest = group.items.map((item) => item.ordered?.at).filter((at): at is string => !!at).sort().pop();
+      parts.push(latest ? t('reorder.orderedWhen').replace('{when}', when(latest)) : t('reorder.statusOrdered'));
+    }
     if (parts.length === 0) parts.push(t('reorder.allGood'), itemsCount(group.items.length));
     return parts.join(' · ');
+  };
+
+  const due = (group: ReorderPlanSupplier) =>
+    group.items.filter((item) => item.status === 'order' || item.status === 'soon');
+
+  // "днес", "вчера", "преди 3 дни".
+  const when = (at: string) => {
+    const days = Math.max(0, differenceInCalendarDays(new Date(), parseISO(at)));
+    return days === 0 ? t('reorder.today') : days === 1 ? t('reorder.yesterday') : t('reorder.daysAgo').replace('{count}', String(days));
+  };
+
+  const orderedLine = (item: ReorderPlanItem) => {
+    if (!item.ordered) return null;
+    const text = item.ordered.by ? t('reorder.orderedWhenBy') : t('reorder.orderedWhen');
+    return text.replace('{when}', when(item.ordered.at)).replace('{name}', item.ordered.by || '');
   };
 
   const quantity = (item: ReorderPlanItem) =>
     item.recommended_quantity > 0 ? `~${item.recommended_quantity} ${item.unit}` : null;
 
   const copyOrder = async (group: ReorderPlanSupplier) => {
-    const due = group.items.filter((item) => item.status === 'order' || item.status === 'soon');
-    const lines = (due.length > 0 ? due : group.items).map((item) =>
+    // What is due; else what was marked ordered (to send again); else all.
+    const ordered = group.items.filter((item) => item.status === 'ordered');
+    const chosen = due(group).length > 0 ? due(group) : ordered.length > 0 ? ordered : group.items;
+    const lines = chosen.map((item) =>
       item.recommended_quantity > 0
         ? `• ${named(item.item_name)} – ${item.recommended_quantity} ${item.unit}`
         : `• ${named(item.item_name)}`);
@@ -75,6 +102,24 @@ export function ReorderPlanCard({ plan }: Props) {
     } catch {
       // No clipboard here: the order is shown to copy by hand.
       Alert.alert(t('reorder.copy'), text);
+    }
+  };
+
+  const markOrdered = async (group: ReorderPlanSupplier) => {
+    const keys = due(group).map((item) => item.item_key);
+    if (keys.length === 0) return;
+    try {
+      await api.markReorderOrdered(keys);
+      onChanged?.();
+      Toast.undo(t('reorder.markedOrdered'), async () => {
+        try {
+          await api.undoReorderOrdered(keys);
+        } finally {
+          onChanged?.();
+        }
+      }, undefined, { icon: 'checkmark-circle', color: COLORS.info });
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
     }
   };
 
@@ -140,6 +185,7 @@ export function ReorderPlanCard({ plan }: Props) {
                             .replace('{days}', String(item.days_since_last))}
                           {item.suppliers_count > 1 ? ` · ${t('reorder.alsoOthers')}` : ''}
                         </Text>
+                        {item.ordered && <Text style={styles.itemOrdered}>{orderedLine(item)}</Text>}
                       </View>
                       <View style={[styles.chip, { borderColor: STATUS_COLOR[status] }]}>
                         <Text style={[styles.chipText, { color: status === 'ok' ? COLORS.textSecondary : STATUS_COLOR[status] }]}>
@@ -149,10 +195,18 @@ export function ReorderPlanCard({ plan }: Props) {
                     </View>
                   );
                 })}
-                <TouchableOpacity style={styles.copy} onPress={() => copyOrder(group)} accessibilityRole="button">
-                  <Ionicons name="copy-outline" size={16} color={COLORS.primary} />
-                  <Text style={styles.copyText}>{t('reorder.copy')}</Text>
-                </TouchableOpacity>
+                <View style={styles.actions}>
+                  <TouchableOpacity style={styles.copy} onPress={() => copyOrder(group)} accessibilityRole="button">
+                    <Ionicons name="copy-outline" size={16} color={COLORS.primary} />
+                    <Text style={styles.copyText} numberOfLines={1}>{t('reorder.copy')}</Text>
+                  </TouchableOpacity>
+                  {due(group).length > 0 && (
+                    <TouchableOpacity style={styles.ordered} onPress={() => markOrdered(group)} accessibilityRole="button">
+                      <Ionicons name="checkmark" size={16} color="white" />
+                      <Text style={styles.orderedText} numberOfLines={1}>{t('reorder.markOrdered')}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             </Expandable>
           </View>
@@ -241,7 +295,11 @@ const styles = StyleSheet.create({
   itemRhythm: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
   chip: { borderWidth: 1, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 },
   chipText: { fontSize: 12, fontWeight: '700' },
+  itemOrdered: { fontSize: 12, color: COLORS.info, marginTop: 2, fontWeight: '600' },
+  actions: { flexDirection: 'row', gap: 10 },
   copy: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -250,8 +308,22 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
     borderRadius: 12,
     paddingVertical: 10,
+    paddingHorizontal: 8,
   },
-  copyText: { fontSize: 14, fontWeight: '700', color: COLORS.primary },
+  copyText: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: COLORS.primary },
+  ordered: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: COLORS.info,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  orderedText: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: 'white' },
   staleIcon: { width: 10, textAlign: 'center' },
   staleTitle: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
   hide: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 },

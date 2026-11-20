@@ -1115,10 +1115,11 @@ export interface ReorderItem {
   trend_ratio: number;
 }
 
-// The ordering plan (backend get_reorder_plan): items by the supplier they
-// were last bought from - to order now, soon or not yet; apart, the items
-// long not bought (no status: asked about, never ordered).
-export type ReorderStatus = 'order' | 'soon' | 'ok';
+// The ordering plan (backend reorder_plan): items by the supplier they were
+// last bought from - to order now, soon, already ordered (its invoice not in
+// yet) or not yet; apart, the items long not bought (no status: asked
+// about, never ordered).
+export type ReorderStatus = 'order' | 'soon' | 'ordered' | 'ok';
 
 export interface ReorderPlanItem extends ReorderItem {
   item_key: string;
@@ -1127,6 +1128,8 @@ export interface ReorderPlanItem extends ReorderItem {
   // Negative: this many days past its usual gap.
   days_until_due: number;
   status?: ReorderStatus;
+  // Marked "Поръчано": when and by whom (first name).
+  ordered?: { at: string; by: string | null };
 }
 
 export interface ReorderPlanSupplier {
@@ -1134,6 +1137,7 @@ export interface ReorderPlanSupplier {
   status: ReorderStatus;
   to_order: number;
   soon: number;
+  ordered: number;
   // What the due items are usually bought for.
   order_value: number;
   items: ReorderPlanItem[];

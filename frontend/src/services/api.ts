@@ -1277,6 +1277,15 @@ class ApiService {
     return this.fetch('/items/reorder-plan');
   }
 
+  // "Поръчано": out of "to order" for everyone until their invoice comes.
+  async markReorderOrdered(itemKeys: string[]): Promise<{ ordered: number }> {
+    return this.fetch('/items/reorder-plan/ordered', { method: 'POST', body: JSON.stringify({ item_keys: itemKeys }) });
+  }
+
+  async undoReorderOrdered(itemKeys: string[]): Promise<{ undone: number }> {
+    return this.fetch('/items/reorder-plan/ordered/undo', { method: 'POST', body: JSON.stringify({ item_keys: itemKeys }) });
+  }
+
   // "No longer used": out of the plan until bought again.
   async hideFromReorderPlan(itemKey: string): Promise<{ hidden: string }> {
     return this.fetch('/items/reorder-plan/hide', { method: 'POST', body: JSON.stringify({ item_key: itemKey }) });

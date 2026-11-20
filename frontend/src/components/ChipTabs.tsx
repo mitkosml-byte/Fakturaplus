@@ -73,7 +73,13 @@ export function ChipTabs<T extends string>({ options, active, onChange, compact 
   // active tab ever changing, which otherwise left the pill frozen at its
   // pre-shift position (visibly under the wrong chip, e.g. "Year" instead
   // of the actually-selected "Month").
-  const handleRowLayout = () => movePillTo(active, false);
+  // The active tab read at the time of the layout, not at the render that
+  // made the handler: on the web the row's layout callback can be the one
+  // from the first render, which on a screen opened straight on another tab
+  // (Statistics' ?tab=items) put the pill back under the first tab.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const handleRowLayout = () => movePillTo(activeRef.current, false);
 
   const pillStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: pillX.value }],

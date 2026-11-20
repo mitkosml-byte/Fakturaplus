@@ -261,6 +261,19 @@ def place_queries(address: Optional[str]) -> List[str]:
     return queries[:4]
 
 
+# A company's legal form, for a line of text: "Доставка Бе Ге ЕООД" -> "Доставка Бе Ге".
+_LEGAL_FORM_END = re.compile(r"[\s,]+(?:ЕООД|ООД|ЕАД|АД|ЕТ|СД|КД|КДА|EOOD|OOD|EAD|AD|ET|LTD)\.?$", re.IGNORECASE)
+_LEGAL_FORM_START = re.compile(r"^(?:ЕТ|ET)\s+", re.IGNORECASE)
+
+
+def short_supplier(name: Optional[str]) -> str:
+    """A supplier's name without its legal form and quotes: '"Доставка Бе
+    Ге" ЕООД' -> 'Доставка Бе Ге'. As it was when nothing is left."""
+    full = " ".join(str(name or "").split())
+    text = _LEGAL_FORM_START.sub("", _LEGAL_FORM_END.sub("", full)).strip(' "\'„“”«»')
+    return text or full
+
+
 def part_of_day(moment: datetime) -> str:
     hour = moment.hour
     if 5 <= hour < 11:

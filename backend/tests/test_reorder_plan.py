@@ -72,3 +72,58 @@ def test_the_plan_by_supplier(client):
     # Whoever has no statistics sees no plan and hides nothing.
     assert client.get("/api/items/reorder-plan", headers=cashier).status_code == 403
     assert client.post("/api/items/reorder-plan/hide", headers=cashier, json={"item_key": "салфетки"}).status_code == 403
+
+
+def _mark_age(company_id, item_key, days):
+    asyncio.run(server.db.reorder_marks.update_one(
+        {"company_id": company_id, "item_key": item_key},
+        {"$set": {"ordered_at": datetime.now(timezone.utc) - timedelta(days=days)}}))
+
+
+def test_ordered_leaves_to_order_until_its_invoice_comes(client):
+    from routers.price_tracking import reorder_overview
+    company_id, _, owner = _company()
+    _, cashier = _user(company_id, "staff", ["add_revenue"], "Ивана Касиерова")
+    asyncio.run(server.db.item_price_history.insert_many(
+        _bought(company_id, ALPHA, "ръкавици L", [58, 44, 30, 16], quantity=3)
+        + _bought(company_id, ALPHA, "дървени вилички", [55, 41, 27, 13], quantity=6)
+        + _bought(company_id, ALPHA, "салфетки", [32, 22, 12, 2])
+        # Every 2 days, last 5 days ago: past the day's review threshold too.
+        + _bought(company_id, BETA, "пилешко филе", [11, 9, 7, 5], quantity=14)
+    ))
+    nudged = [n["item_name"] for n in asyncio.run(reorder_overview(company_id))[0]]
+    assert "пилешко филе" in nudged
+
+    # Alpha's due items marked ordered - for everyone in the business.
+    assert client.post("/api/items/reorder-plan/ordered", headers=owner,
+                       json={"item_keys": ["ръкавици l", "дървени вилички"]}).json() == {"ordered": 2}
+    plan = client.get("/api/items/reorder-plan", headers=owner).json()
+    beta, alpha = plan["suppliers"]          # Beta has something to order now; Alpha waits for its invoice
+    assert beta["supplier"] == BETA and beta["status"] == "order"
+    assert alpha["supplier"] == ALPHA and alpha["status"] == "ordered"
+    assert (alpha["to_order"], alpha["soon"], alpha["ordered"], alpha["order_value"]) == (0, 0, 2, 0)
+    gloves = alpha["items"][0]
+    assert gloves["status"] == "ordered" and gloves["ordered"]["by"] == "Собственик"
+    assert alpha["items"][-1]["item_name"] == "салфетки" and alpha["items"][-1]["status"] == "ok"
+
+    # The day's review does not ask to reorder what is ordered.
+    client.post("/api/items/reorder-plan/ordered", headers=owner, json={"item_keys": ["пилешко филе"]})
+    assert "пилешко филе" not in [n["item_name"] for n in asyncio.run(reorder_overview(company_id))[0]]
+
+    # The gloves' invoice comes: the mark is done, the rhythm starts again.
+    asyncio.run(server.db.item_price_history.insert_many(_bought(company_id, ALPHA, "ръкавици L", [0], quantity=3)))
+    # The forks' order never came (or its invoice was not scanned): after
+    # its usual gap the mark lapses and they are due again.
+    _mark_age(company_id, "дървени вилички", 20)
+    alpha = next(g for g in client.get("/api/items/reorder-plan", headers=owner).json()["suppliers"] if g["supplier"] == ALPHA)
+    status = {n["item_name"]: n["status"] for n in alpha["items"]}
+    assert status["ръкавици L"] == "ok" and status["дървени вилички"] == "soon"
+
+    # Taken back: due again.
+    assert client.post("/api/items/reorder-plan/ordered/undo", headers=owner,
+                       json={"item_keys": ["пилешко филе"]}).json() == {"undone": 1}
+    beta = next(g for g in client.get("/api/items/reorder-plan", headers=owner).json()["suppliers"] if g["supplier"] == BETA)
+    assert beta["items"][0]["status"] == "order"
+
+    # Whoever has no statistics marks nothing.
+    assert client.post("/api/items/reorder-plan/ordered", headers=cashier, json={"item_keys": ["салфетки"]}).status_code == 403

@@ -1885,6 +1885,15 @@ export default function StatsScreen() {
             ) : activeTab === 'items' ? (
               /* ========== ITEMS TAB ========== */
               <View style={styles.suppliersContainer}>
+                {/* Orders first: the day's action (the day card's "За
+                    поръчка днес" opens here), by supplier, what to order
+                    now, soon or not yet - from the rhythm of the scanned
+                    purchases, not stock tracking, and not tied to the
+                    period below. */}
+                <ReorderPlanCard
+                  plan={reorderPlan}
+                  onChanged={() => { api.getReorderPlan().then(setReorderPlan).catch(() => {}); }}
+                />
                 {renderReportScope()}
                 {loadingItems ? (
                   <View style={styles.loadingContainer}>
@@ -1940,11 +1949,6 @@ export default function StatsScreen() {
                       </View>
                     )}
 
-                    {/* Orders: by supplier, what to order now, soon or
-                        not yet - from the rhythm of the scanned purchases,
-                        not stock tracking. One card instead of the two that
-                        repeated each other. */}
-                    <ReorderPlanCard plan={reorderPlan} />
 
                     {/* Cross-data-source insight #2: revenue bucketed by
                         weekday over the trailing 8 weeks, highlighting a

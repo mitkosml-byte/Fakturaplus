@@ -277,6 +277,22 @@ async def _focus(user: User, company: dict, scope: dict, today: date, english: b
                         )
             items.append({"key": "yesterday", "priority": 40, "icon": "trending-up", "route": "/stats", "text": text})
 
+    # What to order today - for whoever orders: sees the plan, keeps the
+    # supplier invoices and spends for the business (not the accountant).
+    # The suppliers with something past its usual gap, not marked ordered.
+    if {"view_statistics", "manage_invoices", "add_expenses"} <= perms:
+        from routers.price_tracking import suppliers_to_order
+        to_order = await suppliers_to_order(company_id)
+        if to_order:
+            names = ", ".join(dc.short_supplier(name) for name in to_order[:2])
+            more = len(to_order) - 2
+            items.append({
+                "key": "to_order", "priority": 65, "icon": "cart-outline", "route": "/stats?tab=items",
+                "text": _t(english,
+                           f"За поръчка днес: {names}" + (f" и още {more}" if more > 0 else ""),
+                           f"To order today: {names}" + (f" and {more} more" if more > 0 else "")),
+            })
+
     # Supplier invoices due today - for whoever keeps the invoices.
     if "manage_invoices" in perms:
         start = datetime.combine(today, datetime.min.time())

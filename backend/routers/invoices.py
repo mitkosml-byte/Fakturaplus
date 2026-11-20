@@ -223,6 +223,9 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
     if company_id and invoice.items:
         if history_rows:
             await server.db.item_price_history.insert_many(history_rows)
+            # A new purchase may end a supplier's "to order today".
+            from routers.price_tracking import forget_due
+            forget_due(company_id)
         for price_alert in price_alerts:
             await server.db.price_alerts.insert_one(price_alert.model_dump())
 

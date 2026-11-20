@@ -351,3 +351,32 @@ def test_the_town_on_a_scanned_invoice_to_the_business(client, weather, monkeypa
     company = asyncio.run(server.db.companies.find_one({"id": company_id}, {"_id": 0, "weather_hint": 1}))
     assert company["weather_hint"]["city"] == "Варна"
     assert client.get("/api/day-card", headers=owner).json()["weather"]["place"] == "Варна"
+
+
+def test_to_order_today_for_whoever_orders(client, weather):
+    from tests.test_reorder_plan import ALPHA, BETA, _bought
+    company_id, _, owner = _company()
+    _, manager = _user(company_id, "manager", sorted(server.ROLE_PERMISSIONS["manager"]), "Петър Управителев")
+    _, accountant = _user(company_id, "accountant", sorted(server.ROLE_PERMISSIONS["accountant"]), "Анна Счетоводителева")
+    yesterday = (server.today_local() - timedelta(days=1)).isoformat()
+    client.post("/api/daily-revenue", headers=owner, json={"date": yesterday, "fiscal_revenue": 500})
+    asyncio.run(server.db.item_price_history.insert_many(
+        _bought(company_id, ALPHA, "ръкавици L", [58, 44, 30, 16], quantity=3)
+        + _bought(company_id, BETA, "пилешко филе", [11, 9, 7, 5], quantity=2)
+    ))
+
+    def to_order(headers):
+        return next((item for item in client.get("/api/day-card", headers=headers).json()["focus"]
+                     if item["key"] == "to_order"), None)
+
+    line = to_order(owner)
+    assert line["text"] == "За поръчка днес: Доставчик Алфа, Доставчик Бета" and line["route"] == "/stats?tab=items"
+    assert to_order(manager) is not None
+    # The accountant keeps the books, not the orders.
+    assert to_order(accountant) is None
+
+    # Ordered: off the line at once, for everyone.
+    client.post("/api/items/reorder-plan/ordered", headers=manager, json={"item_keys": ["ръкавици l"]})
+    assert to_order(owner)["text"] == "За поръчка днес: Доставчик Бета"
+    client.post("/api/items/reorder-plan/ordered", headers=owner, json={"item_keys": ["пилешко филе"]})
+    assert to_order(owner) is None

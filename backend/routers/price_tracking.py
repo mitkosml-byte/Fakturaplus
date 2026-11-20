@@ -34,6 +34,7 @@ _eik_check_digit,
 )
 import math
 import server
+from services.business_calendar import BUSINESS_TZ
 
 router = APIRouter(prefix="/api")
 
@@ -277,6 +278,7 @@ async def rebuild_invoice_price_history(company_id: str, invoice_doc: dict) -> N
     await server.db.item_price_history.delete_many({"company_id": company_id, "invoice_id": invoice_doc["id"]})
     if rows:
         await server.db.item_price_history.insert_many(rows)
+    forget_due(company_id)
 
 
 async def resync_invoice_header(company_id: str, invoice_id: str, changes: dict) -> None:
@@ -338,6 +340,7 @@ async def resync_invoice_line(
         return
     alert = await evaluate_price_change(company_id, row, await get_price_alert_settings_dict(company_id))
     await server.db.item_price_history.insert_one(row)
+    forget_due(company_id)
     if alert:
         unchanged = (
             previous is not None
@@ -1165,7 +1168,7 @@ async def _revenue_trend_ratio(company_id: str, window_days: int) -> float:
     return max(0.4, min(2.5, ratio))
 
 
-async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
+async def _compute_recurring_item_cadences(company_id: str, with_quantities: bool = True) -> List[dict]:
     """Shared by get_reorder_nudges (overdue-only, ranked) and
     get_reorder_recommendations (every recurring item, a standing
     reference) - everything about an item's purchase pattern that doesn't
@@ -1324,8 +1327,13 @@ async def _compute_recurring_item_cadences(company_id: str) -> List[dict]:
         window_days = max(sum(gaps) + pauses * round(median_gap), round(median_gap))
         total_quantity = sum(qty for _, _, qty in entries_sorted)
         baseline_daily_quantity = total_quantity / window_days if window_days > 0 else 0
-        trend_ratio = await _revenue_trend_ratio(company_id, window_days)
-        recommended_quantity = round(max(baseline_daily_quantity * trend_ratio * median_gap, 0))
+        if with_quantities:
+            trend_ratio = await _revenue_trend_ratio(company_id, window_days)
+            recommended_quantity = round(max(baseline_daily_quantity * trend_ratio * median_gap, 0))
+        else:
+            # Only the rhythm is asked for (the day card's "to order today"):
+            # the revenue trend - a query per item - is left out.
+            trend_ratio, recommended_quantity = 1.0, 0
 
         suppliers = suppliers_by_item[canonical]
         supplier_display = (
@@ -1384,7 +1392,9 @@ async def reorder_overview(company_id: str) -> tuple:
     most likely dropped, so they are asked about instead of nagged about
     for ever (a dropped item used to stay "time to reorder" indefinitely)."""
     items = await _compute_recurring_item_cadences(company_id)
-    nudges = [n for n in items if n["is_overdue"] and not n["is_stale"]]
+    marks = await _order_marks(company_id)
+    now = datetime.now(timezone.utc)
+    nudges = [n for n in items if n["is_overdue"] and not n["is_stale"] and not _ordered_mark(n, marks, now)]
     nudges.sort(key=lambda n: n["_impact_score"], reverse=True)
     stale = [n for n in items if n["is_stale"]]
     stale.sort(key=lambda n: n["avg_order_value"], reverse=True)
@@ -1429,26 +1439,49 @@ async def get_reorder_recommendations(current_user: User = Depends(get_current_u
 
 # Due within this many days: "soon" in the ordering plan.
 REORDER_SOON_DAYS = 2
-_PLAN_RANK = {"order": 0, "soon": 1, "ok": 2}
+# "Поръчано": an item marked ordered waits for its invoice at least this
+# many days (its own usual gap if longer) before it is due again - the order
+# may not have come, or its invoice was not scanned.
+REORDER_MARK_MIN_DAYS = 3
+_PLAN_RANK = {"order": 0, "soon": 1, "ordered": 2, "ok": 3}
 
 
-@router.get("/items/reorder-plan")
-async def get_reorder_plan(current_user: User = Depends(get_current_user)):
-    """The ordering assistant in one place: every item with an established
-    rhythm, grouped by the supplier it was last bought from - "order" (its
-    usual gap has passed), "soon" (due within REORDER_SOON_DAYS) or "ok" -
-    with how many items each supplier has to order and what that order is
-    usually worth, the suppliers with something to order first. Apart, the
-    items far past their rhythm: more likely dropped than forgotten, so
-    asked about ("still using it?"), never given a quantity to order."""
-    require_permission(current_user, "view_statistics")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        return {"suppliers": [], "stale": []}
+async def _order_marks(company_id: str) -> Dict[str, dict]:
+    return {
+        mark["item_key"]: mark
+        for mark in await server.db.reorder_marks.find({"company_id": company_id}, {"_id": 0}).to_list(ALL_ROWS)
+        if isinstance(mark.get("ordered_at"), datetime)
+    }
 
+
+def _ordered_mark(item: dict, marks: Dict[str, dict], now: datetime) -> Optional[dict]:
+    """The item's "Поръчано" mark while it still holds: until an invoice for
+    the item dated on or after the order's day, and at most
+    max(REORDER_MARK_MIN_DAYS, its usual gap) days."""
+    mark = marks.get(item["item_key"])
+    if not mark:
+        return None
+    ordered_at = _aware(mark["ordered_at"])
+    if item["last_purchase_date"] >= ordered_at.astimezone(BUSINESS_TZ).date().isoformat():
+        return None
+    if now - ordered_at > timedelta(days=max(REORDER_MARK_MIN_DAYS, item["median_days_between"])):
+        return None
+    return mark
+
+
+async def reorder_plan(company_id: str, with_quantities: bool = True) -> dict:
+    """Every item with an established rhythm, grouped by the supplier it was
+    last bought from - "order" (its usual gap has passed), "soon" (due
+    within REORDER_SOON_DAYS), "ordered" (marked ordered, its invoice not
+    in yet) or "ok" - with how many items each supplier has to order and
+    what that order is usually worth, the suppliers with something to order
+    first. Apart, the items far past their rhythm: more likely dropped than
+    forgotten, so asked about ("still using it?"), never given a quantity."""
+    marks = await _order_marks(company_id)
+    now = datetime.now(timezone.utc)
     groups: Dict[str, dict] = {}
     stale: List[dict] = []
-    for item in await _compute_recurring_item_cadences(company_id):
+    for item in await _compute_recurring_item_cadences(company_id, with_quantities):
         ratio = item.pop("_overdue_ratio")
         item.pop("_impact_score", None)
         item.pop("is_overdue", None)
@@ -1458,7 +1491,12 @@ async def get_reorder_plan(current_user: User = Depends(get_current_user)):
             stale.append(item)
             continue
         due_in = item["days_until_due"]
-        item["status"] = "order" if due_in <= 0 else "soon" if due_in <= REORDER_SOON_DAYS else "ok"
+        status = "order" if due_in <= 0 else "soon" if due_in <= REORDER_SOON_DAYS else "ok"
+        mark = _ordered_mark(item, marks, now) if status != "ok" else None
+        if mark:
+            status = "ordered"
+            item["ordered"] = {"at": _aware(mark["ordered_at"]).isoformat(), "by": mark.get("ordered_by_name")}
+        item["status"] = status
         item["_ratio"] = ratio
         group = groups.setdefault(item["last_supplier"], {"supplier": item["last_supplier"], "items": []})
         group["items"].append(item)
@@ -1471,12 +1509,94 @@ async def get_reorder_plan(current_user: User = Depends(get_current_user)):
         due = [n for n in group["items"] if n["status"] in ("order", "soon")]
         group["to_order"] = sum(1 for n in due if n["status"] == "order")
         group["soon"] = sum(1 for n in due if n["status"] == "soon")
+        group["ordered"] = sum(1 for n in group["items"] if n["status"] == "ordered")
         group["order_value"] = round(sum(n["avg_order_value"] for n in due), 2)
         group["status"] = group["items"][0]["status"]
         suppliers.append(group)
     suppliers.sort(key=lambda g: (_PLAN_RANK[g["status"]], -g["to_order"], -g["order_value"], g["supplier"].lower()))
     stale.sort(key=lambda n: n["avg_order_value"], reverse=True)
     return {"suppliers": suppliers, "stale": stale}
+
+
+@router.get("/items/reorder-plan")
+async def get_reorder_plan(current_user: User = Depends(get_current_user)):
+    """The ordering assistant in one place - see reorder_plan."""
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        return {"suppliers": [], "stale": []}
+    return await reorder_plan(company_id)
+
+
+# The day card's "to order today", kept a while per business: the rhythm is
+# read from every purchase - too much to redo on every opening of Home. A new
+# invoice or an "ordered" mark forgets it at once.
+_DUE_TTL = timedelta(minutes=30)
+_due_cache: Dict[str, Tuple[datetime, List[str]]] = {}
+
+
+async def suppliers_to_order(company_id: str) -> List[str]:
+    """The suppliers with something past its usual gap, not marked ordered -
+    the most items first."""
+    now = datetime.now(timezone.utc)
+    cached = _due_cache.get(company_id)
+    if cached and now - cached[0] < _DUE_TTL:
+        return cached[1]
+    plan = await reorder_plan(company_id, with_quantities=False)
+    due = [group["supplier"] for group in plan["suppliers"] if group["to_order"] > 0]
+    _due_cache[company_id] = (now, due)
+    return due
+
+
+def forget_due(company_id: Optional[str]) -> None:
+    if company_id:
+        _due_cache.pop(company_id, None)
+
+
+class ReorderMarks(BaseModel):
+    item_keys: List[str] = Field(min_length=1, max_length=200)
+
+
+def _mark_keys(body: ReorderMarks) -> List[str]:
+    return sorted({key.strip().lower()[:300] for key in body.item_keys if key.strip()})
+
+
+@router.post("/items/reorder-plan/ordered")
+async def mark_ordered(body: ReorderMarks, current_user: User = Depends(get_current_user)):
+    """"Поръчано": the items leave "to order" for everyone in the business
+    until their invoice comes (or, if it never does, a few days) - so two
+    people do not order the same thing."""
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+    now = datetime.now(timezone.utc)
+    name = (current_user.name or "").strip().split(" ")[0] or None
+    keys = _mark_keys(body)
+    for key in keys:
+        await server.db.reorder_marks.update_one(
+            {"company_id": company_id, "item_key": key},
+            {"$set": {
+                "company_id": company_id, "item_key": key, "ordered_at": now,
+                "ordered_by": current_user.user_id, "ordered_by_name": name,
+            }},
+            upsert=True,
+        )
+    forget_due(company_id)
+    return {"ordered": len(keys)}
+
+
+@router.post("/items/reorder-plan/ordered/undo")
+async def unmark_ordered(body: ReorderMarks, current_user: User = Depends(get_current_user)):
+    """A "Поръчано" taken back: the items are due again."""
+    require_permission(current_user, "view_statistics")
+    company_id, _ = await get_company_scope(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Нямате фирма")
+    keys = _mark_keys(body)
+    await server.db.reorder_marks.delete_many({"company_id": company_id, "item_key": {"$in": keys}})
+    forget_due(company_id)
+    return {"undone": len(keys)}
 
 
 class ReorderHide(BaseModel):

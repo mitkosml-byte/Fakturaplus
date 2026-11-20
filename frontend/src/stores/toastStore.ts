@@ -9,6 +9,10 @@ export interface ToastItem {
   actionLabel?: string;
   onAction?: () => void;
   duration: number;
+  // Instead of the variant's own icon (an undo after a delete is a bin; an
+  // undo after "Поръчано" is a tick).
+  icon?: string;
+  iconColor?: string;
 }
 
 interface ToastState {
