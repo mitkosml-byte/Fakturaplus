@@ -33,8 +33,13 @@ _eik_check_digit,
     _team_channel_id,
 )
 import math
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import date
+from typing import Callable, Set
 import server
-from services.business_calendar import BUSINESS_TZ
+from services import deliveries as dl
+from services.business_calendar import BUSINESS_TZ, business_day, day_start_utc, today_local
 
 router = APIRouter(prefix="/api")
 
@@ -255,6 +260,7 @@ async def purge_invoice_price_data(company_id: str, invoice_id: str) -> None:
     knocked items out of reorder suggestions entirely."""
     await server.db.item_price_history.delete_many({"company_id": company_id, "invoice_id": invoice_id})
     await server.db.price_alerts.delete_many({"company_id": company_id, "invoice_id": invoice_id})
+    forget_due(company_id)
 
 
 async def rebuild_invoice_price_history(company_id: str, invoice_doc: dict) -> None:
@@ -292,6 +298,8 @@ async def resync_invoice_header(company_id: str, invoice_id: str, changes: dict)
         await server.db.item_price_history.update_many(
             {"company_id": company_id, "invoice_id": invoice_id}, {"$set": history_fields}
         )
+    # Another supplier or day changes the deliveries and the plan.
+    forget_due(company_id)
     if shared:
         await server.db.price_alerts.update_many(
             {"company_id": company_id, "invoice_id": invoice_id}, {"$set": shared}
@@ -1112,6 +1120,9 @@ STALE_CADENCE_CYCLES = 4
 # A gap this many times the item's usual one is a pause (an off-season, a
 # closure), not part of its rhythm.
 PAUSE_GAP_FACTOR = 4
+# The purchases an item's rhythm is read from: a year and a bit, so an item
+# bought in one season is still known the next.
+REORDER_HISTORY_DAYS = 400
 
 
 async def _revenue_trend_ratio(company_id: str, window_days: int) -> float:
@@ -1217,10 +1228,17 @@ async def _compute_recurring_item_cadences(company_id: str, with_quantities: boo
         if isinstance(p.get("discontinued_at"), datetime)
     }
 
+    # The purchases of the last REORDER_HISTORY_DAYS, all of them. It used to
+    # be the first 10 000 rows in no particular order: a business with a few
+    # suppliers delivering three times a week passes that in about a year,
+    # and the rows left out were the newest - its items then looked long
+    # unbought.
     records = await server.db.item_price_history.find(
-        {"company_id": company_id},
-        {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1, "unit_price": 1, "quantity": 1, "unit": 1},
-    ).to_list(10000)
+        {"company_id": company_id,
+         "invoice_date": {"$gte": datetime.now(timezone.utc) - timedelta(days=REORDER_HISTORY_DAYS)}},
+        {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1, "unit_price": 1, "quantity": 1, "unit": 1,
+         "created_at": 1},
+    ).to_list(ALL_ROWS)
 
     groups = defaultdict(list)
     suppliers_by_item: Dict[str, set] = defaultdict(set)
@@ -1248,7 +1266,10 @@ async def _compute_recurring_item_cadences(company_id: str, with_quantities: boo
         if canonical not in last_seen or aware_date >= last_seen[canonical]:
             last_seen[canonical] = aware_date
             last_supplier[canonical] = r["supplier"]
-        groups[canonical].append((date, r.get("unit_price", 0) * r.get("quantity", 0), r.get("quantity", 0)))
+        groups[canonical].append((
+            date, r.get("unit_price", 0) * r.get("quantity", 0), r.get("quantity", 0), _supplier_key(r["supplier"]),
+            _aware(r["created_at"]) if isinstance(r.get("created_at"), datetime) else None,
+        ))
         suppliers_by_item[canonical].add(r["supplier"])
         original_name_by_canonical[canonical] = r["item_name"]
         if r.get("unit"):
@@ -1270,8 +1291,13 @@ async def _compute_recurring_item_cadences(company_id: str, with_quantities: boo
         # gap they produced dropped the item from reorder suggestions
         # altogether - the most-bought items were the likeliest to vanish.
         by_day: Dict[Any, list] = {}
-        for d, amount, qty in entries:
+        bought_from: Dict[Any, set] = defaultdict(set)
+        entered: Dict[Any, datetime] = {}
+        for d, amount, qty, supplier_key, created_at in entries:
             d = d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d
+            bought_from[d.date()].add(supplier_key)
+            if created_at and (d.date() not in entered or created_at > entered[d.date()]):
+                entered[d.date()] = created_at
             day_entry = by_day.get(d.date())
             if day_entry is None:
                 by_day[d.date()] = [d, amount, qty]
@@ -1303,9 +1329,17 @@ async def _compute_recurring_item_cadences(company_id: str, with_quantities: boo
             continue
 
         last_date = dates_sorted[-1]
+        # "No longer used": out until bought again - an invoice of a later
+        # day, or one of that same day entered after it (an invoice keeps
+        # 00:00 of its day, so the day alone kept a same-day purchase out).
         stopped_at = discontinued.get(canonical)
-        if stopped_at and last_date <= stopped_at:
-            continue
+        if stopped_at:
+            stopped_day = business_day(stopped_at)
+            last_entered = entered.get(last_date.date())
+            bought_again = last_date > stopped_at or bool(
+                stopped_day and last_date.date() >= stopped_day and last_entered and last_entered > stopped_at)
+            if not bought_again:
+                continue
         # Replaced by another size of the same product, first bought after
         # this size's last purchase (1 kg tins -> 5 kg tins).
         if item_size_signature(canonical) and any(
@@ -1362,8 +1396,19 @@ async def _compute_recurring_item_cadences(company_id: str, with_quantities: boo
             # urgent" - it usually means the item was dropped - so a long
             # gone item can't outrank a live one forever.
             "_impact_score": min(overdue_ratio, 4.0) * (avg_order_value if avg_order_value > 0 else 1.0),
+            # For the ordering plan: each purchase (day, quantity, the
+            # suppliers it came from), and the trend-adjusted daily use.
+            "_purchases": [(e[0].date(), e[2], frozenset(bought_from[e[0].date()])) for e in entries_sorted],
+            "_daily_rate": baseline_daily_quantity * trend_ratio if with_quantities else 0.0,
         })
     return items
+
+
+def _public(item: dict) -> dict:
+    """An item without the plan's working fields (those starting with "_")."""
+    for key in [key for key in item if key.startswith("_")]:
+        del item[key]
+    return item
 
 
 @router.get("/items/reorder-nudges")
@@ -1380,28 +1425,6 @@ async def get_reorder_nudges(current_user: User = Depends(get_current_user)):
 
     nudges, _stale = await reorder_overview(company_id)
     return {"nudges": nudges[:10]}
-
-
-async def reorder_overview(company_id: str) -> tuple:
-    """(nudges, stale) from one cadence computation. nudges: overdue items
-    still within STALE_CADENCE_CYCLES of their cycle, most business-
-    significant first - how overdue relative to its own cadence, weighted
-    by what reordering it is usually worth, so a rarely-bought bulk
-    ingredient genuinely worth flagging outranks an equally-overdue but
-    economically trivial one. stale: items past that, costliest first -
-    most likely dropped, so they are asked about instead of nagged about
-    for ever (a dropped item used to stay "time to reorder" indefinitely)."""
-    items = await _compute_recurring_item_cadences(company_id)
-    marks = await _order_marks(company_id)
-    now = datetime.now(timezone.utc)
-    nudges = [n for n in items if n["is_overdue"] and not n["is_stale"] and not _ordered_mark(n, marks, now)]
-    nudges.sort(key=lambda n: n["_impact_score"], reverse=True)
-    stale = [n for n in items if n["is_stale"]]
-    stale.sort(key=lambda n: n["avg_order_value"], reverse=True)
-    for n in nudges + stale:
-        for private in ("_impact_score", "_overdue_ratio", "is_overdue", "is_stale"):
-            n.pop(private, None)
-    return nudges, stale
 
 
 @router.get("/items/reorder-recommendations")
@@ -1432,17 +1455,19 @@ async def get_reorder_recommendations(current_user: User = Depends(get_current_u
 
     items = await _compute_recurring_item_cadences(company_id)
     items.sort(key=lambda n: n["_overdue_ratio"], reverse=True)
-    for n in items:
-        del n["_impact_score"]
-        del n["_overdue_ratio"]
-    return {"items": items}
+    return {"items": [_public(n) for n in items]}
 
 # Due within this many days: "soon" in the ordering plan.
 REORDER_SOON_DAYS = 2
-# "Поръчано": an item marked ordered waits for its invoice at least this
-# many days (its own usual gap if longer) before it is due again - the order
-# may not have come, or its invoice was not scanned.
+# "Поръчано" for a supplier without fixed days: an item marked ordered waits
+# for its invoice at least this many days (its own usual gap if longer)
+# before it is due again - the order may not have come, or its invoice was
+# not scanned. With fixed days it waits for the delivery it was ordered for.
 REORDER_MARK_MIN_DAYS = 3
+# A delivery that came without something ordered is told for this many days.
+MISSING_SHOWN_DAYS = 2
+# The orders ("Поръчано") the business's ordering habits are learned from.
+ORDERS_LEARNED_DAYS = 120
 _PLAN_RANK = {"order": 0, "soon": 1, "ordered": 2, "ok": 3}
 
 
@@ -1454,64 +1479,269 @@ async def _order_marks(company_id: str) -> Dict[str, dict]:
     }
 
 
-def _ordered_mark(item: dict, marks: Dict[str, dict], now: datetime) -> Optional[dict]:
-    """The item's "Поръчано" mark while it still holds: until an invoice for
-    the item dated on or after the order's day, and at most
-    max(REORDER_MARK_MIN_DAYS, its usual gap) days."""
-    mark = marks.get(item["item_key"])
-    if not mark:
-        return None
+@dataclass
+class _Deliveries:
+    """What the plan knows about deliveries: each supplier's fixed days and
+    the days its invoices came, how early the business orders, its
+    "Поръчано" marks and the day each order's goods came."""
+    today: date
+    now: datetime
+    marks: Dict[str, dict]
+    invoice_days: Dict[str, Set[date]]
+    schedules: Dict[str, Optional[dl.Schedule]]
+    leads: Dict[str, Dict[int, int]]
+    order_arrivals: Dict[str, date]
+    holidays: Dict[date, str]
+    closed: Callable[[date], bool]
+
+    def order_day(self, supplier_key: str, delivery: date, scheduled: bool) -> date:
+        lead = self.leads.get(supplier_key, {})
+        return dl.order_day(delivery, lead.get(delivery.weekday() if scheduled else dl.ANY_DAY), self.closed)
+
+
+def _arrivals(purchases: List[tuple], ordered_day: date, supplier_key: str) -> List[date]:
+    """The days an item came from a supplier after it was ordered (within
+    a lead of an order)."""
+    return [
+        day for day, _, suppliers in purchases
+        if ordered_day < day <= ordered_day + timedelta(days=dl.MAX_LEAD_DAYS) and supplier_key in suppliers
+    ]
+
+
+async def _deliveries(company_id: str, items: List[dict]) -> _Deliveries:
+    today = today_local()
+    now = datetime.now(timezone.utc)
+    since = today - timedelta(weeks=dl.LONG_WEEKS + 2)
+    # An invoice's date is the day its goods came (a credit note is not a delivery).
+    invoice_days: Dict[str, Set[date]] = defaultdict(set)
+    for row in await server.db.invoices.find(
+        {"company_id": company_id, "date": {"$gte": day_start_utc(since)}, "document_type": {"$ne": "credit_note"}},
+        {"_id": 0, "supplier": 1, "date": 1},
+    ).to_list(ALL_ROWS):
+        day = business_day(row.get("date"))
+        if day and row.get("supplier"):
+            invoice_days[_supplier_key(row["supplier"])].add(day)
+
+    closed_weekdays, exceptions = await get_closed_days_lookup(company_id)
+
+    def closed(day: date) -> bool:
+        return is_date_closed(day.isoformat(), closed_weekdays, exceptions)
+
+    holidays: Dict[date, str] = {}
+    for year in sorted({since.year, today.year, (today + timedelta(days=30)).year}):
+        for holiday in get_bulgarian_public_holidays(year):
+            holidays[date.fromisoformat(holiday["date"])] = holiday["name"]
+    # No delivery is missed on a public holiday or a day the business was closed.
+    quiet = set(holidays) | {
+        since + timedelta(days=n) for n in range((today - since).days + 1) if closed(since + timedelta(days=n))
+    }
+    schedules = {
+        key: dl.detect_schedule(invoice_days.get(key, set()), today, quiet)
+        for key in {_supplier_key(item["last_supplier"]) for item in items}
+    }
+
+    # Each order: the day its goods came - how early the business orders for
+    # a delivery, and whether an ordered item came with it.
+    purchases = {item["item_key"]: item["_purchases"] for item in items}
+    samples: Dict[str, List[Tuple[date, date]]] = defaultdict(list)
+    order_arrivals: Dict[str, date] = {}
+    for order in await server.db.reorder_orders.find(
+        {"company_id": company_id, "ordered_at": {"$gte": now - timedelta(days=ORDERS_LEARNED_DAYS)}}, {"_id": 0},
+    ).to_list(ALL_ROWS):
+        ordered_day = business_day(order.get("ordered_at")) if isinstance(order.get("ordered_at"), datetime) else None
+        if ordered_day is None:
+            continue
+        supplier_key = order.get("supplier_key") or ""
+        came = [day for key in order.get("item_keys", []) for day in _arrivals(purchases.get(key, []), ordered_day, supplier_key)]
+        if came:
+            samples[supplier_key].append((ordered_day, min(came)))
+            order_arrivals[order["id"]] = min(came)
+    leads = {key: dl.learned_leads(pairs) for key, pairs in samples.items()}
+    return _Deliveries(today, now, await _order_marks(company_id), invoice_days, schedules, leads,
+                       order_arrivals, holidays, closed)
+
+
+def _mark_holds(item: dict, mark: dict, ctx: _Deliveries) -> Tuple[bool, Optional[date]]:
+    """Whether an item's "Поръчано" still holds, and the day its order's
+    delivery came without it, if it did. It ends when the item's invoice
+    comes; when the delivery it was ordered for came without it; and, with
+    no invoice, a day after that delivery (a supplier with fixed days) or
+    after max(REORDER_MARK_MIN_DAYS, its usual gap) days (without)."""
     ordered_at = _aware(mark["ordered_at"])
-    if item["last_purchase_date"] >= ordered_at.astimezone(BUSINESS_TZ).date().isoformat():
+    ordered_day = business_day(ordered_at) or ctx.today
+    expected = date.fromisoformat(mark["delivery"]) if mark.get("delivery") else None
+    last = date.fromisoformat(item["last_purchase_date"])
+    # Bought on the order's day itself: that day's own delivery came - not
+    # the one ordered, when it was ordered for a later day.
+    if last > ordered_day or (last == ordered_day and not (expected and expected > ordered_day)):
+        return False, None
+    came = ctx.order_arrivals.get(mark.get("order_id") or "")
+    if came:
+        return False, came
+    if expected:
+        return ctx.today <= expected + timedelta(days=1), None
+    return ctx.now - ordered_at <= timedelta(days=max(REORDER_MARK_MIN_DAYS, item["median_days_between"])), None
+
+
+def _place(item: dict, ctx: _Deliveries, with_quantities: bool) -> None:
+    """An item in the plan: the delivery its order goes with (a supplier
+    with fixed days), the day to order by - at least a day before the
+    goods are expected - how much, and its status: "order" (order by today,
+    or already late), "soon" (order day within REORDER_SOON_DAYS),
+    "ordered" (marked, still on its way) or "ok"."""
+    key = _supplier_key(item["last_supplier"])
+    schedule = ctx.schedules.get(key)
+    today = ctx.today
+    gap = max(1, item["median_days_between"])
+    expected = date.fromisoformat(item["last_purchase_date"]) + timedelta(days=gap)
+    item["days_until_due"] = (expected - today).days
+    item["usual_for_weekday"] = False
+    if schedule:
+        deliveries = dl.orderable_deliveries(schedule, today, lambda day: ctx.order_day(key, day, True))
+        delivery = dl.slot_for(expected, deliveries, schedule)
+        order_by = ctx.order_day(key, delivery, True)
+        item["delivery"] = delivery.isoformat()
+        if with_quantities:
+            # What is usually taken on that weekday; else the daily use
+            # until the delivery it would be ordered for next.
+            usual = dl.usual_quantity([(day, qty) for day, qty, _ in item["_purchases"]], delivery.weekday(), today)
+            if usual is not None:
+                item["recommended_quantity"] = round(usual)
+                item["usual_for_weekday"] = True
+            else:
+                cover = dl.coverage_days(delivery, gap, schedule)
+                item["recommended_quantity"] = round(max(item["_daily_rate"] * cover, 0))
+    else:
+        order_by = ctx.order_day(key, expected, False)
+        item["delivery"] = None
+    item["order_by"] = order_by.isoformat()
+    if order_by <= today or expected < today:
+        status = "order"
+    elif (order_by - today).days <= REORDER_SOON_DAYS:
+        status = "soon"
+    else:
+        status = "ok"
+    mark = ctx.marks.get(item["item_key"])
+    if mark:
+        holds, came_without = _mark_holds(item, mark, ctx)
+        if came_without and (today - came_without).days <= MISSING_SHOWN_DAYS:
+            item["missing_on"] = came_without.isoformat()
+        if holds and status != "ok":
+            status = "ordered"
+            item["ordered"] = {"at": _aware(mark["ordered_at"]).isoformat(), "by": mark.get("ordered_by_name")}
+    item["status"] = status
+
+
+async def _placed_items(company_id: str, with_quantities: bool = True) -> Tuple[List[dict], _Deliveries]:
+    items = await _compute_recurring_item_cadences(company_id, with_quantities)
+    ctx = await _deliveries(company_id, items)
+    for item in items:
+        if not item["is_stale"]:
+            _place(item, ctx, with_quantities)
+    return items, ctx
+
+
+def _no_invoice(supplier_key: str, schedule: Optional[dl.Schedule], ctx: _Deliveries) -> Optional[str]:
+    """Yesterday, when a supplier with fixed days was expected and no
+    invoice of it is in: a day it practically always comes on, or the
+    delivery an order was marked for. Not on a public holiday or a day the
+    business was closed."""
+    if not schedule:
         return None
-    if now - ordered_at > timedelta(days=max(REORDER_MARK_MIN_DAYS, item["median_days_between"])):
+    yesterday = ctx.today - timedelta(days=1)
+    if yesterday.weekday() not in schedule.weekdays or yesterday in ctx.holidays or ctx.closed(yesterday):
         return None
-    return mark
+    if yesterday in ctx.invoice_days.get(supplier_key, set()):
+        return None
+    ordered_for = any(
+        mark.get("delivery") == yesterday.isoformat() and mark.get("supplier_key") == supplier_key
+        for mark in ctx.marks.values()
+    )
+    return yesterday.isoformat() if yesterday.weekday() in schedule.strong or ordered_for else None
+
+
+async def reorder_overview(company_id: str) -> tuple:
+    """(nudges, stale) from one cadence computation. nudges: overdue items
+    still within STALE_CADENCE_CYCLES of their cycle and not ordered, most
+    business-significant first - how overdue relative to its own cadence,
+    weighted by what reordering it is usually worth, so a rarely-bought
+    bulk ingredient genuinely worth flagging outranks an equally-overdue
+    but economically trivial one - with the plan's quantities. stale: items
+    past that, costliest first - most likely dropped, so they are asked
+    about instead of nagged about for ever (a dropped item used to stay
+    "time to reorder" indefinitely)."""
+    items, _ = await _placed_items(company_id)
+    nudges = [n for n in items if n["is_overdue"] and not n["is_stale"] and n.get("status") != "ordered"]
+    nudges.sort(key=lambda n: n["_impact_score"], reverse=True)
+    stale = [n for n in items if n["is_stale"]]
+    stale.sort(key=lambda n: n["avg_order_value"], reverse=True)
+    for n in nudges + stale:
+        _public(n)
+        for private in ("is_overdue", "is_stale"):
+            n.pop(private, None)
+    return nudges, stale
 
 
 async def reorder_plan(company_id: str, with_quantities: bool = True) -> dict:
     """Every item with an established rhythm, grouped by the supplier it was
-    last bought from - "order" (its usual gap has passed), "soon" (due
-    within REORDER_SOON_DAYS), "ordered" (marked ordered, its invoice not
-    in yet) or "ok" - with how many items each supplier has to order and
-    what that order is usually worth, the suppliers with something to order
-    first. Apart, the items far past their rhythm: more likely dropped than
-    forgotten, so asked about ("still using it?"), never given a quantity."""
-    marks = await _order_marks(company_id)
-    now = datetime.now(timezone.utc)
+    last bought from - "order", "soon", "ordered" or "ok" (see _place) -
+    with how many items each supplier has to order and what that order is
+    usually worth, the suppliers with something to order first. A supplier
+    with fixed delivery days also says them, the next delivery and the day
+    to order for it, a public holiday on it, a delivery that came without
+    something ordered, and yesterday's delivery with no invoice. Apart, the
+    items far past their rhythm: more likely dropped than forgotten, so
+    asked about ("still using it?"), never given a quantity."""
+    items, ctx = await _placed_items(company_id, with_quantities)
     groups: Dict[str, dict] = {}
     stale: List[dict] = []
-    for item in await _compute_recurring_item_cadences(company_id, with_quantities):
-        ratio = item.pop("_overdue_ratio")
-        item.pop("_impact_score", None)
+    for item in items:
         item.pop("is_overdue", None)
-        is_stale = item.pop("is_stale")
-        item["days_until_due"] = item["median_days_between"] - item["days_since_last"]
-        if is_stale:
-            stale.append(item)
+        if item.pop("is_stale"):
+            item["days_until_due"] = item["median_days_between"] - item["days_since_last"]
+            stale.append(_public(item))
             continue
-        due_in = item["days_until_due"]
-        status = "order" if due_in <= 0 else "soon" if due_in <= REORDER_SOON_DAYS else "ok"
-        mark = _ordered_mark(item, marks, now) if status != "ok" else None
-        if mark:
-            status = "ordered"
-            item["ordered"] = {"at": _aware(mark["ordered_at"]).isoformat(), "by": mark.get("ordered_by_name")}
-        item["status"] = status
-        item["_ratio"] = ratio
         group = groups.setdefault(item["last_supplier"], {"supplier": item["last_supplier"], "items": []})
         group["items"].append(item)
 
     suppliers = []
     for group in groups.values():
-        group["items"].sort(key=lambda n: (_PLAN_RANK[n["status"]], -n["_ratio"]))
-        for item in group["items"]:
-            del item["_ratio"]
+        group["items"].sort(key=lambda n: (_PLAN_RANK[n["status"]], -n["_overdue_ratio"]))
+        key = _supplier_key(group["supplier"])
+        schedule = ctx.schedules.get(key)
         due = [n for n in group["items"] if n["status"] in ("order", "soon")]
+        group["schedule"] = list(schedule.weekdays) if schedule else None
+        group["schedule_changed"] = bool(schedule and schedule.changed)
+        group["holiday"] = None
+        if schedule:
+            # The next order goes with the soonest delivery anything is due for.
+            upcoming = min((date.fromisoformat(n["delivery"]) for n in due), default=None)
+            if upcoming is None:
+                upcoming = dl.orderable_deliveries(schedule, ctx.today, lambda day: ctx.order_day(key, day, True), 1)[0]
+            group["next_delivery"] = upcoming.isoformat()
+            group["order_by"] = ctx.order_day(key, upcoming, True).isoformat()
+            if due and upcoming in ctx.holidays:
+                group["holiday"] = {"date": upcoming.isoformat(), "name": ctx.holidays[upcoming]}
+            for n in group["items"]:
+                n["in_next_order"] = n["status"] in ("order", "soon") and n["delivery"] == group["next_delivery"]
+        else:
+            group["next_delivery"] = None
+            group["order_by"] = min((n["order_by"] for n in due), default=None)
+            for n in group["items"]:
+                n["in_next_order"] = n["status"] in ("order", "soon")
+        missing = [n for n in group["items"] if n.get("missing_on")]
+        group["missing"] = (
+            {"date": max(n["missing_on"] for n in missing), "items": [n["item_name"] for n in missing]}
+            if missing else None
+        )
+        group["no_invoice"] = _no_invoice(key, schedule, ctx)
         group["to_order"] = sum(1 for n in due if n["status"] == "order")
         group["soon"] = sum(1 for n in due if n["status"] == "soon")
         group["ordered"] = sum(1 for n in group["items"] if n["status"] == "ordered")
-        group["order_value"] = round(sum(n["avg_order_value"] for n in due), 2)
+        group["order_value"] = round(sum(n["avg_order_value"] for n in group["items"] if n["in_next_order"]), 2)
         group["status"] = group["items"][0]["status"]
+        for n in group["items"]:
+            _public(n)
         suppliers.append(group)
     suppliers.sort(key=lambda g: (_PLAN_RANK[g["status"]], -g["to_order"], -g["order_value"], g["supplier"].lower()))
     stale.sort(key=lambda n: n["avg_order_value"], reverse=True)
@@ -1528,24 +1758,34 @@ async def get_reorder_plan(current_user: User = Depends(get_current_user)):
     return await reorder_plan(company_id)
 
 
-# The day card's "to order today", kept a while per business: the rhythm is
-# read from every purchase - too much to redo on every opening of Home. A new
-# invoice or an "ordered" mark forgets it at once.
+# The day card's part of the plan, kept a while per business and day: the
+# rhythm is read from every purchase - too much to redo on every opening of
+# Home. A new invoice or an "ordered" mark forgets it at once.
 _DUE_TTL = timedelta(minutes=30)
-_due_cache: Dict[str, Tuple[datetime, List[str]]] = {}
+_due_cache: Dict[str, Tuple[date, datetime, dict]] = {}
 
 
-async def suppliers_to_order(company_id: str) -> List[str]:
-    """The suppliers with something past its usual gap, not marked ordered -
-    the most items first."""
+async def day_orders(company_id: str) -> dict:
+    """For the day card: the suppliers to order from today (with the
+    delivery it is for and a public holiday on it), the deliveries that
+    came without something ordered, and yesterday's expected deliveries
+    with no invoice."""
+    today = today_local()
     now = datetime.now(timezone.utc)
     cached = _due_cache.get(company_id)
-    if cached and now - cached[0] < _DUE_TTL:
-        return cached[1]
+    if cached and cached[0] == today and now - cached[1] < _DUE_TTL:
+        return cached[2]
     plan = await reorder_plan(company_id, with_quantities=False)
-    due = [group["supplier"] for group in plan["suppliers"] if group["to_order"] > 0]
-    _due_cache[company_id] = (now, due)
-    return due
+    result = {
+        "to_order": [
+            {"supplier": g["supplier"], "delivery": g["next_delivery"], "holiday": g["holiday"]}
+            for g in plan["suppliers"] if g["to_order"] > 0
+        ],
+        "missing": [{"supplier": g["supplier"], **g["missing"]} for g in plan["suppliers"] if g["missing"]],
+        "no_invoice": [{"supplier": g["supplier"], "date": g["no_invoice"]} for g in plan["suppliers"] if g["no_invoice"]],
+    }
+    _due_cache[company_id] = (today, now, result)
+    return result
 
 
 def forget_due(company_id: Optional[str]) -> None:
@@ -1555,6 +1795,8 @@ def forget_due(company_id: Optional[str]) -> None:
 
 class ReorderMarks(BaseModel):
     item_keys: List[str] = Field(min_length=1, max_length=200)
+    # Undo: the orders the marks were made with.
+    order_ids: Optional[List[str]] = Field(default=None, max_length=20)
 
 
 def _mark_keys(body: ReorderMarks) -> List[str]:
@@ -1564,8 +1806,12 @@ def _mark_keys(body: ReorderMarks) -> List[str]:
 @router.post("/items/reorder-plan/ordered")
 async def mark_ordered(body: ReorderMarks, current_user: User = Depends(get_current_user)):
     """"Поръчано": the items leave "to order" for everyone in the business
-    until their invoice comes (or, if it never does, a few days) - so two
-    people do not order the same thing."""
+    until their invoice comes (or, if it never does, until a day after the
+    delivery they were ordered for - a few days for a supplier without
+    fixed days) - so two people do not order the same thing. Each item
+    keeps the supplier and the delivery it was ordered for; the order is
+    kept too, to learn how early the business orders for each delivery
+    day and to tell a delivery that came without something ordered."""
     require_permission(current_user, "view_statistics")
     company_id, _ = await get_company_scope(current_user)
     if not company_id:
@@ -1573,28 +1819,51 @@ async def mark_ordered(body: ReorderMarks, current_user: User = Depends(get_curr
     now = datetime.now(timezone.utc)
     name = (current_user.name or "").strip().split(" ")[0] or None
     keys = _mark_keys(body)
+    plan = await reorder_plan(company_id, with_quantities=False)
+    placed = {
+        item["item_key"]: (group["supplier"], item.get("delivery"))
+        for group in plan["suppliers"] for item in group["items"]
+    }
+    by_supplier: Dict[Optional[str], List[str]] = defaultdict(list)
     for key in keys:
-        await server.db.reorder_marks.update_one(
-            {"company_id": company_id, "item_key": key},
-            {"$set": {
-                "company_id": company_id, "item_key": key, "ordered_at": now,
-                "ordered_by": current_user.user_id, "ordered_by_name": name,
-            }},
-            upsert=True,
-        )
+        by_supplier[placed.get(key, (None, None))[0]].append(key)
+    order_ids = []
+    for supplier, supplier_keys in by_supplier.items():
+        order_id = str(uuid.uuid4())
+        order_ids.append(order_id)
+        for key in supplier_keys:
+            await server.db.reorder_marks.update_one(
+                {"company_id": company_id, "item_key": key},
+                {"$set": {
+                    "company_id": company_id, "item_key": key, "ordered_at": now,
+                    "ordered_by": current_user.user_id, "ordered_by_name": name,
+                    "supplier_key": _supplier_key(supplier) if supplier else None,
+                    "delivery": placed.get(key, (None, None))[1], "order_id": order_id,
+                }},
+                upsert=True,
+            )
+        if supplier:
+            await server.db.reorder_orders.insert_one({
+                "id": order_id, "company_id": company_id, "supplier": supplier,
+                "supplier_key": _supplier_key(supplier), "item_keys": supplier_keys,
+                "ordered_at": now, "ordered_by": current_user.user_id, "ordered_by_name": name,
+            })
     forget_due(company_id)
-    return {"ordered": len(keys)}
+    return {"ordered": len(keys), "order_ids": order_ids}
 
 
 @router.post("/items/reorder-plan/ordered/undo")
 async def unmark_ordered(body: ReorderMarks, current_user: User = Depends(get_current_user)):
-    """A "Поръчано" taken back: the items are due again."""
+    """A "Поръчано" taken back: the items are due again, and the order is
+    not learned from."""
     require_permission(current_user, "view_statistics")
     company_id, _ = await get_company_scope(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="Нямате фирма")
     keys = _mark_keys(body)
     await server.db.reorder_marks.delete_many({"company_id": company_id, "item_key": {"$in": keys}})
+    if body.order_ids:
+        await server.db.reorder_orders.delete_many({"company_id": company_id, "id": {"$in": body.order_ids}})
     forget_due(company_id)
     return {"undone": len(keys)}
 
@@ -1875,11 +2144,13 @@ async def get_merged_item_statistics(
         except ValueError:
             raise HTTPException(status_code=400, detail="Невалиден период")
 
-    # Get all price history records
+    # Every purchase of the period - a cap on rows here used to drop the
+    # newest ones for a business that buys often, so a long period showed
+    # less than a short one.
     history = await server.db.item_price_history.find(
         query,
         {"_id": 0, "item_name": 1, "supplier": 1, "invoice_date": 1, "unit_price": 1, "quantity": 1, "unit": 1},
-    ).to_list(10000)
+    ).to_list(ALL_ROWS)
 
     if not history:
         return {

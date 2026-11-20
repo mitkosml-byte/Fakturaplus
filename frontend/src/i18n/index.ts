@@ -4029,8 +4029,8 @@ export const translations: Translations = {
   // Orders (ReorderPlanCard): by supplier, what is due and how much.
   'reorder.title': { bg: 'Поръчки', en: 'Orders' },
   'reorder.subtitle': {
-    bg: 'По доставчици – кое е време да поръчате и колко, по ритъма на досегашните покупки.',
-    en: 'By supplier – what is due and how much, from the rhythm of your purchases so far.',
+    bg: 'По доставчици – кое е време да поръчате и колко, по ритъма на покупките и дните за доставка.',
+    en: 'By supplier – what is due and how much, from the rhythm of your purchases and the delivery days.',
   },
   'reorder.toOrder': { bg: '{count} за поръчка', en: '{count} to order' },
   'reorder.soon': { bg: '{count} скоро', en: '{count} soon' },
@@ -4054,6 +4054,30 @@ export const translations: Translations = {
   'reorder.today': { bg: 'днес', en: 'today' },
   'reorder.yesterday': { bg: 'вчера', en: 'yesterday' },
   'reorder.daysAgo': { bg: 'преди {count} дни', en: '{count} days ago' },
+  // Fixed delivery days, read from the supplier's invoice dates.
+  'reorder.weekdaysShort': { bg: 'пн,вт,ср,чт,пт,сб,нд', en: 'Mon,Tue,Wed,Thu,Fri,Sat,Sun' },
+  'reorder.onWeekdays': {
+    bg: 'в понеделник,във вторник,в сряда,в четвъртък,в петък,в събота,в неделя',
+    en: 'on Mondays,on Tuesdays,on Wednesdays,on Thursdays,on Fridays,on Saturdays,on Sundays',
+  },
+  'reorder.delivers': { bg: 'Доставя {days}', en: 'Delivers {days}' },
+  'reorder.newDays': { bg: 'нови дни', en: 'new days' },
+  'reorder.deliveryOn': { bg: 'Доставка {day}', en: 'Delivery {day}' },
+  'reorder.orderToday': { bg: 'поръчай днес', en: 'order today' },
+  'reorder.orderTomorrow': { bg: 'поръчай до утре', en: 'order by tomorrow' },
+  'reorder.orderBy': { bg: 'поръчай до {day}', en: 'order by {day}' },
+  'reorder.orderNow': { bg: 'поръчай веднага', en: 'order now' },
+  'reorder.usually': { bg: 'обикновено {day}', en: 'usually {day}' },
+  'reorder.holiday': {
+    bg: '{day} е празник ({name}) – доставката може да не дойде. Поръчай за повече дни.',
+    en: '{day} is a public holiday ({name}) – the delivery may not come. Order for more days.',
+  },
+  'reorder.missing': { bg: 'Доставката на {day} дойде без: {items}', en: 'The delivery on {day} came without: {items}' },
+  'reorder.missingItem': { bg: 'липсваше в доставката на {day}', en: 'missing from the delivery on {day}' },
+  'reorder.noInvoice': {
+    bg: 'Няма фактура от вчерашната доставка ({day}) – сканирай я, ако е дошла.',
+    en: "No invoice for yesterday's delivery ({day}) – scan it if it came.",
+  },
   'reorder.copied': {
     bg: 'Поръчката е копирана – поставете я във Viber или имейл',
     en: 'Order copied – paste it into Viber or an email',

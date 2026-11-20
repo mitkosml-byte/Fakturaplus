@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import server
+from services.business_calendar import day_start_utc, today_local
 from tests.test_whole_program_fixes import _company, _user
 
 ALPHA = "Доставчик Алфа ЕООД"
@@ -17,11 +18,14 @@ GAMMA = "Доставчик Гама ЕТ"
 
 
 def _bought(company_id, supplier, item, days_ago, quantity=2, unit_price=10.0, unit="бр"):
-    now = datetime.now(timezone.utc)
+    """Purchases that many business days ago - kept as invoices keep their
+    day (00:00 UTC of it)."""
+    today = today_local()
     return [{
         "company_id": company_id, "supplier": supplier, "item_name": item, "unit": unit,
         "unit_price": unit_price, "quantity": quantity,
-        "invoice_id": f"inv-{item}-{d}", "invoice_number": f"{d:010d}", "invoice_date": now - timedelta(days=d),
+        "invoice_id": f"inv-{item}-{d}", "invoice_number": f"{d:010d}",
+        "invoice_date": day_start_utc(today - timedelta(days=d)), "created_at": datetime.now(timezone.utc),
     } for d in days_ago]
 
 
@@ -29,9 +33,11 @@ def test_the_plan_by_supplier(client):
     company_id, _, owner = _company()
     _, cashier = _user(company_id, "staff", ["add_revenue"], "Ивана Касиерова")
     history = (
-        # Alpha: one past its rhythm, one due tomorrow, one not yet.
+        # Alpha: one past its rhythm, one due tomorrow - ordered today, the
+        # day before it is needed - one in 3 days, one not yet.
         _bought(company_id, ALPHA, "ръкавици L", [58, 44, 30, 16], quantity=3)
         + _bought(company_id, ALPHA, "дървени вилички", [55, 41, 27, 13], quantity=6)
+        + _bought(company_id, ALPHA, "кутии за храна", [53, 39, 25, 11])
         + _bought(company_id, ALPHA, "салфетки", [32, 22, 12, 2])
         # Beta: nothing due; the cheese moved to Beta from Alpha.
         + _bought(company_id, BETA, "картофи", [22, 15, 8, 1], quantity=4)
@@ -46,10 +52,17 @@ def test_the_plan_by_supplier(client):
     alpha, beta = plan["suppliers"]
     assert alpha["supplier"] == ALPHA and alpha["status"] == "order"
     assert [(n["item_name"], n["status"]) for n in alpha["items"]] == [
-        ("ръкавици L", "order"), ("дървени вилички", "soon"), ("салфетки", "ok")]
-    assert (alpha["to_order"], alpha["soon"]) == (1, 1)
-    assert alpha["order_value"] == round(alpha["items"][0]["avg_order_value"] + alpha["items"][1]["avg_order_value"], 2)
-    assert alpha["items"][0]["days_until_due"] == -2 and alpha["items"][0]["recommended_quantity"] >= 0
+        ("ръкавици L", "order"), ("дървени вилички", "order"), ("кутии за храна", "soon"), ("салфетки", "ok")]
+    assert (alpha["to_order"], alpha["soon"]) == (2, 1)
+    assert alpha["order_value"] == round(sum(n["avg_order_value"] for n in alpha["items"][:3]), 2)
+    gloves, forks, boxes, _ = alpha["items"]
+    assert gloves["days_until_due"] == -2 and gloves["recommended_quantity"] >= 0
+    # Without fixed delivery days: the day before the item is expected.
+    today = today_local()
+    assert forks["order_by"] == today.isoformat() and boxes["order_by"] == (today + timedelta(days=2)).isoformat()
+    assert alpha["order_by"] == gloves["order_by"] and alpha["schedule"] is None and alpha["next_delivery"] is None
+    assert all(n["in_next_order"] for n in (gloves, forks, boxes)) and not alpha["items"][3]["in_next_order"]
+    assert not any(key.startswith("_") for n in alpha["items"] for key in n)
 
     # The cheese goes where it was last bought, and says it had another.
     assert beta["supplier"] == BETA and beta["status"] == "ok" and beta["to_order"] == 0
@@ -96,7 +109,7 @@ def test_ordered_leaves_to_order_until_its_invoice_comes(client):
 
     # Alpha's due items marked ordered - for everyone in the business.
     assert client.post("/api/items/reorder-plan/ordered", headers=owner,
-                       json={"item_keys": ["ръкавици l", "дървени вилички"]}).json() == {"ordered": 2}
+                       json={"item_keys": ["ръкавици l", "дървени вилички"]}).json()["ordered"] == 2
     plan = client.get("/api/items/reorder-plan", headers=owner).json()
     beta, alpha = plan["suppliers"]          # Beta has something to order now; Alpha waits for its invoice
     assert beta["supplier"] == BETA and beta["status"] == "order"
@@ -117,7 +130,7 @@ def test_ordered_leaves_to_order_until_its_invoice_comes(client):
     _mark_age(company_id, "дървени вилички", 20)
     alpha = next(g for g in client.get("/api/items/reorder-plan", headers=owner).json()["suppliers"] if g["supplier"] == ALPHA)
     status = {n["item_name"]: n["status"] for n in alpha["items"]}
-    assert status["ръкавици L"] == "ok" and status["дървени вилички"] == "soon"
+    assert status["ръкавици L"] == "ok" and status["дървени вилички"] == "order"
 
     # Taken back: due again.
     assert client.post("/api/items/reorder-plan/ordered/undo", headers=owner,

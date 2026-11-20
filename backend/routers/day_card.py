@@ -277,20 +277,61 @@ async def _focus(user: User, company: dict, scope: dict, today: date, english: b
                         )
             items.append({"key": "yesterday", "priority": 40, "icon": "trending-up", "route": "/stats", "text": text})
 
-    # What to order today - for whoever orders: sees the plan, keeps the
-    # supplier invoices and spends for the business (not the accountant).
-    # The suppliers with something past its usual gap, not marked ordered.
-    if {"view_statistics", "manage_invoices", "add_expenses"} <= perms:
-        from routers.price_tracking import suppliers_to_order
-        to_order = await suppliers_to_order(company_id)
-        if to_order:
-            names = ", ".join(dc.short_supplier(name) for name in to_order[:2])
+    # Orders - for whoever orders: sees the plan, keeps the supplier invoices
+    # and spends for the business (not the accountant). What to order today
+    # (a day before the delivery at the latest), a public holiday on that
+    # delivery, a delivery that came without something ordered; and, for
+    # whoever keeps the invoices of the day, yesterday's delivery with no
+    # invoice scanned.
+    orders_by = {"view_statistics", "manage_invoices", "add_expenses"} <= perms
+    scans_deliveries = {"manage_invoices", "add_expenses"} <= perms
+    if orders_by or scans_deliveries:
+        from routers.price_tracking import day_orders
+        orders = await day_orders(company_id)
+        if orders_by and orders["to_order"]:
+            to_order = orders["to_order"]
+            names = ", ".join(dc.short_supplier(entry["supplier"]) for entry in to_order[:2])
             more = len(to_order) - 2
+            for_tomorrow = all(entry["delivery"] == (today + timedelta(days=1)).isoformat() for entry in to_order)
             items.append({
                 "key": "to_order", "priority": 65, "icon": "cart-outline", "route": "/stats?tab=items",
                 "text": _t(english,
-                           f"За поръчка днес: {names}" + (f" и още {more}" if more > 0 else ""),
-                           f"To order today: {names}" + (f" and {more} more" if more > 0 else "")),
+                           ("За поръчка днес (доставка утре): " if for_tomorrow else "За поръчка днес: ")
+                           + names + (f" и още {more}" if more > 0 else ""),
+                           ("To order today (delivery tomorrow): " if for_tomorrow else "To order today: ")
+                           + names + (f" and {more} more" if more > 0 else "")),
+            })
+            on_holiday = next((entry for entry in to_order if entry["holiday"]), None)
+            if on_holiday:
+                day = date.fromisoformat(on_holiday["holiday"]["date"])
+                who = dc.short_supplier(on_holiday["supplier"])
+                items.append({
+                    "key": "delivery_holiday", "priority": 64, "icon": "flag-outline", "route": "/stats?tab=items",
+                    "text": _t(english,
+                               f"{WEEKDAYS_BG[day.weekday()].capitalize()}, {day.day} {MONTHS_BG[day.month - 1]}, е празник"
+                               f" – {who} може да не достави. Поръчай за повече дни.",
+                               f"{WEEKDAYS_EN[day.weekday()]}, {MONTHS_EN[day.month - 1]} {day.day}, is a public holiday"
+                               f" – {who} may not deliver. Order for more days."),
+                })
+        if orders_by and orders["missing"]:
+            entry = orders["missing"][0]
+            names = ", ".join(entry["items"][:2])
+            more = len(entry["items"]) - 2
+            who = dc.short_supplier(entry["supplier"])
+            items.append({
+                "key": "missing_delivery", "priority": 72, "icon": "alert-circle-outline", "route": "/stats?tab=items",
+                "text": _t(english,
+                           f"{who} достави без: {names}" + (f" и още {more}" if more > 0 else ""),
+                           f"{who} delivered without: {names}" + (f" and {more} more" if more > 0 else "")),
+            })
+        if scans_deliveries and orders["no_invoice"]:
+            names = ", ".join(dc.short_supplier(entry["supplier"]) for entry in orders["no_invoice"][:2])
+            more = len(orders["no_invoice"]) - 2
+            items.append({
+                "key": "no_invoice", "priority": 62, "icon": "document-text-outline", "route": "/scan",
+                "text": _t(english,
+                           f"Няма фактура за вчерашната доставка от {names}" + (f" и още {more}" if more > 0 else ""),
+                           f"No invoice for yesterday's delivery from {names}" + (f" and {more} more" if more > 0 else "")),
             })
 
     # Supplier invoices due today - for whoever keeps the invoices.

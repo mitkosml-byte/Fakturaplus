@@ -6731,6 +6731,11 @@ async def create_indexes():
         await db.item_price_history.create_index([("company_id", 1), ("supplier", 1)])
         # Edits/deletes of an invoice resync its rows by invoice_id
         await db.item_price_history.create_index([("company_id", 1), ("invoice_id", 1)])
+        # The ordering plan reads the last year or so of purchases.
+        await db.item_price_history.create_index([("company_id", 1), ("invoice_date", -1)])
+        # "Поръчано": one mark per item, and the orders it learns from.
+        await db.reorder_marks.create_index([("company_id", 1), ("item_key", 1)])
+        await db.reorder_orders.create_index([("company_id", 1), ("ordered_at", -1)])
         await db.price_alerts.create_index([("company_id", 1), ("invoice_id", 1)])
 
         # Price alerts - read on every app open via GET /items/price-alerts

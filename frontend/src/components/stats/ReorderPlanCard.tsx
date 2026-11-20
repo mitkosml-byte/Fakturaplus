@@ -26,6 +26,16 @@ const STATUS_KEY: Record<ReorderStatus, string> = {
 };
 const STALE_KEY = '__stale__';
 
+type IconName = keyof typeof Ionicons.glyphMap;
+
+// Days come as "YYYY-MM-DD": read as that calendar day here.
+const dayOf = (text: string) => {
+  const [year, month, day] = text.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+// 0 = Monday, as the plan counts weekdays.
+const weekdayOf = (day: Date) => (day.getDay() + 6) % 7;
+
 // Item names come as written on the invoices, often all lower case.
 const named = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 
@@ -40,8 +50,12 @@ type Props = {
 // and what the order is usually worth - the ones with something to order
 // on top - opening on its items, the quantity in bold; one tap copies the
 // order to send, another marks it "Поръчано" so nobody orders it twice.
-// Apart, the items long not bought: asked about, never ordered, hidden once
-// no longer used (back when bought again).
+// A supplier with fixed delivery days (read from its invoice dates) says
+// its next delivery and the day to order for it - at least the day before
+// - and, opened, a public holiday on that delivery, what an order came
+// without and a delivery with no invoice. Apart, the items long not
+// bought: asked about, never ordered, hidden once no longer used (back
+// when bought again).
 export function ReorderPlanCard({ plan, onChanged }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -69,8 +83,66 @@ export function ReorderPlanCard({ plan, onChanged }: Props) {
     return parts.join(' · ');
   };
 
+  // The supplier's next order: what is due for its next delivery (fixed
+  // days) or due at all (no fixed days).
   const due = (group: ReorderPlanSupplier) =>
-    group.items.filter((item) => item.status === 'order' || item.status === 'soon');
+    group.items.filter((item) => item.in_next_order ?? (item.status === 'order' || item.status === 'soon'));
+
+  const weekdaysShort = t('reorder.weekdaysShort').split(',');
+  // "пт, 21.11"
+  const dayLabel = (text: string) => {
+    const day = dayOf(text);
+    return `${weekdaysShort[weekdayOf(day)]}, ${String(day.getDate()).padStart(2, '0')}.${String(day.getMonth() + 1).padStart(2, '0')}`;
+  };
+  // "поръчай днес", "поръчай утре", "поръчай до чт".
+  const orderByLabel = (text: string) => {
+    const days = differenceInCalendarDays(dayOf(text), new Date());
+    if (days < 0) return t('reorder.orderNow');
+    if (days === 0) return t('reorder.orderToday');
+    if (days === 1) return t('reorder.orderTomorrow');
+    return t('reorder.orderBy').replace('{day}', weekdaysShort[weekdayOf(dayOf(text))]);
+  };
+  const deliveryDays = (group: ReorderPlanSupplier) =>
+    t('reorder.delivers').replace('{days}', (group.schedule || []).map((weekday) => weekdaysShort[weekday]).join(', '))
+    + (group.schedule_changed ? ` · ${t('reorder.newDays')}` : '');
+  // Under a supplier with fixed days: its next delivery and when to order
+  // for it - or, with nothing due, the days it delivers.
+  const deliveryLine = (group: ReorderPlanSupplier) => {
+    if (!group.schedule?.length) return null;
+    if (due(group).length > 0 && group.next_delivery && group.order_by) {
+      return `${t('reorder.deliveryOn').replace('{day}', dayLabel(group.next_delivery))} · ${orderByLabel(group.order_by)}`;
+    }
+    return deliveryDays(group);
+  };
+  // Opened: what needs a look - an order that came without something, a
+  // delivery with no invoice, a holiday on the next one - and the days.
+  const notes = (group: ReorderPlanSupplier) => {
+    const list: { key: string; icon: IconName; color: string; text: string }[] = [];
+    if (group.missing) {
+      list.push({
+        key: 'missing', icon: 'alert-circle', color: COLORS.danger,
+        text: t('reorder.missing').replace('{day}', dayLabel(group.missing.date))
+          .replace('{items}', group.missing.items.map(named).join(', ')),
+      });
+    }
+    if (group.no_invoice) {
+      list.push({
+        key: 'invoice', icon: 'document-text', color: COLORS.warning,
+        text: t('reorder.noInvoice').replace('{day}', dayLabel(group.no_invoice)),
+      });
+    }
+    if (group.holiday) {
+      list.push({
+        key: 'holiday', icon: 'flag', color: COLORS.warning,
+        text: named(t('reorder.holiday').replace('{day}', dayLabel(group.holiday.date)).replace('{name}', group.holiday.name)),
+      });
+    }
+    if (group.schedule?.length && due(group).length > 0) {
+      list.push({ key: 'days', icon: 'calendar-outline', color: COLORS.textSecondary, text: deliveryDays(group) });
+    }
+    return list;
+  };
+  const needsLook = (group: ReorderPlanSupplier) => !!(group.missing || group.no_invoice || group.holiday);
 
   // "днес", "вчера", "преди 3 дни".
   const when = (at: string) => {
@@ -109,11 +181,11 @@ export function ReorderPlanCard({ plan, onChanged }: Props) {
     const keys = due(group).map((item) => item.item_key);
     if (keys.length === 0) return;
     try {
-      await api.markReorderOrdered(keys);
+      const { order_ids: orderIds } = await api.markReorderOrdered(keys);
       onChanged?.();
       Toast.undo(t('reorder.markedOrdered'), async () => {
         try {
-          await api.undoReorderOrdered(keys);
+          await api.undoReorderOrdered(keys, orderIds);
         } finally {
           onChanged?.();
         }
@@ -165,26 +237,51 @@ export function ReorderPlanCard({ plan, onChanged }: Props) {
                 >
                   {summary(group)}
                 </Text>
+                {deliveryLine(group) && <Text style={styles.deliveryLine} numberOfLines={2}>{deliveryLine(group)}</Text>}
               </View>
+              {needsLook(group) && <Ionicons name="alert-circle" size={18} color={COLORS.warning} />}
               <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={COLORS.textSecondary} />
             </TouchableOpacity>
 
             <Expandable expanded={expanded}>
               <View style={styles.groupBody}>
+                {notes(group).map((note) => (
+                  <View key={note.key} style={styles.note}>
+                    <Ionicons name={note.icon} size={16} color={note.color} />
+                    <Text style={[styles.noteText, { color: note.color === COLORS.textSecondary ? COLORS.textSecondary : 'white' }]}>
+                      {note.text}
+                    </Text>
+                  </View>
+                ))}
                 {group.items.map((item) => {
                   const status = item.status || 'ok';
                   const amount = quantity(item);
+                  // Due for a later delivery than the supplier's next one.
+                  const later = !!item.delivery && item.delivery !== group.next_delivery && (status === 'order' || status === 'soon');
                   return (
                     <View key={item.item_key} style={styles.item}>
                       <View style={styles.itemText}>
                         <Text style={styles.itemName}>{named(item.item_name)}</Text>
-                        {amount && <Text style={styles.itemQuantity}>{amount}</Text>}
+                        {amount && (
+                          <Text style={styles.itemQuantity}>
+                            {amount}
+                            {item.usual_for_weekday && item.delivery ? (
+                              <Text style={styles.itemUsual}>
+                                {` · ${t('reorder.usually').replace('{day}', t('reorder.onWeekdays').split(',')[weekdayOf(dayOf(item.delivery))])}`}
+                              </Text>
+                            ) : null}
+                          </Text>
+                        )}
                         <Text style={styles.itemRhythm}>
                           {t('reorder.rhythm')
                             .replace('{median}', String(item.median_days_between))
                             .replace('{days}', String(item.days_since_last))}
                           {item.suppliers_count > 1 ? ` · ${t('reorder.alsoOthers')}` : ''}
+                          {later && item.delivery ? ` · ${t('reorder.deliveryOn').replace('{day}', dayLabel(item.delivery)).toLowerCase()}` : ''}
                         </Text>
+                        {item.missing_on && (
+                          <Text style={styles.itemMissing}>{t('reorder.missingItem').replace('{day}', dayLabel(item.missing_on))}</Text>
+                        )}
                         {item.ordered && <Text style={styles.itemOrdered}>{orderedLine(item)}</Text>}
                       </View>
                       <View style={[styles.chip, { borderColor: STATUS_COLOR[status] }]}>
@@ -279,6 +376,17 @@ const styles = StyleSheet.create({
   groupText: { flex: 1, minWidth: 0 },
   supplier: { fontSize: 15, fontWeight: '700', color: 'white' },
   groupSummary: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
+  deliveryLine: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
+  note: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  noteText: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 18 },
   groupBody: { paddingBottom: 12, gap: 10 },
   item: {
     flexDirection: 'row',
@@ -296,6 +404,8 @@ const styles = StyleSheet.create({
   chip: { borderWidth: 1, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 },
   chipText: { fontSize: 12, fontWeight: '700' },
   itemOrdered: { fontSize: 12, color: COLORS.info, marginTop: 2, fontWeight: '600' },
+  itemUsual: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '500' },
+  itemMissing: { fontSize: 12, color: COLORS.danger, marginTop: 2, fontWeight: '600' },
   actions: { flexDirection: 'row', gap: 10 },
   copy: {
     flex: 1,

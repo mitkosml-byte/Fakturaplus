@@ -1278,12 +1278,16 @@ class ApiService {
   }
 
   // "Поръчано": out of "to order" for everyone until their invoice comes.
-  async markReorderOrdered(itemKeys: string[]): Promise<{ ordered: number }> {
+  async markReorderOrdered(itemKeys: string[]): Promise<{ ordered: number; order_ids: string[] }> {
     return this.fetch('/items/reorder-plan/ordered', { method: 'POST', body: JSON.stringify({ item_keys: itemKeys }) });
   }
 
-  async undoReorderOrdered(itemKeys: string[]): Promise<{ undone: number }> {
-    return this.fetch('/items/reorder-plan/ordered/undo', { method: 'POST', body: JSON.stringify({ item_keys: itemKeys }) });
+  // Taken back: the marks and the orders they made (not learned from).
+  async undoReorderOrdered(itemKeys: string[], orderIds?: string[]): Promise<{ undone: number }> {
+    return this.fetch('/items/reorder-plan/ordered/undo', {
+      method: 'POST',
+      body: JSON.stringify({ item_keys: itemKeys, order_ids: orderIds }),
+    });
   }
 
   // "No longer used": out of the plan until bought again.

@@ -1130,6 +1130,16 @@ export interface ReorderPlanItem extends ReorderItem {
   status?: ReorderStatus;
   // Marked "Поръчано": when and by whom (first name).
   ordered?: { at: string; by: string | null };
+  // The delivery its order goes with (a supplier with fixed delivery
+  // days, else null) and the day to order by - "YYYY-MM-DD".
+  delivery?: string | null;
+  order_by?: string;
+  // In the supplier's next order: what "Копирай" and "Поръчано" take.
+  in_next_order?: boolean;
+  // The quantity is what is usually taken on that weekday.
+  usual_for_weekday?: boolean;
+  // The delivery it was ordered for came without it, that day.
+  missing_on?: string;
 }
 
 export interface ReorderPlanSupplier {
@@ -1138,9 +1148,22 @@ export interface ReorderPlanSupplier {
   to_order: number;
   soon: number;
   ordered: number;
-  // What the due items are usually bought for.
+  // What the next order is usually bought for.
   order_value: number;
   items: ReorderPlanItem[];
+  // Fixed delivery days read from its invoices (0 = Monday), or null.
+  schedule?: number[] | null;
+  // The days changed lately.
+  schedule_changed?: boolean;
+  // The next delivery (fixed days) and the day to order by - "YYYY-MM-DD".
+  next_delivery?: string | null;
+  order_by?: string | null;
+  // A public holiday on the next delivery.
+  holiday?: { date: string; name: string } | null;
+  // The delivery it was ordered for came without these.
+  missing?: { date: string; items: string[] } | null;
+  // Yesterday's expected delivery has no invoice ("YYYY-MM-DD").
+  no_invoice?: string | null;
 }
 
 export interface ReorderPlan {
