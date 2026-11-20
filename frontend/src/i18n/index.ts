@@ -2411,9 +2411,14 @@ export const translations: Translations = {
     bg: 'Фактури',
     en: 'Invoices',
   },
-  'stats.top10': {
-    bg: 'Топ 10 Доставчици',
-    en: 'Top 10 Suppliers',
+  // As many as the chart shows: up to ten.
+  'stats.topSuppliersN': {
+    bg: 'Топ {count} доставчици',
+    en: 'Top {count} suppliers',
+  },
+  'stats.otherSuppliers': {
+    bg: 'Останалите ({count})',
+    en: 'The rest ({count})',
   },
   'stats.avgInvoice': {
     bg: 'Ср.',
@@ -3623,16 +3628,16 @@ export const translations: Translations = {
     en: 'Avg Invoice',
   },
   'stats.topByAmount': {
-    bg: 'Топ 10 по обем',
-    en: 'Top 10 by Volume',
+    bg: 'Топ {count} по обем',
+    en: 'Top {count} by volume',
   },
   'stats.topByFrequency': {
-    bg: 'Топ 10 по честота',
-    en: 'Top 10 by Frequency',
+    bg: 'Топ {count} по честота',
+    en: 'Top {count} by frequency',
   },
   'stats.topByAvg': {
-    bg: 'Топ 10 по средна стойност',
-    en: 'Top 10 by Average',
+    bg: 'Топ {count} по средна стойност',
+    en: 'Top {count} by average',
   },
   'stats.invoices': {
     bg: 'фактури',

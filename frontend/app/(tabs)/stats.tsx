@@ -56,6 +56,10 @@ const CHART_COLORS: string[] = [
   COLORS.primary, COLORS.success, COLORS.warning, COLORS.danger, COLORS.info,
   COLORS.pink, COLORS.teal, COLORS.orange, COLORS.indigo, COLORS.lime
 ];
+// The suppliers the chart shows (the server ranks ten), and the smallest
+// share written on its slice.
+const SUPPLIER_CHART_TOP = 10;
+const PIE_TEXT_MIN_PERCENT = 5;
 
 // How a supplier's purchases can be read - by day, week, month or year.
 const SUPPLIER_GROUPS: { key: SupplierGroupBy; labelKey: string }[] = [
@@ -729,43 +733,56 @@ export default function StatsScreen() {
     }
   };
 
+  // The chart's suppliers: the chosen ranking's top ones (the server ranks
+  // ten) - the title, the slices, the legend and the bars all count these.
+  // It used to say "Top 10" over five slices, a nameless grey one and
+  // seven bars.
+  const chartSuppliers = () => getCurrentRanking().slice(0, SUPPLIER_CHART_TOP);
+  // Everyone else: their part of the total, and how many they are.
+  const chartRest = () => {
+    if (!supplierOverview) return { amount: 0, count: 0, percent: 0 };
+    const shown = chartSuppliers();
+    const total = supplierOverview.totals.total_amount;
+    const amount = Math.max(0, total - shown.reduce((sum, s) => sum + s.total_amount, 0));
+    const count = Math.max(0, supplierOverview.executive_summary.total_suppliers - shown.length);
+    return { amount, count, percent: total > 0 ? (amount / total) * 100 : 0 };
+  };
+
   // Prepare pie chart data
   const getPieChartData = () => {
-    const ranking = getCurrentRanking();
-    const top5 = ranking.slice(0, 5);
-    const othersTotal = ranking.slice(5).reduce((sum, s) => sum + s.total_amount, 0);
-    
-    const data = top5.map((supplier, index) => ({
+    // The share on a slice only where it fits; the legend has every one.
+    const data = chartSuppliers().map((supplier, index) => ({
       value: supplier.total_amount,
-      color: CHART_COLORS[index],
-      text: `${supplier.dependency_percent.toFixed(0)}%`,
+      color: CHART_COLORS[index % CHART_COLORS.length],
+      text: supplier.dependency_percent >= PIE_TEXT_MIN_PERCENT ? `${supplier.dependency_percent.toFixed(0)}%` : '',
       shiftTextX: -8,
       shiftTextY: 0,
     }));
-    
-    if (othersTotal > 0) {
+    const rest = chartRest();
+    if (rest.count > 0 && rest.amount > 0) {
       data.push({
-        value: othersTotal,
+        value: rest.amount,
         color: COLORS.textMuted,
-        text: '',
+        text: rest.percent >= PIE_TEXT_MIN_PERCENT ? `${rest.percent.toFixed(0)}%` : '',
         shiftTextX: 0,
         shiftTextY: 0,
       });
     }
-    
     return data;
   };
 
   // Prepare bar chart data for suppliers
   const getSupplierBarData = () => {
-    const ranking = getCurrentRanking().slice(0, 7);
+    const ranking = chartSuppliers();
+    // Shorter names when there are many bars, so the labels do not overlap.
+    const labelLength = ranking.length > 7 ? 4 : 6;
     return ranking.map((supplier, index) => ({
       value: supplierRankingType === 'frequency' ? supplier.invoice_count :
              supplierRankingType === 'avg' ? supplier.avg_invoice : supplier.total_amount,
       // Company names are often quoted (e.g. "Марс-1" ООД) - strip a
       // leading quote before truncating so the label doesn't start with
       // a stray punctuation mark instead of an actual letter.
-      label: supplier.supplier.replace(/^["'„”]+/, '').substring(0, 6),
+      label: supplier.supplier.replace(/^["'„”]+/, '').substring(0, labelLength),
       frontColor: CHART_COLORS[index % CHART_COLORS.length],
     }));
   };
@@ -1645,7 +1662,9 @@ export default function StatsScreen() {
                     <View style={styles.chartContainer}>
                       <View style={styles.chartHeader}>
                         <Ionicons name="trophy" size={24} color={COLORS.warning} />
-                        <Text style={styles.chartTitle}>{t('stats.top10')}</Text>
+                        <Text style={styles.chartTitle}>
+                          {t('stats.topSuppliersN').replace('{count}', String(chartSuppliers().length))}
+                        </Text>
                       </View>
                       
                       {supplierChartType === 'pie' && getPieChartData().length > 0 && (
@@ -1654,37 +1673,55 @@ export default function StatsScreen() {
                             data={getPieChartData()}
                             radius={pieChartRadius}
                             innerRadius={pieChartRadius * 0.5}
-                            centerLabelComponent={() => (
-                              <View style={styles.pieCenter}>
-                                <Text style={styles.pieCenterValue}>
-                                  {formatMoney(supplierOverview.totals.total_amount)}
-                                </Text>
-                                <Text style={styles.pieCenterLabel}>{t('stats.totalAmount')}</Text>
-                              </View>
-                            )}
+                            // The hole in the card's colour: the total is
+                            // white, and on the default white hole it was
+                            // not seen at all.
+                            innerCircleColor={COLORS.surface}
+                            centerLabelComponent={() => {
+                              // Sized to the hole, whatever the total's length.
+                              const total = formatMoney(supplierOverview.totals.total_amount);
+                              const room = pieChartRadius - 10;
+                              const fontSize = Math.max(10, Math.min(18, Math.floor(room / (total.length * 0.6))));
+                              return (
+                                <View style={[styles.pieCenter, { width: room }]}>
+                                  <Text style={[styles.pieCenterValue, { fontSize }]} numberOfLines={1}>{total}</Text>
+                                  <Text style={styles.pieCenterLabel} numberOfLines={1}>{t('stats.totalAmount')}</Text>
+                                </View>
+                              );
+                            }}
                             showText
                             textColor="white"
                             textSize={10}
                           />
                           
-                          {/* Legend */}
+                          {/* Legend: every slice, the rest included */}
                           <View style={styles.legendContainer}>
-                            {getCurrentRanking().slice(0, 5).map((supplier, index) => (
+                            {chartSuppliers().map((supplier, index) => (
                               <TouchableOpacity 
                                 key={supplier.supplier} 
                                 style={styles.legendItem}
                                 onPress={() => setSelectedSupplier(supplier.supplier)}
                               >
-                                <View style={[styles.legendColor, { backgroundColor: CHART_COLORS[index] }]} />
+                                <View style={[styles.legendColor, { backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
                                 <Text style={styles.legendText} numberOfLines={1}>{supplier.supplier}</Text>
                                 <Text style={styles.legendValue}>{supplier.dependency_percent.toFixed(0)}%</Text>
                               </TouchableOpacity>
                             ))}
+                            {chartRest().count > 0 && chartRest().amount > 0 && (
+                              <View style={styles.legendItem}>
+                                <View style={[styles.legendColor, { backgroundColor: COLORS.textMuted }]} />
+                                <Text style={[styles.legendText, styles.legendRest]} numberOfLines={1}>
+                                  {t('stats.otherSuppliers').replace('{count}', String(chartRest().count))}
+                                </Text>
+                                <Text style={styles.legendValue}>{chartRest().percent.toFixed(0)}%</Text>
+                              </View>
+                            )}
                           </View>
                         </View>
                       )}
                       
-                      {(() => {
+                      {/* Bars only when chosen - they used to show under the pie too. */}
+                      {supplierChartType === 'bar' && (() => {
                         const barData = getSupplierBarData();
                         if (barData.length === 0) return null;
                         // Size bars/spacing to the actual item count so all
@@ -1721,23 +1758,38 @@ export default function StatsScreen() {
                         );
                       })()}
                       
-                      {supplierChartType === 'line' && getSupplierBarData().length > 0 && (
-                        <LineChart
-                          data={getSupplierBarData().map(d => ({ value: d.value, label: d.label, dataPointColor: COLORS.primary }))}
-                          width={chartWidth}
-                          height={200}
-                          color={COLORS.primary}
-                          thickness={3}
-                          dataPointsColor={COLORS.primary}
-                          yAxisColor={COLORS.border}
-                          xAxisColor={COLORS.border}
-                          yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
-                          xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
-                          hideRules
-                          isAnimated
-                          curved
-                        />
-                      )}
+                      {supplierChartType === 'line' && (() => {
+                        const lineData = getSupplierBarData();
+                        if (lineData.length === 0) return null;
+                        // Every point within the card (ten used to run off its
+                        // right edge), and straight between them: a curve
+                        // drew rises between suppliers that are not there.
+                        const yAxisLabelWidth = 34;
+                        const edge = 12;
+                        const plotWidth = chartWidth - yAxisLabelWidth;
+                        const spacing = Math.floor((plotWidth - 2 * edge) / Math.max(1, lineData.length - 1));
+                        return (
+                          <LineChart
+                            data={lineData.map(d => ({ value: d.value, label: d.label, dataPointColor: COLORS.primary }))}
+                            width={plotWidth}
+                            height={200}
+                            spacing={spacing}
+                            initialSpacing={edge}
+                            endSpacing={edge}
+                            noOfSections={4}
+                            color={COLORS.primary}
+                            thickness={3}
+                            dataPointsColor={COLORS.primary}
+                            yAxisColor={COLORS.border}
+                            xAxisColor={COLORS.border}
+                            yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                            xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
+                            yAxisLabelWidth={yAxisLabelWidth}
+                            hideRules
+                            isAnimated
+                          />
+                        );
+                      })()}
                     </View>
 
                     {/* Top Suppliers List */}
@@ -1745,8 +1797,9 @@ export default function StatsScreen() {
                       <View style={styles.topSuppliersHeader}>
                         <Ionicons name="list" size={24} color={COLORS.primary} />
                         <Text style={[styles.topSuppliersTitle, { flex: 1 }]}>
-                          {supplierRankingType === 'amount' ? t('stats.topByAmount') :
-                           supplierRankingType === 'frequency' ? t('stats.topByFrequency') : t('stats.topByAvg')}
+                          {(supplierRankingType === 'amount' ? t('stats.topByAmount') :
+                            supplierRankingType === 'frequency' ? t('stats.topByFrequency') : t('stats.topByAvg'))
+                            .replace('{count}', String(getCurrentRanking().length))}
                         </Text>
                         <TouchableOpacity
                           style={[styles.compareToggle, compareMode && styles.compareToggleActive]}
@@ -3032,6 +3085,10 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 13,
     fontWeight: 'bold',
+  },
+  // "The rest (3)": not a supplier of its own, so not in white.
+  legendRest: {
+    color: COLORS.textSecondary,
   },
   
   // Top Suppliers
