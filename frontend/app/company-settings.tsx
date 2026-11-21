@@ -30,6 +30,9 @@ import { TeamMomentsSettings } from '../src/components/TeamMomentsSettings';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
+// "ЕТ" (or the Latin "ET") as a word of the business's name.
+const SOLE_TRADER = /(^|[^A-Za-z0-9_\u0400-\u04FF])(ЕТ|ET)(?![A-Za-z0-9_\u0400-\u04FF])/;
+
 export default function CompanySettingsScreen() {
   const { t } = useTranslation();
   const { hasPermission } = useAuth();
@@ -53,6 +56,8 @@ export default function CompanySettingsScreen() {
   // Registered for VAT: decides the VAT cards and the VAT on issued
   // invoices. null = not answered yet (a VAT number implies "yes").
   const [vatRegistered, setVatRegistered] = useState<boolean | null>(null);
+  // The profit tax rate for the net margin on Home; '' = the law's.
+  const [profitTax, setProfitTax] = useState('');
   const canEditModules = useModulesStore((state) => state.canEdit);
   const { uses } = useModules();
 
@@ -72,6 +77,7 @@ export default function CompanySettingsScreen() {
         setBankName(data.bank_name || '');
         setBankIban(data.bank_iban || '');
         setVatRegistered(typeof data.vat_registered === 'boolean' ? data.vat_registered : (data.vat_number ? true : null));
+        setProfitTax(typeof data.profit_tax_percent === 'number' ? String(data.profit_tax_percent) : '');
 
         // The backend only blocks an EIK change once teammates have joined
         // (it would silently change their company's tax ID too). Mirror
@@ -112,6 +118,13 @@ export default function CompanySettingsScreen() {
       return;
     }
 
+    const taxText = profitTax.trim().replace(',', '.');
+    const taxValue = taxText === '' ? null : Number(taxText);
+    if (taxValue !== null && (!Number.isFinite(taxValue) || taxValue < 0 || taxValue > 50)) {
+      Alert.alert(t('common.error'), t('company.profitTaxError'));
+      return;
+    }
+
     setSaving(true);
     try {
       const savedCompany = await api.createOrUpdateCompany({
@@ -126,6 +139,10 @@ export default function CompanySettingsScreen() {
         bank_name: bankName.trim() || undefined,
         bank_iban: bankIban.trim() || undefined,
         ...(vatRegistered !== null ? { vat_registered: vatRegistered } : {}),
+        // Emptied: back to the law's rate.
+        ...(taxValue !== null
+          ? { profit_tax_percent: taxValue }
+          : typeof company?.profit_tax_percent === 'number' ? { profit_tax_percent: null } : {}),
       });
       setCompany(savedCompany);
       Haptics.success();
@@ -136,6 +153,11 @@ export default function CompanySettingsScreen() {
       setSaving(false);
     }
   };
+
+  // The law's rate when none is set (backend services/margins): a sole
+  // trader's when the name says ЕТ, a company's otherwise.
+  const soleTrader = SOLE_TRADER.test(name);
+  const lawTax = soleTrader ? 15 : 10;
 
   if (loading) {
     return (
@@ -291,6 +313,23 @@ export default function CompanySettingsScreen() {
                   </View>
                   <Text style={styles.inputHint}>
                     {vatRegistered === false ? t('company.vatNotRegisteredHint') : t('company.vatRegisteredHint')}
+                  </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{t('company.profitTax')}</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={profitTax}
+                    onChangeText={setProfitTax}
+                    placeholder={String(lawTax)}
+                    placeholderTextColor={COLORS.textMuted}
+                    keyboardType="decimal-pad"
+                  />
+                  <Text style={styles.inputHint}>
+                    {t('company.profitTaxHint')
+                      .replace('{rate}', String(lawTax))
+                      .replace('{form}', soleTrader ? t('company.profitTaxSoleTrader') : t('company.profitTaxCompany'))}
                   </Text>
                 </View>
 

@@ -938,6 +938,8 @@ class ApiService {
     bank_name?: string;
     bank_iban?: string;
     vat_registered?: boolean;
+    // null: back to the law's rate.
+    profit_tax_percent?: number | null;
   }): Promise<Company> {
     return this.fetch('/company', {
       method: 'POST',

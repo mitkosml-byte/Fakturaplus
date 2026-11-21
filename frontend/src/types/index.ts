@@ -454,6 +454,9 @@ export interface Company {
   // from "average per day" statistics instead of counting as zero-revenue.
   closed_weekdays?: number[];
   modules?: Partial<BusinessModules> | null;
+  // The profit tax rate (%) for the net margin on Home; null/absent = the
+  // law's for the legal form (10% a company, 15% a sole trader).
+  profit_tax_percent?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -1956,6 +1959,34 @@ export interface HomeData {
   day_card?: DayCardData | null;
   // The personal notebook's month - null for whoever may not see it.
   personal_wallet?: PersonalWalletSummary | null;
+  // The period's gross, operating and net margin - null for whoever may
+  // not see the profit.
+  margins?: PeriodMargins | null;
+}
+
+// One margin: its percent of the sales, the profit it leaves and its
+// change since the period before, in percentage points.
+export interface Margin {
+  percent: number;
+  profit: number;
+  change: number | null;
+}
+
+// A period's margins (backend routers/margins.py): without VAT for a
+// business registered for VAT; only of what the viewer sees.
+export interface PeriodMargins {
+  available: boolean;
+  period: { start_date: string; end_date: string };
+  previous_period: { start_date: string; end_date: string } | null;
+  vat_excluded: boolean;
+  profit_tax_percent: number;
+  payroll_left_out: boolean;
+  no_recurring_costs: boolean;
+  sales?: number;
+  costs?: { goods: number; payroll: number; recurring: number; depreciation: number; profit_tax: number };
+  gross?: Margin;
+  operating?: Margin;
+  net?: Margin;
 }
 
 // The day card (backend routers/day_card): a greeting, the weather where

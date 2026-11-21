@@ -3119,6 +3119,17 @@ export const translations: Translations = {
     bg: 'Фактурите се издават с ДДС и програмата показва ДДС за внасяне. Прагът за регистрация следи счетоводителят.',
     en: 'Invoices carry VAT and the app shows the VAT to pay. Your accountant tracks the registration threshold.',
   },
+  'company.profitTax': { bg: 'Данък върху печалбата (%)', en: 'Profit tax (%)' },
+  'company.profitTaxHint': {
+    bg: 'За нетния марж на началната страница. Ако не е попълнено – по закона: {rate}% ({form}). При патентен данък въведете 0.',
+    en: 'For the net margin on Home. When empty – as the law says: {rate}% ({form}). With a patent tax, enter 0.',
+  },
+  'company.profitTaxCompany': { bg: 'дружество', en: 'a company' },
+  'company.profitTaxSoleTrader': { bg: 'ЕТ', en: 'a sole trader' },
+  'company.profitTaxError': {
+    bg: 'Данъкът върху печалбата е между 0 и 50%.',
+    en: 'The profit tax is between 0 and 50%.',
+  },
   'company.vatNotRegisteredHint': {
     bg: 'Фактурите се издават без ДДС (чл. 113, ал. 9 ЗДДС) и картите за ДДС се скриват. Прагът за регистрация следи счетоводителят.',
     en: 'Invoices are issued without VAT (Art. 113(9) VAT Act) and the VAT cards are hidden. Your accountant tracks the registration threshold.',
@@ -5832,6 +5843,50 @@ export const translations: Translations = {
   'breakEven.addFixedCosts': {
     bg: 'Добавете заплатите и периодичните разходи (наем, абонаменти), за да виждате дневната цел за излизане на нула.',
     en: 'Add payroll and recurring expenses (rent, subscriptions) to see the daily target for breaking even.',
+  },
+
+  // The period's margins on Home (backend routers/margins.py)
+  'margins.title': { bg: 'Маржове', en: 'Margins' },
+  'margins.gross': { bg: 'Брутен', en: 'Gross' },
+  'margins.operating': { bg: 'Оперативен', en: 'Operating' },
+  'margins.net': { bg: 'Нетен', en: 'Net' },
+  'margins.pp': { bg: 'п.п.', en: 'pp' },
+  'margins.ofSales': { bg: 'от {amount} продажби', en: 'of {amount} in sales' },
+  'margins.ofSalesNoVat': { bg: 'от {amount} продажби без ДДС', en: 'of {amount} in sales excl. VAT' },
+  'margins.versus': { bg: 'спрямо {range}', en: 'vs {range}' },
+  'margins.sales': { bg: 'Продажби', en: 'Sales' },
+  'margins.salesNoVat': { bg: 'Продажби без ДДС', en: 'Sales excl. VAT' },
+  'margins.goods': { bg: 'Стока и материали', en: 'Goods and materials' },
+  'margins.grossProfit': { bg: 'Брутна печалба', en: 'Gross profit' },
+  'margins.payroll': { bg: 'Заплати и осигуровки', en: 'Payroll' },
+  'margins.recurring': { bg: 'Периодични разходи (наем, ток, абонаменти)', en: 'Recurring costs (rent, utilities, subscriptions)' },
+  'margins.depreciation': { bg: 'Амортизация', en: 'Depreciation' },
+  'margins.operatingProfit': { bg: 'Оперативна печалба', en: 'Operating profit' },
+  'margins.tax': { bg: 'Данък върху печалбата ({rate}%)', en: 'Profit tax ({rate}%)' },
+  'margins.netProfit': { bg: 'Нетна печалба', en: 'Net profit' },
+  'margins.grossHint': {
+    bg: 'Брутен марж – колко остава от продажбите след стоката и материалите.',
+    en: 'Gross margin – what is left of the sales after the goods and materials.',
+  },
+  'margins.operatingHint': {
+    bg: 'Оперативен марж – и след заплатите, периодичните разходи и амортизацията.',
+    en: 'Operating margin – also after payroll, recurring costs and depreciation.',
+  },
+  'margins.netHint': {
+    bg: 'Нетен марж – и след данъка върху печалбата ({rate}%). Приблизителен: данъкът се дължи за цялата година.',
+    en: 'Net margin – also after the profit tax ({rate}%). Approximate: the tax is due on the whole year.',
+  },
+  'margins.vatNote': {
+    bg: 'Без ДДС – той е пари на държавата, не продажби. Затова оперативната печалба може да е по-малка от „Печалба“ горе.',
+    en: 'Without VAT – it is the state\'s money, not sales. So the operating profit can be lower than Profit above.',
+  },
+  'margins.recurringNote': {
+    bg: 'Периодичните разходи се броят по дни от месеца, като заплатите – маржът не пада в деня, в който е платен наемът.',
+    en: 'Recurring costs count by the days of their month, like payroll – the margin does not drop on the day the rent is paid.',
+  },
+  'margins.noRecurring': {
+    bg: 'Добавете наема, тока и абонаментите като периодични разходи – дотогава се броят към стоката и брутният марж излиза по-нисък.',
+    en: 'Add rent, utilities and subscriptions as recurring expenses – until then they count as goods and the gross margin reads lower.',
   },
 
   // The month's pack for the accountant (Н4)

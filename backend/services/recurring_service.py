@@ -45,6 +45,9 @@ AMOUNT_TOLERANCE = 0.01
 # The same cost on an invoice can carry VAT the off-book amount did not
 # (800 € paid, 960 € invoiced): a match by amount also tries these rates.
 VAT_FACTORS = (1.0, 1.2, 1.09)
+# For a business that deducts VAT: an invoice still to come for a recurring
+# cost is taken as its usual amount with VAT at the standard rate in it.
+STANDARD_VAT_FACTOR = 1.2
 # An invoice from the supplier replaces the month's off-book record by
 # itself only when the two amounts are this close; otherwise the owner is
 # asked whether they are the same cost.
@@ -236,7 +239,7 @@ def within_replace_band(invoice_amount: float, recorded_amount: float) -> bool:
 
 
 INVOICE_FIELDS = {
-    "_id": 0, "id": 1, "supplier": 1, "supplier_eik": 1, "total_amount": 1, "invoice_number": 1,
+    "_id": 0, "id": 1, "supplier": 1, "supplier_eik": 1, "total_amount": 1, "vat_amount": 1, "invoice_number": 1,
     "date": 1, "document_type": 1, "asset_id": 1, "recurring_id": 1, "recurring_month": 1, "items.name": 1,
 }
 EXPENSE_FIELDS = {
@@ -273,6 +276,8 @@ def _invoice_summary(invoice: dict) -> dict:
     return {
         "id": invoice["id"], "number": invoice.get("invoice_number"), "supplier": invoice.get("supplier"),
         "amount": round(float(invoice.get("total_amount") or 0), 2), "date": day.isoformat() if day else None,
+        # Its VAT: a business that deducts VAT counts the cost without it (period_costs).
+        "vat": round(float(invoice.get("vat_amount") or 0), 2),
     }
 
 
@@ -433,24 +438,98 @@ def outlook(
     Off-book records only for a viewer who sees off-book expenses; an
     expense without an invoice, still to come, likewise."""
     paid_so_far = 0.0
-    month_total = 0.0
     kinds = {item["id"]: item_kind(item) for item in items}
-    for item_id, occurrence in occurrences.items():
-        records = list(occurrence["invoices"])
-        if include_off_book:
-            records += occurrence["expenses"]
-        match = occurrence.get("match")
-        if match and (match["source"] == "invoice" or include_off_book):
-            records.append(match)
-        if records:
-            month_total += sum(record["amount"] for record in records)
-            paid_so_far += sum(
-                record["amount"] for record in records
-                if record.get("date") and str(record["date"]) <= through.isoformat()
-            )
-        elif occurrence["state"] in UNPAID_STATES and (include_off_book or kinds.get(item_id) == INVOICE):
-            month_total += occurrence["expected_amount"]
+    for occurrence in occurrences.values():
+        paid_so_far += sum(
+            record["amount"] for record in _records(occurrence, include_off_book)
+            if record.get("date") and str(record["date"]) <= through.isoformat()
+        )
+    month_total = month_cost(occurrences, kinds, include_off_book)
     return {"paid_so_far": round(paid_so_far, 2), "month_total": round(month_total, 2)}
+
+
+def _records(occurrence: dict, include_off_book: bool) -> List[dict]:
+    """What paid an occurrence - a likely match counted as paying it until
+    the owner says otherwise: its invoices, and its off-book records for a
+    viewer who sees them."""
+    records = list(occurrence["invoices"])
+    if include_off_book:
+        records += occurrence["expenses"]
+    match = occurrence.get("match")
+    if match and (match["source"] == "invoice" or include_off_book):
+        records.append(match)
+    return records
+
+
+def _amount(record: dict, net_of_vat: bool) -> float:
+    """A record's amount - less its VAT (an invoice's) when the VAT is deducted."""
+    amount = float(record.get("amount") or 0)
+    return amount - float(record.get("vat") or 0) if net_of_vat else amount
+
+
+def _record_day(record: dict) -> Optional[date]:
+    try:
+        return business_day(record.get("date"))
+    except (TypeError, ValueError):
+        return None
+
+
+def month_cost(occurrences: Dict[str, dict], kinds: Dict[str, str], include_off_book: bool,
+               net_of_vat: bool = False) -> float:
+    """The whole month of recurring costs: what paid each, or else what is
+    still expected (nothing for a month skipped). An invoice still to come,
+    for a business that deducts VAT: its usual amount taken as including
+    VAT at the standard rate, until the invoice itself says."""
+    total = 0.0
+    for item_id, occurrence in occurrences.items():
+        records = _records(occurrence, include_off_book)
+        if records:
+            total += sum(_amount(record, net_of_vat) for record in records)
+        elif occurrence["state"] in UNPAID_STATES and (include_off_book or kinds.get(item_id) == INVOICE):
+            expected = float(occurrence["expected_amount"] or 0)
+            total += expected / STANDARD_VAT_FACTOR if net_of_vat and kinds.get(item_id) == INVOICE else expected
+    return total
+
+
+async def period_costs(
+    db, company_id: Optional[str], scope: dict, period: Period, include_off_book: bool, net_of_vat: bool,
+) -> Dict[str, Any]:
+    """A period's recurring costs, for its margins (routers/margins.py):
+
+    - paid: what the records paying them that are dated in the period come
+      to, whichever month they paid - they are among the period's invoices
+      and expenses, and are no goods;
+    - accrued: each month's recurring costs (month_cost) by the share of
+      its days in the period, as payroll is counted - the cost of running
+      the business in those days, not on the day it was paid;
+    - items: how many recurring costs the business follows."""
+    items = await active_items(db, company_id)
+    if not items:
+        return {"paid": 0.0, "accrued": 0.0, "items": 0}
+    kinds = {item["id"]: item_kind(item) for item in items}
+    ids = [item["id"] for item in items]
+    # A payment dated in the period can be the month before's (paid late)
+    # or the next month's (paid early); none comes before the first one.
+    month = max(add_months(period.start.year, period.start.month, -1), min(parse_month(first_month(item)) for item in items))
+    last = add_months(period.end.year, period.end.month, 1)
+    paid: Dict[str, dict] = {}
+    accrued = 0.0
+    while month <= last:
+        year, number = month
+        occurrences = resolve_month(items, year, number, await load_month_records(db, scope, ids, year, number))
+        share = period.month_share(year, number)
+        if share:
+            accrued += share * month_cost(occurrences, kinds, include_off_book, net_of_vat)
+        for occurrence in occurrences.values():
+            for record in _records(occurrence, include_off_book):
+                if period.contains(_record_day(record)):
+                    paid[str(record["id"])] = record
+        month = add_months(year, number, 1)
+    return {
+        "paid": round(sum(_amount(record, net_of_vat) for record in paid.values()), 2),
+        "accrued": round(accrued, 2),
+        "items": len(items),
+    }
 
 
 async def active_items(db, company_id: Optional[str]) -> List[dict]:

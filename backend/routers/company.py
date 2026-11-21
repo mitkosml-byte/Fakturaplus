@@ -432,6 +432,19 @@ async def update_notification_settings(
     updated = await server.db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
     return NotificationSettings(**updated)
 
+# Settings an owner clears by sending null - back to the default: the
+# profit tax rate goes back to the law's for the legal form.
+CLEARABLE_COMPANY_FIELDS = ("profit_tax_percent",)
+
+
+def _cleared_fields(payload: BaseModel) -> Dict[str, str]:
+    """The clearable settings sent as null - for $unset."""
+    return {
+        field: "" for field in CLEARABLE_COMPANY_FIELDS
+        if field in payload.model_fields_set and getattr(payload, field) is None
+    }
+
+
 @router.post("/company", response_model=Company)
 async def create_or_update_company(company_data: CompanyCreate, current_user: User = Depends(get_current_user)):
     """Създава нова фирма или обновява съществуваща (само Owner може да редактира)"""
@@ -447,6 +460,7 @@ async def create_or_update_company(company_data: CompanyCreate, current_user: Us
         # Update existing company
         update_data = {k: v for k, v in company_data.model_dump().items() if v is not None}
         update_data["updated_at"] = datetime.now(timezone.utc)
+        cleared = _cleared_fields(company_data)
         
         # Don't allow EIK change if company has other users
         other_users = await server.db.users.count_documents({
@@ -460,7 +474,7 @@ async def create_or_update_company(company_data: CompanyCreate, current_user: Us
         
         await server.db.companies.update_one(
             {"id": user_doc["company_id"]},
-            {"$set": update_data}
+            {"$set": update_data, **({"$unset": cleared} if cleared else {})}
         )
         
         updated_company = await server.db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
@@ -538,14 +552,15 @@ async def update_company(company_update: CompanyUpdate, current_user: User = Dep
         raise HTTPException(status_code=403, detail="Само титулярят може да редактира данните на фирмата")
 
     update_data = {k: v for k, v in company_update.model_dump().items() if v is not None}
-    if not update_data:
+    cleared = _cleared_fields(company_update)
+    if not update_data and not cleared:
         raise HTTPException(status_code=400, detail="Няма данни за обновяване")
     
     update_data["updated_at"] = datetime.now(timezone.utc)
     
     await server.db.companies.update_one(
         {"id": user_doc["company_id"]},
-        {"$set": update_data}
+        {"$set": update_data, **({"$unset": cleared} if cleared else {})}
     )
     
     updated_company = await server.db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})

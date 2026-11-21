@@ -228,6 +228,9 @@ class Company(BaseModel):
     # The parts of the program the business uses (see BUSINESS_MODULES);
     # absent or missing one = used.
     modules: Optional[Dict[str, bool]] = None
+    # The profit tax rate (%) for the net margin on Home; None = the law's
+    # for the legal form (services/margins.profit_tax_percent).
+    profit_tax_percent: Optional[float] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -244,6 +247,7 @@ class CompanyCreate(BaseModel):
     bank_iban: Optional[str] = None
     vat_registered: Optional[bool] = None
     closed_weekdays: Optional[List[int]] = None
+    profit_tax_percent: Optional[float] = Field(default=None, ge=0, le=50)
 
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
@@ -258,6 +262,7 @@ class CompanyUpdate(BaseModel):
     bank_iban: Optional[str] = None
     vat_registered: Optional[bool] = None
     closed_weekdays: Optional[List[int]] = None
+    profit_tax_percent: Optional[float] = Field(default=None, ge=0, le=50)
 
 # The parts of the program a business can use or leave out ("Какво ползвам"):
 # the till and pocket money, invoices issued to customers, the team and its
@@ -7408,6 +7413,8 @@ from routers import admin
 app.include_router(admin.router)
 
 # Home in one request (Л14) - built from the handlers above.
+from routers import margins as margins_router
+app.include_router(margins_router.router)
 from routers import home as home_router
 app.include_router(home_router.router)
 from routers import day_card as day_card_router

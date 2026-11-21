@@ -1,7 +1,7 @@
-"""Home in one request (Л14): the period's numbers, the day's review, a new
-business's first steps, the invoicing card, the scans left, the day card and
-the personal notebook's month - which used to be separate requests, some
-sent two or three times as each card refreshed itself.
+"""Home in one request (Л14): the period's numbers and margins, the day's
+review, a new business's first steps, the invoicing card, the scans left, the
+day card and the personal notebook's month - which used to be separate
+requests, some sent two or three times as each card refreshed itself.
 
 Each part is exactly what its own endpoint answers, worked out by that
 endpoint's handler, so the numbers on Home and on every other screen stay
@@ -17,6 +17,7 @@ from server import User, get_current_user
 from routers.ai_insights import list_proactive_signals
 from routers.company import getting_started
 from routers.day_card import build_day_card
+from routers.margins import period_margins
 from routers.receivables import get_billing_overview
 from routers.roi_wallet import get_personal_wallet_summary
 from routers.scan_credits import get_scan_credits
@@ -49,8 +50,10 @@ async def get_home(
 
     # The personal notebook's month - only for whoever may see the notebook.
     sees_notebook = "view_personal_wallet" in set(current_user.permissions or [])
-    summary, signals, started, billing, credits, day_card, notebook = await asyncio.gather(
+    summary, margins, signals, started, billing, credits, day_card, notebook = await asyncio.gather(
         _part(get_summary(start_date=start_date, end_date=end_date, current_month_only=True, current_user=current_user)),
+        # The period's gross, operating and net margin - never keeps Home from loading.
+        _quiet(period_margins(current_user, start_date, end_date), "Margins"),
         _part(list_proactive_signals(current_user=current_user, lang=lang if language else None)),
         _part(getting_started(current_user=current_user)),
         _part(get_billing_overview(start_date=start_date, end_date=end_date, current_user=current_user))
@@ -62,6 +65,7 @@ async def get_home(
     )
     return {
         "summary": summary,
+        "margins": margins,
         "signals": signals["signals"] if signals else None,
         "getting_started": started,
         "billing_overview": billing,
