@@ -79,6 +79,10 @@ agenthub/agents/youtube/db
 # Mobile development
 android-sdk/
 
+# Scratch research notes/reports (deep-research skill output) - not app code
+/research_notes/
+/reports/
+
 # Local environment files only (keep .env for deployment)
 .env.local
 .env.development.local

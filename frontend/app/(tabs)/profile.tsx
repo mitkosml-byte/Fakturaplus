@@ -1,11 +1,10 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Image,
   ImageBackground,
   RefreshControl,
   Modal,
@@ -14,25 +13,50 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
+import * as ImagePicker from 'expo-image-picker';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useModules } from '../../src/stores/modulesStore';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation, useLanguageStore, Language } from '../../src/i18n';
 import { api } from '../../src/services/api';
 import { Company, CompanyMembership } from '../../src/types';
 import { getRoleName as sharedGetRoleName, getRoleColor } from '../../src/utils/roles';
+import { Avatar } from '../../src/components/Avatar';
+import { AvatarCropModal } from '../../src/components/AvatarCropModal';
+import { BirthdaySheet } from '../../src/components/BirthdaySheet';
 import { COLORS } from '../../src/theme/colors';
-import { DURATION, EASING } from '../../src/theme/motion';
+
+// A profile picture is a small icon shown everywhere (team list, chat,
+// calendar, audit log) - not read for fine detail like an invoice scan,
+// so it's resized down hard before upload regardless of what the OS
+// picker/cropper handed back, keeping every user document's picture
+// field cheap to store and fetch.
+const AVATAR_TARGET_SIZE = 320;
+
+// Takes the already-chosen square crop (from AvatarCropModal - the user's
+// own positioning, or its centered default if they never dragged) and
+// scales just that region down to the stored size.
+async function prepareAvatarImage(uri: string, crop: { originX: number; originY: number; size: number }): Promise<string> {
+  const context = ImageManipulator.manipulate(uri)
+    .crop({ originX: crop.originX, originY: crop.originY, width: crop.size, height: crop.size })
+    .resize({ width: AVATAR_TARGET_SIZE, height: AVATAR_TARGET_SIZE });
+  const rendered = await context.renderAsync();
+  const saved = await rendered.saveAsync({ compress: 0.8, format: SaveFormat.JPEG, base64: true });
+  return `data:image/jpeg;base64,${saved.base64}`;
+}
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function ProfileScreen() {
   const { t } = useTranslation();
   const { language, setLanguage } = useLanguageStore();
-  const { user, logout, refreshUser, hasPermission, isOwner } = useAuth();
+  const { user, logout, refreshUser, setUser, hasPermission, isOwner } = useAuth();
+  const { uses } = useModules();
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
@@ -45,70 +69,9 @@ export default function ProfileScreen() {
   const [newCompanyEik, setNewCompanyEik] = useState('');
   const [creatingCompany, setCreatingCompany] = useState(false);
 
-  // Profile IA: 20 flat rows regrouped into 5 categories (Motion Design
-  // Audit's documented proposal) behind a horizontal chip selector, the
-  // same pattern Statistics uses for its own tabs. A category is only
-  // ever shown if it has at least one item this user's role can see, so
-  // a narrower permission set means fewer categories, not emptier ones.
+  // Account (Л7): every section listed under its own title - nothing
+  // hidden behind chips; a section shows only with an item this person sees.
   type CategoryKey = 'company' | 'accounting' | 'security' | 'settings' | 'support';
-  const [activeCategory, setActiveCategory] = useState<CategoryKey | null>(null);
-  const [displayedCategory, setDisplayedCategory] = useState<CategoryKey | null>(null);
-  // Measured on demand via measureLayout rather than cached from onLayout:
-  // react-native-web's onLayout is backed by a ResizeObserver, which only
-  // fires on a SIZE change - a chip that merely shifts x position because a
-  // sibling was inserted/removed before it (exactly what happens here, since
-  // hasPermission depends on `user` and can load a beat after first paint,
-  // changing which categories - and therefore which chips - exist) never
-  // refires onLayout, leaving a stale cached x behind. measureLayout queries
-  // the real current DOM position every time instead, so it can't go stale.
-  const rowRef = useRef<View>(null);
-  const chipRefs = useRef<Partial<Record<CategoryKey, any>>>({});
-  const pillX = useSharedValue(0);
-  const pillWidth = useSharedValue(0);
-  const contentOpacity = useSharedValue(1);
-  const prevVisibleKeysRef = useRef<string | null>(null);
-
-  const movePillTo = (key: CategoryKey, animate: boolean) => {
-    const node = chipRefs.current[key];
-    const row = rowRef.current;
-    if (!node || !row) return;
-    // @ts-ignore - measureLayout is exposed by the host component both the
-    // View and the TouchableOpacity ref forward to on native and web.
-    node.measureLayout(
-      row,
-      (x: number, _y: number, width: number) => {
-        if (animate) {
-          pillX.value = withTiming(x, { duration: DURATION.fast, easing: EASING.standard });
-          pillWidth.value = withTiming(width, { duration: DURATION.fast, easing: EASING.standard });
-        } else {
-          pillX.value = x;
-          pillWidth.value = width;
-        }
-      },
-      () => {}
-    );
-  };
-
-  const handleCategoryChange = (key: CategoryKey) => {
-    if (key === activeCategory) return;
-    setActiveCategory(key);
-    movePillTo(key, true);
-    // Content cross-fades rather than slides (Motion Design System:
-    // "Category tab / chip switch") - sliding both the pill and the
-    // content underneath would be two competing horizontal motions.
-    contentOpacity.value = withTiming(0, { duration: DURATION.fast, easing: EASING.easeIn }, (finished) => {
-      if (finished) {
-        runOnJS(setDisplayedCategory)(key);
-        contentOpacity.value = withTiming(1, { duration: DURATION.fast, easing: EASING.easeOut });
-      }
-    });
-  };
-
-  const contentAnimatedStyle = useAnimatedStyle(() => ({ opacity: contentOpacity.value }));
-  const pillAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: pillX.value }],
-    width: pillWidth.value,
-  }));
 
   const loadCompany = useCallback(async () => {
     try {
@@ -131,11 +94,23 @@ export default function ProfileScreen() {
   // Tab screens stay mounted, so returning from company-settings after an
   // edit doesn't remount this screen - only re-fetching on focus picks up
   // the change without needing a manual pull-to-refresh.
+  // One's own birthday (day and month) - see BirthdaySheet.
+  const [birthday, setBirthday] = useState<string | null>(null);
+  const [showBirthday, setShowBirthday] = useState(false);
+  const loadBirthday = useCallback(async () => {
+    try {
+      setBirthday((await api.getMyBirthday()).birthday);
+    } catch {
+      setBirthday(null);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       loadCompany();
       loadMemberships();
-    }, [loadCompany, loadMemberships])
+      loadBirthday();
+    }, [loadCompany, loadMemberships, loadBirthday])
   );
 
   const onRefresh = useCallback(async () => {
@@ -187,6 +162,76 @@ export default function ProfileScreen() {
     }
   };
 
+  // The OS picker's own allowsEditing/aspect crop UI differs by platform
+  // (and the web build skips it entirely), so cropping is instead always
+  // done with AvatarCropModal below - one consistent, user-draggable
+  // positioning step regardless of platform.
+  const [pickedAvatar, setPickedAvatar] = useState<{ uri: string; width: number; height: number } | null>(null);
+  const [cropModalVisible, setCropModalVisible] = useState(false);
+
+  const handlePickAvatar = async () => {
+    // Gallery picker only (no camera-vs-gallery choice) - same tradeoff
+    // assets.tsx/payroll.tsx already accept, and it sidesteps the Alert
+    // utility's web fallback only properly handling a 2-button
+    // confirm/cancel, not a 3-way source picker.
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+    });
+    if (result.canceled || !result.assets[0]) return;
+
+    const asset = result.assets[0];
+    setPickedAvatar({ uri: asset.uri, width: asset.width, height: asset.height });
+    setCropModalVisible(true);
+  };
+
+  const handleCropCancel = () => {
+    setCropModalVisible(false);
+    setPickedAvatar(null);
+  };
+
+  const handleCropConfirm = async (crop: { originX: number; originY: number; size: number }) => {
+    if (!pickedAvatar) return;
+    setCropModalVisible(false);
+    setUploadingAvatar(true);
+    try {
+      const dataUri = await prepareAvatarImage(pickedAvatar.uri, crop);
+      await api.updateMyPicture(dataUri);
+      setUser(user ? { ...user, picture: dataUri } : user);
+      await refreshUser();
+      Haptics.success();
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      Alert.alert(t('common.error'), t('profile.avatarUploadError'));
+    } finally {
+      setUploadingAvatar(false);
+      setPickedAvatar(null);
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    Alert.alert(t('profile.removeAvatarTitle'), t('profile.removeAvatarConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          setUploadingAvatar(true);
+          try {
+            await api.updateMyPicture(null);
+            setUser(user ? { ...user, picture: null } : user);
+            await refreshUser();
+          } catch (error) {
+            console.error('Error removing avatar:', error);
+            Alert.alert(t('common.error'), t('profile.avatarUploadError'));
+          } finally {
+            setUploadingAvatar(false);
+          }
+        },
+      },
+    ]);
+  };
+
   const handleLogout = () => {
     Alert.alert(
       t('profile.logout'),
@@ -212,6 +257,16 @@ export default function ProfileScreen() {
   };
 
   const getRoleName = (role: string) => sharedGetRoleName(role, language);
+
+  // "11-19" as "19 ноември".
+  const birthdayText = (value: string) => {
+    const months = language === 'en'
+      ? ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+      : ['януари', 'февруари', 'март', 'април', 'май', 'юни', 'юли', 'август', 'септември', 'октомври', 'ноември', 'декември'];
+    const month = months[Number(value.slice(0, 2)) - 1] || '';
+    const day = Number(value.slice(3));
+    return language === 'en' ? `${month} ${day}` : `${day} ${month}`;
+  };
 
   interface MenuItemDef {
     key: string;
@@ -251,29 +306,18 @@ export default function ProfileScreen() {
               onPress: () => router.push('/users-management'),
             }]
           : []),
-        ...(hasPermission('team_collaboration')
+        ...(company && (hasPermission('manage_company') || (hasPermission('view_statistics') && hasPermission('view_profit')))
           ? [{
-              key: 'calendar',
-              title: t('profile.calendar'),
-              subtitle: t('profile.calendarDesc'),
-              icon: 'calendar' as const,
-              iconBg: 'rgba(139, 92, 246, 0.15)',
-              iconColor: COLORS.primary,
-              onPress: () => router.push('/calendar'),
-            }]
-          : []),
-        ...(hasPermission('team_collaboration')
-          ? [{
-              key: 'messages',
-              title: t('profile.messages'),
-              subtitle: t('profile.messagesDesc'),
-              icon: 'chatbubbles' as const,
+              key: 'locations',
+              title: t('locations.title'),
+              subtitle: t('locations.menuDesc'),
+              icon: 'storefront-outline' as const,
               iconBg: 'rgba(16, 185, 129, 0.15)',
               iconColor: COLORS.success,
-              onPress: () => router.push('/messages'),
+              onPress: () => router.push('/locations'),
             }]
           : []),
-        ...(hasPermission('manage_company')
+        ...(uses('till') && hasPermission('manage_company')
           ? [{
               key: 'closedDays',
               title: t('profile.closedDays'),
@@ -284,6 +328,17 @@ export default function ProfileScreen() {
               onPress: () => router.push('/closed-days'),
             }]
           : []),
+        ...(user?.role === 'owner' || user?.role === 'manager'
+          ? [{
+              key: 'deadlines',
+              title: t('deadlines.title'),
+              subtitle: t('deadlines.menuDesc'),
+              icon: 'alarm-outline' as const,
+              iconBg: 'rgba(245, 158, 11, 0.15)',
+              iconColor: COLORS.warning,
+              onPress: () => router.push('/deadlines'),
+            }]
+          : []),
       ],
     },
     {
@@ -291,61 +346,19 @@ export default function ProfileScreen() {
       label: t('profile.category.accounting'),
       icon: 'calculator-outline',
       items: [
-        ...(hasPermission('manage_budget')
-          ? [{
-              key: 'budget',
-              title: t('profile.budget'),
-              subtitle: t('profile.budgetDesc'),
-              icon: 'wallet' as const,
-              iconBg: 'rgba(139, 92, 246, 0.15)',
-              iconColor: COLORS.primary,
-              onPress: () => router.push('/budget'),
-            }]
-          : []),
-        ...(hasPermission('manage_budget')
-          ? [{
-              key: 'payroll',
-              title: t('payroll.title'),
-              subtitle: t('profile.payrollDesc'),
-              icon: 'people' as const,
-              iconBg: 'rgba(16, 185, 129, 0.15)',
-              iconColor: COLORS.success,
-              onPress: () => router.push('/payroll'),
-            }]
-          : []),
-        ...(hasPermission('manage_budget')
-          ? [{
-              key: 'absences',
-              title: t('absences.title'),
-              subtitle: t('profile.absencesDesc'),
-              icon: 'sunny' as const,
-              iconBg: 'rgba(245, 158, 11, 0.15)',
-              iconColor: COLORS.warning,
-              onPress: () => router.push('/employee-absences'),
-            }]
-          : []),
-        ...(hasPermission('manage_budget')
-          ? [{
-              key: 'assets',
-              title: t('assets.title'),
-              subtitle: t('profile.assetsDesc'),
-              icon: 'business' as const,
-              iconBg: 'rgba(245, 158, 11, 0.15)',
-              iconColor: COLORS.warning,
-              onPress: () => router.push('/assets'),
-            }]
-          : []),
-        ...(hasPermission('view_statistics')
-          ? [{
-              key: 'protocols',
-              title: t('profile.protocols'),
-              subtitle: t('profile.protocolsDesc'),
-              icon: 'document-text' as const,
-              iconBg: 'rgba(139, 92, 246, 0.15)',
-              iconColor: COLORS.primary,
-              onPress: () => router.push('/protocols'),
-            }]
-          : []),
+        // One central hub for every history/records screen - previously
+        // each one only existed scattered under its own Home stat card,
+        // modal button, or menu item, with no single place that listed
+        // them all (Module 3 audit finding).
+        {
+          key: 'historyHub',
+          title: t('historyHub.title'),
+          subtitle: t('historyHub.subtitle'),
+          icon: 'time-outline' as const,
+          iconBg: 'rgba(20, 184, 166, 0.15)',
+          iconColor: COLORS.teal,
+          onPress: () => router.push('/history-hub'),
+        },
         ...(hasPermission('export_data')
           ? [{
               key: 'export',
@@ -403,6 +416,15 @@ export default function ProfileScreen() {
       icon: 'settings-outline',
       items: [
         {
+          key: 'birthday',
+          title: t('birthday.title'),
+          subtitle: birthday ? birthdayText(birthday) : t('birthday.notSet'),
+          icon: 'gift-outline',
+          iconBg: 'rgba(236, 72, 153, 0.15)',
+          iconColor: '#EC4899',
+          onPress: () => setShowBirthday(true),
+        },
+        {
           key: 'notifications',
           title: t('profile.notifications'),
           subtitle: t('profile.vatNotifications'),
@@ -411,15 +433,23 @@ export default function ProfileScreen() {
           iconColor: COLORS.primary,
           onPress: () => router.push('/notifications-settings'),
         },
-        {
-          key: 'scanCredits',
-          title: t('scanCredits.title'),
-          subtitle: t('scanCredits.totalRemaining'),
-          icon: 'scan',
-          iconBg: 'rgba(139, 92, 246, 0.15)',
-          iconColor: COLORS.primary,
-          onPress: () => router.push('/scan-credits'),
-        },
+        // manage_invoices-gated - same permission already gating the
+        // Scan/Invoices tabs and the backend endpoints this screen calls
+        // (balance/history/packages). A staff member with nothing granted
+        // used to see this entry and the full screen behind it (balance +
+        // real transaction history) despite having no reason to ever
+        // touch scan credits.
+        ...(hasPermission('manage_invoices')
+          ? [{
+              key: 'scanCredits',
+              title: t('scanCredits.title'),
+              subtitle: t('scanCredits.totalRemaining'),
+              icon: 'scan' as const,
+              iconBg: 'rgba(139, 92, 246, 0.15)',
+              iconColor: COLORS.primary,
+              onPress: () => router.push('/scan-credits'),
+            }]
+          : []),
         {
           key: 'language',
           title: t('profile.language'),
@@ -468,33 +498,6 @@ export default function ProfileScreen() {
   ];
 
   const visibleCategories = allCategories.filter((c) => c.items.length > 0);
-  const visibleKeysSignature = visibleCategories.map((c) => c.key).join(',');
-  if (prevVisibleKeysRef.current !== null && prevVisibleKeysRef.current !== visibleKeysSignature) {
-    if (activeCategory !== null && !visibleCategories.some((c) => c.key === activeCategory)) {
-      // The active category's permission was revoked out from under it
-      // (edge case - a role change mid-session) - fall back to the first
-      // category that's still actually visible.
-      setActiveCategory(visibleCategories[0]?.key ?? null);
-      setDisplayedCategory(visibleCategories[0]?.key ?? null);
-    }
-  }
-  prevVisibleKeysRef.current = visibleKeysSignature;
-  if (activeCategory === null && visibleCategories.length > 0) {
-    // First render: pick the first visible category without going through
-    // the animated transition - there's nothing on screen yet to cross-fade from.
-    setActiveCategory(visibleCategories[0].key);
-    setDisplayedCategory(visibleCategories[0].key);
-  }
-  const currentItems = visibleCategories.find((c) => c.key === displayedCategory)?.items || [];
-
-  // Re-snap the pill (no animation - this isn't a user action) whenever the
-  // set of visible categories changes, e.g. once `user` finishes loading a
-  // beat after first paint and a permission-gated category's chip appears
-  // or disappears, shifting everyone after it.
-  useEffect(() => {
-    if (activeCategory) movePillTo(activeCategory, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleKeysSignature, activeCategory]);
 
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
@@ -513,95 +516,75 @@ export default function ProfileScreen() {
           >
             <View style={styles.header}>
               <Text style={styles.title}>{t('profile.title')}</Text>
-              <TouchableOpacity
-                style={styles.headerLogoutButton}
-                onPress={handleLogout}
-                accessibilityLabel={t('profile.logout')}
-              >
-                <Ionicons name="log-out-outline" size={22} color={COLORS.danger} />
-              </TouchableOpacity>
             </View>
 
-            {/* Company Banner - always opens the switcher, which also has
-                the "add another company" entry point, not just a way to
-                jump between companies you already have. */}
+            {/* Who is signed in, in one row - the picture changes with a tap,
+                a long press removes it. */}
+            <View style={styles.userCard}>
+              <TouchableOpacity
+                style={styles.avatarContainer}
+                onPress={handlePickAvatar}
+                onLongPress={user?.picture ? handleRemoveAvatar : undefined}
+                disabled={uploadingAvatar}
+                accessibilityLabel={t('profile.changeAvatar')}
+              >
+                <Avatar uri={user?.picture} name={user?.name} size={52} />
+                <View style={styles.avatarEditBadge}>
+                  {uploadingAvatar ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <Ionicons name="camera" size={11} color="white" />
+                  )}
+                </View>
+              </TouchableOpacity>
+              <View style={styles.userInfo}>
+                <Text style={styles.userName} numberOfLines={1}>{user?.name || t('role.user')}</Text>
+                <Text style={styles.userEmail} numberOfLines={1}>{user?.email || ''}</Text>
+                <View style={styles.roleContainer}>
+                  <Ionicons
+                    name={user?.role === 'owner' ? 'star' : user?.role === 'manager' ? 'briefcase' : user?.role === 'accountant' ? 'calculator' : 'person'}
+                    size={13}
+                    color={getRoleColor(user?.role || 'staff')}
+                  />
+                  <Text style={[styles.roleText, { color: getRoleColor(user?.role || 'staff') }]}>
+                    {getRoleName(user?.role || 'staff')}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* The company - a tap opens the switcher, which also adds another. */}
             {company && (
               <TouchableOpacity style={styles.companyBanner} onPress={() => setShowSwitcherModal(true)} accessibilityLabel={t('companySwitcher.switchCompany')}>
-                <Ionicons name="business" size={20} color={COLORS.primary} />
-                <Text style={styles.companyName}>{company.name}</Text>
-                <Ionicons name="swap-horizontal" size={18} color={COLORS.primary} />
+                <Ionicons name="business" size={18} color={COLORS.primary} />
+                <Text style={styles.companyName} numberOfLines={1}>{company.name}</Text>
+                <Ionicons name="swap-horizontal" size={16} color={COLORS.primary} />
               </TouchableOpacity>
             )}
 
-            {/* User Card */}
-            <View style={styles.userCard}>
-              <View style={styles.avatarContainer}>
-                {user?.picture ? (
-                  <Image source={{ uri: user.picture }} style={styles.avatar} />
-                ) : (
-                  <View style={styles.avatarPlaceholder}>
-                    <Ionicons name="person" size={40} color={COLORS.primary} />
-                  </View>
-                )}
+            {visibleCategories.map((category) => (
+              <View key={category.key} style={styles.menuSection}>
+                <Text style={styles.sectionTitle}>{category.label}</Text>
+                <View style={styles.sectionCard}>
+                {category.items.map((item, index) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
+                    onPress={item.onPress}
+                  >
+                    <View style={[styles.menuIcon, { backgroundColor: item.iconBg }]}>
+                      <Ionicons name={item.icon} size={18} color={item.iconColor} />
+                    </View>
+                    <View style={styles.menuContent}>
+                      <Text style={styles.menuTitle}>{item.title}</Text>
+                      <Text style={styles.menuSubtitle} numberOfLines={1}>{item.subtitle}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                ))}
+                </View>
               </View>
-              <Text style={styles.userName}>{user?.name || t('role.user')}</Text>
-              <Text style={styles.userEmail}>{user?.email || ''}</Text>
-              <View style={styles.roleContainer}>
-                <Ionicons
-                  name={user?.role === 'owner' ? 'star' : user?.role === 'manager' ? 'briefcase' : user?.role === 'accountant' ? 'calculator' : 'person'}
-                  size={16}
-                  color={getRoleColor(user?.role || 'staff')}
-                />
-                <Text style={[styles.roleText, { color: getRoleColor(user?.role || 'staff') }]}>
-                  {getRoleName(user?.role || 'staff')}
-                </Text>
-              </View>
-        </View>
-
-        {/* Category selector - replaces the old flat 20-row list (Motion
-            Design Audit's Profile IA proposal). A sliding pill tracks the
-            active chip; the row below cross-fades when it changes. */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoryScroll}
-        >
-          <View ref={rowRef} style={styles.categoryRow}>
-            <Animated.View style={[styles.categoryPill, pillAnimatedStyle]} />
-            {visibleCategories.map((cat) => (
-              <TouchableOpacity
-                key={cat.key}
-                ref={(node) => { chipRefs.current[cat.key] = node; }}
-                style={styles.categoryChip}
-                onPress={() => handleCategoryChange(cat.key)}
-              >
-                <Ionicons
-                  name={cat.icon}
-                  size={15}
-                  color={activeCategory === cat.key ? 'white' : COLORS.textMuted}
-                />
-                <Text style={[styles.categoryChipText, activeCategory === cat.key && styles.categoryChipTextActive]}>
-                  {cat.label}
-                </Text>
-              </TouchableOpacity>
             ))}
-          </View>
-        </ScrollView>
-
-        <Animated.View style={[styles.menuSection, contentAnimatedStyle]}>
-          {currentItems.map((item) => (
-            <TouchableOpacity key={item.key} style={styles.menuItem} onPress={item.onPress}>
-              <View style={[styles.menuIcon, { backgroundColor: item.iconBg }]}>
-                <Ionicons name={item.icon} size={20} color={item.iconColor} />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>{item.title}</Text>
-                <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          ))}
-        </Animated.View>
 
             {/* Logout Button */}
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -656,6 +639,13 @@ export default function ProfileScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <BirthdaySheet
+        visible={showBirthday}
+        birthday={birthday}
+        onClose={() => setShowBirthday(false)}
+        onSaved={setBirthday}
+      />
 
       {/* Company Switcher Modal */}
       <Modal
@@ -772,6 +762,15 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <AvatarCropModal
+        visible={cropModalVisible}
+        imageUri={pickedAvatar?.uri ?? null}
+        imageWidth={pickedAvatar?.width ?? 1}
+        imageHeight={pickedAvatar?.height ?? 1}
+        onCancel={handleCropCancel}
+        onConfirm={handleCropConfirm}
+      />
     </ImageBackground>
   );
 }
@@ -792,87 +791,63 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    marginBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerLogoutButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    marginBottom: 16,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     color: 'white',
   },
-  companyBanner: {
+  // Who is signed in, in one row.
+  userCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-  },
-  companyName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.primary,
-    flex: 1,
-  },
-  userCard: {
+    gap: 14,
     backgroundColor: COLORS.surface,
-    borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 24,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
   },
   avatarContainer: {
-    marginBottom: 16,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 3,
+    padding: 2,
+    borderRadius: 30,
+    borderWidth: 2,
     borderColor: COLORS.primary,
   },
-  avatarPlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    justifyContent: 'center',
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.primary,
+    borderWidth: 2,
+    borderColor: COLORS.surface,
     alignItems: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.primary,
+    justifyContent: 'center',
   },
+  userInfo: { flex: 1 },
   userName: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 4,
   },
   userEmail: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.textSecondary,
-    marginBottom: 12,
+    marginTop: 1,
   },
   roleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    marginTop: 6,
     backgroundColor: COLORS.background,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   roleText: {
     fontSize: 12,
@@ -882,64 +857,56 @@ const styles = StyleSheet.create({
   roleTextAccountant: {
     color: COLORS.primary,
   },
-  categoryScroll: {
-    marginBottom: 16,
-    flexGrow: 0,
-  },
-  categoryRow: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderRadius: 14,
-    padding: 4,
-    gap: 2,
-  },
-  categoryPill: {
-    position: 'absolute',
-    top: 4,
-    bottom: 4,
-    left: 0,
-    backgroundColor: COLORS.primary,
-    borderRadius: 10,
-  },
-  categoryChip: {
+  companyBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 12,
     paddingVertical: 10,
-    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginBottom: 20,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
   },
-  categoryChipText: {
-    fontSize: 13,
+  companyName: {
+    fontSize: 15,
     fontWeight: '600',
-    color: COLORS.textMuted,
+    color: COLORS.primary,
+    flex: 1,
   },
-  categoryChipTextActive: {
-    color: 'white',
-  },
+  // Each section: its title, then its items in one card.
   menuSection: {
-    marginBottom: 24,
+    marginBottom: 18,
   },
-  menuSectionTitle: {
+  sectionTitle: {
     fontSize: 12,
     color: COLORS.textMuted,
-    fontWeight: '600',
-    marginBottom: 12,
+    fontWeight: '700',
+    marginBottom: 8,
     marginLeft: 4,
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sectionCard: {
+    borderRadius: 14,
+    overflow: 'hidden',
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  menuItemDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
   },
   menuIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 9,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -955,7 +922,7 @@ const styles = StyleSheet.create({
   menuSubtitle: {
     fontSize: 12,
     color: COLORS.textMuted,
-    marginTop: 2,
+    marginTop: 1,
   },
   logoutButton: {
     flexDirection: 'row',

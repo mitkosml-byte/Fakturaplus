@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { InfoButton } from '../../src/components/InfoButton';
 import {
   View,
   Text,
@@ -11,6 +12,7 @@ import {
   Platform,
   Image,
   ImageBackground,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,13 +21,23 @@ import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { prepareScanImage } from '../../src/utils/scanImage';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
-import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale } from '../../src/components';
+import { ScanCreditsReloadButton, StaggerReveal, Expandable, PressableScale, LocationPicker } from '../../src/components';
+import { useLocationChoice, useLocationsStore } from '../../src/stores/locationsStore';
 import { api } from '../../src/services/api';
-import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod } from '../../src/types';
+import { useAuth } from '../../src/contexts/AuthContext';
+import { useModules } from '../../src/stores/modulesStore';
+import { useScanQueueStore, QueuedScan, isNetworkError } from '../../src/stores/scanQueueStore';
+import { useNetwork } from '../../src/hooks/useNetwork';
+import NetInfo from '@react-native-community/netinfo';
+import { OCRResult, InvoiceItemCreate, VatTreatment, PaymentMethod, ItemPriceHint, InvoiceDraftCheck, InvoiceDraftFix, InvoiceDocumentType } from '../../src/types';
+import { detectPackMultiple, formatEur, priceAlertMeaning } from '../../src/utils/priceAlert';
 import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
+import { toApiDate } from '../../src/utils/periodRange';
+import { formatAmount, formatMoney } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -34,9 +46,26 @@ interface EditableItem {
   quantity: string;
   unit: string;
   unit_price: string;
+  // As recognized, before any correction - what a pack re-read is measured
+  // against when the invoice is saved (that is how the app learns it).
+  // total_price = the line's value as printed, which the amounts check
+  // holds quantity x price against.
+  ocr?: { quantity: number; unit_price: number; total_price?: number };
+  // A pack size learned from an earlier correction that the app applied
+  // automatically; `undone` once the owner put the line back.
+  packRule?: { multiple: number; undone: boolean };
 }
 
 const emptyItem = (): EditableItem => ({ name: '', quantity: '1', unit: 'бр.', unit_price: '' });
+
+// A typed amount as a number ("12,50" or "12.50"); 0 when empty.
+const toNumber = (value: string | number | null | undefined): number => {
+  const n = parseFloat(String(value ?? '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+};
+
+// How long after the last edit the amounts are checked again.
+const DRAFT_CHECK_DELAY_MS = 500;
 
 export default function ScanScreen() {
   const { t, dateLocale } = useTranslation();
@@ -44,12 +73,44 @@ export default function ScanScreen() {
   const router = useRouter();
 
   // Which direction the scanned document is: a purchase invoice FROM a
-  // supplier (the default, feeds the invoice form below) or a sales
-  // invoice/receipt the business itself ISSUED to a customer (feeds
-  // straight into that day's daily revenue instead - no separate
-  // sales-invoice record is kept, per the app's pocket-ledger scope).
+  // supplier (the default, feeds the invoice form below) or an invoice the
+  // business itself ISSUED to a customer in another program - saved as an
+  // issued invoice with its own number (income of its day; one paid at the
+  // till is in that day's till revenue already and is not counted again).
   const [scanMode, setScanMode] = useState<'purchase' | 'sales'>('purchase');
+  // An invoice the business issued is saved as an issued invoice - its own right.
+  const { hasPermission, user } = useAuth();
+  const companyId = user?.company_id ?? null;
+  // Scanning without a connection (Н12): the pages are kept and read once
+  // the connection is back - here, or from the queue below.
+  const { isOnline } = useNetwork();
+  const [offlineWaiting, setOfflineWaiting] = useState(false);
+  const queue = useScanQueueStore((state) => state.items);
+  const loadQueue = useScanQueueStore((state) => state.load);
+  const enqueueScan = useScanQueueStore((state) => state.enqueue);
+  const processQueue = useScanQueueStore((state) => state.processPending);
+  const retryQueued = useScanQueueStore((state) => state.retry);
+  const removeQueued = useScanQueueStore((state) => state.remove);
+  const takeQueued = useScanQueueStore((state) => state.take);
+  const queueProcessing = useScanQueueStore((state) => state.processing);
+  const { uses } = useModules();
+  const canIssueInvoices = hasPermission('issue_invoices') && uses('billing');
+  const usesTill = uses('till');
   const [salesVatRate, setSalesVatRate] = useState<20 | 9 | 0>(20);
+  const [salesCustomer, setSalesCustomer] = useState('');
+  const [salesCustomerEik, setSalesCustomerEik] = useState('');
+  const [salesPaymentMethod, setSalesPaymentMethod] = useState<'bank_transfer' | 'cash' | 'card'>('bank_transfer');
+  const [salesInTill, setSalesInTill] = useState(false);
+  const [logsTill, setLogsTill] = useState(false);
+
+  // Whether the business enters its till here: then a sales invoice paid in
+  // cash or by card went through the till (a fiscal receipt).
+  useEffect(() => {
+    if (scanMode !== 'sales') return;
+    api.getInvoiceDefaults()
+      .then((defaults) => { setLogsTill(defaults.logs_till); setSalesInTill(defaults.logs_till); })
+      .catch(() => {});
+  }, [scanMode]);
 
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -61,11 +122,37 @@ export default function ScanScreen() {
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
   const [ocrCorrections, setOcrCorrections] = useState<string[]>([]);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
+  // What each recognized line would raise once saved, judged by the same
+  // engine as a saved invoice: a "pack of N?" question when the price is
+  // exactly a pack multiple of the usual one (with a one-tap fix), or a
+  // real change with its size in EUR a month - so a misread is fixed here,
+  // before it reaches the price history. Keyed by the item's index in
+  // `items` (its name alone isn't a stable key - two rows can share a
+  // name before the user's edited them apart).
+  const [itemPriceHints, setItemPriceHints] = useState<Record<number, ItemPriceHint>>({});
+  // Do the amounts add up (POST /invoices/draft-check)? Asked again after
+  // every edit; `draftCheckFresh` is false from an edit until the answer
+  // for it arrives - meanwhile the old answer shows dimmed, without its
+  // fix buttons (a second tap must not apply a fix twice) or line notes
+  // (their positions may have moved).
+  const [draftCheck, setDraftCheck] = useState<InvoiceDraftCheck | null>(null);
+  const [draftCheckFresh, setDraftCheckFresh] = useState(false);
+  const draftCheckSeq = useRef(0);
+  const draftLineFlags = useMemo(
+    () => Object.fromEntries((draftCheck?.line_flags || []).map((flag) => [flag.index, flag])),
+    [draftCheck],
+  );
 
   // Form fields (editable after OCR)
   const [supplier, setSupplier] = useState('');
   const [supplierEik, setSupplierEik] = useState('');
   const [eikCheck, setEikCheck] = useState<{ valid: boolean; reason: string | null } | null>(null);
+  // Known suppliers (name + ЕИК) from this company's own invoice history -
+  // drives the autocomplete chips below the supplier field, so correcting
+  // an OCR misread or typing a supplier manually doesn't mean retyping an
+  // ЕИК that's already on file from a previous invoice. Loaded once, lazily
+  // (reuses the existing invoice list endpoint, no backend change).
+  const [supplierDirectory, setSupplierDirectory] = useState<{ name: string; eik: string; date: string }[]>([]);
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [amountWithoutVat, setAmountWithoutVat] = useState('');
   const [vatAmount, setVatAmount] = useState('');
@@ -80,10 +167,27 @@ export default function ScanScreen() {
   // warning that keeps that silent default from being mistaken for a
   // confirmed, OCR-read date.
   const [dateFoundByOcr, setDateFoundByOcr] = useState<boolean | null>(null);
+  // Л6: what was read shows as a short card with Save on top; the whole
+  // form opens with "Редактирай".
+  const [reviewing, setReviewing] = useState(false);
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [items, setItems] = useState<EditableItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>('');
+  // The location the invoice is for (Н11): until picked, the last one used here.
+  const { fallback: defaultLocation } = useLocationChoice();
+  const rememberLocation = useLocationsStore((state) => state.remember);
+  const [locationPick, setLocationPick] = useState<string | null | undefined>(undefined);
+  const invoiceLocation = locationPick === undefined ? defaultLocation : locationPick;
+  const [paymentMethodFromOcr, setPaymentMethodFromOcr] = useState(false);
+  const [paymentMethodMissing, setPaymentMethodMissing] = useState(false);
   const [paymentDueDate, setPaymentDueDate] = useState<Date | null>(null);
+  // A credit note (кредитно известие) takes purchases and the VAT credit
+  // down; its amounts are typed as printed and nothing is owed on it.
+  const [documentType, setDocumentType] = useState<InvoiceDocumentType>('invoice');
+  const isCreditNote = documentType === 'credit_note';
+  // The invoice a credit note corrects ("към фактура №", printed on it):
+  // what it takes off is no longer owed on that invoice.
+  const [creditedInvoiceNumber, setCreditedInvoiceNumber] = useState('');
   const [isDueDatePickerVisible, setDueDatePickerVisible] = useState(false);
 
   // Suggest a VAT treatment from the amounts (mirrors the backend's own
@@ -129,6 +233,33 @@ export default function ScanScreen() {
     return () => clearTimeout(timeout);
   }, [supplierEik]);
 
+  useEffect(() => {
+    if (scanMode !== 'purchase' || capturedImages.length === 0 || supplierDirectory.length > 0) return;
+    api.getInvoices({})
+      .then((invoices) => {
+        const byName = new Map<string, { name: string; eik: string; date: string }>();
+        invoices.forEach((inv) => {
+          const key = inv.supplier.trim().toLowerCase();
+          if (!key) return;
+          const existing = byName.get(key);
+          if (!existing || inv.date > existing.date) {
+            byName.set(key, { name: inv.supplier.trim(), eik: inv.supplier_eik || '', date: inv.date });
+          }
+        });
+        setSupplierDirectory(Array.from(byName.values()));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanMode, capturedImages.length]);
+
+  const supplierMatches = useMemo(() => {
+    const q = supplier.trim().toLowerCase();
+    if (!q) return [];
+    return supplierDirectory
+      .filter((s) => s.name.toLowerCase() !== q && s.name.toLowerCase().includes(q))
+      .slice(0, 5);
+  }, [supplier, supplierDirectory]);
+
   // Delegates to the phone's own camera app (via the OS camera picker)
   // instead of a custom in-page live preview. The in-page camera had no
   // reliable autofocus on web (browsers don't expose manual focus control
@@ -142,6 +273,8 @@ export default function ScanScreen() {
   const addPage = async (dataUri: string) => {
     const updated = [...capturedImages, dataUri];
     setCapturedImages(updated);
+    // No connection: the page joins the others, read together later.
+    if (offlineWaiting) return;
     await processImages(updated);
   };
 
@@ -168,7 +301,8 @@ export default function ScanScreen() {
         // a light haptic the instant the shutter fires - no delay waiting
         // on the network/OCR call that follows.
         Haptics.success();
-        await addPage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+        const dataUri = await prepareScanImage(result.assets[0]);
+        await addPage(dataUri);
       }
     } catch (error) {
       console.error('Error taking photo:', error);
@@ -184,79 +318,161 @@ export default function ScanScreen() {
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      await addPage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+      const dataUri = await prepareScanImage(result.assets[0]);
+      await addPage(dataUri);
     }
   };
 
+  // Best-effort like the price hints: no answer just shows nothing.
+  useEffect(() => {
+    if (scanMode !== 'purchase' || items.length === 0) {
+      setDraftCheck(null);
+      return;
+    }
+    setDraftCheckFresh(false);
+    const seq = ++draftCheckSeq.current;
+    const handle = setTimeout(async () => {
+      try {
+        const result = await api.checkInvoiceDraft({
+          amount_without_vat: toNumber(amountWithoutVat),
+          vat_amount: toNumber(vatAmount),
+          total_amount: toNumber(totalAmount),
+          items: items.map((item) => ({
+            name: item.name,
+            quantity: toNumber(item.quantity) || 1,
+            unit_price: toNumber(item.unit_price),
+            printed_total: item.ocr?.total_price ?? null,
+          })),
+        });
+        if (seq === draftCheckSeq.current) {
+          setDraftCheck(result);
+          setDraftCheckFresh(true);
+        }
+      } catch {
+        if (seq === draftCheckSeq.current) setDraftCheck(null);
+      }
+    }, DRAFT_CHECK_DELAY_MS);
+    return () => clearTimeout(handle);
+  }, [items, amountWithoutVat, vatAmount, totalAmount, scanMode]);
+
+  // Best-effort: a failed check just leaves the lines without hints,
+  // never blocks the scan.
+  const loadItemPriceHints = async (
+    ocrItems: { name: string; quantity: number; unit?: string; unit_price: number }[],
+    supplierName: string,
+  ) => {
+    if (!supplierName.trim() || ocrItems.length === 0) return;
+    try {
+      const { hints } = await api.checkItemPrices(supplierName, ocrItems.map((item) => ({
+        name: item.name,
+        quantity: item.quantity || 1,
+        unit: item.unit || 'бр.',
+        unit_price: item.unit_price,
+      })));
+      const byIndex: Record<number, ItemPriceHint> = {};
+      const learned: Record<number, number> = {};
+      hints.forEach((hint) => {
+        if (hint.kind === 'pack_rule' && hint.auto_apply && hint.pack_multiple) {
+          learned[hint.index] = hint.pack_multiple;
+        } else {
+          byIndex[hint.index] = hint;
+        }
+      });
+      setItemPriceHints(byIndex);
+      // A pack size the owner corrected before is applied straight away -
+      // only to lines still exactly as recognized, and with an undo.
+      if (Object.keys(learned).length > 0) {
+        setItems((prev) => prev.map((item, i) => {
+          const k = learned[i];
+          if (!k || !item.ocr) return item;
+          if (parseFloat(item.quantity) !== item.ocr.quantity || parseFloat(item.unit_price) !== item.ocr.unit_price) {
+            return item;
+          }
+          return {
+            ...item,
+            quantity: String(Math.round(item.ocr.quantity * k * 1000) / 1000),
+            unit_price: String(Math.round((item.ocr.unit_price / k) * 10000) / 10000),
+            packRule: { multiple: k, undone: false },
+          };
+        }));
+      }
+    } catch {
+      // no hints
+    }
+  };
+
+  // The line as it would read if it really was a pack: N times the
+  // quantity at 1/N the price (or the reverse when the price came in N
+  // times BELOW the usual pack price). Same line total either way.
+  const packFixValues = (index: number): { quantity: number; unitPrice: number } | null => {
+    const hint = itemPriceHints[index];
+    const item = items[index];
+    if (!hint || hint.kind !== 'pack_suspect' || !hint.pack_multiple || !item) return null;
+    const k = hint.pack_multiple;
+    const qty = parseFloat(item.quantity.replace(',', '.')) || 1;
+    const price = parseFloat(item.unit_price.replace(',', '.'));
+    if (!price) return null;
+    const split = hint.direction !== 'decrease';
+    return {
+      quantity: Math.round((split ? qty * k : qty / k) * 1000) / 1000,
+      unitPrice: Math.round((split ? price / k : price * k) * 10000) / 10000,
+    };
+  };
+
+  // The remembered-pack note shows only while the line still holds the
+  // values the app put there - an edit by hand makes it the owner's own.
+  const packRuleActive = (item: EditableItem): boolean => {
+    if (!item.packRule || item.packRule.undone || !item.ocr) return false;
+    const k = item.packRule.multiple;
+    return parseFloat(item.quantity) === Math.round(item.ocr.quantity * k * 1000) / 1000
+      && parseFloat(item.unit_price) === Math.round((item.ocr.unit_price / k) * 10000) / 10000;
+  };
+
+  // Puts a line the app converted with a remembered pack size back the way
+  // it was recognized; saving it like that forgets that pack size.
+  const undoPackRule = (index: number) => {
+    setItems(prev => prev.map((item, i) => (
+      i === index && item.ocr && item.packRule
+        ? {
+          ...item,
+          quantity: String(item.ocr.quantity),
+          unit_price: String(item.ocr.unit_price),
+          packRule: { ...item.packRule, undone: true },
+        }
+        : item
+    )));
+  };
+
+  const applyPackFix = (index: number) => {
+    const fix = packFixValues(index);
+    if (!fix) return;
+    updateItem(index, { quantity: String(fix.quantity), unit_price: String(fix.unitPrice) });
+  };
+
   const processImages = async (images: string[]) => {
+    const network = await NetInfo.fetch().catch(() => null);
+    if (network && (network.isConnected === false || network.isInternetReachable === false)) {
+      setOfflineWaiting(true);
+      return;
+    }
+    setOfflineWaiting(false);
     setIsScanning(true);
     setOcrCorrections([]);
     setOcrConfidence(null);
     try {
       const result = await api.scanInvoice(images);
-      setOcrResult(result);
-      setSupplier(result.supplier);
-      setSupplierEik(result.supplier_eik || '');
-      setInvoiceNumber(result.invoice_number);
-      setAmountWithoutVat(result.amount_without_vat.toString());
-      setVatAmount(result.vat_amount.toString());
-      setTotalAmount(result.total_amount.toString());
-      
-      // Save corrections info
-      if (result.corrections && result.corrections.length > 0) {
-        setOcrCorrections(result.corrections);
+      // The pages as they were read - the sheet straightened and cut out of
+      // the table - shown and kept instead of the photos; a page changed
+      // meanwhile stays as it is.
+      if (result.pages?.some(Boolean)) {
+        setCapturedImages((current) => current.map((image, i) => (image === images[i] && result.pages?.[i]) || image));
       }
-      if (result.confidence) {
-        setOcrConfidence(result.confidence);
-      }
-
-      // Pre-fill the recognized line items - reviewable/editable before saving
-      if (result.items && result.items.length > 0) {
-        setItems(result.items.map(item => ({
-          name: item.name,
-          quantity: String(item.quantity),
-          unit: item.unit || 'бр.',
-          unit_price: String(item.unit_price),
-        })));
-      }
-      
-      // Set invoice date from OCR if available - and flag it clearly when
-      // it isn't, instead of leaving invoiceDate silently at today's date
-      // with no sign that nothing was actually read off the invoice.
-      let foundDate = false;
-      if (result.invoice_date) {
-        try {
-          const parsedDate = new Date(result.invoice_date);
-          if (!isNaN(parsedDate.getTime())) {
-            setInvoiceDate(parsedDate);
-            foundDate = true;
-          }
-        } catch (e) {
-          // Keep default date if parsing fails
-        }
-      }
-      setDateFoundByOcr(foundDate);
-
-      // A payment due date printed on the invoice does NOT reliably mean a
-      // deferred bank-transfer payment - many Bulgarian invoice templates
-      // print a standard payment-term line even when the purchase was
-      // actually settled in cash on the spot, and auto-selecting "Банков
-      // превод" from that printed line alone was wrongly flagging cash
-      // purchases as unpaid. The due date is still useful if the user DOES
-      // pick bank transfer themselves, so it's still pre-filled - just no
-      // longer used to pick the payment method on the user's behalf.
-      if (result.payment_due_date) {
-        try {
-          const parsedDueDate = new Date(result.payment_due_date);
-          if (!isNaN(parsedDueDate.getTime())) {
-            setPaymentDueDate(parsedDueDate);
-          }
-        } catch (e) {
-          // Leave due date unset if parsing fails - manual picker covers it
-        }
-      }
+      applyOcrResult(result);
     } catch (error: any) {
-      if (error.status === 402) {
+      if (isNetworkError(error)) {
+        // The connection dropped on the way: kept, as if offline from the start.
+        setOfflineWaiting(true);
+      } else if (error.status === 402) {
         // Out of scan credits - this is the app's one paid feature (see
         // ScanCreditService on the backend), so route to the purchase
         // screen instead of showing a dead-end error.
@@ -276,20 +492,189 @@ export default function ScanScreen() {
     }
   };
 
-  const handleSaveInvoice = async () => {
+  // What was read off the pages, into the form - a scan just made or one
+  // taken from the queue of scans read once the connection came back.
+  const applyOcrResult = (result: OCRResult) => {
+    setOcrResult(result);
+    setReviewing(false);
+    setDocumentType(result.document_type === 'credit_note' ? 'credit_note' : 'invoice');
+    setCreditedInvoiceNumber(result.credited_invoice_number || '');
+    // An invoice the business issued: the customer is its recipient.
+    setSalesCustomer(result.buyer || '');
+    setSalesCustomerEik(result.buyer_eik || '');
+    if (result.payment_method === 'cash' || result.payment_method === 'card' || result.payment_method === 'bank_transfer') {
+      setSalesPaymentMethod(result.payment_method);
+    }
+    setSupplier(result.supplier);
+    setSupplierEik(result.supplier_eik || '');
+    setInvoiceNumber(result.invoice_number);
+    setAmountWithoutVat(result.amount_without_vat.toString());
+    setVatAmount(result.vat_amount.toString());
+    setTotalAmount(result.total_amount.toString());
+    
+    // Save corrections info
+    if (result.corrections && result.corrections.length > 0) {
+      setOcrCorrections(result.corrections);
+    }
+    if (result.confidence) {
+      setOcrConfidence(result.confidence);
+    }
+
+    // Pre-fill the recognized line items - reviewable/editable before saving
+    if (result.items && result.items.length > 0) {
+      setItems(result.items.map(item => ({
+        name: item.name,
+        quantity: String(item.quantity),
+        unit: item.unit || 'бр.',
+        unit_price: String(item.unit_price),
+        ocr: { quantity: item.quantity || 1, unit_price: item.unit_price, total_price: item.total_price },
+      })));
+      setItemPriceHints({});
+      loadItemPriceHints(result.items, result.supplier);
+    }
+    
+    // Set invoice date from OCR if available - and flag it clearly when
+    // it isn't, instead of leaving invoiceDate silently at today's date
+    // with no sign that nothing was actually read off the invoice.
+    let foundDate = false;
+    if (result.invoice_date) {
+      try {
+        // A plain "yyyy-MM-dd" is that day on this device's calendar -
+        // new Date() would read it as UTC midnight, the day before
+        // anywhere west of Greenwich.
+        const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(result.invoice_date)
+          ? parse(result.invoice_date, 'yyyy-MM-dd', new Date())
+          : new Date(result.invoice_date);
+        if (!isNaN(parsedDate.getTime())) {
+          setInvoiceDate(parsedDate);
+          foundDate = true;
+        }
+      } catch (e) {
+        // Keep default date if parsing fails
+      }
+    }
+    setDateFoundByOcr(foundDate);
+
+    // A payment due date printed on the invoice does NOT reliably mean a
+    // deferred bank-transfer payment - many Bulgarian invoice templates
+    // print a standard payment-term line even when the purchase was
+    // actually settled in cash on the spot, and auto-selecting "Банков
+    // превод" from that printed line alone was wrongly flagging cash
+    // purchases as unpaid. The due date is still useful if the user DOES
+    // pick bank transfer themselves, so it's still pre-filled - just no
+    // longer used to pick the payment method on the user's behalf.
+    // The payment method printed on the invoice ("Начин на плащане") is
+    // taken as read; when it isn't printed, the person picks it before
+    // saving - an invoice without one was never tracked as owed.
+    setPaymentMethodFromOcr(!!result.payment_method);
+    if (result.payment_method) {
+      setPaymentMethod(result.payment_method);
+    }
+    if (result.payment_due_date) {
+      try {
+        const parsedDueDate = new Date(result.payment_due_date);
+        if (!isNaN(parsedDueDate.getTime())) {
+          setPaymentDueDate(parsedDueDate);
+        }
+      } catch (e) {
+        // Leave due date unset if parsing fails - manual picker covers it
+      }
+    }
+  };
+
+  // The connection came back while the pages wait here: read them now.
+  useEffect(() => {
+    if (isOnline && offlineWaiting && capturedImages.length > 0) {
+      processImages(capturedImages);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline]);
+
+  useEffect(() => { loadQueue(); }, [loadQueue]);
+  const myQueue = queue.filter((item) => item.companyId === companyId);
+
+  // Kept for later: read on its own once the connection is back.
+  const saveForLater = async () => {
+    try {
+      await enqueueScan(capturedImages, scanMode, companyId);
+      Toast.success(t('scanQueue.saved'));
+      resetForm();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error?.message || t('scanQueue.saveFailed'));
+    }
+  };
+
+  const reviewQueued = async (item: QueuedScan) => {
+    const taken = await takeQueued(item.id);
+    if (!taken) return;
+    resetForm();
+    setScanMode(taken.mode);
+    setCapturedImages(taken.pages);
+    applyOcrResult(taken.result);
+  };
+
+  const retryNow = async (item: QueuedScan) => {
+    await retryQueued(item.id);
+    const ready = await processQueue(companyId);
+    if (ready > 0) Toast.success(t('scanQueue.readyToast').replace('{count}', String(ready)));
+  };
+
+  const deleteQueued = (item: QueuedScan) => {
+    Alert.alert(t('scanQueue.deleteTitle'), t('scanQueue.deleteBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.delete'), style: 'destructive', onPress: () => { removeQueued(item.id); } },
+    ]);
+  };
+
+  const handleSaveInvoice = async (confirmed: boolean = false) => {
+    if (!isCreditNote && !paymentMethod) {
+      // Whether the invoice is owed or already paid decides every payables
+      // figure - it is never left to a default.
+      setPaymentMethodMissing(true);
+      Alert.alert(t('common.error'), t('scan.paymentMethodRequired'));
+      return;
+    }
     if (!supplier || !invoiceNumber || !totalAmount) {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;
     }
 
+    // Amounts that do not add up are asked about once more before they
+    // reach the data - saving anyway stays the owner's call.
+    const problems = draftProblems();
+    if (problems.length > 0 && confirmed !== true) {
+      Alert.alert(t('scanCheck.confirmTitle'), `${problems.join('\n')}\n\n${t('scanCheck.confirmBody')}`, [
+        { text: t('scanCheck.review'), style: 'cancel' },
+        { text: t('scanCheck.saveAnyway'), onPress: () => { handleSaveInvoice(true); } },
+      ]);
+      return;
+    }
+
     const itemsPayload: InvoiceItemCreate[] = items
       .filter(item => item.name.trim() && item.unit_price)
-      .map(item => ({
-        name: item.name.trim(),
-        quantity: parseFloat(item.quantity) || 1,
-        unit: item.unit.trim() || 'бр.',
-        unit_price: parseFloat(item.unit_price) || 0,
-      }));
+      .map(item => {
+        const quantity = parseFloat(item.quantity) || 1;
+        // A negative unit_price is kept as-is, not clamped to 0 - a
+        // discount/rebate line ("отстъпка") printed as its own row on the
+        // invoice is a real, common pattern the backend accepts on purpose.
+        const unitPrice = parseFloat(item.unit_price) || 0;
+        // A pack re-read as pieces (by the fix button, by hand or by a
+        // remembered pack size) is learned for this supplier and item; a
+        // remembered pack size put back to the recognized line is forgotten.
+        const packMultiple = item.ocr
+          ? detectPackMultiple(item.ocr.quantity, item.ocr.unit_price, quantity, unitPrice)
+          : null;
+        const putBack = !!item.packRule && !!item.ocr
+          && quantity === item.ocr.quantity && unitPrice === item.ocr.unit_price;
+        return {
+          name: item.name.trim(),
+          quantity,
+          unit: item.unit.trim() || 'бр.',
+          unit_price: unitPrice,
+          ...(packMultiple ? { pack_multiple_applied: packMultiple } : {}),
+          ...(!packMultiple && putBack ? { pack_rule_rejected: true } : {}),
+        };
+      });
 
     setIsSaving(true);
     try {
@@ -297,19 +682,25 @@ export default function ScanScreen() {
         supplier,
         supplier_eik: supplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
+        document_type: documentType,
+        credited_invoice_number: isCreditNote ? creditedInvoiceNumber.trim() || undefined : undefined,
         amount_without_vat: parseFloat(amountWithoutVat) || 0,
         vat_amount: parseFloat(vatAmount) || 0,
         total_amount: parseFloat(totalAmount) || 0,
         vat_treatment: vatTreatment || undefined,
-        date: invoiceDate.toISOString(),
+        date: toApiDate(invoiceDate),
         image_base64s: capturedImages.length > 0 ? capturedImages : undefined,
         notes: notes || undefined,
         items: itemsPayload.length > 0 ? itemsPayload : undefined,
-        payment_method: paymentMethod || undefined,
-        payment_due_date: paymentMethod === 'bank_transfer' && paymentDueDate ? paymentDueDate.toISOString() : undefined,
+        payment_method: (!isCreditNote && paymentMethod) || undefined,
+        payment_due_date: !isCreditNote && paymentMethod === 'bank_transfer' && paymentDueDate ? toApiDate(paymentDueDate) : undefined,
+        location_id: invoiceLocation,
       });
+      if (invoiceLocation) rememberLocation(invoiceLocation);
       Haptics.success();
-      if (saved.protocol_number) {
+      if (isCreditNote) {
+        Toast.success(t('scan.creditNoteSaved'));
+      } else if (saved.protocol_number) {
         Toast.success(`${t('msg.invoiceSaved')} · ${t('scan.protocolAssigned')} ${saved.protocol_number}`);
       } else {
         Toast.success(t('msg.invoiceSaved'));
@@ -322,35 +713,214 @@ export default function ScanScreen() {
     }
   };
 
-  // Sales mode hands off to the Home tab's existing daily-revenue modal
-  // (via router params, the same pattern the unpaid-invoices card already
-  // uses to deep-link into invoices.tsx) rather than saving anything here
-  // directly - that modal already knows how to load whatever's currently
-  // logged for the date and let the owner reconcile it with this scanned
-  // amount, instead of silently overwriting the day's other sales.
-  const handleAddToRevenue = () => {
-    const total = parseFloat(totalAmount);
-    if (!total) {
-      Alert.alert(t('common.error'), t('msg.fillRequired'));
+  // An invoice issued in another program: saved as an issued invoice with
+  // its own number - never added to the till's revenue, where a sale paid
+  // through the till already is (then it is marked so, not counted twice).
+  const handleSaveSalesInvoice = async () => {
+    const total = parseFloat(totalAmount.replace(',', '.'));
+    const number = invoiceNumber.replace(/\D/g, '');
+    if (!total || !salesCustomer.trim() || !number) {
+      Alert.alert(t('common.error'), t('scan.salesRequired'));
       return;
     }
-    router.push({
-      pathname: '/(tabs)',
-      params: {
-        ocrDate: format(invoiceDate, 'yyyy-MM-dd'),
-        ocrFiscalRevenue: String(total),
-        ocrVatRate: String(salesVatRate),
-      },
+    if (number.length > 10) {
+      Alert.alert(t('common.error'), t('scan.salesNumberTooLong'));
+      return;
+    }
+    const net = Math.round((total / (1 + salesVatRate / 100)) * 100) / 100;
+    setIsSaving(true);
+    try {
+      const saved = await api.createBillingDocument({
+        doc_type: 'invoice',
+        external: true,
+        invoice_number: number,
+        customer_name: salesCustomer.trim(),
+        customer_eik: salesCustomerEik.trim() || undefined,
+        issue_date: toApiDate(invoiceDate),
+        payment_method: salesPaymentMethod,
+        ...(salesPaymentMethod !== 'bank_transfer' ? { in_till: salesInTill } : {}),
+        ...(invoiceLocation ? { location_id: invoiceLocation } : {}),
+        items: [{
+          name: t('scan.salesLine').replace('{number}', number), quantity: 1, unit: 'бр.', unit_price: net, vat_rate: salesVatRate,
+        }],
+      });
+      if (invoiceLocation) rememberLocation(invoiceLocation);
+      Haptics.success();
+      Toast.success(t('scan.salesSaved').replace('{number}', saved.invoice_number || number));
+      resetForm();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error?.message || '');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const money = (value: number) => formatAmount(Math.abs(value));
+  const lineName = (index: number | null) => (index != null && items[index]?.name.trim()) || '?';
+
+  const headerProblemText = (header: NonNullable<InvoiceDraftCheck['header']>) =>
+    t('scanCheck.headerMismatch')
+      .replace('{expected}', money(header.expected_total))
+      .replace('{total}', money(header.total_amount));
+
+  const linesProblemText = (lines: NonNullable<InvoiceDraftCheck['lines']>) =>
+    t('scanCheck.linesMismatch')
+      .replace('{sum}', money(lines.sum))
+      .replace('{base}', money(lines.base))
+      .replace('{diff}', money(lines.difference));
+
+  // What does not add up, one sentence each (purchase invoices only).
+  const draftProblems = (): string[] => {
+    if (scanMode !== 'purchase' || !draftCheck) return [];
+    const problems: string[] = [];
+    if (draftCheck.header) problems.push(headerProblemText(draftCheck.header));
+    if (draftCheck.lines && !draftCheck.lines.ok) problems.push(linesProblemText(draftCheck.lines));
+    return problems;
+  };
+
+  const draftCauseText = (lines: NonNullable<InvoiceDraftCheck['lines']>): string | null => {
+    switch (lines.cause) {
+      case 'line_values':
+        return lines.index != null
+          ? t('scanCheck.causeLineValuesOne').replace('{name}', lineName(lines.index))
+          : t('scanCheck.causeLineValues').replace('{n}', String(lines.fixes.length));
+      case 'vat_included':
+        return t('scanCheck.causeVatIncluded');
+      case 'duplicate_line':
+        return t('scanCheck.causeDuplicate').replace('{name}', lineName(lines.remove_index));
+      case 'decimal_slip':
+        return t('scanCheck.causeDecimal')
+          .replace('{name}', lineName(lines.index))
+          .replace('{price}', String(lines.fixes[0]?.unit_price ?? ''));
+      case 'missing_line':
+        return t('scanCheck.causeMissing').replace('{diff}', money(lines.difference));
+      case 'extra':
+        return t('scanCheck.causeExtra').replace('{diff}', money(lines.difference));
+      default:
+        return null;
+    }
+  };
+
+  // A fix keeps a line's printed value in step when it agreed with the line
+  // before (prices read with VAT, a decimal point misplaced in the value
+  // too); otherwise the printed value is what the fix was taken from.
+  const withUnitPrice = (item: EditableItem, unitPrice: number): EditableItem => {
+    const quantity = toNumber(item.quantity) || 1;
+    const printed = item.ocr?.total_price;
+    const before = quantity * toNumber(item.unit_price);
+    const agreed = printed != null && Math.abs(before - printed) <= Math.max(0.02, 0.005 * Math.abs(printed));
+    return {
+      ...item,
+      unit_price: String(unitPrice),
+      ocr: item.ocr && agreed ? { ...item.ocr, total_price: Math.round(quantity * unitPrice * 100) / 100 } : item.ocr,
+    };
+  };
+
+  const applyDraftFixes = (fixes: InvoiceDraftFix[]) => {
+    const byIndex = new Map(fixes.map((fix) => [fix.index, fix.unit_price]));
+    setItems((prev) => prev.map((item, i) => {
+      const unitPrice = byIndex.get(i);
+      return unitPrice == null ? item : withUnitPrice(item, unitPrice);
+    }));
+    // An edited line's price hint no longer applies, as with any edit.
+    setItemPriceHints((prev) => {
+      const next = { ...prev };
+      byIndex.forEach((_, i) => { delete next[i]; });
+      return next;
     });
-    resetForm();
+  };
+
+  const renderDraftCheck = (check: InvoiceDraftCheck) => {
+    const lines = check.lines;
+    const problem = !!check.header || (!!lines && !lines.ok);
+    const fixButton = (label: string, onPress: () => void) => (
+      <TouchableOpacity style={styles.packFixButton} onPress={onPress}>
+        <Ionicons name="construct-outline" size={14} color={COLORS.warning} />
+        <Text style={styles.packFixButtonText}>{label}</Text>
+      </TouchableOpacity>
+    );
+    let action: React.ReactNode = null;
+    if (lines && !lines.ok && draftCheckFresh) {
+      if (lines.cause === 'line_values' && lines.fixes.length > 1) {
+        action = fixButton(t('scanCheck.fixLinePrices').replace('{n}', String(lines.fixes.length)), () => applyDraftFixes(lines.fixes));
+      } else if (lines.cause === 'line_values' && lines.fixes.length === 1) {
+        // One line off: its price or its quantity was misread - offer both
+        // readings that give the printed value, as on the line itself.
+        const flag = draftLineFlags[lines.fixes[0].index];
+        const index = lines.fixes[0].index;
+        action = (
+          <View style={styles.lineFixRow}>
+            {fixButton(t('scanCheck.setPrice').replace('{price}', String(lines.fixes[0].unit_price)), () => applyDraftFixes(lines.fixes))}
+            {flag?.quantity != null && fixButton(
+              t('scanCheck.setQuantity').replace('{qty}', String(flag.quantity)),
+              () => updateItem(index, { quantity: String(flag.quantity) }),
+            )}
+          </View>
+        );
+      } else if (lines.cause === 'decimal_slip' && lines.fixes.length === 1) {
+        action = fixButton(t('scanCheck.setPrice').replace('{price}', String(lines.fixes[0].unit_price)), () => applyDraftFixes(lines.fixes));
+      } else if (lines.cause === 'vat_included') {
+        action = fixButton(t('scanCheck.fixVatIncluded'), () => applyDraftFixes(lines.fixes));
+      } else if (lines.cause === 'duplicate_line' && lines.remove_index != null) {
+        const index = lines.remove_index;
+        action = fixButton(t('scanCheck.removeDuplicate'), () => removeItem(index));
+      } else if (lines.cause === 'missing_line') {
+        action = fixButton(t('scanCheck.addMissingLine'), addItem);
+      }
+    }
+    const cause = lines && !lines.ok && draftCheckFresh ? draftCauseText(lines) : null;
+    return (
+      <View style={[styles.checkCard, problem ? styles.checkCardWarn : styles.checkCardOk, !draftCheckFresh && styles.checkCardStale]}>
+        {check.header && (
+          <View style={styles.checkRow}>
+            <Ionicons name="alert-circle" size={16} color={COLORS.warning} />
+            <Text style={[styles.checkText, styles.checkTitle]}>{headerProblemText(check.header)}</Text>
+          </View>
+        )}
+        {lines && (lines.ok ? (
+          <View style={styles.checkRow}>
+            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
+            <Text style={[styles.checkText, { color: COLORS.success }]}>
+              {t('scanCheck.allGood').replace('{sum}', money(lines.sum))}
+            </Text>
+          </View>
+        ) : (
+          <View style={check.header ? styles.checkSpaced : undefined}>
+            <View style={styles.checkRow}>
+              <Ionicons name="alert-circle" size={16} color={COLORS.warning} />
+              <Text style={[styles.checkText, styles.checkTitle]}>{linesProblemText(lines)}</Text>
+            </View>
+            {cause && <Text style={styles.checkCause}>{cause}</Text>}
+            {action && <View style={styles.checkActions}>{action}</View>}
+          </View>
+        ))}
+      </View>
+    );
   };
 
   const updateItem = (index: number, patch: Partial<EditableItem>) => {
     setItems(prev => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+    // A hint judged the line as recognized - once edited, it no longer applies.
+    setItemPriceHints(prev => {
+      if (!(index in prev)) return prev;
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
   };
 
   const removeItem = (index: number) => {
     setItems(prev => prev.filter((_, i) => i !== index));
+    // Hints are keyed by position: the rows below the removed one move up.
+    setItemPriceHints(prev => {
+      const next: Record<number, ItemPriceHint> = {};
+      Object.entries(prev).forEach(([key, hint]) => {
+        const i = Number(key);
+        if (i < index) next[i] = hint;
+        else if (i > index) next[i - 1] = hint;
+      });
+      return next;
+    });
   };
 
   const addItem = () => {
@@ -358,6 +928,8 @@ export default function ScanScreen() {
   };
 
   const resetForm = () => {
+    setOfflineWaiting(false);
+    setLocationPick(undefined);
     setCapturedImages([]);
     setOcrResult(null);
     setSupplier('');
@@ -370,10 +942,21 @@ export default function ScanScreen() {
     setVatTreatment('');
     setNotes('');
     setItems([]);
+    setItemPriceHints({});
+    setDraftCheck(null);
     setInvoiceDate(new Date());
     setDateFoundByOcr(null);
+    setReviewing(false);
     setPaymentMethod('');
+    setPaymentMethodFromOcr(false);
+    setPaymentMethodMissing(false);
     setPaymentDueDate(null);
+    setDocumentType('invoice');
+    setCreditedInvoiceNumber('');
+    setSalesCustomer('');
+    setSalesCustomerEik('');
+    setSalesPaymentMethod('bank_transfer');
+    setSalesInTill(logsTill);
   };
 
   return (
@@ -402,14 +985,16 @@ export default function ScanScreen() {
                       {t('scan.modePurchase')}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modeButton, scanMode === 'sales' && styles.modeButtonActive]}
-                    onPress={() => setScanMode('sales')}
-                  >
-                    <Text style={[styles.modeButtonText, scanMode === 'sales' && styles.modeButtonTextActive]} numberOfLines={1}>
-                      {t('scan.modeSales')}
-                    </Text>
-                  </TouchableOpacity>
+                  {canIssueInvoices && (
+                    <TouchableOpacity
+                      style={[styles.modeButton, scanMode === 'sales' && styles.modeButtonActive]}
+                      onPress={() => setScanMode('sales')}
+                    >
+                      <Text style={[styles.modeButtonText, scanMode === 'sales' && styles.modeButtonTextActive]} numberOfLines={1}>
+                        {t('scan.modeSales')}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
 
@@ -433,37 +1018,75 @@ export default function ScanScreen() {
             </View>
           ) : null}
 
-          {capturedImages.length === 0 && scanMode === 'purchase' && (
-            <View style={styles.tipsBox}>
-              <View style={styles.tipsHeader}>
-                <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
-                <Text style={styles.tipsTitle}>{t('scan.tipsTitle')}</Text>
+          {capturedImages.length === 0 && myQueue.length > 0 && (
+            <View style={styles.queueBox}>
+              <View style={styles.queueHeader}>
+                <Ionicons name="cloud-upload-outline" size={18} color={COLORS.primary} />
+                <Text style={styles.queueTitle}>{t('scanQueue.title').replace('{count}', String(myQueue.length))}</Text>
+                {isOnline && myQueue.some((item) => item.status === 'waiting') && !queueProcessing && (
+                  <TouchableOpacity onPress={() => processQueue(companyId)} hitSlop={8}>
+                    <Text style={styles.queueLink}>{t('scanQueue.readNow')}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-              {[t('scan.tipSupplier'), t('scan.tipAmounts'), t('scan.tipItems'), t('scan.tipPayment')].map((tip, i) => (
-                <View key={i} style={styles.tipRow}>
-                  <Ionicons name="checkmark-circle" size={14} color={COLORS.success} style={{ marginTop: 2 }} />
-                  <Text style={styles.tipText}>{tip}</Text>
+              {myQueue.map((item) => (
+                <View key={item.id} style={styles.queueRow}>
+                  <Image source={{ uri: item.pages[0] }} style={styles.queueThumb} resizeMode="cover" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.queueWhen}>
+                      {format(new Date(item.createdAt), 'dd.MM HH:mm')}
+                      {item.pages.length > 1 ? ` · ${t('scan.invoiceWithPages').replace('{count}', String(item.pages.length))}` : ''}
+                    </Text>
+                    <Text
+                      style={[styles.queueStatus, item.status === 'ready' && { color: COLORS.success }, item.status === 'failed' && { color: COLORS.danger }]}
+                      numberOfLines={2}
+                    >
+                      {item.status === 'failed' ? (item.error || t('scanQueue.failed')) : t(`scanQueue.status.${item.status}`)}
+                    </Text>
+                  </View>
+                  {item.status === 'reading' && <ActivityIndicator size="small" color={COLORS.primary} />}
+                  {item.status === 'ready' && (
+                    <TouchableOpacity style={styles.queueReview} onPress={() => reviewQueued(item)}>
+                      <Text style={styles.queueReviewText}>{t('scanQueue.review')}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {item.status === 'failed' && (
+                    <TouchableOpacity onPress={() => retryNow(item)} hitSlop={8} accessibilityLabel={t('scanQueue.retry')}>
+                      <Ionicons name="refresh" size={20} color={COLORS.primary} />
+                    </TouchableOpacity>
+                  )}
+                  {item.status !== 'reading' && (
+                    <TouchableOpacity onPress={() => deleteQueued(item)} hitSlop={8} accessibilityLabel={t('common.delete')}>
+                      <Ionicons name="trash-outline" size={18} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))}
-              <Text style={styles.tipsFooter}>{t('scan.tipsFooter')}</Text>
+            </View>
+          )}
+
+          {capturedImages.length === 0 && scanMode === 'purchase' && (
+            <View style={[styles.tipsBox, styles.tipsHeader]}>
+              <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
+              <Text style={[styles.tipsTitle, { flex: 1 }]}>{t('scan.tipsTitle')}</Text>
+              <InfoButton
+                title={t('scan.tipsTitle')}
+                lines={[
+                  [t('scan.tipSupplier'), t('scan.tipAmounts'), t('scan.tipItems'), t('scan.tipPayment')].map((tip) => `• ${tip}`).join('\n'),
+                  t('scan.tipsFooter'),
+                ]}
+              />
             </View>
           )}
 
           {capturedImages.length === 0 && scanMode === 'sales' && (
-            <View style={styles.tipsBox}>
-              <View style={styles.tipsHeader}>
-                <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
-                <Text style={styles.tipsTitle}>{t('scan.salesTipsTitle')}</Text>
-              </View>
-              <View style={styles.tipRow}>
-                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} style={{ marginTop: 2 }} />
-                <Text style={styles.tipText}>{t('scan.salesTip1')}</Text>
-              </View>
-              <View style={styles.tipRow}>
-                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} style={{ marginTop: 2 }} />
-                <Text style={styles.tipText}>{t('scan.salesTip2')}</Text>
-              </View>
-              <Text style={styles.tipsFooter}>{t('scan.salesTipsFooter')}</Text>
+            <View style={[styles.tipsBox, styles.tipsHeader]}>
+              <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
+              <Text style={[styles.tipsTitle, { flex: 1 }]}>{t('scan.salesTipsTitle')}</Text>
+              <InfoButton
+                title={t('scan.salesTipsTitle')}
+                lines={[`• ${t('scan.salesTip1')}\n• ${t('scan.salesTip2')}`, t('scan.salesTipsFooter')]}
+              />
             </View>
           )}
 
@@ -519,22 +1142,36 @@ export default function ScanScreen() {
                 </TouchableOpacity>
               </View>
 
-              {isScanning ? (
+              {offlineWaiting ? (
+                <View style={styles.offlineCard}>
+                  <Ionicons name="cloud-offline-outline" size={32} color={COLORS.warning} />
+                  <Text style={styles.offlineTitle}>{t('scanQueue.offlineTitle')}</Text>
+                  <Text style={styles.offlineText}>{t('scanQueue.offlineText')}</Text>
+                  <TouchableOpacity style={styles.offlineButton} onPress={saveForLater}>
+                    <Ionicons name="save-outline" size={18} color="white" />
+                    <Text style={styles.offlineButtonText}>{t('scanQueue.saveForLater')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : isScanning ? (
                 <View style={styles.scanningContainer}>
                   <ActivityIndicator size="large" color={COLORS.primary} />
                   <Text style={styles.scanningText}>{t('scan.processing')}</Text>
                 </View>
               ) : (
                 <View style={styles.formContainer}>
+                  {(scanMode === 'sales' || reviewing) && (
+                  <>
                   <Text style={styles.formTitle}>
                     {scanMode === 'sales' ? t('scan.salesFormTitle') : t('scan.invoiceDataTitle')}
                   </Text>
                   <Text style={styles.formHint}>
                     {scanMode === 'sales' ? t('scan.salesFormHint') : t('scan.editIfNeeded')}
                   </Text>
+                  </>
+                  )}
 
                   {/* AI Corrections Info */}
-                  <Expandable expanded={ocrCorrections.length > 0}>
+                  <Expandable expanded={ocrCorrections.length > 0 && (scanMode === 'sales' || reviewing)}>
                     <View style={styles.correctionsContainer}>
                       <View style={styles.correctionsHeader}>
                         <Ionicons name="sparkles" size={18} color={COLORS.success} />
@@ -563,6 +1200,41 @@ export default function ScanScreen() {
                       <View style={styles.protocolNote}>
                         <Ionicons name="information-circle" size={16} color={COLORS.primary} />
                         <Text style={styles.protocolNoteText}>{t('scan.salesNote')}</Text>
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.salesCustomer')} *</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={salesCustomer}
+                          onChangeText={setSalesCustomer}
+                          placeholder={t('scan.salesCustomerPlaceholder')}
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.salesCustomerEik')}</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={salesCustomerEik}
+                          onChangeText={setSalesCustomerEik}
+                          keyboardType="number-pad"
+                          placeholder="123456789"
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.salesNumber')} *</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={invoiceNumber}
+                          onChangeText={setInvoiceNumber}
+                          keyboardType="number-pad"
+                          placeholder="0000000001"
+                          placeholderTextColor={COLORS.textMuted}
+                        />
                       </View>
 
                       <View style={styles.inputGroup}>
@@ -605,9 +1277,240 @@ export default function ScanScreen() {
                           ))}
                         </View>
                       </View>
+
+                      <LocationPicker value={invoiceLocation} onChange={setLocationPick} noneLabel={t('locations.noneWhole')} />
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
+                        <View style={styles.vatTreatmentGrid}>
+                          {(['bank_transfer', 'cash', 'card'] as const).map((method) => (
+                            <TouchableOpacity
+                              key={method}
+                              style={[styles.vatTreatmentChip, salesPaymentMethod === method && styles.vatTreatmentChipActive]}
+                              onPress={() => setSalesPaymentMethod(method)}
+                            >
+                              <Text style={[styles.vatTreatmentChipText, salesPaymentMethod === method && styles.vatTreatmentChipTextActive]}>
+                                {t(`scan.paymentMethod.${method}`)}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                        {usesTill && salesPaymentMethod !== 'bank_transfer' && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.inputLabel}>{t('billingDocuments.inTill')}</Text>
+                              <Text style={styles.eikWarningText}>
+                                {salesInTill ? t('billingDocuments.inTillHint') : t('billingDocuments.notInTillHint')}
+                              </Text>
+                            </View>
+                            <Switch value={salesInTill} onValueChange={setSalesInTill} accessibilityLabel={t('billingDocuments.inTill')} />
+                          </View>
+                        )}
+                      </View>
                     </>
+                  ) : !reviewing ? (
+                    (() => {
+                      // What was read, in a few lines - and an input only
+                      // for what was not read (Л6).
+                      const missingSupplier = !supplier.trim();
+                      const missingNumber = !invoiceNumber.trim();
+                      const missingTotal = !totalAmount.trim() || isNaN(parseFloat(totalAmount));
+                      const missingPayment = !isCreditNote && !paymentMethod;
+                      const problems = draftProblems();
+                      const pricesUp = Object.values(itemPriceHints).filter((hint) => hint && hint.kind === 'price_change' && hint.change_percent != null && hint.change_percent > 0).length;
+                      const net = parseFloat(amountWithoutVat) || 0;
+                      const vat = parseFloat(vatAmount) || 0;
+                      return (
+                        <View style={styles.summaryCard}>
+                          <View style={styles.summaryHeader}>
+                            <Ionicons name="checkmark-done" size={18} color={COLORS.success} />
+                            <Text style={styles.summaryTitle}>{t('scanSummary.title')}</Text>
+                          </View>
+                          {isCreditNote && (
+                            <Text style={styles.summaryNote}>
+                              {t('scanSummary.creditNote')}{creditedInvoiceNumber ? ` · № ${creditedInvoiceNumber}` : ''}
+                            </Text>
+                          )}
+
+                          {missingSupplier ? (
+                            <View style={styles.summaryInputGroup}>
+                              <Text style={[styles.inputLabel, styles.summaryMissingLabel]}>{t('scan.supplier')} *</Text>
+                              <TextInput style={styles.input} value={supplier} onChangeText={setSupplier}
+                                placeholder={t('scan.companyNamePlaceholder')} placeholderTextColor={COLORS.textMuted} />
+                            </View>
+                          ) : (
+                            <View style={styles.summaryRow}>
+                              <Text style={styles.summaryLabel}>{t('scan.supplier')}</Text>
+                              <Text style={styles.summaryValue} numberOfLines={2}>{supplier}{supplierEik ? ` · ${supplierEik}` : ''}</Text>
+                            </View>
+                          )}
+
+                          {missingNumber ? (
+                            <View style={styles.summaryInputGroup}>
+                              <Text style={[styles.inputLabel, styles.summaryMissingLabel]}>{t('scan.invoiceNumber')} *</Text>
+                              <TextInput style={styles.input} value={invoiceNumber} onChangeText={setInvoiceNumber}
+                                placeholder="0000000001" placeholderTextColor={COLORS.textMuted} />
+                            </View>
+                          ) : (
+                            <View style={styles.summaryRow}>
+                              <Text style={styles.summaryLabel}>{t('scan.invoiceNumber')}</Text>
+                              <Text style={styles.summaryValue}>{invoiceNumber}</Text>
+                            </View>
+                          )}
+
+                          <TouchableOpacity style={styles.summaryRow} onPress={() => setDatePickerVisible(true)}>
+                            <Text style={styles.summaryLabel}>{t('scan.issueDate')}</Text>
+                            <Text style={[styles.summaryValue, dateFoundByOcr === false && { color: COLORS.warning }]}>
+                              {format(invoiceDate, 'd MMMM yyyy', { locale: dateLocale })}
+                              {dateFoundByOcr === false ? ` · ${t('scanSummary.dateNotRead')}` : ''}
+                            </Text>
+                          </TouchableOpacity>
+
+                          {missingTotal ? (
+                            <View style={styles.summaryInputGroup}>
+                              <Text style={[styles.inputLabel, styles.summaryMissingLabel]}>{t('scan.totalAmount')} *</Text>
+                              <TextInput style={styles.input} value={totalAmount} onChangeText={setTotalAmount}
+                                keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={COLORS.textMuted} />
+                            </View>
+                          ) : (
+                            <View style={styles.summaryRow}>
+                              <Text style={styles.summaryLabel}>{t('scan.totalAmount')}</Text>
+                              <View style={{ flexShrink: 1, alignItems: 'flex-end' }}>
+                                <Text style={[styles.summaryValue, styles.summaryTotal]}>{formatMoney((parseFloat(totalAmount) || 0))}</Text>
+                                <Text style={styles.summarySub}>
+                                  {t('scanSummary.amounts').replace('{net}', formatAmount(net)).replace('{vat}', formatAmount(vat))}
+                                </Text>
+                              </View>
+                            </View>
+                          )}
+
+                          {!isCreditNote && (missingPayment ? (
+                            <View style={styles.summaryInputGroup}>
+                              <Text style={[styles.inputLabel, styles.summaryMissingLabel]}>{t('scan.paymentMethod')} *</Text>
+                              <View style={styles.vatTreatmentGrid}>
+                                {(['cash', 'card', 'bank_transfer'] as PaymentMethod[]).map((option) => (
+                                  <TouchableOpacity
+                                    key={option}
+                                    style={[styles.vatTreatmentChip, paymentMethodMissing && { borderColor: COLORS.danger }]}
+                                    onPress={() => { setPaymentMethod(option); setPaymentMethodFromOcr(false); }}
+                                  >
+                                    <Text style={styles.vatTreatmentChipText}>{t(`scan.paymentMethod.${option}`)}</Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </View>
+                            </View>
+                          ) : (
+                            <TouchableOpacity
+                              style={styles.summaryRow}
+                              onPress={() => (paymentMethod === 'bank_transfer' ? setDueDatePickerVisible(true) : setReviewing(true))}
+                            >
+                              <Text style={styles.summaryLabel}>{t('scan.paymentMethod')}</Text>
+                              <Text style={styles.summaryValue}>
+                                {t(`scan.paymentMethod.${paymentMethod}`)}
+                                {paymentMethod === 'bank_transfer'
+                                  ? ` · ${paymentDueDate ? t('scanSummary.dueDate').replace('{date}', format(paymentDueDate, 'd MMM yyyy', { locale: dateLocale })) : t('scan.paymentDueDateDefault')}`
+                                  : ''}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+
+                          {items.length > 0 && (
+                            <TouchableOpacity style={styles.summaryRow} onPress={() => setReviewing(true)}>
+                              <Text style={styles.summaryLabel}>{t('scanSummary.itemsLabel')}</Text>
+                              <Text style={[styles.summaryValue, pricesUp > 0 && { color: COLORS.danger }]}>
+                                {items.length === 1 ? t('scanSummary.itemsOne') : t('scanSummary.items').replace('{n}', String(items.length))}
+                                {pricesUp > 0 ? ` · ${t('scanSummary.pricesUp').replace('{n}', String(pricesUp))}` : ''}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {problems.length > 0 && (
+                            <TouchableOpacity style={styles.summaryWarning} onPress={() => setReviewing(true)}>
+                              <Ionicons name="alert-circle" size={16} color={COLORS.warning} />
+                              <Text style={styles.summaryWarningText}>{t('scanSummary.checkSums')}</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          <LocationPicker value={invoiceLocation} onChange={setLocationPick} noneLabel={t('locations.noneWhole')} />
+
+                          <PressableScale
+                            style={[styles.saveButton, styles.summarySave, isSaving && styles.saveButtonDisabled]}
+                            onPress={() => handleSaveInvoice()}
+                            disabled={isSaving}
+                          >
+                            {isSaving ? (
+                              <ActivityIndicator color="white" />
+                            ) : (
+                              <>
+                                <Ionicons name="checkmark-circle" size={24} color="white" />
+                                <Text style={styles.saveButtonText}>{t('scan.saveInvoice')}</Text>
+                              </>
+                            )}
+                          </PressableScale>
+                          <TouchableOpacity style={styles.summaryEdit} onPress={() => setReviewing(true)}>
+                            <Ionicons name="create-outline" size={16} color={COLORS.primary} />
+                            <Text style={styles.summaryEditText}>{t('scanSummary.edit')}</Text>
+                          </TouchableOpacity>
+
+                          <DateTimePickerModal
+                            isVisible={isDatePickerVisible}
+                            mode="date"
+                            date={invoiceDate}
+                            onConfirm={(date) => { setInvoiceDate(date); setDateFoundByOcr(null); setDatePickerVisible(false); }}
+                            onCancel={() => setDatePickerVisible(false)}
+                            confirmTextIOS={t('common.select')}
+                            cancelTextIOS={t('common.cancel')}
+                            locale={language}
+                          />
+                          <DateTimePickerModal
+                            isVisible={isDueDatePickerVisible}
+                            mode="date"
+                            date={paymentDueDate || new Date(invoiceDate.getTime() + 14 * 24 * 60 * 60 * 1000)}
+                            onConfirm={(date) => { setPaymentDueDate(date); setDueDatePickerVisible(false); }}
+                            onCancel={() => setDueDatePickerVisible(false)}
+                            confirmTextIOS={t('common.select')}
+                            cancelTextIOS={t('common.cancel')}
+                            locale={language}
+                          />
+                        </View>
+                      );
+                    })()
                   ) : (
                     <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('scan.documentType')}</Text>
+                    <View style={styles.vatTreatmentGrid}>
+                      {(['invoice', 'credit_note'] as InvoiceDocumentType[]).map((option) => (
+                        <TouchableOpacity
+                          key={option}
+                          style={[styles.vatTreatmentChip, documentType === option && styles.vatTreatmentChipActive]}
+                          onPress={() => setDocumentType(option)}
+                        >
+                          <Text style={[styles.vatTreatmentChipText, documentType === option && styles.vatTreatmentChipTextActive]}>
+                            {t(`scan.documentType.${option}`)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    {isCreditNote && (
+                      <>
+                        <View style={styles.protocolNote}>
+                          <Ionicons name="return-down-back" size={16} color={COLORS.primary} />
+                          <Text style={styles.protocolNoteText}>{t('scan.creditNoteNote')}</Text>
+                        </View>
+                        <Text style={[styles.inputLabel, { marginTop: 12 }]}>{t('scan.creditedInvoiceNumber')}</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={creditedInvoiceNumber}
+                          onChangeText={setCreditedInvoiceNumber}
+                          placeholder={t('scan.creditedInvoicePlaceholder')}
+                          placeholderTextColor={COLORS.textMuted}
+                          accessibilityLabel={t('scan.creditedInvoiceNumber')}
+                        />
+                      </>
+                    )}
+                  </View>
+
                   <StaggerReveal index={0} style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>{t('scan.supplier')} *</Text>
                     <TextInput
@@ -617,6 +1520,19 @@ export default function ScanScreen() {
                       placeholder={t('scan.companyNamePlaceholder')}
                       placeholderTextColor={COLORS.textMuted}
                     />
+                    {supplierMatches.length > 0 && (
+                      <View style={styles.supplierChipRow}>
+                        {supplierMatches.map((s) => (
+                          <TouchableOpacity
+                            key={s.name}
+                            style={styles.supplierChip}
+                            onPress={() => { setSupplier(s.name); setSupplierEik(s.eik); }}
+                          >
+                            <Text style={styles.supplierChipText} numberOfLines={1}>{s.name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
                   </StaggerReveal>
 
                   <StaggerReveal index={1} style={styles.inputGroup}>
@@ -752,14 +1668,24 @@ export default function ScanScreen() {
                     )}
                   </StaggerReveal>
 
+                  <LocationPicker value={invoiceLocation} onChange={setLocationPick} noneLabel={t('locations.noneWhole')} />
+
+                  {/* Nothing is owed on a credit note - no payment to say. */}
+                  {!isCreditNote && (
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>{t('scan.paymentMethod')}</Text>
+                    <Text style={[styles.inputLabel, paymentMethodMissing && !paymentMethod && { color: COLORS.danger }]}>
+                      {t('scan.paymentMethod')} *
+                    </Text>
                     <View style={styles.vatTreatmentGrid}>
-                      {(['cash', 'bank_transfer'] as PaymentMethod[]).map((option) => (
+                      {(['cash', 'card', 'bank_transfer'] as PaymentMethod[]).map((option) => (
                         <TouchableOpacity
                           key={option}
-                          style={[styles.vatTreatmentChip, paymentMethod === option && styles.vatTreatmentChipActive]}
-                          onPress={() => setPaymentMethod(option)}
+                          style={[
+                            styles.vatTreatmentChip,
+                            paymentMethod === option && styles.vatTreatmentChipActive,
+                            paymentMethodMissing && !paymentMethod && { borderColor: COLORS.danger },
+                          ]}
+                          onPress={() => { setPaymentMethod(option); setPaymentMethodFromOcr(false); }}
                         >
                           <Text style={[styles.vatTreatmentChipText, paymentMethod === option && styles.vatTreatmentChipTextActive]}>
                             {t(`scan.paymentMethod.${option}`)}
@@ -773,7 +1699,13 @@ export default function ScanScreen() {
                         <Text style={styles.protocolNoteText}>{t('scan.paymentMethodNotDetectedNote')}</Text>
                       </View>
                     )}
-                    {paymentMethod === 'cash' && (
+                    {paymentMethodFromOcr && !!paymentMethod && (
+                      <View style={styles.protocolNote}>
+                        <Ionicons name="scan" size={16} color={COLORS.primary} />
+                        <Text style={styles.protocolNoteText}>{t('scan.paymentMethodFromInvoice')}</Text>
+                      </View>
+                    )}
+                    {(paymentMethod === 'cash' || paymentMethod === 'card') && (
                       <View style={styles.protocolNote}>
                         <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
                         <Text style={styles.protocolNoteText}>{t('scan.cashAutoPaidNote')}</Text>
@@ -794,6 +1726,7 @@ export default function ScanScreen() {
                       </TouchableOpacity>
                     )}
                   </View>
+                  )}
 
                   <DateTimePickerModal
                     isVisible={isDueDatePickerVisible}
@@ -822,6 +1755,8 @@ export default function ScanScreen() {
                         </Text>
                       </TouchableOpacity>
                     </View>
+
+                    {draftCheck && (draftCheck.header || draftCheck.lines) && renderDraftCheck(draftCheck)}
 
                     {items.length === 0 ? (
                       <Text style={styles.itemsEmptyHint}>
@@ -865,6 +1800,88 @@ export default function ScanScreen() {
                               <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
                             </TouchableOpacity>
                           </View>
+                          {item.packRule && packRuleActive(item) && (
+                            <View style={styles.packRuleRow}>
+                              <Ionicons name="cube" size={13} color={COLORS.success} />
+                              <Text style={[styles.itemPriceNote, styles.packRuleText]}>
+                                {t('scan.packRuleApplied').replace(/\{k\}/g, String(item.packRule.multiple))}
+                              </Text>
+                              <TouchableOpacity onPress={() => undoPackRule(index)}>
+                                <Text style={styles.packRuleUndo}>{t('scan.packRuleUndo')}</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
+                          {/* What went back has no purchase price to compare. */}
+                          {!isCreditNote && itemPriceHints[index] && (() => {
+                            const hint = itemPriceHints[index];
+                            if (hint.kind === 'pack_suspect') {
+                              const fix = packFixValues(index);
+                              return (
+                                <View>
+                                  <Text style={[styles.itemPriceNote, { color: COLORS.warning }]}>
+                                    {priceAlertMeaning(hint, t)}
+                                  </Text>
+                                  {fix && (
+                                    <TouchableOpacity style={styles.packFixButton} onPress={() => applyPackFix(index)}>
+                                      <Ionicons name="cube-outline" size={14} color={COLORS.warning} />
+                                      <Text style={styles.packFixButtonText}>
+                                        {t(hint.direction === 'decrease' ? 'scan.packFixCombine' : 'scan.packFixSplit')
+                                          .replace('{k}', String(hint.pack_multiple))
+                                          .replace('{qty}', String(fix.quantity))
+                                          .replace('{price}', String(fix.unitPrice))}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                              );
+                            }
+                            if (hint.change_percent == null || hint.old_price == null) return null;
+                            const up = hint.change_percent > 0;
+                            const meaning = priceAlertMeaning(hint, t);
+                            return (
+                              <Text style={[styles.itemPriceNote, { color: up ? COLORS.danger : COLORS.success }]}>
+                                {up ? '▲' : '▼'}{' '}
+                                {t('scan.priceHintChange')
+                                  .replace('{percent}', Math.abs(hint.change_percent).toFixed(0))
+                                  .replace('{old}', formatEur(hint.old_price))}
+                                {meaning ? ` · ${meaning}` : ''}
+                              </Text>
+                            );
+                          })()}
+                          {draftCheckFresh && draftLineFlags[index] && (() => {
+                            const flag = draftLineFlags[index];
+                            return (
+                              <View>
+                                <Text style={[styles.itemPriceNote, { color: COLORS.warning }]}>
+                                  {t('scanCheck.lineValueMismatch')
+                                    .replace('{computed}', money(flag.computed))
+                                    .replace('{printed}', money(flag.printed))}
+                                </Text>
+                                <View style={styles.lineFixRow}>
+                                  {flag.unit_price != null && (
+                                    <TouchableOpacity
+                                      style={styles.packFixButton}
+                                      onPress={() => applyDraftFixes([{ index, unit_price: flag.unit_price as number }])}
+                                    >
+                                      <Text style={styles.packFixButtonText}>
+                                        {t('scanCheck.setPrice').replace('{price}', String(flag.unit_price))}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
+                                  {flag.quantity != null && (
+                                    <TouchableOpacity
+                                      style={styles.packFixButton}
+                                      onPress={() => updateItem(index, { quantity: String(flag.quantity) })}
+                                    >
+                                      <Text style={styles.packFixButtonText}>
+                                        {t('scanCheck.setQuantity').replace('{qty}', String(flag.quantity))}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                              </View>
+                            );
+                          })()}
                         </View>
                       ))
                     )}
@@ -885,9 +1902,10 @@ export default function ScanScreen() {
                     </>
                   )}
 
+                  {(scanMode === 'sales' || reviewing) && (
                   <PressableScale
                     style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-                    onPress={scanMode === 'sales' ? handleAddToRevenue : handleSaveInvoice}
+                    onPress={scanMode === 'sales' ? handleSaveSalesInvoice : () => handleSaveInvoice()}
                     disabled={isSaving}
                   >
                     {isSaving ? (
@@ -896,11 +1914,12 @@ export default function ScanScreen() {
                       <>
                         <Ionicons name="checkmark-circle" size={24} color="white" />
                         <Text style={styles.saveButtonText}>
-                          {scanMode === 'sales' ? t('scan.addToRevenue') : t('scan.saveInvoice')}
+                          {scanMode === 'sales' ? t('scan.saveSalesInvoice') : t('scan.saveInvoice')}
                         </Text>
                       </>
                     )}
                   </PressableScale>
+                  )}
                 </View>
               )}
             </View>
@@ -914,6 +1933,62 @@ export default function ScanScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Sits in the form's own card - no second frame around it.
+  summaryCard: {},
+  summaryHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  summaryTitle: { color: 'white', fontSize: 16, fontWeight: '700' },
+  summaryNote: { color: COLORS.primaryLight, fontSize: 13, marginBottom: 4 },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 9,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+  },
+  summaryLabel: { color: COLORS.textSecondary, fontSize: 13 },
+  summaryValue: { flexShrink: 1, color: 'white', fontSize: 14, fontWeight: '600', textAlign: 'right' },
+  summaryTotal: { fontSize: 17 },
+  summarySub: { color: COLORS.textMuted, fontSize: 11, marginTop: 2, textAlign: 'right' },
+  summaryInputGroup: { paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border },
+  summaryMissingLabel: { color: COLORS.warning },
+  summaryWarning: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
+  summaryWarningText: { flex: 1, color: COLORS.warning, fontSize: 13 },
+  summarySave: { marginTop: 12 },
+  summaryEdit: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12 },
+  summaryEditText: { color: COLORS.primary, fontSize: 14, fontWeight: '600' },
+  offlineCard: {
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 12,
+  },
+  offlineTitle: { color: 'white', fontSize: 16, fontWeight: '700' },
+  offlineText: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19, textAlign: 'center' },
+  offlineButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    marginTop: 6,
+  },
+  offlineButtonText: { color: 'white', fontSize: 15, fontWeight: '600' },
+  queueBox: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 14, marginTop: 20 },
+  queueHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  queueTitle: { flex: 1, color: 'white', fontSize: 15, fontWeight: '700' },
+  queueLink: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },
+  queueRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: COLORS.border },
+  queueThumb: { width: 44, height: 56, borderRadius: 6, backgroundColor: COLORS.background },
+  queueWhen: { color: COLORS.textLight, fontSize: 13, fontWeight: '600' },
+  queueStatus: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  queueReview: { backgroundColor: COLORS.primary, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 12 },
+  queueReviewText: { color: 'white', fontSize: 12, fontWeight: '600' },
   backgroundImage: {
     flex: 1,
   },
@@ -1004,37 +2079,19 @@ const styles = StyleSheet.create({
   tipsBox: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,
-    padding: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     marginTop: 20,
   },
   tipsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
   },
   tipsTitle: {
     fontSize: 15,
     fontWeight: '600',
     color: 'white',
-  },
-  tipRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginBottom: 8,
-  },
-  tipText: {
-    flex: 1,
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    lineHeight: 19,
-  },
-  tipsFooter: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 4,
-    fontStyle: 'italic',
   },
   resultContainer: {
     flex: 1,
@@ -1195,6 +2252,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.warning,
     marginTop: 6,
+  },
+  supplierChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  supplierChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    maxWidth: 200,
+  },
+  supplierChipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
   },
   vatTreatmentGrid: {
     flexDirection: 'row',
@@ -1364,8 +2441,100 @@ const styles = StyleSheet.create({
     gap: 8,
     alignItems: 'center',
   },
+  itemPriceNote: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 6,
+  },
+  packRuleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  packRuleText: {
+    marginTop: 0,
+    flexShrink: 1,
+    color: COLORS.success,
+  },
+  packRuleUndo: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  packFixButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.warning + '60',
+    backgroundColor: COLORS.warning + '15',
+  },
+  packFixButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.warning,
+  },
+  // Do the amounts add up?
+  checkCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+  },
+  checkCardWarn: {
+    borderColor: COLORS.warning,
+  },
+  checkCardOk: {
+    borderColor: COLORS.success,
+  },
+  checkCardStale: {
+    opacity: 0.55,
+  },
+  checkSpaced: {
+    marginTop: 8,
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  checkText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: COLORS.textSecondary,
+  },
+  checkTitle: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  checkCause: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: COLORS.textSecondary,
+    marginTop: 6,
+    marginLeft: 22,
+  },
+  checkActions: {
+    marginLeft: 22,
+  },
+  lineFixRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   itemSmallInput: {
     flex: 1,
+    // Without it a web text input keeps its built-in width and the row
+    // runs off the screen (price and delete out of view).
+    minWidth: 0,
     paddingVertical: 10,
     paddingHorizontal: 10,
     fontSize: 14,

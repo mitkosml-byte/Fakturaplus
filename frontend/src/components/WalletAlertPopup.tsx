@@ -5,9 +5,12 @@ import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useModules } from '../stores/modulesStore';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
 import { ModalBlurBackdrop } from './ModalBlurBackdrop';
+import { toApiMonth } from '../utils/periodRange';
+import { formatMoney } from '../utils/money';
 
 // The loud counterpart to Home's passive wallet teaser - surfaces once per
 // calendar month, only when personal withdrawals have actually crossed the
@@ -22,6 +25,7 @@ const DISMISSED_MONTH_KEY = 'dismissed_wallet_alert_month';
 
 export function WalletAlertPopup() {
   const { isAuthenticated, hasPermission } = useAuth();
+  const usesWallet = useModules().uses('wallet');
   const { t } = useTranslation();
   const router = useRouter();
   const segments = useSegments();
@@ -45,24 +49,24 @@ export function WalletAlertPopup() {
     })();
   }, []);
 
-  const currentMonthKey = () => new Date().toISOString().slice(0, 7);
+  const currentMonthKey = () => toApiMonth(new Date());
 
   const checkAlert = useCallback(async () => {
-    if (!isAuthenticated || !hasPermission('view_personal_wallet') || !storageLoaded) return;
+    if (!isAuthenticated || !usesWallet || !hasPermission('view_personal_wallet') || !storageLoaded) return;
     const now = Date.now();
     if (now - lastCheckRef.current < RECHECK_INTERVAL_MS) return;
     lastCheckRef.current = now;
     try {
       const summary = await api.getPersonalWalletSummary();
       if (summary.status === 'danger' && dismissedMonthRef.current !== currentMonthKey()) {
-        setSafeToSpend(summary.safe_to_spend);
+        setSafeToSpend(summary.safe_to_spend ?? 0);
         setSpentPercent(summary.spent_percent_of_profit);
         setVisible(true);
       }
     } catch (error) {
       console.error('Error checking wallet alert:', error);
     }
-  }, [isAuthenticated, hasPermission, storageLoaded]);
+  }, [isAuthenticated, hasPermission, storageLoaded, usesWallet]);
 
   useEffect(() => {
     if (isAuthenticated) checkAlert();
@@ -108,7 +112,7 @@ export function WalletAlertPopup() {
           <View style={styles.safeRow}>
             <Text style={styles.safeLabel}>{t('wallet.safeToSpend')}</Text>
             <Text style={[styles.safeValue, { color: safeToSpend >= 0 ? COLORS.warning : COLORS.danger }]}>
-              {safeToSpend.toFixed(2)} €
+              {formatMoney(safeToSpend)}
             </Text>
           </View>
 

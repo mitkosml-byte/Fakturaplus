@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { FirstUseHint } from '../../src/components/FirstUseHint';
 import {
   View,
   Text,
@@ -8,32 +9,33 @@ import {
   TouchableOpacity,
   TextInput,
   RefreshControl,
-  Modal,
   ImageBackground,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useModules } from '../../src/stores/modulesStore';
 import DateTimePickerModal from '../../src/components/AppDateTimePicker';
 import { Alert } from '../../src/utils/alert';
 import { Toast } from '../../src/utils/toast';
 import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
-import { Invoice, VatTreatment } from '../../src/types';
+import { Invoice, PaymentMethod, VatTreatment, InvoiceDocumentType } from '../../src/types';
 import { validateEikFormat } from '../../src/utils/eik';
 import { format } from 'date-fns';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import ExcelImportModal from '../../src/components/ExcelImportModal';
-import { ScanCreditsBadge, Expandable, PressableScale, CountUp, SkeletonRow, AnimatedEmptyIcon } from '../../src/components';
+import { ScanCreditsBadge, Expandable, CountUp, SkeletonRow, AnimatedEmptyIcon } from '../../src/components';
+import { ExportFormatModal } from '../../src/components/invoices/ExportFormatModal';
+import { ImageViewerModal } from '../../src/components/invoices/ImageViewerModal';
+import { PaymentModal, PaymentMethodChoice } from '../../src/components/invoices/PaymentModal';
+import { InvoiceDetailModal } from '../../src/components/invoices/InvoiceDetailModal';
 import { COLORS } from '../../src/theme/colors';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
-import { DURATION, EASING } from '../../src/theme/motion';
+import Animated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
+import { toApiDate } from '../../src/utils/periodRange';
+import { formatAmount, formatMoney } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -53,26 +55,26 @@ function getPeriodRange(
   switch (preset) {
     case 'thisMonth':
       return {
-        start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
-        end: now.toISOString(),
+        start: toApiDate(new Date(now.getFullYear(), now.getMonth(), 1)),
+        end: toApiDate(now),
       };
     case 'lastMonth':
       return {
-        start: new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString(),
-        end: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString(),
+        start: toApiDate(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+        end: toApiDate(new Date(now.getFullYear(), now.getMonth(), 0)),
       };
     case 'last3Months':
       return {
-        start: new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString(),
-        end: now.toISOString(),
+        start: toApiDate(new Date(now.getFullYear(), now.getMonth() - 2, 1)),
+        end: toApiDate(now),
       };
     case 'thisYear':
       return {
-        start: new Date(now.getFullYear(), 0, 1).toISOString(),
-        end: now.toISOString(),
+        start: toApiDate(new Date(now.getFullYear(), 0, 1)),
+        end: toApiDate(now),
       };
     case 'custom':
-      return { start: customStart.toISOString(), end: customEnd.toISOString() };
+      return { start: toApiDate(customStart), end: toApiDate(customEnd) };
     default:
       return {};
   }
@@ -82,10 +84,21 @@ export default function InvoicesScreen() {
   const { t, dateLocale } = useTranslation();
   const { language } = useLanguageStore();
   const { hasPermission } = useAuth();
+  // A bank statement records payments on supplier invoices and customer debts.
+  const canReadStatement = hasPermission('manage_invoices') || hasPermission('add_revenue');
+  const usesBilling = useModules().uses('billing');
   const router = useRouter();
-  const params = useLocalSearchParams<{ paymentFilter?: string }>();
+  const params = useLocalSearchParams<{ paymentFilter?: string; invoiceId?: string }>();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  // Set only when the backend's true match count exceeds what was
+  // actually returned (it caps at 1,000 by default) - lets the banner
+  // below tell the user some invoices aren't shown instead of silently
+  // looking like a complete, if short, list.
+  const [invoicesTotalCount, setInvoicesTotalCount] = useState<number | null>(null);
+  // Sums of every invoice the filter matches (from the server), so the
+  // header totals cover the whole period even past the first page.
+  const [serverTotals, setServerTotals] = useState<{ amount: number; vat: number } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
@@ -106,6 +119,16 @@ export default function InvoicesScreen() {
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  // Invoice.user_id is who scanned/created it, but the invoice itself only
+  // ever stores that id - resolved to a name+picture via the company
+  // directory, same approach as calendar.tsx/audit-log.tsx, rather than
+  // adding a denormalized field to every invoice document.
+  const [pictureByUserId, setPictureByUserId] = useState<Record<string, { name: string; picture: string | null }>>({});
+  useEffect(() => {
+    api.getCompanyDirectory()
+      .then((dir) => setPictureByUserId(Object.fromEntries(dir.map((d) => [d.user_id, { name: d.name, picture: d.picture }]))))
+      .catch(() => {});
+  }, []);
   // Which of this invoice's items triggered a price-increase alert when it
   // was created - fetched lazily per invoice_id so the item rows can flag
   // "up X% from last purchase" without duplicating that comparison here.
@@ -119,16 +142,6 @@ export default function InvoicesScreen() {
   const [showOnlyEikIssues, setShowOnlyEikIssues] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'partial' | 'overdue'>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const chevronRotation = useSharedValue(0);
-  useEffect(() => {
-    chevronRotation.value = withTiming(filtersExpanded ? 180 : 0, {
-      duration: DURATION.deliberate,
-      easing: EASING.standard,
-    });
-  }, [filtersExpanded]);
-  const chevronStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${chevronRotation.value}deg` }],
-  }));
 
   // Lets the Home dashboard's unpaid-invoices reminder deep-link straight
   // into this filter instead of always landing on "all".
@@ -141,6 +154,18 @@ export default function InvoicesScreen() {
       setFiltersExpanded(true);
     }
   }, [params.paymentFilter]);
+
+  // Lets a price alert (or anything else pointing at one specific invoice)
+  // deep-link straight to it, even if it falls outside whatever date/search
+  // filter this screen currently has applied - fetched directly by id
+  // rather than relying on it being in the already-loaded `invoices` list.
+  useEffect(() => {
+    if (!params.invoiceId) return;
+    const id = params.invoiceId;
+    api.getInvoice(id)
+      .then((invoice) => setSelectedInvoice(invoice))
+      .catch((error) => console.error('Error opening linked invoice:', error));
+  }, [params.invoiceId]);
 
   // Reverse-charge suppliers are foreign and don't have a Bulgarian ЕИК,
   // so they're excluded from this check on purpose.
@@ -161,13 +186,16 @@ export default function InvoicesScreen() {
   const loadInvoices = useCallback(async () => {
     try {
       const { start, end } = getPeriodRange(periodPreset, customStartDate, customEndDate);
-      const data = await api.getInvoices({
+      const { invoices: data, totalCount, totalAmount: allAmount, totalVat: allVat } = await api.getInvoicesPage({
         ...(searchQuery ? { search: searchQuery } : {}),
         ...(start ? { start_date: start } : {}),
         ...(end ? { end_date: end } : {}),
         ...(paymentFilter !== 'all' ? { payment_status: paymentFilter } : {}),
+        limit: 1000,
       });
       setInvoices(data);
+      setInvoicesTotalCount(totalCount > data.length ? totalCount : null);
+      setServerTotals(allAmount != null && allVat != null ? { amount: allAmount, vat: allVat } : null);
     } catch (error) {
       console.error('Error loading invoices:', error);
     } finally {
@@ -252,6 +280,8 @@ export default function InvoicesScreen() {
   const [updatingPayment, setUpdatingPayment] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [paymentAmountInput, setPaymentAmountInput] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date());
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodChoice>('bank_transfer');
 
   const applyInvoiceUpdate = (updated: Invoice) => {
     setSelectedInvoice(updated);
@@ -269,22 +299,51 @@ export default function InvoicesScreen() {
   const [editAmountWithoutVat, setEditAmountWithoutVat] = useState('');
   const [editVatAmount, setEditVatAmount] = useState('');
   const [editVatTreatment, setEditVatTreatment] = useState<VatTreatment | ''>('');
+  const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod | ''>('');
+  const [editDocumentType, setEditDocumentType] = useState<InvoiceDocumentType>('invoice');
+  const [editCreditedNumber, setEditCreditedNumber] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editLocation, setEditLocation] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Real incident this fixes: OCR (or a fat-fingered manual entry) read a
+  // 6-pack as "1 бр.", so the per-unit price looked 6x higher than it
+  // actually is and fired a bogus price-change alert - with no way to
+  // correct just the quantity/price of one already-saved line, the only
+  // option was delete-and-rescan the whole invoice. Quantity/unit_price
+  // are kept as strings for direct TextInput binding, same convention as
+  // editAmountWithoutVat/editVatAmount above.
+  const [editItems, setEditItems] = useState<
+    { id: string; name: string; quantity: string; unit: string; unit_price: string }[]
+  >([]);
 
   const startEditInvoice = (invoice: Invoice) => {
     setEditSupplier(invoice.supplier);
     setEditSupplierEik(invoice.supplier_eik || '');
     setEditInvoiceNumber(invoice.invoice_number);
     setEditDate(new Date(invoice.date));
-    setEditAmountWithoutVat(invoice.amount_without_vat.toFixed(2));
-    setEditVatAmount(invoice.vat_amount.toFixed(2));
+    // Amounts are edited as printed; a credit note's sign is its type.
+    setEditDocumentType(invoice.document_type === 'credit_note' ? 'credit_note' : 'invoice');
+    setEditCreditedNumber(invoice.credited_invoice_number || '');
+    setEditAmountWithoutVat(Math.abs(invoice.amount_without_vat).toFixed(2));
+    setEditVatAmount(Math.abs(invoice.vat_amount).toFixed(2));
     setEditVatTreatment(invoice.vat_treatment || '');
+    setEditPaymentMethod(invoice.payment_method || '');
     setEditNotes(invoice.notes || '');
+    setEditLocation(invoice.location_id ?? null);
+    setEditItems(
+      (invoice.items || []).map((it) => ({
+        id: it.id, name: it.name, quantity: String(it.quantity), unit: it.unit, unit_price: it.unit_price.toFixed(2),
+      }))
+    );
     setEditMode(true);
   };
 
-  const handleSaveEditedInvoice = async () => {
+  const updateEditItemField = (itemId: string, field: 'quantity' | 'unit_price', value: string) => {
+    setEditItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, [field]: value } : it)));
+  };
+
+  const handleSaveEditedInvoice = async (checked: { lines?: boolean; paid?: boolean | null } = {}) => {
     if (!selectedInvoice) return;
     const supplier = editSupplier.trim();
     const invoiceNumber = editInvoiceNumber.trim();
@@ -294,18 +353,73 @@ export default function InvoicesScreen() {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;
     }
+    const parsedItems = editItems.map((it) => ({
+      id: it.id,
+      quantity: parseFloat(it.quantity.replace(',', '.')),
+      unit_price: parseFloat(it.unit_price.replace(',', '.')),
+    }));
+    if (parsedItems.some((it) => isNaN(it.quantity) || it.quantity <= 0 || isNaN(it.unit_price))) {
+      Alert.alert(t('common.error'), t('msg.fillRequired'));
+      return;
+    }
+    // The corrected lines are checked against the total, as at scan.
+    if (!checked.lines && parsedItems.length > 0) {
+      try {
+        const check = await api.checkInvoiceDraft({
+          amount_without_vat: withoutVat, vat_amount: vat, total_amount: withoutVat + vat,
+          items: editItems.map((it, i) => ({
+            name: it.name, quantity: parsedItems[i].quantity, unit_price: parsedItems[i].unit_price, printed_total: null,
+          })),
+        });
+        if (check.lines && !check.lines.ok) {
+          Alert.alert(
+            t('invoices.linesMismatchTitle'),
+            t('invoices.linesMismatchText')
+              .replace('{lines}', formatAmount(check.lines.sum))
+              .replace('{base}', formatAmount(check.lines.base)),
+            [
+              { text: t('common.cancel'), style: 'cancel' },
+              { text: t('invoices.saveAnyway'), onPress: () => { handleSaveEditedInvoice({ ...checked, lines: true }); } },
+            ],
+          );
+          return;
+        }
+      } catch {
+        // The check is a help, never a block.
+      }
+    }
+    // From paid at the till to a bank transfer: was it already paid?
+    // (Nothing is owed on a credit note - no payment to change or ask.)
+    const isCreditNote = editDocumentType === 'credit_note';
+    const methodChanged = !isCreditNote && !!editPaymentMethod && editPaymentMethod !== (selectedInvoice.payment_method || '');
+    const fromTillToBank = methodChanged && editPaymentMethod === 'bank_transfer'
+      && (selectedInvoice.payment_method === 'cash' || selectedInvoice.payment_method === 'card');
+    if (fromTillToBank && checked.paid === undefined) {
+      Alert.alert(t('invoices.alreadyPaidTitle'), t('invoices.alreadyPaidText'), [
+        { text: t('invoices.notPaidYet'), onPress: () => { handleSaveEditedInvoice({ ...checked, paid: false }); } },
+        { text: t('invoices.alreadyPaid'), onPress: () => { handleSaveEditedInvoice({ ...checked, paid: true }); } },
+      ]);
+      return;
+    }
     setSavingEdit(true);
     try {
       const updated = await api.updateInvoice(selectedInvoice.id, {
+        ...(methodChanged ? { payment_method: editPaymentMethod as PaymentMethod } : {}),
+        ...(fromTillToBank && checked.paid ? { is_paid: true } : {}),
         supplier,
         supplier_eik: editSupplierEik.trim() || undefined,
         invoice_number: invoiceNumber,
-        date: editDate.toISOString(),
+        document_type: editDocumentType,
+        ...(isCreditNote ? { credited_invoice_number: editCreditedNumber.trim() } : {}),
+        date: toApiDate(editDate),
         amount_without_vat: withoutVat,
         vat_amount: vat,
         total_amount: withoutVat + vat,
         vat_treatment: editVatTreatment || undefined,
         notes: editNotes.trim() || undefined,
+        items: parsedItems.length > 0 ? parsedItems : undefined,
+        // "" takes it off any location.
+        location_id: editLocation ?? '',
       });
       applyInvoiceUpdate(updated);
       setEditMode(false);
@@ -335,25 +449,35 @@ export default function InvoicesScreen() {
     }
   };
 
+  // What is left to pay: the total less what was paid and what credit
+  // notes took off.
+  const invoiceLeft = (invoice: Invoice) =>
+    Math.max(invoice.total_amount - invoice.paid_amount - (invoice.credited_amount || 0), 0);
+
   const openPaymentModal = (invoice: Invoice) => {
-    setPaymentAmountInput(invoice.paid_amount > 0 ? invoice.paid_amount.toFixed(2) : '');
+    setPaymentAmountInput(invoiceLeft(invoice).toFixed(2));
+    setPaymentDate(new Date());
+    setPaymentMethod('bank_transfer');
     setPaymentModalVisible(true);
   };
 
-  const handleSavePaymentAmount = async () => {
+  // A payment on its own day, added to the invoice's payment history.
+  const handleSavePayment = async () => {
     if (!selectedInvoice) return;
-    const amount = parseFloat(paymentAmountInput);
-    if (isNaN(amount) || amount < 0) {
+    const amount = parseFloat(paymentAmountInput.replace(',', '.'));
+    if (isNaN(amount) || amount <= 0) {
       Alert.alert(t('common.error'), t('budget.invalidAmount'));
       return;
     }
-    if (amount > selectedInvoice.total_amount + 0.01) {
+    if (amount > invoiceLeft(selectedInvoice) + 0.01) {
       Alert.alert(t('common.error'), t('invoices.paidAmountExceedsTotal'));
       return;
     }
     setUpdatingPayment(true);
     try {
-      const updated = await api.updateInvoice(selectedInvoice.id, { paid_amount: amount });
+      const updated = await api.addInvoicePayment(selectedInvoice.id, {
+        amount, date: format(paymentDate, 'yyyy-MM-dd'), method: paymentMethod,
+      });
       applyInvoiceUpdate(updated);
       setPaymentModalVisible(false);
       Haptics.success();
@@ -362,6 +486,26 @@ export default function InvoicesScreen() {
     } finally {
       setUpdatingPayment(false);
     }
+  };
+
+  const handleDeletePayment = (invoice: Invoice, paymentId: string) => {
+    Alert.alert(t('invoices.deletePaymentTitle'), t('invoices.deletePaymentConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          setUpdatingPayment(true);
+          try {
+            applyInvoiceUpdate(await api.deleteInvoicePayment(invoice.id, paymentId));
+          } catch (error: any) {
+            Alert.alert(t('common.error'), error.message);
+          } finally {
+            setUpdatingPayment(false);
+          }
+        },
+      },
+    ]);
   };
 
   // Reverted the immediate-delete + 4s-undo-toast pattern (Motion Design
@@ -390,7 +534,8 @@ export default function InvoicesScreen() {
               Haptics.destructive();
               setInvoices((prev) => prev.filter((inv) => inv.id !== id));
               if (selectedInvoice?.id === id) setSelectedInvoice(null);
-              Toast.success(t('invoices.deletedUndo'));
+              // Where it can be brought back - said once, at the delete (Л10).
+              Toast.success(t(hasPermission('restore_deleted_data') ? 'invoices.deletedRestorable' : 'invoices.deletedUndo'));
             } catch (error: any) {
               Alert.alert(t('common.error'), error.message);
             }
@@ -421,9 +566,12 @@ export default function InvoicesScreen() {
 
   const renderInvoice = ({ item }: { item: Invoice }) => {
     const eikIssue = hasEikIssue(item);
-    const isUnpaid = item.payment_method === 'bank_transfer' && !item.is_paid;
+    const isCreditNote = item.document_type === 'credit_note';
+    const isUnpaid = !isCreditNote && item.payment_method === 'bank_transfer' && !item.is_paid;
     const overdue = isUnpaid && !!item.payment_due_date && new Date(item.payment_due_date).getTime() < Date.now();
-    const isPartial = isUnpaid && item.paid_amount > 0;
+    // Paid in part, or a credit note took part of it off.
+    const credited = item.credited_amount || 0;
+    const isPartial = isUnpaid && (item.paid_amount > 0 || credited > 0);
     const statusLabel = overdue ? t('invoices.overdue') : (isPartial ? t('invoices.partiallyPaid') : t('invoices.unpaid'));
 
     return (
@@ -438,7 +586,7 @@ export default function InvoicesScreen() {
             <Text style={styles.supplierName} numberOfLines={1}>{item.supplier}</Text>
           </View>
           <View style={styles.invoiceRowTopRight}>
-            <Text style={styles.totalValueCompact}>{item.total_amount.toFixed(2)} €</Text>
+            <Text style={styles.totalValueCompact}>{formatMoney(item.total_amount)}</Text>
             {/* Explicit, discoverable delete action - the same long-press
                 gesture on the card still works too (and goes through the
                 exact same confirm dialog below), but a visible "X" doesn't
@@ -459,8 +607,14 @@ export default function InvoicesScreen() {
             {item.invoice_number} · {formatDate(item.date)}
           </Text>
 
-          {(eikIssue || isUnpaid) && (
+          {(eikIssue || isUnpaid || isCreditNote) && (
             <View style={styles.compactBadgeRow}>
+              {isCreditNote && (
+                <View style={styles.compactBadge}>
+                  <Ionicons name="return-down-back" size={11} color={COLORS.primary} />
+                  <Text style={styles.compactBadgeText}>{t('invoices.creditNote')}</Text>
+                </View>
+              )}
               {eikIssue && (
                 <View style={styles.compactBadge}>
                   <Ionicons name="alert-circle" size={11} color={COLORS.warning} />
@@ -471,7 +625,7 @@ export default function InvoicesScreen() {
                 <View style={[styles.compactBadge, overdue && styles.overdueBadge]}>
                   <Ionicons name={overdue ? 'alert-circle' : (isPartial ? 'pie-chart-outline' : 'time-outline')} size={11} color={overdue ? COLORS.danger : COLORS.warning} />
                   <Text style={[styles.compactBadgeText, overdue && { color: COLORS.danger }]}>
-                    {statusLabel}{isPartial ? ` (${(item.total_amount - item.paid_amount).toFixed(2)} €)` : ''}
+                    {statusLabel}{isPartial ? ` (${formatMoney(Math.max(0, item.total_amount - item.paid_amount - credited))})` : ''}
                   </Text>
                 </View>
               )}
@@ -489,8 +643,15 @@ export default function InvoicesScreen() {
     [invoices, showOnlyEikIssues, hasEikIssue]
   );
 
-  const totalAmount = visibleInvoices.reduce((sum, inv) => sum + inv.total_amount, 0);
-  const totalVat = visibleInvoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
+  // Whole-filter sums from the server unless the list is narrowed on the
+  // device (the ЕИК check), where only the shown invoices count.
+  const useServerTotals = serverTotals !== null && !showOnlyEikIssues;
+  const totalAmount = useServerTotals
+    ? serverTotals.amount
+    : visibleInvoices.reduce((sum, inv) => sum + inv.total_amount, 0);
+  const totalVat = useServerTotals
+    ? serverTotals.vat
+    : visibleInvoices.reduce((sum, inv) => sum + inv.vat_amount, 0);
 
   const sections = useMemo(() => {
     const groups = new Map<string, { title: string; data: Invoice[]; totalAmount: number; totalVat: number }>();
@@ -523,7 +684,7 @@ export default function InvoicesScreen() {
     <View style={styles.monthHeader}>
       <Text style={styles.monthHeaderTitle}>{section.title}</Text>
       <Text style={styles.monthHeaderStats}>
-        {section.data.length} · {t('invoices.monthlyTotal')} {section.totalAmount.toFixed(2)} €
+        {section.data.length} · {t('invoices.monthlyTotal')} {formatMoney(section.totalAmount)}
       </Text>
     </View>
   );
@@ -545,20 +706,52 @@ export default function InvoicesScreen() {
             </View>
           </Animated.View>
 
-          {/* Admin-only safety net for the confirm dialog above: whoever
-              holds restore_deleted_data can undo a delete after the fact
-              too, from the full snapshot kept on that invoice's audit log
-              entry - see restore_audit_entry in the backend. */}
-          {hasPermission('restore_deleted_data') && (
-            <TouchableOpacity style={styles.restoreHintBanner} onPress={() => router.push('/audit-log')}>
-              <Ionicons name="time-outline" size={16} color={COLORS.primary} />
-              <Text style={styles.restoreHintText}>{t('invoices.restoreDeletedHint')}</Text>
-              <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
-            </TouchableOpacity>
+          {/* Navigation-architecture review (2026-10): Вземания/Документи/
+              Протоколи used to be buried in Profile's "accounting"
+              category - they're all documents/money with the outside
+              world, the same subject matter as the invoice list right
+              below, so a visible link belongs here instead. */}
+          {((usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices'))) || hasPermission('view_statistics') || canReadStatement) && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.quickLinksRow}
+              contentContainerStyle={styles.quickLinksContent}
+            >
+              {usesBilling && hasPermission('add_revenue') && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/receivables')}>
+                  <Ionicons name="cash-outline" size={15} color={COLORS.success} />
+                  <Text style={styles.quickLinkChipText}>{t('receivables.title')}</Text>
+                </TouchableOpacity>
+              )}
+              {usesBilling && (hasPermission('add_revenue') || hasPermission('issue_invoices')) && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/billing-documents')}>
+                  <Ionicons name="document-text-outline" size={15} color={COLORS.success} />
+                  <Text style={styles.quickLinkChipText}>{t('billingDocuments.title')}</Text>
+                </TouchableOpacity>
+              )}
+              {canReadStatement && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/bank-statement')}>
+                  <Ionicons name="business-outline" size={15} color={COLORS.primary} />
+                  <Text style={styles.quickLinkChipText}>{t('bankStatement.title')}</Text>
+                </TouchableOpacity>
+              )}
+              {hasPermission('view_statistics') && (
+                <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/protocols')}>
+                  <Ionicons name="document-text-outline" size={15} color={COLORS.primary} />
+                  <Text style={styles.quickLinkChipText}>{t('profile.protocols')}</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
           )}
 
-          {/* Search */}
-          <View style={styles.searchContainer}>
+          <View style={{ marginHorizontal: 16 }}>
+            <FirstUseHint id="invoices" icon="document-text" text={t('hint.invoices')} />
+          </View>
+
+          {/* Search, the filters and the EIK warning - one row (Л13). */}
+          <View style={styles.searchRow}>
+          <View style={[styles.searchContainer, styles.searchInRow]}>
             <Ionicons name="search" size={20} color={COLORS.textMuted} />
             <TextInput
               style={styles.searchInput}
@@ -574,22 +767,36 @@ export default function InvoicesScreen() {
               </TouchableOpacity>
             )}
           </View>
-
-          {/* Filters toggle — collapsed by default so the chip rows don't
-              permanently eat vertical space above the list */}
+          {/* The filters (period, payment) open under the row; the number
+              says how many are on. */}
           <TouchableOpacity
-            style={styles.filtersToggle}
+            style={[styles.filterButton, (filtersExpanded || activeFilterCount > 0) && styles.filterButtonOn]}
             onPress={() => setFiltersExpanded((prev) => !prev)}
+            accessibilityLabel={t('invoices.filtersButton')}
+            accessibilityState={{ expanded: filtersExpanded }}
           >
-            <Ionicons name="options-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.filtersToggleText}>
-              {t('invoices.filtersButton')}
-              {activeFilterCount > 0 ? ` · ${activeFilterCount} ${t('invoices.filtersActive')}` : ''}
-            </Text>
-            <Animated.View style={chevronStyle}>
-              <Ionicons name="chevron-down" size={16} color={COLORS.primary} />
-            </Animated.View>
+            <Ionicons name="options-outline" size={20} color={COLORS.primary} />
+            {activeFilterCount > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
+          {/* Invoices whose supplier has no valid EIK: a filter of its own. */}
+          {eikIssueCount > 0 && (
+            <TouchableOpacity
+              style={[styles.eikChip, showOnlyEikIssues && styles.eikChipOn]}
+              onPress={() => setShowOnlyEikIssues((prev) => !prev)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: showOnlyEikIssues }}
+              accessibilityLabel={`${eikIssueCount} ${eikIssueCount === 1 ? t('invoices.missingEikSingular') : t('invoices.missingEikPlural')}`}
+            >
+              <Ionicons name="alert-circle" size={15} color={showOnlyEikIssues ? COLORS.background : COLORS.warning} />
+              <Text style={[styles.eikChipText, showOnlyEikIssues && styles.eikChipTextOn]}>{eikIssueCount}</Text>
+              <Text style={[styles.eikChipText, showOnlyEikIssues && styles.eikChipTextOn]}>{t('invoices.eikChip')}</Text>
+            </TouchableOpacity>
+          )}
+          </View>
 
           <Expandable expanded={filtersExpanded}>
             <>
@@ -672,20 +879,17 @@ export default function InvoicesScreen() {
             </>
           </Expandable>
 
-          {/* ЕИК issues banner */}
-          {eikIssueCount > 0 && (
-            <TouchableOpacity
-              style={[styles.eikBanner, showOnlyEikIssues && styles.eikBannerActive]}
-              onPress={() => setShowOnlyEikIssues((prev) => !prev)}
-            >
-              <Ionicons name="alert-circle" size={18} color={COLORS.warning} />
+          {/* Truncation banner - the backend caps matches per page; this is
+              the only signal the user gets that the list isn't complete. */}
+          {invoicesTotalCount !== null && (
+            <View style={styles.eikBanner}>
+              <Ionicons name="information-circle" size={18} color={COLORS.warning} />
               <Text style={styles.eikBannerText}>
-                {eikIssueCount} {eikIssueCount === 1 ? t('invoices.missingEikSingular') : t('invoices.missingEikPlural')}
+                {t('invoices.truncatedBanner')
+                  .replace('{shown}', String(invoices.length))
+                  .replace('{total}', String(invoicesTotalCount))}
               </Text>
-              <Text style={styles.eikBannerAction}>
-                {showOnlyEikIssues ? t('invoices.showAll') : t('invoices.showOnlyThese')}
-              </Text>
-            </TouchableOpacity>
+            </View>
           )}
 
           {/* Summary */}
@@ -696,13 +900,13 @@ export default function InvoicesScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('stats.vat')}:</Text>
-              <Text style={styles.summaryValue}>{totalVat.toFixed(2)} €</Text>
+              <Text style={styles.summaryValue}>{formatMoney(totalVat)}</Text>
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('invoices.total')}:</Text>
               <CountUp
                 value={totalAmount}
-                formatter={(n) => `${n.toFixed(2)} €`}
+                formatter={(n) => `${formatMoney(n)}`}
                 style={[styles.summaryValue, { color: COLORS.primary }]}
               />
             </View>
@@ -743,37 +947,11 @@ export default function InvoicesScreen() {
           )}
 
           {/* Export Modal */}
-      <Modal visible={exportModalVisible} animationType="fade" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{t('invoices.exportTitle')}</Text>
-
-            <TouchableOpacity style={styles.exportOption} onPress={() => handleExport('excel')}>
-              <View style={[styles.exportIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                <Ionicons name="document" size={24} color={COLORS.success} />
-              </View>
-              <View>
-                <Text style={styles.exportOptionTitle}>{t('invoices.excelTitle')}</Text>
-                <Text style={styles.exportOptionHint}>{t('invoices.excelHint')}</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.exportOption} onPress={() => handleExport('pdf')}>
-              <View style={[styles.exportIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-                <Ionicons name="document-text" size={24} color={COLORS.danger} />
-              </View>
-              <View>
-                <Text style={styles.exportOptionTitle}>PDF</Text>
-                <Text style={styles.exportOptionHint}>{t('invoices.pdfHint')}</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.cancelButton} onPress={() => setExportModalVisible(false)}>
-              <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <ExportFormatModal
+        visible={exportModalVisible}
+        onClose={() => setExportModalVisible(false)}
+        onExport={handleExport}
+      />
 
       <ExcelImportModal
         visible={importModalVisible}
@@ -783,491 +961,88 @@ export default function InvoicesScreen() {
         fields={[
           { key: 'supplier', label: t('invoices.supplier') },
           { key: 'invoice_number', label: t('invoices.invoiceNo') },
-          { key: 'total_amount', label: t('invoices.total'), format: (v) => `${Number(v).toFixed(2)} €` },
+          { key: 'total_amount', label: t('invoices.total'), format: (v) => `${formatMoney(Number(v))}` },
         ]}
         onImported={loadInvoices}
       />
 
       {/* Invoice Detail Modal */}
-      <Modal visible={!!selectedInvoice} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.detailModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{editMode ? t('invoices.editInvoice') : t('invoices.details')}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                {!editMode && selectedInvoice && (
-                  <TouchableOpacity onPress={() => startEditInvoice(selectedInvoice)} accessibilityLabel={t('invoices.editInvoice')}>
-                    <Ionicons name="pencil" size={22} color={COLORS.primary} />
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity onPress={() => (editMode ? setEditMode(false) : setSelectedInvoice(null))}>
-                  <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {selectedInvoice && editMode && (
-              <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('invoices.supplier')} *</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={editSupplier}
-                    onChangeText={setEditSupplier}
-                    placeholderTextColor={COLORS.textMuted}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('scan.supplierEik')}</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={editSupplierEik}
-                    onChangeText={setEditSupplierEik}
-                    keyboardType="number-pad"
-                    placeholder="131071587"
-                    placeholderTextColor={COLORS.textMuted}
-                    maxLength={13}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('invoices.invoiceNo')} *</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={editInvoiceNumber}
-                    onChangeText={setEditInvoiceNumber}
-                    placeholderTextColor={COLORS.textMuted}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('invoices.dateLabel')} *</Text>
-                  <TouchableOpacity style={styles.dateInputButton} onPress={() => setEditDatePickerVisible(true)}>
-                    <Ionicons name="calendar" size={20} color={COLORS.primary} />
-                    <Text style={styles.dateInputText}>
-                      {format(editDate, 'd MMMM yyyy', { locale: dateLocale })}
-                    </Text>
-                    <Ionicons name="chevron-down" size={20} color={COLORS.textMuted} />
-                  </TouchableOpacity>
-                </View>
-                <DateTimePickerModal
-                  isVisible={isEditDatePickerVisible}
-                  mode="date"
-                  date={editDate}
-                  onConfirm={(d) => { setEditDate(d); setEditDatePickerVisible(false); }}
-                  onCancel={() => setEditDatePickerVisible(false)}
-                  confirmTextIOS={t('common.select')}
-                  cancelTextIOS={t('common.cancel')}
-                  locale={language}
-                />
-
-                <View style={styles.detailRow2}>
-                  <View style={[styles.inputGroup, { flex: 1 }]}>
-                    <Text style={styles.inputLabel}>{t('invoices.withoutVAT')}</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editAmountWithoutVat}
-                      onChangeText={setEditAmountWithoutVat}
-                      keyboardType="decimal-pad"
-                      placeholder="0.00"
-                      placeholderTextColor={COLORS.textMuted}
-                    />
-                  </View>
-                  <View style={[styles.inputGroup, { flex: 1 }]}>
-                    <Text style={styles.inputLabel}>{t('scan.vatAmount')}</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editVatAmount}
-                      onChangeText={setEditVatAmount}
-                      keyboardType="decimal-pad"
-                      placeholder="0.00"
-                      placeholderTextColor={COLORS.textMuted}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.totalSection}>
-                  <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
-                  <Text style={styles.totalSectionValue}>
-                    {((parseFloat(editAmountWithoutVat.replace(',', '.')) || 0) + (parseFloat(editVatAmount.replace(',', '.')) || 0)).toFixed(2)} €
-                  </Text>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('scan.vatTreatment')}</Text>
-                  <View style={styles.vatTreatmentGrid}>
-                    {(['standard_20', 'reduced_9', 'zero_rate', 'exempt', 'reverse_charge', 'outside_scope'] as VatTreatment[]).map((option) => (
-                      <TouchableOpacity
-                        key={option}
-                        style={[styles.vatTreatmentChip, editVatTreatment === option && styles.vatTreatmentChipActive]}
-                        onPress={() => setEditVatTreatment(option)}
-                      >
-                        <Text style={[styles.vatTreatmentChipText, editVatTreatment === option && styles.vatTreatmentChipTextActive]}>
-                          {t(`vat.${option}`)}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('invoices.notes')}</Text>
-                  <TextInput
-                    style={[styles.input, { minHeight: 70 }]}
-                    value={editNotes}
-                    onChangeText={setEditNotes}
-                    multiline
-                    placeholderTextColor={COLORS.textMuted}
-                  />
-                </View>
-
-                <View style={styles.editActionsRow}>
-                  <TouchableOpacity style={styles.editCancelButton} onPress={() => setEditMode(false)} disabled={savingEdit}>
-                    <Text style={styles.editCancelButtonText}>{t('common.cancel')}</Text>
-                  </TouchableOpacity>
-                  <PressableScale style={[styles.submitButton, { flex: 1 }]} onPress={handleSaveEditedInvoice} disabled={savingEdit}>
-                    {savingEdit ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
-                  </PressableScale>
-                </View>
-              </ScrollView>
-            )}
-
-            {selectedInvoice && !editMode && (
-              <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionLabel}>{t('invoices.supplier')}</Text>
-                  <Text style={styles.detailSectionValue}>{selectedInvoice.supplier}</Text>
-                </View>
-                {selectedInvoice.supplier_eik && (
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionLabel}>{t('scan.supplierEik')}</Text>
-                    <Text style={styles.detailSectionValue}>{selectedInvoice.supplier_eik}</Text>
-                  </View>
-                )}
-                {selectedInvoice.vat_treatment && (
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionLabel}>{t('scan.vatTreatment')}</Text>
-                    <Text style={styles.detailSectionValue}>{t(`vat.${selectedInvoice.vat_treatment}`)}</Text>
-                  </View>
-                )}
-                {selectedInvoice.vat_treatment === 'reverse_charge' && (() => {
-                  const deadline = new Date(new Date(selectedInvoice.date).getTime() + 15 * 24 * 60 * 60 * 1000);
-                  const overdue = deadline.getTime() < Date.now();
-                  return (
-                    <View style={[styles.protocolBanner, overdue && styles.protocolBannerOverdue]}>
-                      <Ionicons name={overdue ? 'alert-circle' : 'document-text'} size={18} color={overdue ? COLORS.danger : COLORS.primary} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.protocolBannerTitle}>
-                          {t('scan.protocolAssigned')} {selectedInvoice.protocol_number || '—'}
-                        </Text>
-                        <Text style={[styles.protocolBannerDeadline, overdue && { color: COLORS.danger }]}>
-                          {t('invoices.protocolDeadline')}: {formatDate(deadline.toISOString())}
-                          {overdue ? ` (${t('invoices.protocolOverdue')})` : ''}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })()}
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionLabel}>{t('invoices.invoiceNo')}</Text>
-                  <Text style={styles.detailSectionValue}>{selectedInvoice.invoice_number}</Text>
-                </View>
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionLabel}>{t('invoices.dateLabel')}</Text>
-                  <Text style={styles.detailSectionValue}>{formatDate(selectedInvoice.date)}</Text>
-                </View>
-                <View style={styles.detailRow2}>
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionLabel}>{t('invoices.withoutVAT')}</Text>
-                    <Text style={styles.detailSectionValue}>{selectedInvoice.amount_without_vat.toFixed(2)} €</Text>
-                  </View>
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionLabel}>{t('invoices.vatPercent')}</Text>
-                    <Text style={styles.detailSectionValue}>{selectedInvoice.vat_amount.toFixed(2)} €</Text>
-                  </View>
-                </View>
-                <View style={styles.totalSection}>
-                  <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
-                  <Text style={styles.totalSectionValue}>{selectedInvoice.total_amount.toFixed(2)} €</Text>
-                </View>
-
-                {selectedInvoice.payment_method && (() => {
-                  const overdue = !selectedInvoice.is_paid && !!selectedInvoice.payment_due_date
-                    && new Date(selectedInvoice.payment_due_date).getTime() < Date.now();
-                  return (
-                    <View style={[styles.paymentSection, overdue && styles.paymentSectionOverdue]}>
-                      <View style={styles.paymentSectionHeader}>
-                        <Text style={styles.detailSectionLabel}>{t('invoices.paymentSection')}</Text>
-                        <Text style={styles.paymentMethodTag}>
-                          {selectedInvoice.payment_method === 'cash'
-                            ? t('invoices.paymentMethodCash')
-                            : t('invoices.paymentMethodBankTransfer')}
-                        </Text>
-                      </View>
-
-                      {selectedInvoice.payment_method === 'bank_transfer' && (
-                        <>
-                          {selectedInvoice.payment_due_date && !selectedInvoice.is_paid && (
-                            <Text style={[styles.paymentDueText, overdue && { color: COLORS.danger }]}>
-                              {overdue ? t('invoices.overdueSince') : t('invoices.paymentDueDate')}: {formatDate(selectedInvoice.payment_due_date)}
-                            </Text>
-                          )}
-
-                          {!selectedInvoice.is_paid && selectedInvoice.paid_amount > 0 && (
-                            <View style={styles.paymentProgressBox}>
-                              <Text style={styles.paymentProgressText}>
-                                {t('invoices.paidOfTotal')
-                                  .replace('{paid}', selectedInvoice.paid_amount.toFixed(2))
-                                  .replace('{total}', selectedInvoice.total_amount.toFixed(2))}
-                              </Text>
-                              <Text style={styles.paymentRemainingText}>
-                                {t('invoices.remainingAmount')}: {(selectedInvoice.total_amount - selectedInvoice.paid_amount).toFixed(2)} €
-                              </Text>
-                              <View style={styles.paymentProgressBar}>
-                                <View style={[
-                                  styles.paymentProgressBarFill,
-                                  { width: `${Math.min(100, (selectedInvoice.paid_amount / selectedInvoice.total_amount) * 100)}%` }
-                                ]} />
-                              </View>
-                            </View>
-                          )}
-
-                          <TouchableOpacity
-                            style={styles.paidCheckboxRow}
-                            onPress={() => handleTogglePaid(selectedInvoice)}
-                            disabled={updatingPayment}
-                          >
-                            <View style={[styles.checkbox, selectedInvoice.is_paid && styles.checkboxChecked]}>
-                              {selectedInvoice.is_paid && <Ionicons name="checkmark" size={16} color="white" />}
-                            </View>
-                            <Text style={styles.paidCheckboxLabel}>
-                              {selectedInvoice.is_paid && selectedInvoice.paid_at
-                                ? `${t('invoices.paidOn')} ${formatDate(selectedInvoice.paid_at)}`
-                                : t('invoices.markFullyPaid')}
-                            </Text>
-                            {updatingPayment && <ActivityIndicator size="small" color={COLORS.primary} />}
-                          </TouchableOpacity>
-
-                          {!selectedInvoice.is_paid && (
-                            <TouchableOpacity
-                              style={styles.recordPaymentButton}
-                              onPress={() => openPaymentModal(selectedInvoice)}
-                              disabled={updatingPayment}
-                            >
-                              <Ionicons name="cash-outline" size={16} color={COLORS.primary} />
-                              <Text style={styles.recordPaymentButtonText}>
-                                {selectedInvoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
-                              </Text>
-                            </TouchableOpacity>
-                          )}
-                        </>
-                      )}
-                    </View>
-                  );
-                })()}
-
-                {selectedInvoice.items && selectedInvoice.items.length > 0 && (() => {
-                  const items = selectedInvoice.items!;
-                  const itemsSum = items.reduce(
-                    (sum, it) => sum + (it.total_price ?? (it.quantity || 0) * it.unit_price),
-                    0
-                  );
-                  const mismatch = Math.abs(itemsSum - selectedInvoice.amount_without_vat) > 0.05;
-                  return (
-                    <View style={styles.itemsSection}>
-                      <View style={styles.itemsSectionHeader}>
-                        <Text style={styles.detailSectionLabel}>{t('invoices.items')}</Text>
-                        {loadingInvoiceAlerts && <ActivityIndicator size="small" color={COLORS.textMuted} />}
-                      </View>
-
-                      <View style={styles.itemsTableHeader}>
-                        <Text style={[styles.itemsTableHeaderText, { flex: 2 }]}>{t('invoices.itemName')}</Text>
-                        <Text style={[styles.itemsTableHeaderText, styles.itemsColRight, { flex: 1 }]}>{t('invoices.itemQty')}</Text>
-                        <Text style={[styles.itemsTableHeaderText, styles.itemsColRight, { flex: 1 }]}>{t('invoices.itemUnitPrice')}</Text>
-                        <Text style={[styles.itemsTableHeaderText, styles.itemsColRight, { flex: 1 }]}>{t('invoices.itemTotal')}</Text>
-                      </View>
-
-                      {items.map((item, index) => {
-                        const alert = selectedInvoiceAlerts.find((a) => a.item_name === item.name);
-                        const lineTotal = item.total_price ?? (item.quantity || 0) * item.unit_price;
-                        return (
-                          <View key={index} style={styles.itemRow}>
-                            <View style={{ flex: 2 }}>
-                              <Text style={styles.itemRowName} numberOfLines={2}>{item.name}</Text>
-                              {alert && (
-                                <View style={styles.itemPriceAlertBadge}>
-                                  <Ionicons name="trending-up" size={11} color={COLORS.danger} />
-                                  <Text style={styles.itemPriceAlertText}>
-                                    +{alert.change_percent}% {t('invoices.vsLastPurchase')}
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                            <Text style={[styles.itemRowValue, styles.itemsColRight, { flex: 1 }]}>
-                              {item.quantity} {item.unit}
-                            </Text>
-                            <Text style={[styles.itemRowValue, styles.itemsColRight, { flex: 1 }]}>
-                              {item.unit_price.toFixed(2)}€
-                            </Text>
-                            <Text style={[styles.itemRowValue, styles.itemsColRight, styles.itemRowTotal, { flex: 1 }]}>
-                              {lineTotal.toFixed(2)}€
-                            </Text>
-                          </View>
-                        );
-                      })}
-
-                      <View style={styles.itemsSumRow}>
-                        <Text style={styles.itemsSumLabel}>{t('invoices.itemsSum')}</Text>
-                        <Text style={styles.itemsSumValue}>{itemsSum.toFixed(2)} €</Text>
-                      </View>
-                      {mismatch && (
-                        <View style={styles.itemsMismatchNote}>
-                          <Ionicons name="alert-circle-outline" size={14} color={COLORS.warning} />
-                          <Text style={styles.itemsMismatchText}>{t('invoices.itemsMismatch')}</Text>
-                        </View>
-                      )}
-                    </View>
-                  );
-                })()}
-
-                {(loadingScannedPages || scannedPages.length > 0) && (
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionLabel}>{t('invoices.scannedPages')}</Text>
-                    {loadingScannedPages ? (
-                      <ActivityIndicator size="small" color={COLORS.textMuted} style={{ marginTop: 8 }} />
-                    ) : (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                        {scannedPages.map((uri, index) => (
-                          <TouchableOpacity
-                            key={index}
-                            style={styles.scannedPageThumbWrapper}
-                            onPress={() => setViewerPageIndex(index)}
-                          >
-                            <Image source={{ uri }} style={styles.scannedPageThumb} resizeMode="cover" />
-                            {scannedPages.length > 1 && (
-                              <View style={styles.scannedPageBadge}>
-                                <Text style={styles.scannedPageBadgeText}>{index + 1}</Text>
-                              </View>
-                            )}
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    )}
-                  </View>
-                )}
-
-                {selectedInvoice.notes && (
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionLabel}>{t('invoices.notes')}</Text>
-                    <Text style={styles.detailSectionValue}>{selectedInvoice.notes}</Text>
-                  </View>
-                )}
-
-                <PressableScale
-                  style={styles.deleteButton}
-                  onPress={() => {
-                    setSelectedInvoice(null);
-                    handleDeleteInvoice(selectedInvoice.id);
-                  }}
-                >
-                  <Ionicons name="trash" size={20} color={COLORS.danger} />
-                  <Text style={styles.deleteButtonText}>{t('invoices.deleteInvoice')}</Text>
-                </PressableScale>
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
+      <InvoiceDetailModal
+        invoice={selectedInvoice}
+        scannedBy={selectedInvoice ? pictureByUserId[selectedInvoice.user_id] : undefined}
+        onClose={() => setSelectedInvoice(null)}
+        editMode={editMode}
+        onStartEdit={() => selectedInvoice && startEditInvoice(selectedInvoice)}
+        onCancelEdit={() => setEditMode(false)}
+        dateLocale={dateLocale}
+        language={language}
+        editSupplier={editSupplier}
+        onChangeSupplier={setEditSupplier}
+        editSupplierEik={editSupplierEik}
+        onChangeSupplierEik={setEditSupplierEik}
+        editInvoiceNumber={editInvoiceNumber}
+        onChangeInvoiceNumber={setEditInvoiceNumber}
+        editDate={editDate}
+        onChangeEditDate={setEditDate}
+        isEditDatePickerVisible={isEditDatePickerVisible}
+        onOpenEditDatePicker={() => setEditDatePickerVisible(true)}
+        onCloseEditDatePicker={() => setEditDatePickerVisible(false)}
+        editAmountWithoutVat={editAmountWithoutVat}
+        onChangeAmountWithoutVat={setEditAmountWithoutVat}
+        editVatAmount={editVatAmount}
+        onChangeVatAmount={setEditVatAmount}
+        editVatTreatment={editVatTreatment}
+        onChangeVatTreatment={setEditVatTreatment}
+        editDocumentType={editDocumentType}
+        onChangeDocumentType={setEditDocumentType}
+        editCreditedNumber={editCreditedNumber}
+        onChangeCreditedNumber={setEditCreditedNumber}
+        editPaymentMethod={editPaymentMethod}
+        onChangePaymentMethod={setEditPaymentMethod}
+        editNotes={editNotes}
+        onChangeNotes={setEditNotes}
+        editLocation={editLocation}
+        onChangeLocation={setEditLocation}
+        editItems={editItems}
+        onChangeEditItemField={updateEditItemField}
+        savingEdit={savingEdit}
+        onSaveEdit={() => handleSaveEditedInvoice()}
+        selectedInvoiceAlerts={selectedInvoiceAlerts}
+        loadingInvoiceAlerts={loadingInvoiceAlerts}
+        updatingPayment={updatingPayment}
+        onTogglePaid={handleTogglePaid}
+        onOpenPaymentModal={openPaymentModal}
+        onDeletePayment={handleDeletePayment}
+        scannedPages={scannedPages}
+        loadingScannedPages={loadingScannedPages}
+        onViewPage={setViewerPageIndex}
+        onDelete={handleDeleteInvoice}
+      />
 
       {/* Full-screen scanned page viewer - opened by tapping a thumbnail in
           the detail modal above. */}
-      <Modal visible={viewerPageIndex !== null} animationType="fade" transparent>
-        <View style={styles.pageViewerOverlay}>
-          <TouchableOpacity
-            style={styles.pageViewerClose}
-            onPress={() => setViewerPageIndex(null)}
-            accessibilityLabel={t('common.close')}
-          >
-            <Ionicons name="close" size={28} color="white" />
-          </TouchableOpacity>
-          {viewerPageIndex !== null && (
-            <>
-              <Image
-                source={{ uri: scannedPages[viewerPageIndex] }}
-                style={styles.pageViewerImage}
-                resizeMode="contain"
-              />
-              {scannedPages.length > 1 && (
-                <View style={styles.pageViewerNav}>
-                  <TouchableOpacity
-                    style={styles.pageViewerNavButton}
-                    disabled={viewerPageIndex === 0}
-                    onPress={() => setViewerPageIndex((i) => (i !== null ? Math.max(0, i - 1) : i))}
-                  >
-                    <Ionicons name="chevron-back" size={24} color={viewerPageIndex === 0 ? COLORS.borderLight : 'white'} />
-                  </TouchableOpacity>
-                  <Text style={styles.pageViewerNavText}>{viewerPageIndex + 1} / {scannedPages.length}</Text>
-                  <TouchableOpacity
-                    style={styles.pageViewerNavButton}
-                    disabled={viewerPageIndex === scannedPages.length - 1}
-                    onPress={() => setViewerPageIndex((i) => (i !== null ? Math.min(scannedPages.length - 1, i + 1) : i))}
-                  >
-                    <Ionicons name="chevron-forward" size={24} color={viewerPageIndex === scannedPages.length - 1 ? COLORS.borderLight : 'white'} />
-                  </TouchableOpacity>
-                </View>
-              )}
-            </>
-          )}
-        </View>
-      </Modal>
+      <ImageViewerModal
+        pages={scannedPages}
+        pageIndex={viewerPageIndex}
+        onChangeIndex={setViewerPageIndex}
+      />
 
       {/* Record/edit payment amount - edit-in-place, same convention as the
           daily-revenue form: the field shows what's already paid, and
           saving REPLACES that value rather than adding to it. */}
-      <Modal visible={paymentModalVisible} animationType="fade" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {selectedInvoice && selectedInvoice.paid_amount > 0 ? t('invoices.editPayment') : t('invoices.recordPayment')}
-              </Text>
-              <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
-                <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {selectedInvoice && (
-              <>
-                <View style={styles.editNoticeBanner}>
-                  <Ionicons name="information-circle" size={18} color={COLORS.primary} />
-                  <Text style={styles.editNoticeText}>{t('invoices.paidAmountEditNotice')}</Text>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>{t('invoices.paidAmountLabel')}</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={paymentAmountInput}
-                    onChangeText={setPaymentAmountInput}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                    placeholderTextColor={COLORS.textMuted}
-                    autoFocus
-                  />
-                  <Text style={styles.inputHint}>
-                    {t('invoices.totalAmount')}: {selectedInvoice.total_amount.toFixed(2)} €
-                  </Text>
-                </View>
-
-                <TouchableOpacity style={styles.submitButton} onPress={handleSavePaymentAmount} disabled={updatingPayment}>
-                  {updatingPayment ? <ActivityIndicator color="white" /> : <Text style={styles.submitButtonText}>{t('common.save')}</Text>}
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      <PaymentModal
+        visible={paymentModalVisible}
+        onClose={() => setPaymentModalVisible(false)}
+        invoice={selectedInvoice}
+        amountInput={paymentAmountInput}
+        onChangeAmountInput={setPaymentAmountInput}
+        date={paymentDate}
+        onChangeDate={setPaymentDate}
+        method={paymentMethod}
+        onChangeMethod={setPaymentMethod}
+        onSave={handleSavePayment}
+        saving={updatingPayment}
+      />
         </SafeAreaView>
       </View>
     </ImageBackground>
@@ -1313,45 +1088,73 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 12,
   },
-  restoreHintBanner: {
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16 },
+  searchInRow: { flex: 1, marginHorizontal: 0, paddingHorizontal: 12, gap: 8 },
+  filterButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterButtonOn: { backgroundColor: 'rgba(139, 92, 246, 0.2)' },
+  filterBadge: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  filterBadgeText: { color: 'white', fontSize: 10, fontWeight: '700' },
+  eikChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(139, 92, 246, 0.12)',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    gap: 4,
+    height: 46,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
   },
-  restoreHintText: {
-    flex: 1,
-    fontSize: 13,
-    color: COLORS.primary,
-    fontWeight: '500',
-  },
+  eikChipOn: { backgroundColor: COLORS.warning },
+  eikChipText: { color: COLORS.warning, fontSize: 13, fontWeight: '700' },
+  eikChipTextOn: { color: COLORS.background },
   searchInput: {
     flex: 1,
     paddingVertical: 14,
     color: 'white',
     fontSize: 16,
   },
-  filtersToggle: {
+  quickLinksRow: {
+    marginTop: 12,
+    height: 36,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  quickLinksContent: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  quickLinkChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
     backgroundColor: COLORS.surface,
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    marginRight: 8,
+    flexShrink: 0,
   },
-  filtersToggleText: {
-    fontSize: 13,
-    color: COLORS.primary,
-    fontWeight: '600',
+  quickLinkChipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
   periodChipsRow: {
     marginTop: 12,
@@ -1517,20 +1320,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  eikBannerActive: {
-    backgroundColor: 'rgba(245, 158, 11, 0.25)',
-  },
   eikBannerText: {
     flex: 1,
     fontSize: 13,
     color: COLORS.warning,
     fontWeight: '600',
-  },
-  eikBannerAction: {
-    fontSize: 12,
-    color: COLORS.warning,
-    fontWeight: '700',
-    textDecorationLine: 'underline',
   },
   supplierContainer: {
     flexDirection: 'row',
@@ -1557,483 +1351,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.borderLight,
     marginTop: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  modalContent: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 24,
-    padding: 24,
-    width: '100%',
-    maxWidth: 340,
-  },
-  detailModalContent: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 24,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '90%',
-  },
-  detailScroll: {
-    maxHeight: '100%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 20,
-  },
-  editNoticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: 'rgba(139, 92, 246, 0.12)',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 16,
-  },
-  editNoticeText: {
-    flex: 1,
-    fontSize: 12,
-    color: COLORS.primaryLight,
-    lineHeight: 16,
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: COLORS.background,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: 'white',
-  },
-  inputHint: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 6,
-  },
-  submitButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  submitButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  dateInputButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    gap: 10,
-  },
-  dateInputText: {
-    flex: 1,
-    color: 'white',
-    fontSize: 16,
-  },
-  vatTreatmentGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  vatTreatmentChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  vatTreatmentChipActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  vatTreatmentChipText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    fontWeight: '500',
-  },
-  vatTreatmentChipTextActive: {
-    color: 'white',
-  },
-  editActionsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-    marginBottom: 16,
-  },
-  editCancelButton: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: COLORS.border,
-  },
-  editCancelButtonText: {
-    color: COLORS.textLight,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  exportOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    marginBottom: 12,
-    gap: 16,
-  },
-  exportIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  exportOptionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-  },
-  exportOptionHint: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  cancelButton: {
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  cancelButtonText: {
-    color: COLORS.textSecondary,
-    fontSize: 16,
-  },
-  detailSection: {
-    marginBottom: 16,
-  },
-  scannedPageThumbWrapper: {
-    marginRight: 10,
-    position: 'relative',
-  },
-  scannedPageThumb: {
-    width: 72,
-    height: 96,
-    borderRadius: 8,
-    backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  scannedPageBadge: {
-    position: 'absolute',
-    bottom: 4,
-    left: 4,
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
-    borderRadius: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-  },
-  scannedPageBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  pageViewerOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pageViewerClose: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    zIndex: 1,
-    padding: 8,
-  },
-  pageViewerImage: {
-    width: '100%',
-    height: '80%',
-  },
-  pageViewerNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 24,
-    marginTop: 16,
-  },
-  pageViewerNavButton: {
-    padding: 8,
-  },
-  pageViewerNavText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  protocolBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    backgroundColor: 'rgba(139, 92, 246, 0.12)',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  protocolBannerOverdue: {
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-  },
-  protocolBannerTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'white',
-  },
-  protocolBannerDeadline: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  detailSectionLabel: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: 4,
-  },
-  detailSectionValue: {
-    fontSize: 16,
-    color: 'white',
-  },
-  detailRow2: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  totalSection: {
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  totalSectionLabel: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: 4,
-  },
-  totalSectionValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-  },
-  paymentSection: {
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  paymentSectionOverdue: {
-    borderColor: COLORS.danger,
-  },
-  paymentSectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  paymentMethodTag: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.primary,
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  paymentDueText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginBottom: 10,
-  },
-  paidCheckboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: COLORS.textMuted,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxChecked: {
-    backgroundColor: COLORS.success,
-    borderColor: COLORS.success,
-  },
-  paidCheckboxLabel: {
-    fontSize: 14,
-    color: 'white',
-    flex: 1,
-  },
-  paymentProgressBox: {
-    marginBottom: 10,
-  },
-  paymentProgressText: {
-    fontSize: 13,
-    color: 'white',
-    fontWeight: '600',
-  },
-  paymentRemainingText: {
-    fontSize: 12,
-    color: COLORS.warning,
-    marginTop: 2,
-    marginBottom: 6,
-  },
-  paymentProgressBar: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: COLORS.border,
-    overflow: 'hidden',
-  },
-  paymentProgressBarFill: {
-    height: '100%',
-    backgroundColor: COLORS.primary,
-    borderRadius: 3,
-  },
-  recordPaymentButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 10,
-    alignSelf: 'flex-start',
-  },
-  recordPaymentButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.primary,
-  },
-  itemsSection: {
-    marginBottom: 16,
-  },
-  itemsSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  itemsTableHeader: {
-    flexDirection: 'row',
-    paddingBottom: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    marginBottom: 4,
-  },
-  itemsTableHeaderText: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    fontWeight: '600',
-  },
-  itemsColRight: {
-    textAlign: 'right',
-  },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: COLORS.background,
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 6,
-    gap: 4,
-  },
-  itemRowName: {
-    fontSize: 13,
-    color: 'white',
-    fontWeight: '500',
-  },
-  itemRowValue: {
-    fontSize: 13,
-    color: COLORS.textSubtle,
-  },
-  itemRowTotal: {
-    fontWeight: '600',
-    color: 'white',
-  },
-  itemPriceAlertBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    marginTop: 3,
-  },
-  itemPriceAlertText: {
-    fontSize: 10,
-    color: COLORS.danger,
-    fontWeight: '600',
-  },
-  itemsSumRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 6,
-    paddingHorizontal: 4,
-  },
-  itemsSumLabel: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-  },
-  itemsSumValue: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    fontWeight: '600',
-  },
-  itemsMismatchNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-    paddingHorizontal: 4,
-  },
-  itemsMismatchText: {
-    fontSize: 11,
-    color: COLORS.warning,
-    flex: 1,
-  },
-  deleteButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    gap: 8,
-    marginTop: 8,
-  },
-  deleteButtonText: {
-    color: COLORS.danger,
-    fontSize: 14,
-    fontWeight: '500',
   },
 });

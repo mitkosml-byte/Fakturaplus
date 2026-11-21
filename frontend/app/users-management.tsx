@@ -32,7 +32,7 @@ import { ROLE_DEFAULT_PERMISSIONS, ConfigurableRole } from '../src/utils/permiss
 // ROLE_PERMISSIONS in backend/server.py) - never checklist-configurable -
 // so it's handled as a distinct branch wherever ConfigurableRole drives UI.
 type PickableRole = ConfigurableRole | 'owner';
-import { PermissionsChecklist, ScreenEnter, BottomSheet, RoleBadge, PressableScale } from '../src/components';
+import { PermissionsChecklist, ScreenEnter, BottomSheet, RoleBadge, PressableScale, Avatar } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -361,17 +361,7 @@ export default function UsersManagementScreen() {
                 <View key={user.user_id} style={styles.userCard}>
                   <View style={styles.userInfo}>
                     <View style={styles.avatarContainer}>
-                      {user.picture ? (
-                        <View style={styles.avatar}>
-                          <Text style={styles.avatarText}>
-                            {user.name?.charAt(0)?.toUpperCase() || '?'}
-                          </Text>
-                        </View>
-                      ) : (
-                        <View style={styles.avatar}>
-                          <Ionicons name="person" size={20} color="white" />
-                        </View>
-                      )}
+                      <Avatar uri={user.picture} name={user.name} size={40} />
                     </View>
                     <View style={styles.userDetails}>
                       <Text style={styles.userName}>{user.name}</Text>
@@ -596,23 +586,23 @@ export default function UsersManagementScreen() {
                   </View>
                 )}
 
-                <PressableScale
-                  style={[styles.inviteButton, inviting && styles.buttonDisabled]}
-                  onPress={handleInvite}
-                  disabled={inviting}
-                >
-                  {inviting ? (
-                    <ActivityIndicator color="white" />
-                  ) : (
-                    <>
-                      <Ionicons name="send" size={20} color="white" />
-                      <Text style={styles.inviteButtonText}>
-                        {t('users.createInvitation')}
-                      </Text>
-                    </>
-                  )}
-                </PressableScale>
                 </ScrollView>
+              <PressableScale
+                style={[styles.inviteButton, inviting && styles.buttonDisabled]}
+                onPress={handleInvite}
+                disabled={inviting}
+              >
+                {inviting ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <>
+                    <Ionicons name="send" size={20} color="white" />
+                    <Text style={styles.inviteButtonText}>
+                      {t('users.createInvitation')}
+                    </Text>
+                  </>
+                )}
+              </PressableScale>
               </View>
           </BottomSheet>
 
@@ -691,20 +681,22 @@ export default function UsersManagementScreen() {
                         </View>
                       )}
 
-                      <PressableScale
-                        style={[styles.inviteButton, savingAccess && styles.buttonDisabled]}
-                        onPress={handleSaveAccess}
-                        disabled={savingAccess}
-                      >
-                        {savingAccess ? (
-                          <ActivityIndicator color="white" />
-                        ) : (
-                          <Text style={styles.inviteButtonText}>{t('users.saveChanges')}</Text>
-                        )}
-                      </PressableScale>
                     </>
                   )}
                 </ScrollView>
+                {editingUser && (
+                  <PressableScale
+                    style={[styles.inviteButton, savingAccess && styles.buttonDisabled]}
+                    onPress={handleSaveAccess}
+                    disabled={savingAccess}
+                  >
+                    {savingAccess ? (
+                      <ActivityIndicator color="white" />
+                    ) : (
+                      <Text style={styles.inviteButtonText}>{t('users.saveChanges')}</Text>
+                    )}
+                  </PressableScale>
+                )}
               </View>
           </BottomSheet>
 
@@ -827,19 +819,6 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     marginRight: 12,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
   },
   userDetails: {
     flex: 1,
@@ -976,6 +955,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
+    flexShrink: 1,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -1039,6 +1019,11 @@ const styles = StyleSheet.create({
   },
   roleOption: {
     flex: 1,
+    // Flex items default to min-width: auto on web, which refuses to
+    // shrink a chip below its text's natural (unwrapped) width - the
+    // longest role label ("Счетоводител") then overflowed past its
+    // border in a 4-column row instead of wrapping to a second line.
+    minWidth: 0,
     padding: 16,
     borderRadius: 12,
     backgroundColor: COLORS.background,
@@ -1054,6 +1039,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: COLORS.textMuted,
+    textAlign: 'center',
   },
   roleOptionTextActive: {
     color: COLORS.primary,

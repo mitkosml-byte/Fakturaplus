@@ -60,12 +60,12 @@ export default function HelpScreen() {
     },
     {
       icon: 'scan',
-      title: 'Сканиране на фактури (OCR)',
+      title: 'Сканиране на фактури',
       content: [
         '📷 Натиснете "Сканирай" в долното меню',
         '📄 Заснемете фактурата с камерата или изберете от галерията',
         '📑 Ако фактурата е на няколко страници, натиснете "Добави страница" - AI разпознава данните от всички страници заедно',
-        '🔍 Системата автоматично ще извлече: доставчик, ЕИК, номер, дата, суми, ДДС третиране и артикули',
+        '🔍 Системата автоматично ще извлече: доставчик, ЕИК, номер, дата, суми, вид ДДС и артикули',
         '✏️ Можете да редактирате извлечените данни ако има грешки',
         '💾 Запазете фактурата с бутона "Запази" - сканираните страници остават достъпни за преглед от детайлите на фактурата',
         '🧾 Режим "Издадена фактура" прехвърля сумата директно в дневния оборот, без отделен запис на фактура',
@@ -98,7 +98,7 @@ export default function HelpScreen() {
       title: 'ДДС изчисление',
       content: [
         '📈 ДДС от продажби се изчислява от въведения оборот и избраната ставка (20%, 9% или 0%)',
-        '📉 ДДС кредит = ДДС от входящите фактури, според избраното ДДС третиране на всяка (стандартно 20%, намалено 9%, нулева ставка, освободени, извън обхвата или обратно начисляване)',
+        '📉 ДДС кредит = ДДС от входящите фактури, според избрания вид ДДС на всяка (стандартно 20%, намалено 9%, нулева ставка, освободени, извън обхвата или обратно начисляване)',
         '📄 При обратно начисляване приложението автоматично номерира протокол по чл. 117 ЗДДС',
         '💳 ДДС за плащане = ДДС продажби - ДДС кредит',
         '📊 Дневник на покупки/продажби (ДДС дневник) се експортира от Профил → Експорт за конкретен период',
@@ -112,7 +112,7 @@ export default function HelpScreen() {
         '📈 Графики с барчета по дни, вкл. изменение спрямо предходен период',
         '🌙 Почивните дни на фирмата (вижте секция "Почивни дни" по-долу) се показват в сиво и се изключват от средния дневен оборот',
         '🏆 Топ доставчици и артикули по суми',
-        '🔮 Прогноза за приходи/разходи и анализ на възвръщаемостта (ROI) - само за титуляря',
+        '🔮 Прогноза за приходи/разходи и анализ на възвръщаемостта - само за титуляря',
         '🔄 Дърпане надолу за опресняване на данните',
       ],
     },
@@ -196,7 +196,7 @@ export default function HelpScreen() {
       icon: 'person-circle',
       title: 'Лични вложения (само за титуляря)',
       content: [
-        '💼 Проследявайте лични средства, които влагате в бизнеса (стока, наем, персонал и др.) - за анализ на възвръщаемостта (ROI). За разходи, които теглите от бизнеса за лични нужди, вижте Лично тефтерче',
+        '💼 Проследявайте лични средства, които влагате в бизнеса (стока, наем, персонал и др.) - за анализ на възвръщаемостта. За разходи, които теглите от бизнеса за лични нужди, вижте Лично тефтерче',
         '📜 Пълна история с филтри по период, вид и категория в Начало → История',
       ],
     },
@@ -211,8 +211,8 @@ export default function HelpScreen() {
       icon: 'cloud-upload',
       title: 'Backup',
       content: [
-        '☁️ Профил → Google Drive бекъп',
-        '📤 Създайте backup и го запазете в Google Drive',
+        '☁️ Профил → Износ/импорт на бекъп',
+        '📤 Създайте backup и го запазете където пожелаете (Google Drive, имейл, локално)',
         '📥 Възстановете данни от backup файл',
         '🔒 Данните се съхраняват сигурно в базата данни на приложението',
       ],
@@ -228,12 +228,12 @@ export default function HelpScreen() {
     },
     {
       icon: 'scan',
-      title: 'Invoice Scanning (OCR)',
+      title: 'Scanning invoices',
       content: [
         '📷 Press "Scan" in the bottom menu',
         '📄 Capture the invoice with the camera or select from the gallery',
         '📑 If the invoice spans several pages, tap "Add page" - AI reads all pages together',
-        '🔍 The system automatically extracts: supplier, EIK, number, date, amounts, VAT treatment and line items',
+        '🔍 The system automatically extracts: supplier, EIK, number, date, amounts, VAT type and line items',
         '✏️ You can edit the extracted data if there are errors',
         '💾 Save the invoice with the "Save" button - the scanned pages stay available from the invoice detail view',
         '🧾 "Issued invoice" mode adds the amount directly to daily revenue instead of a separate invoice record',
@@ -266,7 +266,7 @@ export default function HelpScreen() {
       title: 'VAT Calculation',
       content: [
         '📈 Sales VAT is calculated from the entered revenue and the chosen rate (20%, 9% or 0%)',
-        '📉 VAT credit = VAT from incoming invoices, per each one\'s VAT treatment (standard 20%, reduced 9%, zero rate, exempt, outside scope, or reverse charge)',
+        '📉 VAT credit = VAT from incoming invoices, per each one\'s VAT type (standard 20%, reduced 9%, zero rate, exempt, outside scope, or reverse charge)',
         '📄 For reverse charge, the app automatically numbers a Чл. 117 ЗДДС self-billing protocol',
         '💳 VAT to pay = Sales VAT - VAT credit',
         '📊 The purchases/sales VAT ledger exports from Profile → Export for any period',
@@ -379,8 +379,8 @@ export default function HelpScreen() {
       icon: 'cloud-upload',
       title: 'Backup',
       content: [
-        '☁️ Profile → Google Drive backup',
-        '📤 Create a backup and save it to Google Drive',
+        '☁️ Profile → Backup export/import',
+        '📤 Create a backup and save it wherever you like (Google Drive, email, locally)',
         '📥 Restore data from a backup file',
         "🔒 Data is stored securely in the app's own database",
       ],

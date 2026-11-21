@@ -12,6 +12,7 @@ import { useLanguageStore, useTranslation } from '../src/i18n';
 import { api } from '../src/services/api';
 import { setStoredToken } from '../src/utils/tokenStorage';
 import { COLORS } from '../src/theme/colors';
+import type { LoginChallenge, LoginSession } from '../src/types';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -35,6 +36,11 @@ export default function LoginScreen() {
   // се по покана").
   const [showInviteCode, setShowInviteCode] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
+  // The second step at login, for an account that turned it on: the
+  // password was right and the login now waits for the code.
+  const [challenge, setChallenge] = useState<LoginChallenge | null>(null);
+  const [code, setCode] = useState('');
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
 
   useEffect(() => {
     loadLanguage();
@@ -56,29 +62,31 @@ export default function LoginScreen() {
 
     setIsProcessing(true);
     try {
-      let result;
       if (authMode === 'register') {
-        result = await api.register(email.trim(), password, name.trim(), inviteCode.trim() || undefined);
+        const result = await api.register(email.trim(), password, name.trim(), inviteCode.trim() || undefined);
+        await keepSession(result);
+        // The account already exists and is logged in at this point - an
+        // invalid/expired code (invite_error) doesn't undo that, it just
+        // means they landed in their own new company instead of the
+        // inviter's. Say so, but don't block sign-up over it.
+        if (inviteCode.trim() && result.invite_error) {
+          Alert.alert(
+            t('login.codeDidntWork'),
+            result.invite_error + '\n\n' + t('login.accountCreatedTryAgain')
+          );
+        }
+        setUser(result.user);
       } else {
-        result = await api.login(email.trim(), password);
+        const result = await api.login(email.trim(), password);
+        if ('two_factor_required' in result) {
+          setChallenge(result);
+          setCode('');
+          setUseRecoveryCode(result.method === 'email' && result.code_sent === false);
+          return;
+        }
+        await keepSession(result);
+        setUser(result.user);
       }
-
-      api.setToken(result.session_token);
-      // Persist the token so the session survives a reload/app restart -
-      // checkAuth() on the next app boot reads it back to restore login.
-      await setStoredToken(result.session_token);
-
-      // The account already exists and is logged in at this point - an
-      // invalid/expired code (invite_error) doesn't undo that, it just
-      // means they landed in their own new company instead of the
-      // inviter's. Say so, but don't block sign-up over it.
-      if (authMode === 'register' && inviteCode.trim() && 'invite_error' in result && result.invite_error) {
-        Alert.alert(
-          t('login.codeDidntWork'),
-          result.invite_error + '\n\n' + t('login.accountCreatedTryAgain')
-        );
-      }
-      setUser(result.user);
       // The root layout's auth guard navigates to /(tabs) once
       // isAuthenticated flips true - no manual navigation needed here.
     } catch (error: any) {
@@ -86,6 +94,39 @@ export default function LoginScreen() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const keepSession = async (session: LoginSession) => {
+    api.setToken(session.session_token);
+    // Persist the token so the session survives a reload/app restart -
+    // checkAuth() on the next app boot reads it back to restore login.
+    await setStoredToken(session.session_token);
+  };
+
+  const handleSecondStep = async () => {
+    if (!challenge) return;
+    if (!code.trim()) {
+      Alert.alert(t('common.error'), t('login.enterCode'));
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      const session = await api.loginSecondStep(challenge.challenge_token, code.trim());
+      await keepSession(session);
+      setChallenge(null);
+      setUser(session.user);
+    } catch (error: any) {
+      setCode('');
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const backToLogin = () => {
+    setChallenge(null);
+    setCode('');
+    setUseRecoveryCode(false);
   };
 
   if (isLoading || isProcessing) {
@@ -139,6 +180,52 @@ export default function LoginScreen() {
                 <Text style={styles.subtitle}>{t('login.title')}</Text>
               </View>
 
+              {challenge ? (
+                <View style={styles.formContainer}>
+                  <View style={styles.secondStepHeader}>
+                    <Ionicons name="shield-checkmark-outline" size={26} color={COLORS.primary} />
+                    <Text style={styles.secondStepTitle}>{t('login.twoFactorTitle')}</Text>
+                  </View>
+                  <Text style={styles.secondStepText}>
+                    {challenge.method === 'totp'
+                      ? t('login.twoFactorApp')
+                      : challenge.code_sent === false
+                        ? t('login.twoFactorEmailFailed')
+                        : t('login.twoFactorEmail')}
+                  </Text>
+                  <View style={styles.inputContainer}>
+                    <Ionicons name={useRecoveryCode ? 'key-outline' : 'keypad-outline'} size={20} color={COLORS.textMuted} style={styles.inputIcon} />
+                    <TextInput
+                      key={useRecoveryCode ? 'recovery' : 'code'}
+                      style={[styles.input, !!code && styles.codeInput]}
+                      placeholder={useRecoveryCode ? 'XXXX-XXXX' : t('login.twoFactorPlaceholder')}
+                      placeholderTextColor={COLORS.textMuted}
+                      value={code}
+                      onChangeText={(v) => setCode(useRecoveryCode ? v.toUpperCase() : v.replace(/\D/g, ''))}
+                      keyboardType={useRecoveryCode ? 'default' : 'number-pad'}
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      textContentType="oneTimeCode"
+                      autoComplete="one-time-code"
+                      maxLength={useRecoveryCode ? 9 : 6}
+                      autoFocus
+                      onSubmitEditing={handleSecondStep}
+                    />
+                  </View>
+                  {!useRecoveryCode && (
+                    <TouchableOpacity onPress={() => { setUseRecoveryCode(true); setCode(''); }} style={styles.inviteCodeToggle}>
+                      <Ionicons name="key-outline" size={16} color={COLORS.primary} />
+                      <Text style={styles.inviteCodeToggleText}>{t('login.twoFactorRecoveryHint')}</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity style={styles.emailButton} onPress={handleSecondStep}>
+                    <Text style={styles.emailButtonText}>{t('login.confirmCode')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={backToLogin} style={styles.backToLogin}>
+                    <Text style={styles.forgotPasswordText}>{t('login.backToLogin')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (<>
               {/* Auth Mode Toggle */}
               <View style={styles.authToggle}>
                 <TouchableOpacity 
@@ -257,6 +344,7 @@ export default function LoginScreen() {
                   </Text>
                 </TouchableOpacity>
               </View>
+              </>)}
 
               {/* Legal Links */}
               <View style={styles.legalLinks}>
@@ -461,6 +549,34 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  secondStepHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  secondStepTitle: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  secondStepText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  codeInput: {
+    letterSpacing: 4,
+    fontWeight: '600',
+  },
+  backToLogin: {
+    alignItems: 'center',
+    marginTop: 16,
+    padding: 8,
   },
   featuresContainer: {
     width: '100%',

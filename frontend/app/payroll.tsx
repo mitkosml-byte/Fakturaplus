@@ -22,9 +22,11 @@ import { Employee, PayrollAgreementType, PayrollRates, PayrollBreakdown, Payroll
 import { format } from 'date-fns';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter } from '../src/components';
+import { AccessDenied, ScreenEnter, LocationPicker } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
+import PayrollPdfImportModal from '../src/components/PayrollPdfImportModal';
 import { COLORS } from '../src/theme/colors';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 const emptyEmployeeForm = () => ({
   name: '',
@@ -33,6 +35,9 @@ const emptyEmployeeForm = () => ({
   agreement_type: 'gross' as PayrollAgreementType,
   food_vouchers: '',
   additional_insurance: '',
+  linked_user_id: null as string | null,
+  // Where they work (Н11): their payroll goes to that location.
+  location_id: null as string | null,
 });
 
 export default function PayrollScreen() {
@@ -49,8 +54,13 @@ export default function PayrollScreen() {
 
   const [employeeModalVisible, setEmployeeModalVisible] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
+  const [pdfImportModalVisible, setPdfImportModalVisible] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm());
+  // Optional link from this payroll record to the SAME person's own app
+  // account, so work-schedule can cross-check a shift against their
+  // already-recorded leave. Loaded once, used only to populate the picker.
+  const [directory, setDirectory] = useState<{ user_id: string; name: string; picture: string | null }[]>([]);
 
   const [payrollModalVisible, setPayrollModalVisible] = useState(false);
   const [payrollEmployee, setPayrollEmployee] = useState<Employee | null>(null);
@@ -70,20 +80,25 @@ export default function PayrollScreen() {
     min_insurance_income: '',
     max_insurance_income: '',
   });
+  // From which month the rates apply ("YYYY-MM"): a payroll of an earlier
+  // month keeps the rates of its own time.
+  const [ratesFrom, setRatesFrom] = useState('');
 
   const periodMonth = selectedMonth.getMonth() + 1;
   const periodYear = selectedMonth.getFullYear();
 
   const loadData = useCallback(async () => {
     try {
-      const [employeesData, entriesData, ratesData] = await Promise.all([
+      const [employeesData, entriesData, ratesData, directoryData] = await Promise.all([
         api.getEmployees(),
         api.getPayrollEntries({ month: periodMonth, year: periodYear }),
         api.getPayrollRates(),
+        api.getCompanyDirectory(),
       ]);
       setEmployees(employeesData);
       setEntries(entriesData);
       setRates(ratesData);
+      setDirectory(directoryData);
     } catch (error) {
       console.error('Error loading payroll data:', error);
     } finally {
@@ -106,7 +121,13 @@ export default function PayrollScreen() {
   };
 
   const entryForEmployee = (employeeId: string) => entries.find((e) => e.employee_id === employeeId);
-  const totalCostThisMonth = entries.reduce((sum, e) => sum + e.total_employer_cost, 0);
+  // Matches the backend's own get_payroll_cost_for_period filter - an
+  // entry switched off here must disappear from this total too, or the
+  // screen would show a number that contradicts what actually counts
+  // toward business expenses elsewhere in the app.
+  const totalCostThisMonth = entries
+    .filter((e) => e.counted_in_expenses !== false)
+    .reduce((sum, e) => sum + e.total_employer_cost, 0);
 
   // ---- Employee CRUD ----
   const openNewEmployee = () => {
@@ -124,6 +145,8 @@ export default function PayrollScreen() {
       agreement_type: emp.agreement_type,
       food_vouchers: emp.food_vouchers ? String(emp.food_vouchers) : '',
       additional_insurance: emp.additional_insurance ? String(emp.additional_insurance) : '',
+      linked_user_id: emp.linked_user_id || null,
+      location_id: emp.location_id || null,
     });
     setEmployeeModalVisible(true);
   };
@@ -140,12 +163,14 @@ export default function PayrollScreen() {
       agreement_type: employeeForm.agreement_type,
       food_vouchers: parseFloat(employeeForm.food_vouchers) || 0,
       additional_insurance: parseFloat(employeeForm.additional_insurance) || 0,
+      linked_user_id: employeeForm.linked_user_id,
     };
     try {
       if (editingEmployee) {
-        await api.updateEmployee(editingEmployee.id, payload);
+        // "" takes them off a location.
+        await api.updateEmployee(editingEmployee.id, { ...payload, location_id: employeeForm.location_id ?? '' });
       } else {
-        await api.createEmployee(payload);
+        await api.createEmployee({ ...payload, location_id: employeeForm.location_id });
       }
       setEmployeeModalVisible(false);
       await loadData();
@@ -231,7 +256,7 @@ export default function PayrollScreen() {
     }
   };
 
-  const savePayrollEntry = async () => {
+  const savePayrollEntry = async (confirmDoublePay = false) => {
     if (!payrollEmployee) return;
     setSaving(true);
     try {
@@ -243,6 +268,7 @@ export default function PayrollScreen() {
         bonus_amount: parseFloat(bonusAmount) || 0,
         notes: payrollNotes || undefined,
         image_base64: payrollImage || undefined,
+        confirm_double_pay: confirmDoublePay,
       };
       if (payrollEmployee.agreement_type === 'net') {
         params.net_target = amount;
@@ -253,9 +279,27 @@ export default function PayrollScreen() {
       setPayrollModalVisible(false);
       await loadData();
     } catch (error: any) {
-      Alert.alert(t('common.error'), error.message);
+      if (error.status === 428 && !confirmDoublePay) {
+        // Already paid for days of this month through Work Schedule.
+        Alert.alert(t('payRun.doublePayTitle'), error.message, [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('payRun.payAnyway'), style: 'destructive', onPress: () => { savePayrollEntry(true); } },
+        ]);
+      } else {
+        Alert.alert(t('common.error'), error.message);
+      }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const toggleCountedInExpenses = async (entry: PayrollEntry) => {
+    const next = !(entry.counted_in_expenses !== false);
+    try {
+      await api.setPayrollEntryCountedInExpenses(entry.id, next);
+      await loadData();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
     }
   };
 
@@ -282,8 +326,14 @@ export default function PayrollScreen() {
   };
 
   // ---- Rates ----
+  const thisMonthKey = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  };
+
   const openRates = () => {
     if (!rates) return;
+    setRatesFrom(thisMonthKey());
     setRatesForm({
       employee_rate_percent: String(rates.employee_rate_percent),
       employer_rate_percent: String(rates.employer_rate_percent),
@@ -296,7 +346,12 @@ export default function PayrollScreen() {
 
   const saveRates = async () => {
     try {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ratesFrom.trim())) {
+        Alert.alert(t('common.error'), t('payroll.ratesFromInvalid'));
+        return;
+      }
       const updated = await api.updatePayrollRates({
+        effective_from: ratesFrom.trim(),
         employee_rate_percent: parseFloat(ratesForm.employee_rate_percent),
         employer_rate_percent: parseFloat(ratesForm.employer_rate_percent),
         income_tax_percent: parseFloat(ratesForm.income_tax_percent),
@@ -310,7 +365,24 @@ export default function PayrollScreen() {
     }
   };
 
-  if (!hasPermission('manage_budget')) {
+  const removeRatesVersion = (effectiveFrom: string) => {
+    Alert.alert(t('common.confirm'), t('payroll.ratesDeleteConfirm').replace('{month}', effectiveFrom), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setRates(await api.deletePayrollRatesVersion(effectiveFrom));
+          } catch (error: any) {
+            Alert.alert(t('common.error'), error.message);
+          }
+        },
+      },
+    ]);
+  };
+
+  if (!hasPermission('manage_payroll')) {
     return <AccessDenied />;
   }
 
@@ -324,6 +396,12 @@ export default function PayrollScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('payroll.title')}</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity onPress={() => router.push('/pay-run')} style={styles.backButton} accessibilityLabel={t('payroll.payTeam')}>
+              <Ionicons name="cash-outline" size={22} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setPdfImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('payroll.importPdfButton')}>
+              <Ionicons name="document-attach-outline" size={22} color="white" />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setImportModalVisible(true)} style={styles.backButton} accessibilityLabel={t('import.button')}>
               <Ionicons name="cloud-upload-outline" size={22} color="white" />
             </TouchableOpacity>
@@ -347,7 +425,7 @@ export default function PayrollScreen() {
 
         <View style={styles.totalCostCard}>
           <Text style={styles.totalCostLabel}>{t('payroll.totalCostThisMonth')}</Text>
-          <Text style={styles.totalCostValue}>{totalCostThisMonth.toFixed(2)} €</Text>
+          <Text style={styles.totalCostValue}>{formatMoney(totalCostThisMonth)}</Text>
         </View>
 
         <ScrollView
@@ -383,7 +461,7 @@ export default function PayrollScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.employeeName}>{emp.name}</Text>
                       <Text style={styles.employeePosition}>
-                        {emp.position || t('payroll.noPosition')} · {emp.base_salary.toFixed(0)} €
+                        {emp.position || t('payroll.noPosition')} · {formatMoney(emp.base_salary)}
                         {emp.agreement_type === 'net' ? ` ${t('payroll.netShort')}` : ` ${t('payroll.grossShort')}`}
                       </Text>
                     </View>
@@ -391,14 +469,28 @@ export default function PayrollScreen() {
 
                   {entry ? (
                     <View style={styles.entrySummary}>
+                      {entry.source === 'accountant_import' && (
+                        <View style={styles.importedBadge}>
+                          <Ionicons name="document-attach" size={11} color={COLORS.success} />
+                          <Text style={styles.importedBadgeText}>{t('payroll.importedBadge')}</Text>
+                        </View>
+                      )}
                       <View style={styles.entrySummaryRow}>
                         <Text style={styles.entrySummaryLabel}>{t('payroll.netAmount')}</Text>
-                        <Text style={styles.entrySummaryValue}>{entry.net_amount.toFixed(2)} €</Text>
+                        <Text style={styles.entrySummaryValue}>{formatMoney(entry.net_amount)}</Text>
                       </View>
                       <View style={styles.entrySummaryRow}>
                         <Text style={styles.entrySummaryLabel}>{t('payroll.totalEmployerCost')}</Text>
-                        <Text style={[styles.entrySummaryValue, { color: COLORS.primary }]}>{entry.total_employer_cost.toFixed(2)} €</Text>
+                        <Text style={[styles.entrySummaryValue, { color: COLORS.primary }]}>{formatMoney(entry.total_employer_cost)}</Text>
                       </View>
+                      <TouchableOpacity style={styles.countedToggleRow} onPress={() => toggleCountedInExpenses(entry)}>
+                        <Ionicons
+                          name={entry.counted_in_expenses !== false ? 'checkbox' : 'square-outline'}
+                          size={18}
+                          color={COLORS.primary}
+                        />
+                        <Text style={styles.countedToggleText}>{t('payroll.countedInExpenses')}</Text>
+                      </TouchableOpacity>
                       <TouchableOpacity style={styles.deleteEntryButton} onPress={() => deletePayrollEntry(entry)}>
                         <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
                         <Text style={styles.deleteEntryText}>{t('payroll.removeEntry')}</Text>
@@ -500,6 +592,37 @@ export default function PayrollScreen() {
                 </View>
               </View>
 
+              <LocationPicker
+                value={employeeForm.location_id}
+                onChange={(id) => setEmployeeForm((p) => ({ ...p, location_id: id }))}
+                label={t('locations.employeeLabel')}
+                noneLabel={t('locations.noneTeam')}
+              />
+
+              <Text style={styles.inputLabel}>{t('payroll.linkedAccount')}</Text>
+              <Text style={styles.linkedAccountHint}>{t('payroll.linkedAccountHint')}</Text>
+              <View style={styles.linkChipRow}>
+                <TouchableOpacity
+                  style={[styles.linkChip, !employeeForm.linked_user_id && styles.linkChipActive]}
+                  onPress={() => setEmployeeForm((p) => ({ ...p, linked_user_id: null }))}
+                >
+                  <Text style={[styles.linkChipText, !employeeForm.linked_user_id && styles.linkChipTextActive]}>
+                    {t('payroll.noLinkedAccount')}
+                  </Text>
+                </TouchableOpacity>
+                {directory.map((d) => (
+                  <TouchableOpacity
+                    key={d.user_id}
+                    style={[styles.linkChip, employeeForm.linked_user_id === d.user_id && styles.linkChipActive]}
+                    onPress={() => setEmployeeForm((p) => ({ ...p, linked_user_id: d.user_id }))}
+                  >
+                    <Text style={[styles.linkChipText, employeeForm.linked_user_id === d.user_id && styles.linkChipTextActive]}>
+                      {d.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <View style={styles.modalButtons}>
                 <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setEmployeeModalVisible(false)}>
                   <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
@@ -563,28 +686,28 @@ export default function PayrollScreen() {
                   <>
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.grossAmount')}</Text>
-                      <Text style={styles.previewValue}>{preview.gross_amount.toFixed(2)} €</Text>
+                      <Text style={styles.previewValue}>{formatMoney(preview.gross_amount)}</Text>
                     </View>
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.employeeContributions')}</Text>
-                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{preview.employee_contributions.toFixed(2)} €</Text>
+                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{formatMoney(preview.employee_contributions)}</Text>
                     </View>
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.incomeTax')}</Text>
-                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{preview.income_tax.toFixed(2)} €</Text>
+                      <Text style={[styles.previewValue, { color: COLORS.danger }]}>-{formatMoney(preview.income_tax)}</Text>
                     </View>
                     <View style={[styles.previewRow, styles.previewRowHighlight]}>
                       <Text style={styles.previewLabelBold}>{t('payroll.netAmount')}</Text>
-                      <Text style={styles.previewValueBold}>{preview.net_amount.toFixed(2)} €</Text>
+                      <Text style={styles.previewValueBold}>{formatMoney(preview.net_amount)}</Text>
                     </View>
                     <View style={styles.previewDivider} />
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>{t('payroll.employerContributions')}</Text>
-                      <Text style={styles.previewValue}>+{preview.employer_contributions.toFixed(2)} €</Text>
+                      <Text style={styles.previewValue}>+{formatMoney(preview.employer_contributions)}</Text>
                     </View>
                     <View style={[styles.previewRow, styles.previewRowHighlight]}>
                       <Text style={styles.previewLabelBold}>{t('payroll.totalEmployerCost')}</Text>
-                      <Text style={[styles.previewValueBold, { color: COLORS.primary }]}>{preview.total_employer_cost.toFixed(2)} €</Text>
+                      <Text style={[styles.previewValueBold, { color: COLORS.primary }]}>{formatMoney(preview.total_employer_cost)}</Text>
                     </View>
                   </>
                 ) : null}
@@ -594,7 +717,7 @@ export default function PayrollScreen() {
                 <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setPayrollModalVisible(false)}>
                   <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.modalSaveBtn} onPress={savePayrollEntry} disabled={saving}>
+                <TouchableOpacity style={styles.modalSaveBtn} onPress={() => savePayrollEntry()} disabled={saving}>
                   {saving ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
                 </TouchableOpacity>
               </View>
@@ -609,6 +732,34 @@ export default function PayrollScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t('payroll.rates')}</Text>
             <Text style={styles.ratesDisclaimer}>{t('payroll.ratesDisclaimer')}</Text>
+
+            <Text style={styles.inputLabel}>{t('payroll.ratesFrom')}</Text>
+            <TextInput
+              style={styles.input}
+              value={ratesFrom}
+              onChangeText={setRatesFrom}
+              placeholder="2027-01"
+              placeholderTextColor={COLORS.textMuted}
+              autoCapitalize="none"
+            />
+            <Text style={styles.ratesDisclaimer}>{t('payroll.ratesFromHint')}</Text>
+            {(rates?.versions || []).length > 1 && (
+              <View style={{ marginBottom: 8 }}>
+                {(rates?.versions || []).map((version) => (
+                  <View key={version.effective_from} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 }}>
+                    <Text style={[styles.ratesDisclaimer, { flex: 1, marginBottom: 0 }]}>
+                      {version.effective_from === '2000-01'
+                        ? t('payroll.ratesFromStart')
+                        : t('payroll.ratesVersion').replace('{month}', version.effective_from)}
+                      {` · ${formatAmount(version.min_insurance_income)}–${formatMoney(version.max_insurance_income)}`}
+                    </Text>
+                    <TouchableOpacity onPress={() => removeRatesVersion(version.effective_from)} hitSlop={8}>
+                      <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
 
             <Text style={styles.inputLabel}>{t('payroll.employeeRate')}</Text>
             <TextInput
@@ -679,9 +830,23 @@ export default function PayrollScreen() {
         title={t('import.button')}
         fields={[
           { key: 'period_month', label: t('payroll.period'), format: (_v, row) => `${row.period_month}/${row.period_year}` },
-          { key: 'gross_amount', label: t('payroll.grossAmount'), format: (v, row) => `${Number(v ?? row.net_target ?? 0).toFixed(2)} €` },
+          { key: 'gross_amount', label: t('payroll.grossAmount'), format: (v, row) => `${formatMoney(Number(v ?? row.net_target ?? 0))}` },
         ]}
         onImported={loadData}
+      />
+
+      <PayrollPdfImportModal
+        visible={pdfImportModalVisible}
+        onClose={() => setPdfImportModalVisible(false)}
+        employees={employees}
+        onImported={(importedMonth, importedYear) => {
+          // Jumps the screen to the period that was just imported - loadData
+          // re-runs automatically via the effect watching periodMonth/
+          // periodYear below, so a successful import is immediately visible
+          // instead of silently landing on whatever month happened to be
+          // selected before the import.
+          setSelectedMonth(new Date(importedYear, importedMonth - 1, 1));
+        }}
       />
     </View>
     </ScreenEnter>
@@ -743,11 +908,15 @@ const styles = StyleSheet.create({
   },
   processButtonText: { color: 'white', fontSize: 13, fontWeight: '600' },
   entrySummary: { backgroundColor: COLORS.background, borderRadius: 10, padding: 12 },
+  importedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginBottom: 6 },
+  importedBadgeText: { fontSize: 10, color: COLORS.success, fontWeight: '600' },
   entrySummaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
   entrySummaryLabel: { fontSize: 12, color: COLORS.textSecondary },
   entrySummaryValue: { fontSize: 13, fontWeight: '600', color: 'white' },
   deleteEntryButton: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, alignSelf: 'flex-start' },
   deleteEntryText: { fontSize: 11, color: COLORS.danger },
+  countedToggleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  countedToggleText: { fontSize: 12, color: COLORS.textSecondary },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 22 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: 'white', textAlign: 'center' },
@@ -756,9 +925,19 @@ const styles = StyleSheet.create({
   input: { backgroundColor: COLORS.background, borderRadius: 10, padding: 12, color: 'white', fontSize: 15 },
   row2: { flexDirection: 'row', gap: 12 },
   agreementRow: { flexDirection: 'row', gap: 10 },
-  agreementChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.background, alignItems: 'center' },
+  // minWidth: 0 overrides flex items' web default of min-width: auto, which
+  // refuses to shrink a chip below its text's natural width and overflows
+  // a longer label past its border instead of wrapping (same fix as
+  // ChipTabs' chip style and users-management's roleOption).
+  agreementChip: { flex: 1, minWidth: 0, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.background, alignItems: 'center' },
   agreementChipActive: { backgroundColor: COLORS.primary },
-  agreementChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  agreementChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500', textAlign: 'center' },
+  linkedAccountHint: { fontSize: 11, color: COLORS.textMuted, marginBottom: 8 },
+  linkChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  linkChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: COLORS.background },
+  linkChipActive: { backgroundColor: COLORS.primary },
+  linkChipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  linkChipTextActive: { color: 'white' },
   agreementChipTextActive: { color: 'white' },
   attachButton: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, alignSelf: 'flex-start' },
   attachButtonText: { fontSize: 13, color: COLORS.primary, fontWeight: '500' },

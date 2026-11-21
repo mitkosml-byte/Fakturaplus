@@ -26,13 +26,17 @@ export const Toast = {
   },
   // Sharpened #19: used by immediate-delete flows instead of a blocking
   // confirm dialog - the row is already gone, this is the undo window.
-  undo(message: string, onUndo: () => void, duration = UNDO_DURATION) {
+  // look: another icon than the bin, for an undo after something that is
+  // not a delete (e.g. "Поръчано").
+  undo(message: string, onUndo: () => void, duration = UNDO_DURATION, look?: { icon: string; color: string }) {
     useToastStore.getState().show({
       message,
       variant: 'undo',
       actionLabel: t('common.undo'),
       onAction: onUndo,
       duration,
+      icon: look?.icon,
+      iconColor: look?.color,
     });
   },
 };

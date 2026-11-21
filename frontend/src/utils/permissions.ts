@@ -5,9 +5,11 @@ export type Permission =
   | 'manage_company'
   | 'view_audit_log'
   | 'manage_budget'
+  | 'manage_payroll'
   | 'export_data'
   | 'view_statistics'
   | 'manage_invoices'
+  | 'issue_invoices'
   | 'add_revenue'
   | 'add_expenses'
   | 'view_pocket_money'
@@ -35,14 +37,16 @@ export type ConfigurableRole = 'manager' | 'staff' | 'accountant';
 export const ROLE_DEFAULT_PERMISSIONS: Record<ConfigurableRole, Permission[]> = {
   manager: [
     'manage_budget', 'export_data', 'view_statistics', 'manage_invoices', 'add_revenue', 'add_expenses',
-    'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'team_collaboration',
+    'issue_invoices', 'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'team_collaboration',
   ],
-  staff: [
-    'manage_invoices', 'add_revenue', 'add_expenses',
-    'view_pocket_money', 'view_off_book_expenses',
-  ],
+  // Empty by design: a newly invited staff member starts with no
+  // permission at all - everything these gate is opt-in, ticked explicitly
+  // per person. Their own Work Schedule shifts and their own Account/
+  // profile settings aren't gated by any of these, so those stay reachable
+  // regardless.
+  staff: [],
   accountant: [
-    'view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices',
+    'view_audit_log', 'manage_budget', 'manage_payroll', 'export_data', 'view_statistics', 'manage_invoices',
     'view_profit', 'team_collaboration',
   ],
 };
@@ -51,8 +55,8 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<ConfigurableRole, Permission[]> = 
 // the owner is allowed to see and tick for that role. manage_users and
 // manage_company never appear here for anyone but the owner.
 const STAFF_LIKE_CONFIGURABLE: Permission[] = [
-  'view_audit_log', 'manage_budget', 'export_data', 'view_statistics',
-  'manage_invoices', 'add_revenue', 'add_expenses',
+  'view_audit_log', 'manage_budget', 'manage_payroll', 'export_data', 'view_statistics',
+  'manage_invoices', 'add_revenue', 'add_expenses', 'issue_invoices',
   'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
   'team_collaboration', 'restore_deleted_data',
   'view_personal_wallet', 'add_personal_wallet_entries', 'manage_personal_wallet',
@@ -67,9 +71,9 @@ export const ROLE_CONFIGURABLE_PERMISSIONS: Record<ConfigurableRole, Permission[
   // permissions on offer, so the owner is never asked to think about those
   // for this role.
   accountant: [
-    'view_audit_log', 'manage_budget', 'export_data', 'view_statistics', 'manage_invoices',
+    'view_audit_log', 'manage_budget', 'manage_payroll', 'export_data', 'view_statistics', 'manage_invoices',
     'view_pocket_money', 'view_off_book_expenses', 'view_profit', 'view_personal_investments',
-    'team_collaboration', 'restore_deleted_data',
+    'team_collaboration', 'restore_deleted_data', 'issue_invoices',
     'view_personal_wallet', 'add_personal_wallet_entries', 'manage_personal_wallet',
   ],
 };
@@ -78,11 +82,15 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   manage_users: { bg: 'Управление на потребители', en: 'Manage users' },
   manage_company: { bg: 'Настройки на фирмата', en: 'Company settings' },
   view_audit_log: { bg: 'Одит лог', en: 'Audit log' },
-  manage_budget: { bg: 'Бюджет, ведомости, ДМА', en: 'Budget, payroll, fixed assets' },
+  manage_budget: { bg: 'Бюджет, ДМА, график и отсъствия', en: 'Budget, fixed assets, schedule and absences' },
+  // Whoever keeps the payroll also sees the salaries in the totals - for
+  // anyone else they are out of every sum (get_financial_visibility).
+  manage_payroll: { bg: 'Заплати и ведомости (вижда ги и в сумите; плащане по график)', en: 'Salaries and payroll (sees them in the totals too; schedule pay)' },
   export_data: { bg: 'Износ на данни (Excel/PDF)', en: 'Export data (Excel/PDF)' },
   view_statistics: { bg: 'Разширена статистика', en: 'Advanced statistics' },
   manage_invoices: { bg: 'Фактури', en: 'Invoices' },
-  add_revenue: { bg: 'Въвеждане на оборот', en: 'Enter revenue' },
+  add_revenue: { bg: 'Въвеждане на оборот, сметки и вземания', en: 'Enter revenue, bills and receivables' },
+  issue_invoices: { bg: 'Издаване на фактури (анулира само собственик/управител)', en: 'Issue invoices (only owner/manager cancel)' },
   add_expenses: { bg: 'Въвеждане на разходи', en: 'Enter expenses' },
   view_pocket_money: { bg: 'Вижда "джобче"', en: 'Sees pocket money' },
   view_off_book_expenses: { bg: 'Вижда разходи "в канала"', en: 'Sees off-book expenses' },
@@ -91,7 +99,7 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   team_collaboration: { bg: 'Календар и съобщения', en: 'Calendar and messages' },
   manage_billing: { bg: 'Плащания и кредити за сканиране', en: 'Billing and scan credits' },
   restore_deleted_data: { bg: 'Възстановяване на изтрити фактури', en: 'Restore deleted invoices' },
-  view_personal_wallet: { bg: 'Вижда личното тефтерче', en: 'Sees the personal wallet' },
+  view_personal_wallet: { bg: 'Вижда личното тефтерче (и „Лично ползване“ под печалбата)', en: 'Sees the personal wallet (and "Personal use" under the profit)' },
   add_personal_wallet_entries: { bg: 'Добавя в личното тефтерче', en: 'Adds to the personal wallet' },
   manage_personal_wallet: { bg: 'Коригира личното тефтерче', en: 'Edits the personal wallet' },
 };

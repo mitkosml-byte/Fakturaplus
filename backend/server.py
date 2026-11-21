@@ -1,14 +1,17 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Response, Request, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
+import contextvars
+import math
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr, ValidationError
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field, EmailStr, ValidationError, model_validator
+from typing import Annotated, List, Optional, Dict, Any, Literal, Tuple
 from enum import Enum
 import uuid
 from datetime import datetime, timezone, timedelta, date
@@ -16,8 +19,10 @@ import base64
 import httpx
 import io
 import re
+import statistics
 import json
 import difflib
+import hashlib
 from passlib.context import CryptContext
 import certifi
 from anthropic import AsyncAnthropic
@@ -44,8 +49,19 @@ from slowapi.errors import RateLimitExceeded
 # first call.
 import services.scan_credit_service as scan_credit_service_module
 from services.scan_credit_service import ScanCreditService
+from services.business_calendar import (
+    BUSINESS_TZ, OPEN_END, OPEN_START, Period, business_day, day_start_utc, days_in_month, is_stored_day,
+    now_local, stored_day, today_local,
+)
+from services import revenue_vat
+from services.money_text import fmt_amount, fmt_eur
 
 ROOT_DIR = Path(__file__).parent
+
+# cursor.to_list(ALL_ROWS) = every matching document - never a silent first-N
+# slice of data that feeds a sum. (Motor's stubs type the length as int; the
+# driver takes None for "all", hence Any.)
+ALL_ROWS: Any = None
 load_dotenv(ROOT_DIR / '.env')
 
 # Environment
@@ -64,7 +80,16 @@ limiter = Limiter(key_func=get_remote_address)
 # unreachable at startup, which blocks the port binding that Render (and
 # any other host) waits on to consider the deploy alive.
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
+# Explicit generic parameter (as a STRING annotation - the installed
+# motor version's AsyncIOMotorClient isn't actually subscriptable at
+# runtime despite its .pyi stub declaring it generic, so a real
+# `AsyncIOMotorClient[Dict[str, Any]]` expression here would raise
+# TypeError on import; a string annotation is read by mypy but never
+# evaluated by Python). Without this, mypy can't infer _DocumentType
+# from this call and silently falls back to treating every
+# db.<collection>.find_one/find/etc. result as None - the single
+# largest source of noise in this file's type-check output.
+client: "AsyncIOMotorClient[Dict[str, Any]]" = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
 db = client[os.environ.get('DB_NAME', 'test_database')]
 
 # AI features (OCR scanning, AI item merge, AI ROI insights) run on the
@@ -100,16 +125,31 @@ BILLING_ENABLED = bool(STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET)
 if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
-async def send_email(to_email: str, subject: str, html_body: str) -> bool:
+# Temporary pause switch for the scan-credit paywall, set via a Render env
+# var - not a per-company setting, since this is meant for "I'm between
+# billing setups, let everyone scan for free for now" rather than an
+# ongoing per-customer discount. While off, /ocr/scan neither blocks on an
+# empty balance nor deducts a scan, so turning it back on later resumes
+# exactly where the balance was left, instead of having silently drained it
+# to a large negative number the whole time it was off.
+SCAN_CREDITS_ENFORCED = os.environ.get('SCAN_CREDITS_ENFORCED', 'true').strip().lower() != 'false'
+
+async def send_email(to_email: str, subject: str, html_body: str,
+                     attachments: Optional[List[Dict[str, str]]] = None) -> bool:
+    """Sends an email through Resend; attachments are {"filename",
+    "content" (base64)}. False when email is not set up or it failed."""
     if not EMAIL_FEATURES_ENABLED:
         return False
+    payload: Dict[str, Any] = {"from": RESEND_FROM_EMAIL, "to": [to_email], "subject": subject, "html": html_body}
+    if attachments:
+        payload["attachments"] = attachments
     try:
         async with httpx.AsyncClient() as client_http:
             resp = await client_http.post(
                 "https://api.resend.com/emails",
                 headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-                json={"from": RESEND_FROM_EMAIL, "to": [to_email], "subject": subject, "html": html_body},
-                timeout=10.0,
+                json=payload,
+                timeout=60.0 if attachments else 10.0,
             )
             if resp.status_code >= 300:
                 logger.error(f"Resend API error {resp.status_code}: {resp.text}")
@@ -119,17 +159,37 @@ async def send_email(to_email: str, subject: str, html_body: str) -> bool:
         logger.error(f"Failed to send email via Resend: {e}")
         return False
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup - calls resolved at runtime (the module finishes executing,
+    # defining each of these, well before the ASGI server ever fires this
+    # event), in the same order the old @app.on_event("startup") handlers
+    # below used to register in.
+    await start_morning_push_loop()
+    await start_calendar_reminder_loop()
+    await start_budget_alert_loop()
+    await start_scan_credit_depletion_loop()
+    await start_recurring_expense_loop()
+    await start_backup_email_loop()
+    await team_moments_router.start_team_moments_loop()
+    await create_indexes()
+    await run_data_migrations()
+    yield
+    # Shutdown
+    await shutdown_db_client()
+
 # Create the main app
 app = FastAPI(
     title="Invoice Manager API",
     version="1.0.0",
     docs_url=None if IS_PRODUCTION else "/docs",
-    redoc_url=None if IS_PRODUCTION else "/redoc"
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    lifespan=lifespan,
 )
 
 # Add rate limiter
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]  # slowapi's documented handler; Starlette's stub wants Callable[[Request, Exception], ...]
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -156,12 +216,21 @@ class Company(BaseModel):
     email: Optional[str] = None  # Имейл
     bank_name: Optional[str] = None  # Банка
     bank_iban: Optional[str] = None  # IBAN
+    # Регистрирана по ЗДДС: None = по ДДС номера в профила (company_vat_registered).
+    # Прагът и регистрацията са работа на счетоводството - тук е само фактът.
+    vat_registered: Optional[bool] = None
     # Дни от седмицата, в които фирмата обичайно е затворена (0=понеделник
     # ... 6=неделя, Python date.weekday() конвенция) - изключват се от
     # статистиките за среден дневен оборот вместо да се броят за дни с
     # нулев оборот. None/липсващо поле = не е конфигурирано (нищо не се
     # изключва), за да не променя поведението на вече съществуващи фирми.
     closed_weekdays: Optional[List[int]] = None
+    # The parts of the program the business uses (see BUSINESS_MODULES);
+    # absent or missing one = used.
+    modules: Optional[Dict[str, bool]] = None
+    # The profit tax rate (%) for the net margin on Home; None = the law's
+    # for the legal form (services/margins.profit_tax_percent).
+    profit_tax_percent: Optional[float] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -176,7 +245,9 @@ class CompanyCreate(BaseModel):
     email: Optional[str] = None
     bank_name: Optional[str] = None
     bank_iban: Optional[str] = None
+    vat_registered: Optional[bool] = None
     closed_weekdays: Optional[List[int]] = None
+    profit_tax_percent: Optional[float] = Field(default=None, ge=0, le=50)
 
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
@@ -189,7 +260,50 @@ class CompanyUpdate(BaseModel):
     email: Optional[str] = None
     bank_name: Optional[str] = None
     bank_iban: Optional[str] = None
+    vat_registered: Optional[bool] = None
     closed_weekdays: Optional[List[int]] = None
+    profit_tax_percent: Optional[float] = Field(default=None, ge=0, le=50)
+
+# The parts of the program a business can use or leave out ("Какво ползвам"):
+# the till and pocket money, invoices issued to customers, the team and its
+# schedule, payroll, fixed assets, the owner's personal wallet. What a
+# business leaves out leaves its menus, Home and the signals; whatever it
+# entered stays, and comes back with the module. Everything else - expenses,
+# supplier invoices, scanning, statistics - every business uses.
+BUSINESS_MODULES: Tuple[str, ...] = ("till", "billing", "team", "payroll", "assets", "wallet")
+
+
+def company_modules(company: Optional[dict]) -> Dict[str, bool]:
+    """Which modules the business uses - each one until the owner says not."""
+    chosen = (company or {}).get("modules") or {}
+    return {module: chosen.get(module) is not False for module in BUSINESS_MODULES}
+
+
+async def modules_for_company(company_id: Optional[str]) -> Dict[str, bool]:
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "modules": 1}) if company_id else None
+    return company_modules(company)
+
+
+def company_vat_registered(company: Optional[dict]) -> bool:
+    """Whether the business charges and deducts VAT, as the owner set it.
+    Not answered yet: as the app always was - registered - and the owner is
+    asked once (vat_registration_unanswered) instead of the VAT cards
+    vanishing for a registered business that never typed its VAT number."""
+    if not company:
+        return True
+    flag = company.get("vat_registered")
+    return flag if isinstance(flag, bool) else True
+
+
+def vat_registration_unanswered(company: Optional[dict]) -> bool:
+    """Not set, and no VAT number to say so - worth one question."""
+    if not company:
+        return False
+    return not isinstance(company.get("vat_registered"), bool) and not str(company.get("vat_number") or "").strip()
+
+# Printed on an invoice of a business not registered for VAT.
+VAT_EXEMPT_BASIS = "чл. 113, ал. 9 от ЗДДС"
+
 
 class User(BaseModel):
     user_id: str
@@ -202,6 +316,10 @@ class User(BaseModel):
     password_hash: Optional[str] = None  # За email/password auth
     auth_provider: str = "email"  # "google" or "email"
     has_password: bool = False  # Дали акаунтът има парола (за да предложим "задай парола" на Google потребители)
+    # A second step at login (services/two_factor) - only whether it is on
+    # and how; its secret and codes never leave the server (sanitize_user).
+    two_factor_enabled: bool = False
+    two_factor_method: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserSession(BaseModel):
@@ -224,6 +342,12 @@ class UserLogin(BaseModel):
 class ChangePassword(BaseModel):
     current_password: Optional[str] = None  # Не се изисква, ако акаунтът все още няма парола (напр. Google вход)
     new_password: str
+
+class DeleteAccountRequest(BaseModel):
+    password: Optional[str] = None  # Не се изисква, ако акаунтът все още няма парола (напр. Google вход)
+
+class UpdatePictureRequest(BaseModel):
+    picture: Optional[str] = None  # data: URI base64, same convention as invoice/asset/payroll images - null clears it
 
 class PasswordResetCode(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -282,10 +406,46 @@ class VatTreatment(str, Enum):
     REVERSE_CHARGE = "reverse_charge"  # Обратно начисляване / ВОП (протокол чл.117/чл.84)
     OUTSIDE_SCOPE = "outside_scope"    # Извън обхвата на ЗДДС
 
+# A supplier's credit note (кредитно известие - goods returned, or a
+# discount on an earlier invoice) is kept with the invoices, its amounts
+# stored below zero: every sum of purchases, VAT credit and supplier totals
+# then takes it off by itself. Nothing is owed on it, so it is settled from
+# the start, and its lines are what went back, not purchase prices - they
+# never enter the price history.
+CREDIT_NOTE = "credit_note"
+NOT_A_CREDIT_NOTE: Dict[str, Any] = {"document_type": {"$ne": CREDIT_NOTE}}
+InvoiceDocumentType = Literal["invoice", "credit_note"]
+INVOICE_AMOUNT_FIELDS = ("amount_without_vat", "vat_amount", "total_amount")
+
+
+def sign_invoice_amounts(document_type: Optional[str], amounts: Dict[str, Any]) -> Dict[str, Any]:
+    """The amounts as stored: below zero on a credit note whichever way they
+    were typed or printed, never below zero on an invoice (a minus there is
+    a credit note entered as an invoice - said, not stored)."""
+    signed: Dict[str, Any] = {}
+    for field, value in amounts.items():
+        if value is None:
+            signed[field] = value
+            continue
+        number = float(value)
+        if document_type == CREDIT_NOTE:
+            signed[field] = -abs(number) if number else 0.0
+        elif number < 0:
+            raise ValueError("Отрицателна сума е възможна само при кредитно известие - изберете вида на документа")
+        else:
+            signed[field] = number
+    return signed
+
+
 class Invoice(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
+    # None (every invoice before credit notes existed) or "invoice" is an
+    # invoice; "credit_note" is a credit note, its amounts below zero.
+    document_type: Optional[str] = None
     company_id: Optional[str] = None  # Връзка към фирмата
+    # The location it was bought for (routers/locations); None: the whole business.
+    location_id: Optional[str] = None
     supplier: str
     supplier_eik: Optional[str] = None  # ЕИК/Булстат на доставчика
     invoice_number: str
@@ -302,7 +462,7 @@ class Invoice(BaseModel):
     # Плащане към доставчика - незададено (None) означава "не се следи",
     # за да не се третират стари фактури (преди тази функционалност) като
     # неплатени по подразбиране.
-    payment_method: Optional[str] = None  # cash | bank_transfer
+    payment_method: Optional[str] = None  # cash | bank_transfer | card
     is_paid: bool = False
     # Кумулативна платена сума към момента - "напълно платена" означава
     # paid_amount >= total_amount (is_paid се извежда от това, не обратното).
@@ -310,6 +470,21 @@ class Invoice(BaseModel):
     paid_amount: float = 0.0
     payment_due_date: Optional[datetime] = None  # само при bank_transfer
     paid_at: Optional[datetime] = None
+    # Each payment to the supplier on an invoice by bank: {id, amount, date
+    # "YYYY-MM-DD", method} - in parts, each on its own day, as with what
+    # customers pay (paid_amount is their sum, plus any paid before there
+    # was a history).
+    payments: List[Dict[str, Any]] = []
+    # Set when this is the purchase invoice of a fixed asset (routers/assets):
+    # not an expense of its day then - the asset's depreciation is.
+    asset_id: Optional[str] = None
+    # A credit note: the invoice it corrects, as printed ("към фактура №")
+    # and, once that invoice is in, the link to it (settle_credited_invoice).
+    credited_invoice_number: Optional[str] = None
+    credited_invoice_id: Optional[str] = None
+    # An invoice: what credit notes to it took off - no longer owed; past
+    # what is left to pay, it is the supplier's to refund or offset.
+    credited_amount: float = 0.0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 # Invoice Item models
@@ -326,9 +501,30 @@ class InvoiceItemCreate(BaseModel):
     name: str
     quantity: float = Field(default=1, gt=0)
     unit: str = "бр."
-    unit_price: float = Field(ge=0)
-    total_price: Optional[float] = Field(default=None, ge=0)  # Ако не е подадено, се изчислява
-    vat_amount: Optional[float] = Field(default=None, ge=0)
+    # Negative is legitimate here - a discount/rebate line ("отстъпка")
+    # printed as its own row on the invoice is a real, common pattern, not
+    # a bad OCR read; total_price/vat_amount below follow the same sign
+    # when computed from it (quantity * a negative unit_price).
+    unit_price: float
+    total_price: Optional[float] = None  # Ако не е подадено, се изчислява
+    vat_amount: Optional[float] = None
+    # Scan review only, never stored on the line: the owner re-read this
+    # line as k pieces per invoice unit (learned for the supplier + item),
+    # or undid such a correction the app applied (forgotten).
+    pack_multiple_applied: Optional[int] = Field(default=None, ge=2, le=100)
+    pack_rule_rejected: Optional[bool] = None
+
+class InvoiceItemUpdate(BaseModel):
+    """Corrects one already-saved line item (e.g. OCR read "1 бр." for what
+    was actually a 6-pack, so the real per-unit price looked 6x higher than
+    it is) - id identifies which of the invoice's existing items this
+    applies to; every other field is optional, only sent when it actually
+    changed."""
+    id: str
+    name: Optional[str] = None
+    quantity: Optional[float] = Field(default=None, gt=0)
+    unit: Optional[str] = None
+    unit_price: Optional[float] = None
 
 # Item Price History - за проследяване на цените
 class ItemPriceHistory(BaseModel):
@@ -336,10 +532,16 @@ class ItemPriceHistory(BaseModel):
     company_id: str
     supplier: str  # Доставчик
     item_name: str  # Нормализирано име на артикул
+    # The line's name as printed/typed, before normalization merged it -
+    # kept so a later, better grouping can be recomputed from the original.
+    raw_name: Optional[str] = None
     unit_price: float  # Единична цена
     quantity: float  # Количество
     unit: str  # Мерна единица
     invoice_id: str  # Връзка към фактурата
+    # The invoice line this row came from, so editing or deleting that one
+    # line updates exactly this row (older rows have none).
+    line_item_id: Optional[str] = None
     invoice_number: str
     invoice_date: datetime
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -349,6 +551,15 @@ class PriceAlertSettings(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     company_id: str
     threshold_percent: float = 10.0  # Праг за аларма в %
+    # The change's cost per month at this company's own usual quantity
+    # (price change x typical monthly quantity), not per unit - +0.07 EUR on
+    # 4000 pitas a month is 280 EUR and must alert, +2.10 EUR on one bottle
+    # of cleaner a month must not.
+    min_monthly_impact: float = 10.0
+    # Price *drops* are also useful (renegotiate elsewhere, switch item) -
+    # off by default so existing companies' alert volume doesn't change
+    # until they opt in.
+    alert_on_decrease: bool = False
     enabled: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -357,45 +568,98 @@ class PriceAlert(BaseModel):
     company_id: str
     item_name: str
     supplier: str
-    old_price: float
+    # "price_change" - a real price move; "pack_suspect" - the new unit
+    # price is (almost exactly) a pack multiple of the usual one, so the
+    # line was most likely a pack read as one unit and the alert asks
+    # instead of claiming a +500% increase.
+    kind: str = "price_change"
+    old_price: float  # Базова цена (медиана/средно от последните покупки) - виж baseline_purchase_count
     new_price: float
     change_percent: float
+    direction: str = "increase"  # increase | decrease
+    # (new - old) x this item's typical monthly quantity, in EUR per month.
+    monthly_impact: Optional[float] = None
+    pack_multiple: Optional[int] = None
+    unit: Optional[str] = None
+    # How many prior purchases the baseline (old_price) was computed from -
+    # shown to the user so a one-off anomaly isn't silently treated as "the
+    # real price" without any indication of where the number came from.
+    baseline_purchase_count: int = 1
     invoice_id: str
+    line_item_id: Optional[str] = None
     invoice_number: str
     status: str = "unread"  # unread, read, dismissed
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Lets a company say "stop alerting me about this item from this supplier"
+# permanently, for items whose price is known to fluctuate normally (fuel,
+# produce) instead of being forced to re-dismiss the same noisy alert
+# forever.
+class PriceAlertMute(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    item_name: str  # Нормализирано име (както се пази в item_price_history)
+    supplier: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class InvoiceCreate(BaseModel):
     supplier: str
     supplier_eik: Optional[str] = None
     invoice_number: str
-    amount_without_vat: float = Field(ge=0)
-    vat_amount: float = Field(ge=0)
-    total_amount: float = Field(ge=0)
+    location_id: Optional[str] = Field(default=None, max_length=64)
+    document_type: InvoiceDocumentType = "invoice"
+    # As printed: a credit note may be typed with or without a minus, it
+    # is stored below zero either way (sign_invoice_amounts).
+    amount_without_vat: float
+    vat_amount: float
+    total_amount: float
     vat_treatment: Optional[VatTreatment] = None
     date: str
     image_base64: Optional[str] = None  # Legacy - едностранично сканиране
     image_base64s: Optional[List[str]] = None  # Всички страници на сканираната фактура, по ред
     notes: Optional[str] = None
     items: Optional[List[InvoiceItemCreate]] = None  # Артикули
-    payment_method: Optional[str] = None  # cash | bank_transfer
+    payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = None  # paid on the spot: cash, card
     payment_due_date: Optional[str] = None  # само при bank_transfer; ако липсва се изчислява
+    # Credit note only: the number of the invoice it corrects.
+    credited_invoice_number: Optional[str] = Field(default=None, max_length=50)
+
+    @model_validator(mode="after")
+    def _signed_amounts(self) -> "InvoiceCreate":
+        signed = sign_invoice_amounts(self.document_type, {f: getattr(self, f) for f in INVOICE_AMOUNT_FIELDS})
+        for field, value in signed.items():
+            setattr(self, field, value)
+        return self
 
 class InvoiceUpdate(BaseModel):
     supplier: Optional[str] = None
     supplier_eik: Optional[str] = None
     invoice_number: Optional[str] = None
-    amount_without_vat: Optional[float] = Field(default=None, ge=0)
-    vat_amount: Optional[float] = Field(default=None, ge=0)
-    total_amount: Optional[float] = Field(default=None, ge=0)
+    # "" takes it off any location.
+    location_id: Optional[str] = Field(default=None, max_length=64)
+    document_type: Optional[InvoiceDocumentType] = None
+    # Signed by the route, against the document's type after this edit.
+    amount_without_vat: Optional[float] = None
+    vat_amount: Optional[float] = None
+    total_amount: Optional[float] = None
     vat_treatment: Optional[VatTreatment] = None
     protocol_number: Optional[str] = None
     date: Optional[str] = None
     notes: Optional[str] = None
-    payment_method: Optional[str] = None
+    payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = None
     payment_due_date: Optional[str] = None
     is_paid: Optional[bool] = None
-    paid_amount: Optional[float] = Field(default=None, ge=0)
+    paid_amount: Optional[float] = None  # checked by the route (never below 0 on an invoice)
+    items: Optional[List[InvoiceItemUpdate]] = None
+    # Credit note only: the number of the invoice it corrects ("" clears it).
+    credited_invoice_number: Optional[str] = Field(default=None, max_length=50)
+
+class VatGroupAmount(BaseModel):
+    """One VAT group of the till's daily report: its rate and its sales
+    (with VAT)."""
+    rate_percent: float = Field(ge=0, le=100)
+    amount: float = Field(ge=0)
+
 
 class DailyRevenue(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -406,14 +670,45 @@ class DailyRevenue(BaseModel):
     pocket_money: float = 0  # "джобче" - не влиза в ДДС
     card_revenue: float = 0  # Частта от fiscal_revenue, платена с карта (остатъкът се приема за в брой)
     vat_rate_percent: float = 20.0  # Ставката на фискализирания оборот (20% стандартна, 9% намалена, 0%)
+    # The day's till revenue by VAT rate, as the fiscal device's daily
+    # report gives it (they add up to fiscal_revenue); empty when the whole
+    # day is at vat_rate_percent (services/revenue_vat).
+    vat_groups: List[VatGroupAmount] = Field(default_factory=list)
+    # Stored beside these, never in a reply: "by_location" - each location's
+    # part of the day (routers/revenue_expenses._save_revenue_part); the
+    # day's own fields stay its total.
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class DailyRevenueCreate(BaseModel):
+    """A day's revenue as entered. A field left out (None) keeps what the
+    day already holds - an Excel row with an empty "Джобче" cell, or a
+    teammate who may not see pocket money, never wipes it out. A new day
+    starts from 0 (20% VAT)."""
     date: str
-    fiscal_revenue: float = Field(default=0, ge=0)
-    pocket_money: float = Field(default=0, ge=0)
-    card_revenue: float = Field(default=0, ge=0)
-    vat_rate_percent: float = Field(default=20.0, ge=0, le=100)
+    fiscal_revenue: Optional[float] = Field(default=None, ge=0)
+    pocket_money: Optional[float] = Field(default=None, ge=0)
+    card_revenue: Optional[float] = Field(default=None, ge=0)
+    vat_rate_percent: Optional[float] = Field(default=None, ge=0, le=100)
+    # The day by VAT rate, as the till's daily report gives it: the till
+    # total is then their sum. An empty list: the whole day at one rate.
+    vat_groups: Optional[List[VatGroupAmount]] = None
+    # The figures are this location's for the day (routers/locations).
+    location_id: Optional[str] = Field(default=None, max_length=64)
+
+
+class PocketMoneyAdd(BaseModel):
+    """Money added to a day's pocket money - added to what is there,
+    never replacing it (a paid bill logged as revenue)."""
+    date: str
+    amount: float = Field(gt=0)
+    # Added to this location's part of the day (routers/locations).
+    location_id: Optional[str] = Field(default=None, max_length=64)
+
+# An expense record that is wages paid by Work Schedule (one per day
+# worked): counted with payroll, never as an off-book expense, and managed
+# only through its schedule payment.
+SCHEDULE_WAGES = "schedule_wages"
+NOT_WAGES: Dict[str, Any] = {"kind": {"$ne": SCHEDULE_WAGES}}
 
 class NonInvoiceExpense(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -422,12 +717,26 @@ class NonInvoiceExpense(BaseModel):
     description: str
     amount: float
     date: str
+    kind: Optional[str] = None  # SCHEDULE_WAGES, or None for an ordinary off-book expense
+    location_id: Optional[str] = None  # the location it was for; None: the whole business
+    schedule_payment_id: Optional[str] = None
+    # A recurring expense's payment for a month ("YYYY-MM") - see
+    # routers/recurring.py; one per recurring expense and month.
+    recurring_id: Optional[str] = None
+    recurring_month: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class NonInvoiceExpenseCreate(BaseModel):
     description: str
     amount: float = Field(gt=0)
     date: str
+    location_id: Optional[str] = Field(default=None, max_length=64)
+
+class NonInvoiceExpenseUpdate(BaseModel):
+    description: Optional[str] = None
+    amount: Optional[float] = Field(default=None, gt=0)
+    date: Optional[str] = None
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 # ===================== PERSONAL EXPENSES & ROI MODELS =====================
 
@@ -532,21 +841,37 @@ class ROIAnalysis(BaseModel):
     investment_covered: bool
     ai_insights: List[str]
 
+# The morning push - the top of the daily review - goes out once a day
+# per person, at the hour they choose on the business's own calendar.
+# Never at night: from DAILY_PUSH_QUIET_FROM the day is skipped, so a
+# morning the server slept through is not delivered at midnight.
+DAILY_PUSH_DEFAULT_HOUR = 8
+DAILY_PUSH_EARLIEST_HOUR = 5
+DAILY_PUSH_LATEST_HOUR = 20
+DAILY_PUSH_QUIET_FROM = 21
+
 class NotificationSettings(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
-    vat_threshold_enabled: bool = False
-    vat_threshold_amount: float = 0
+    # The daily review as a push: only when something in it is worth an
+    # interruption (PROACTIVE_PUSH_WORTHY_PRIORITY), at daily_push_hour.
+    daily_push_enabled: bool = True
+    daily_push_hour: int = DAILY_PUSH_DEFAULT_HOUR
+    # A reminder on chosen days of the month, sent at the same morning
+    # hour, always (it says what waits, or that nothing does). A day past
+    # a short month's end (31 in April, 30 in February) falls on its last day.
     periodic_enabled: bool = False
     periodic_dates: List[int] = []  # Days of month (1-31)
+    # Dedup state - never set by the client, only by _morning_push_tick.
+    periodic_last_sent_date: Optional[str] = None  # "YYYY-MM-DD"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class NotificationSettingsUpdate(BaseModel):
-    vat_threshold_enabled: Optional[bool] = None
-    vat_threshold_amount: Optional[float] = None
+    daily_push_enabled: Optional[bool] = None
+    daily_push_hour: Optional[int] = Field(default=None, ge=DAILY_PUSH_EARLIEST_HOUR, le=DAILY_PUSH_LATEST_HOUR)
     periodic_enabled: Optional[bool] = None
-    periodic_dates: Optional[List[int]] = None
+    periodic_dates: Optional[List[Annotated[int, Field(ge=1, le=31)]]] = Field(default=None, max_length=31)
 
 class OCRItemResult(BaseModel):
     name: str
@@ -559,18 +884,65 @@ class OCRResult(BaseModel):
     supplier: str
     supplier_eik: Optional[str] = None  # ЕИК на доставчика, ако е видим на фактурата
     invoice_number: str
+    document_type: Optional[str] = None  # invoice | credit_note (озаглавен "КРЕДИТНО ИЗВЕСТИЕ")
+    credited_invoice_number: Optional[str] = None  # credit note: "към фактура №"
+    buyer: Optional[str] = None  # получателят - за фактура, издадена от самата фирма
+    buyer_eik: Optional[str] = None
     amount_without_vat: float
     vat_amount: float
     total_amount: float
     invoice_date: Optional[str] = None  # Дата на издаване от фактурата
     payment_due_date: Optional[str] = None  # Срок за плащане, ако е отпечатан на фактурата
+    payment_method: Optional[str] = None  # cash | bank_transfer | card - ако е отпечатан
     items: List[OCRItemResult] = []  # Разпознати продукти от таблицата с артикули
     corrections: Optional[List[str]] = None  # Списък с направени корекции
     confidence: Optional[float] = None  # Увереност в резултата (0-1)
+    # The photos as read: each page straightened and cut out of its
+    # background (data URI), None where a photo was read as it came - the
+    # app shows and keeps these instead (services/document_scan).
+    pages: Optional[List[Optional[str]]] = None
 
 # ===================== AUTH HELPERS =====================
 
 VALID_ROLES = {"owner", "manager", "staff", "accountant"}
+
+CSRF_COOKIE_NAME = "csrf_token"
+CSRF_HEADER_NAME = "x-csrf-token"
+SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+
+def set_session_cookies(response: Response, session_token: str) -> str:
+    """Sets both halves of the session: the httponly session_token cookie
+    (as before) plus a second, JS-readable csrf_token cookie the web
+    frontend echoes back as a header on state-changing requests - a
+    double-submit CSRF defense, needed specifically because samesite="none"
+    (required for the cross-origin frontend/backend split) gives up the
+    browser's own default CSRF protection. Returns the csrf token so a
+    caller that also needs it (none today) can reuse it without re-reading
+    the cookie."""
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=SESSION_MAX_AGE_SECONDS,
+        path="/"
+    )
+    csrf_token = uuid.uuid4().hex
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=csrf_token,
+        httponly=False,  # the frontend must be able to read this one
+        secure=True,
+        samesite="none",
+        max_age=SESSION_MAX_AGE_SECONDS,
+        path="/"
+    )
+    return csrf_token
+
+def clear_session_cookies(response: Response) -> None:
+    response.delete_cookie(key="session_token", path="/")
+    response.delete_cookie(key=CSRF_COOKIE_NAME, path="/")
 
 async def repair_invalid_role(user_doc: dict) -> dict:
     """Поправя легаси/невалидни стойности на role (напр. от стари версии на схемата).
@@ -619,6 +991,12 @@ def sanitize_user(user_doc: dict) -> dict:
     user_doc = dict(user_doc)
     user_doc["has_password"] = bool(user_doc.get("password_hash"))
     user_doc.pop("password_hash", None)
+    # The second step's secret and codes stay on the server; only whether it
+    # is on, and how, goes out.
+    two_factor = user_doc.pop("two_factor", None) or {}
+    user_doc.pop("two_factor_pending", None)
+    user_doc["two_factor_enabled"] = bool(two_factor.get("method"))
+    user_doc["two_factor_method"] = two_factor.get("method")
     role = user_doc.get("role", "staff")
     if not user_doc.get("permissions"):
         user_doc["permissions"] = resolve_permissions(role, None)
@@ -631,6 +1009,13 @@ def sanitize_user(user_doc: dict) -> dict:
             for version, added in _PERMISSIONS_ADDED_AT_VERSION.items():
                 if stamped_version < version:
                     defaults |= ROLE_PERMISSIONS.get(role, set()) & added
+            # Payroll used to come with "Бюджет": whoever had it keeps
+            # payroll rather than losing a screen they used.
+            if stamped_version < 6 and "manage_budget" in user_doc["permissions"]:
+                defaults.add("manage_payroll")
+            # Invoices used to come with entering revenue: kept likewise.
+            if stamped_version < 7 and "add_revenue" in user_doc["permissions"]:
+                defaults.add("issue_invoices")
             user_doc["permissions"] = sorted(set(user_doc["permissions"]) | defaults)
     return user_doc
 
@@ -661,9 +1046,15 @@ async def get_company_scope(current_user: User) -> tuple:
     if not company_id:
         return None, {"user_id": current_user.user_id}
 
+    return company_id, await company_data_scope(company_id)
+
+async def company_data_scope(company_id: str) -> dict:
+    """The company-wide half of get_company_scope's filter, usable from
+    background tasks that only have a company_id (no logged-in User) - the
+    budget-alert tick below is the first such caller."""
     member_docs = await db.users.find({"company_id": company_id}, {"_id": 0, "user_id": 1}).to_list(1000)
     member_ids = [m["user_id"] for m in member_docs]
-    return company_id, {
+    return {
         "$or": [
             {"company_id": company_id},
             {"user_id": {"$in": member_ids}, "company_id": None},
@@ -698,23 +1089,26 @@ ROLE_PERMISSIONS = {
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
         "team_collaboration", "manage_billing", "restore_deleted_data",
         "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
+        "manage_payroll", "issue_invoices",
     },
     "manager": {
         "manage_budget", "export_data", "view_statistics", "manage_invoices",
-        "add_revenue", "add_expenses",
+        "add_revenue", "add_expenses", "issue_invoices",
         # Not view_personal_investments - a manager enters revenue/expenses
         # themselves but has no stake in the owner's personal investments.
         "view_pocket_money", "view_off_book_expenses", "view_profit",
         "team_collaboration",
     },
-    "staff": {
-        "manage_invoices", "add_revenue", "add_expenses",
-        "view_pocket_money", "view_off_book_expenses",
-        # Deliberately no team_collaboration by default - the shared
-        # calendar/messages feature is meant for owner/manager/accountant
-        # coordination, not day-to-day staff use. Still grantable per-user
-        # via the configurable ceiling below, same as every other permission.
-    },
+    # Empty by design: a newly invited staff member starts with no
+    # permission at all - every screen/tab this gates (invoices/scan,
+    # statistics, pocket money, off-book expenses, ...) is opt-in, ticked
+    # explicitly per person via the permissions checklist. What's NOT
+    # gated by any of these - their own Work Schedule shifts and their own
+    # Account/profile settings - is what they can always reach regardless.
+    # This was a real incident, not a hypothetical: a newly invited staff
+    # member had full invoice/statistics/financial-field access before any
+    # permission was ever explicitly granted, simply by being "staff".
+    "staff": set(),
     "accountant": {
         "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
         # Profit only: an accountant's typical job is exactly this figure,
@@ -722,12 +1116,14 @@ ROLE_PERMISSIONS = {
         # line items themselves or the owner's personal investments.
         "view_profit",
         "team_collaboration",
+        # Payroll is the accountant's work; a manager gets it only if ticked.
+        "manage_payroll",
     },
 }
 
 _STAFF_LIKE_CONFIGURABLE = {
-    "view_audit_log", "manage_budget", "export_data", "view_statistics",
-    "manage_invoices", "add_revenue", "add_expenses",
+    "view_audit_log", "manage_budget", "manage_payroll", "export_data", "view_statistics",
+    "manage_invoices", "add_revenue", "add_expenses", "issue_invoices",
     "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
     "team_collaboration", "restore_deleted_data",
     "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
@@ -747,7 +1143,7 @@ _SENSITIVE_FIELD_PERMISSIONS = {
 # inspecting the stored list - is the only way to tell "never touched since
 # this version" apart from "deliberately configured to have none of the new
 # permissions").
-PERMISSIONS_SCHEMA_VERSION = 5
+PERMISSIONS_SCHEMA_VERSION = 7
 
 # Permissions introduced after PERMISSIONS_SCHEMA_VERSION 1, keyed by the
 # version that added them - see sanitize_user's migration branch below,
@@ -759,6 +1155,14 @@ _PERMISSIONS_ADDED_AT_VERSION = {
     3: {"team_collaboration"},
     4: {"restore_deleted_data"},
     5: {"view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet"},
+    # Payroll split off "Бюджет" (manage_budget): salaries, payroll, Pay-run
+    # and schedule payments. See sanitize_user: an account from before that
+    # holds manage_budget keeps payroll too until its next real edit.
+    6: {"manage_payroll"},
+    # Issuing invoices to customers split off "Въвеждане на оборот"
+    # (add_revenue): an invoice is a tax document, not a till entry. See
+    # sanitize_user: whoever could issue them before keeps it.
+    7: {"issue_invoices"},
 }
 
 ROLE_CONFIGURABLE_PERMISSIONS = {
@@ -766,9 +1170,9 @@ ROLE_CONFIGURABLE_PERMISSIONS = {
     "staff": _STAFF_LIKE_CONFIGURABLE,
     # Deliberately narrow - see the accountant note in ROLE_PERMISSIONS above.
     "accountant": {
-        "view_audit_log", "manage_budget", "export_data", "view_statistics", "manage_invoices",
+        "view_audit_log", "manage_budget", "manage_payroll", "export_data", "view_statistics", "manage_invoices",
         "view_pocket_money", "view_off_book_expenses", "view_profit", "view_personal_investments",
-        "team_collaboration", "restore_deleted_data",
+        "team_collaboration", "restore_deleted_data", "issue_invoices",
         "view_personal_wallet", "add_personal_wallet_entries", "manage_personal_wallet",
     },
 }
@@ -790,21 +1194,73 @@ def require_permission(current_user: User, permission: str):
     if permission not in set(current_user.permissions or []):
         raise HTTPException(status_code=403, detail="Нямате права за тази операция")
 
+
+def require_sales_access(current_user: User) -> None:
+    """Customers and the documents to them: for whoever enters revenue or
+    issues invoices."""
+    if not {"add_revenue", "issue_invoices"} & set(current_user.permissions or []):
+        raise HTTPException(status_code=403, detail="Нямате права за тази операция")
+
+
+# Only these roles cancel an issued invoice: a tax document, its number kept.
+INVOICE_CANCEL_ROLES = {"owner", "manager"}
+
 def get_financial_visibility(current_user: User) -> dict:
     """Which of the four sensitive financial data fields this viewer may
-    see. Used both to decide what get_summary/get_chart_data return raw AND
-    to decide what to fold into their derived totals (income, expense,
-    profit, the daily charts) - a hidden field is zeroed out of every
-    aggregate that would otherwise include it, not just blanked in the UI,
-    so the viewer gets a fully coherent analytical picture for the data
-    they're actually allowed to see."""
-    granted = set(current_user.permissions or [])
+    see, plus "statistics" - the overarching gate on seeing any company-wide
+    financial aggregate at all (Home's income/expense/VAT/unpaid-invoices
+    cards, Stats). A newly invited staff member has none of these by
+    default (see ROLE_PERMISSIONS["staff"]), so without "statistics" every
+    aggregate get_summary/get_chart_data compute is withheld, not just the
+    four sensitive sub-fields - seeing the real company totals is itself a
+    grant, same as seeing pocket money or profit is.
+
+    Used both to decide what get_summary/get_chart_data return raw AND to
+    decide what to fold into their derived totals (income, expense, profit,
+    the daily charts) - a hidden field is zeroed out of every aggregate
+    that would otherwise include it, not just blanked in the UI, so the
+    viewer gets a fully coherent analytical picture for the data they're
+    actually allowed to see."""
+    return visibility_from_permissions(current_user.permissions)
+
+
+def visibility_from_permissions(permissions: Optional[List[str]]) -> dict:
+    """get_financial_visibility for a permission list - for a background
+    task writing to a member it has no request of (the budget alert)."""
+    granted = set(permissions or [])
     return {
+        "statistics": "view_statistics" in granted,
         "pocket_money": "view_pocket_money" in granted,
         "off_book_expenses": "view_off_book_expenses" in granted,
         "profit": "view_profit" in granted,
         "personal_investments": "view_personal_investments" in granted,
+        # Salaries are seen by whoever keeps the payroll: for anyone else
+        # the payroll is out of every total (expenses, profit, the charts,
+        # the forecast...) as if it were zero - like pocket money and the
+        # expenses without invoice.
+        "payroll": "manage_payroll" in granted,
+        # The personal notebook (company money spent personally): only its
+        # viewers see it, as a line of its own under the profit - "personal
+        # use" and what is left in the business. It is never a business
+        # expense: everyone else's totals are the business's own.
+        "personal_wallet": "view_personal_wallet" in granted,
     }
+
+def restricted_data_note(visibility: dict) -> Optional[str]:
+    """What a viewer with partial access is looking at, in one sentence -
+    the same words as the screens' note (frontend utils/visibilityNote):
+    which parts the totals leave out, and so which profit is shown."""
+    if not visibility.get("statistics", True):
+        return "Общите суми на фирмата са скрити за вашия достъп."
+    left_out = [name for key, name in (
+        ("pocket_money", "джобчето"), ("off_book_expenses", "разходите без фактура"), ("payroll", "заплатите"),
+    ) if not visibility.get(key, True)]
+    items = ", ".join(left_out[:-1]) + " и " + left_out[-1] if len(left_out) > 1 else "".join(left_out)
+    if not visibility.get("profit", True):
+        return (f"Сумите са без {items} - скрити са за вашия достъп. " if left_out else "") + "Печалбата е скрита за вашия достъп."
+    if not left_out:
+        return None
+    return f"Сумите и печалбата са без {items} (скрити за вашия достъп) - това не е действителната печалба на фирмата."
 
 async def ensure_membership(user_id: str, company_id: str, role: str, permissions: Optional[List[str]] = None):
     """Записва (или обновява) връзката потребител-фирма в company_memberships.
@@ -898,11 +1354,15 @@ async def request_owner_status_change(company_id: str, target_user: dict, reques
     action_doc.pop("_id", None)
     return action_doc
 
-async def execute_owner_action(action: dict):
+async def execute_owner_action(action: dict, executed_by: Optional[User] = None):
+    target_before: Optional[Dict[str, Any]] = await db.users.find_one({"user_id": action["target_user_id"]}, {"_id": 0})
+
     if action["action"] == "remove":
+        new_role = "staff"
+        permissions = resolve_permissions("staff", None)
         await db.users.update_one(
             {"user_id": action["target_user_id"]},
-            {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
+            {"$unset": {"company_id": ""}, "$set": {"role": new_role, "permissions": permissions}}
         )
     else:
         new_role = action["action"]
@@ -912,6 +1372,27 @@ async def execute_owner_action(action: dict):
             {"$set": {"role": new_role, "permissions": permissions, "permissions_schema_version": PERMISSIONS_SCHEMA_VERSION}}
         )
         await ensure_membership(action["target_user_id"], action["company_id"], new_role, permissions)
+
+    # This is a multi-owner-approved change to another owner's role/access -
+    # exactly the kind of action the audit log must never be silent about.
+    # The acting identity is whichever owner's approval completed the
+    # required sign-off; the full approval chain goes in details.
+    await audit_service.log_action(
+        user_id=executed_by.user_id if executed_by else action["requested_by"],
+        user_name=executed_by.name if executed_by else action.get("requested_by_name", ""),
+        action="update_role",
+        entity_type="user",
+        entity_id=action["target_user_id"],
+        company_id=action["company_id"],
+        details={
+            "target_name": action.get("target_name") or (target_before or {}).get("name"),
+            "old_role": (target_before or {}).get("role"),
+            "new_role": new_role,
+            "via": "owner_action_approval",
+            "requested_by_name": action.get("requested_by_name"),
+            "approved_by": action.get("approved_by", []),
+        },
+    )
 
 async def get_session_token(request: Request) -> Optional[str]:
     # Check cookie first
@@ -957,17 +1438,7 @@ async def get_current_user_optional(request: Request) -> Optional[User]:
 
 # ===================== AUTH ENDPOINTS =====================
 
-@api_router.get("/auth/me")
-async def get_me(current_user: User = Depends(get_current_user)):
-    return current_user.dict()
 
-@api_router.post("/auth/logout")
-async def logout(request: Request, response: Response):
-    session_token = await get_session_token(request)
-    if session_token:
-        await db.user_sessions.delete_one({"session_token": session_token})
-    response.delete_cookie(key="session_token", path="/")
-    return {"message": "Успешно излязохте"}
 
 # ===================== BULGARIAN TAX ID (EIK/BULSTAT) VALIDATION =====================
 
@@ -1017,11 +1488,6 @@ def validate_eik(raw: str) -> dict:
 
     return {"valid": True, "normalized": normalized, "reason": None}
 
-@api_router.get("/utils/validate-eik")
-async def check_eik(eik: str, current_user: User = Depends(get_current_user)):
-    """Format + checksum check for a Bulgarian ЕИК/Булстат, used by the UI
-    for live feedback while entering or reviewing a supplier's tax ID."""
-    return validate_eik(eik)
 
 # ===================== EMAIL/PASSWORD AUTH =====================
 
@@ -1040,953 +1506,39 @@ def validate_password(password: str) -> tuple[bool, str]:
         return False, "Паролата трябва да съдържа поне една цифра"
     return True, ""
 
-@api_router.post("/auth/register")
-@limiter.limit("5/minute")
-async def register_user(request: Request, user_data: UserRegister, response: Response):
-    """Register new user with email/password"""
-    # Validate email
-    if not validate_email(user_data.email):
-        raise HTTPException(status_code=400, detail="Невалиден имейл адрес")
-    
-    # Validate password
-    is_valid, error_msg = validate_password(user_data.password)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=error_msg)
-    
-    # Validate name
-    if not user_data.name or len(user_data.name.strip()) < 2:
-        raise HTTPException(status_code=400, detail="Името трябва да е поне 2 символа")
-    
-    # Check if user already exists
-    existing_user = await db.users.find_one({"email": user_data.email.lower()})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Потребител с този имейл вече съществува")
-    
-    # Create user
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
-    password_hash = pwd_context.hash(user_data.password)
 
-    # If a valid invitation code was supplied, join that company directly
-    # instead of auto-creating one - otherwise the new account would need a
-    # separate accept-invitation call afterward, which fails (the fresh
-    # account already "has a company", tripping the one-company-per-user
-    # rule) since it's not yet a member of anything when this decision is
-    # made. An invalid/expired/mismatched code doesn't fail the whole
-    # registration - it just falls through to the normal own-company path,
-    # with invite_error in the response so the frontend can say why.
-    invitation = None
-    invite_error = None
-    if user_data.invitation_code:
-        code = user_data.invitation_code.upper().strip()
-        invitation = await db.invitations.find_one({"code": code, "status": "pending"})
-        if not invitation:
-            invite_error = "Невалиден или изтекъл код"
-        else:
-            expires_at = invitation["expires_at"]
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at < datetime.now(timezone.utc):
-                await db.invitations.update_one({"id": invitation["id"]}, {"$set": {"status": "expired"}})
-                invitation = None
-                invite_error = "Поканата е изтекла"
-            elif invitation.get("email") and invitation["email"].lower() != user_data.email.lower():
-                invitation = None
-                invite_error = "Тази покана е издадена за друг имейл адрес"
 
-    if invitation:
-        company_id = invitation["company_id"]
-        role = invitation["role"]
-        permissions = invitation.get("permissions") or resolve_permissions(role, None)
-    else:
-        # Auto-create company for new user
-        company_name = user_data.name.split()[0] + " Company" if user_data.name else "My Company"
-        new_company = Company(
-            name=company_name,
-            eik=f"AUTO{uuid.uuid4().hex[:9].upper()}"
-        )
-        await db.companies.insert_one(new_company.dict())
-        company_id = new_company.id
-        role = "owner"
-        permissions = resolve_permissions("owner", None)
 
-    new_user = {
-        "user_id": user_id,
-        "email": user_data.email.lower(),
-        "name": user_data.name.strip(),
-        "picture": None,
-        "role": role,
-        "permissions": permissions,
-        "company_id": company_id,
-        "password_hash": password_hash,
-        "auth_provider": "email",
-        "created_at": datetime.now(timezone.utc)
-    }
-    await db.users.insert_one(new_user)
 
-    if invitation:
-        await ensure_membership(user_id, company_id, role, permissions)
-        await db.invitations.update_one({"id": invitation["id"]}, {"$set": {"status": "accepted"}})
 
-    # Create session
-    session_token = uuid.uuid4().hex
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    session_doc = {
-        "user_id": user_id,
-        "session_token": session_token,
-        "expires_at": expires_at,
-        "created_at": datetime.now(timezone.utc)
-    }
-    await db.user_sessions.insert_one(session_doc)
 
-    # Set cookie
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=7 * 24 * 60 * 60,
-        path="/"
-    )
 
-    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    return {"user": sanitize_user(user_doc), "session_token": session_token, "invite_error": invite_error}
-
-@api_router.post("/auth/login")
-@limiter.limit("10/minute")
-async def login_user(request: Request, user_data: UserLogin, response: Response):
-    """Login with email/password"""
-    # Find user. The same generic error is used whether the email doesn't
-    # exist, has no password (Google-only account), or the password is
-    # wrong - a distinct message for any one of these would let an
-    # unauthenticated caller enumerate which emails have registered
-    # accounts and how they authenticate.
-    generic_error = HTTPException(status_code=401, detail="Невалиден имейл или парола")
-    user = await db.users.find_one({"email": user_data.email.lower()})
-    if not user:
-        raise generic_error
-
-    if not user.get("password_hash"):
-        raise generic_error
-
-    # Verify password
-    if not pwd_context.verify(user_data.password, user["password_hash"]):
-        raise generic_error
-    
-    # Create session
-    session_token = uuid.uuid4().hex
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    session_doc = {
-        "user_id": user["user_id"],
-        "session_token": session_token,
-        "expires_at": expires_at,
-        "created_at": datetime.now(timezone.utc)
-    }
-    await db.user_sessions.insert_one(session_doc)
-    
-    # Set cookie
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=7 * 24 * 60 * 60,
-        path="/"
-    )
-    
-    user_doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    return {"user": sanitize_user(user_doc), "session_token": session_token}
-
-@api_router.put("/auth/change-password")
-async def change_password(data: ChangePassword, current_user: User = Depends(get_current_user)):
-    """Смяна на парола. Ако акаунтът (напр. Google вход) все още няма парола, я задава за пръв път."""
-    user = await db.users.find_one({"user_id": current_user.user_id})
-    if not user:
-        raise HTTPException(status_code=401, detail="Потребителят не е намерен")
-
-    existing_hash = user.get("password_hash")
-    if existing_hash:
-        if not data.current_password:
-            raise HTTPException(status_code=400, detail="Въведете текущата парола")
-        if not pwd_context.verify(data.current_password, existing_hash):
-            raise HTTPException(status_code=401, detail="Грешна текуща парола")
-
-    is_valid, error_msg = validate_password(data.new_password)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=error_msg)
-
-    new_hash = pwd_context.hash(data.new_password)
-    await db.users.update_one(
-        {"user_id": current_user.user_id},
-        {"$set": {"password_hash": new_hash}}
-    )
-    return {"message": "Паролата е сменена успешно"}
-
-@api_router.post("/auth/forgot-password")
-@limiter.limit("3/minute")
-async def forgot_password(request: Request, data: ForgotPasswordRequest):
-    """Изпраща код за възстановяване на паролата по имейл. Винаги връща
-    същия отговор, независимо дали имейлът съществува, има парола, или
-    не - иначе би издало кои имейли са регистрирани в системата."""
-    if not EMAIL_FEATURES_ENABLED:
-        raise HTTPException(status_code=503, detail="Възстановяването на парола временно не е налично. Моля, свържете се с администратора.")
-
-    generic_response = {"message": "Ако имейлът съществува в системата, изпратихме код за възстановяване на паролата."}
-
-    user = await db.users.find_one({"email": data.email.lower()})
-    if not user or not user.get("password_hash"):
-        # Doesn't exist, or is a Google-only account with no password to reset.
-        return generic_response
-
-    reset_code = PasswordResetCode(user_id=user["user_id"])
-    await db.password_reset_codes.insert_one(reset_code.dict())
-
-    await send_email(
-        to_email=user["email"],
-        subject="Код за възстановяване на паролата - Фактура+",
-        html_body=(
-            f"<p>Здравейте, {user.get('name', '')}!</p>"
-            f"<p>Получихме заявка за възстановяване на паролата на вашия акаунт във Фактура+.</p>"
-            f"<p>Вашият код за възстановяване е:</p>"
-            f"<h2 style=\"letter-spacing:4px;\">{reset_code.code}</h2>"
-            f"<p>Кодът е валиден 30 минути. Ако не сте заявили това, просто игнорирайте този имейл.</p>"
-        ),
-    )
-    return generic_response
-
-@api_router.post("/auth/reset-password")
-@limiter.limit("10/minute")
-async def reset_password(request: Request, data: ResetPasswordRequest):
-    """Задава нова парола с код, изпратен по имейл от /auth/forgot-password."""
-    is_valid, error_msg = validate_password(data.new_password)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=error_msg)
-
-    # Same generic error whether the email doesn't exist or the code is
-    # wrong/expired/already used - same enumeration concern as login.
-    generic_error = HTTPException(status_code=400, detail="Невалиден или изтекъл код")
-
-    user = await db.users.find_one({"email": data.email.lower()})
-    if not user:
-        raise generic_error
-
-    code = data.code.upper().strip()
-    reset_doc = await db.password_reset_codes.find_one({
-        "user_id": user["user_id"], "code": code, "used": False
-    })
-    if not reset_doc:
-        raise generic_error
-
-    expires_at = reset_doc["expires_at"]
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at < datetime.now(timezone.utc):
-        raise generic_error
-
-    new_hash = pwd_context.hash(data.new_password)
-    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"password_hash": new_hash}})
-    await db.password_reset_codes.update_one({"id": reset_doc["id"]}, {"$set": {"used": True}})
-
-    # A password reset proves account ownership via email, but doesn't
-    # prove every existing session is still trustworthy - if the reset was
-    # triggered because a session got hijacked, that session shouldn't
-    # survive the reset.
-    await db.user_sessions.delete_many({"user_id": user["user_id"]})
-
-    return {"message": "Паролата е сменена успешно. Моля, влезте отново."}
-
-@api_router.put("/auth/role/{user_id}")
-async def update_user_role(user_id: str, request: Request, current_user: User = Depends(get_current_user)):
-    body = await request.json()
-    role = body.get("role")
-    # None here means "no explicit checklist edit" - resolve_permissions
-    # then falls back to the role's default set, same as at invite time.
-    requested_permissions = body.get("permissions")
-
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да променя роли")
-
-    if role not in ["owner", "manager", "staff", "accountant"]:
-        raise HTTPException(status_code=400, detail="Невалидна роля. Допустими: owner, manager, staff, accountant")
-
-    # Get target user
-    target_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    if not target_user:
-        raise HTTPException(status_code=404, detail="Потребителят не е намерен")
-
-    # Ensure same company
-    if target_user.get("company_id") != current_user.company_id:
-        raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
-
-    # Cannot change own role if owner
-    if user_id == current_user.user_id and current_user.role == "owner":
-        raise HTTPException(status_code=400, detail="Не можете да променяте собствената си роля на собственик")
-
-    # Demoting a co-owner strips their owner powers just as surely as
-    # removing them would - it needs the same unanimous sign-off from the
-    # other owners, not a single owner's unilateral edit. Promoting someone
-    # TO owner, or changing role among non-owners, stays immediate.
-    if target_user.get("role") == "owner" and role != "owner":
-        pending_action = await request_owner_status_change(current_user.company_id, target_user, current_user, role)
-        return {
-            "status": "pending_approval",
-            "message": "Промяната засяга собственик и изисква одобрение от другите собственици, преди да влезе в сила.",
-            "action": pending_action,
-        }
-
-    permissions = resolve_permissions(role, requested_permissions)
-
-    # Stamps this account as having gone through a real checklist save on
-    # the current permissions schema - see sanitize_user's docstring for
-    # why this stamp (not the resulting permission list) is what tells a
-    # never-migrated legacy account apart from one that deliberately
-    # unticked every sensitive-data toggle.
-    result = await db.users.update_one(
-        {"user_id": user_id},
-        {"$set": {"role": role, "permissions": permissions, "permissions_schema_version": PERMISSIONS_SCHEMA_VERSION}}
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Потребителят не е намерен")
-
-    # Keep the membership record (used by the accountant company switcher)
-    # in sync, in case this user held accountant-level access here.
-    await ensure_membership(user_id, current_user.company_id, role, permissions)
-
-    return {"status": "executed", "message": "Ролята е обновена"}
-
-@api_router.get("/auth/users")
-async def get_all_users(current_user: User = Depends(get_current_user)):
-    if current_user.role not in ["owner", "manager"]:
-        raise HTTPException(status_code=403, detail="Нямате права за тази операция")
-    
-    if not current_user.company_id:
-        return []
-    
-    users = await db.users.find(
-        {"company_id": current_user.company_id},
-        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1, "permissions": 1, "picture": 1, "created_at": 1}
-    ).to_list(1000)
-    for u in users:
-        if not u.get("permissions"):
-            u["permissions"] = resolve_permissions(u.get("role", "staff"), None)
-
-    # An accountant with access to this company might currently be
-    # switched into a DIFFERENT client's data, so their live users.company_id
-    # (and users.permissions, which follows the ACTIVE company) won't match
-    # here - pull them in separately via their membership record, which
-    # holds the role/permissions specific to THIS company.
-    existing_ids = {u["user_id"] for u in users}
-    accountant_memberships = await db.company_memberships.find(
-        {"company_id": current_user.company_id, "role": "accountant"},
-        {"_id": 0, "user_id": 1, "permissions": 1}
-    ).to_list(1000)
-    membership_permissions = {
-        m["user_id"]: m.get("permissions") or resolve_permissions("accountant", None)
-        for m in accountant_memberships
-    }
-    extra_ids = [uid for uid in membership_permissions if uid not in existing_ids]
-    if extra_ids:
-        extra_users = await db.users.find(
-            {"user_id": {"$in": extra_ids}},
-            {"_id": 0, "user_id": 1, "email": 1, "name": 1, "picture": 1, "created_at": 1}
-        ).to_list(1000)
-        for u in extra_users:
-            u["role"] = "accountant"  # overrides whatever company they're currently active in
-            u["permissions"] = membership_permissions[u["user_id"]]
-        users.extend(extra_users)
-
-    return users
-
-@api_router.delete("/auth/users/{user_id}")
-async def remove_user_from_company(user_id: str, current_user: User = Depends(get_current_user)):
-    """Премахва потребител от фирмата (само Owner)"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да премахва потребители")
-    
-    if user_id == current_user.user_id:
-        raise HTTPException(status_code=400, detail="Не можете да премахнете себе си")
-    
-    target_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    if not target_user:
-        raise HTTPException(status_code=404, detail="Потребителят не е намерен")
-
-    # A co-owner can never be unilaterally kicked out - see
-    # request_owner_status_change's docstring for the full reasoning.
-    if target_user.get("role") == "owner":
-        if target_user.get("company_id") != current_user.company_id:
-            raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
-        pending_action = await request_owner_status_change(current_user.company_id, target_user, current_user, "remove")
-        return {
-            "status": "pending_approval",
-            "message": "Премахването на собственик изисква одобрение от другите собственици, преди да влезе в сила.",
-            "action": pending_action,
-        }
-
-    # An accountant's membership may exist here even while they're
-    # currently switched into a different client's data, so check
-    # company_memberships first rather than requiring an exact
-    # company_id match.
-    accountant_membership = await db.company_memberships.find_one({
-        "user_id": user_id,
-        "company_id": current_user.company_id,
-        "role": "accountant",
-    })
-    if accountant_membership:
-        await db.company_memberships.delete_one({
-            "user_id": user_id,
-            "company_id": current_user.company_id,
-        })
-        # If they're currently looking at this exact company, switch them
-        # back to another membership of theirs (or clear it entirely).
-        if target_user.get("company_id") == current_user.company_id:
-            fallback = await db.company_memberships.find_one({"user_id": user_id}, {"_id": 0})
-            if fallback:
-                fallback_permissions = fallback.get("permissions") or resolve_permissions(fallback["role"], None)
-                await db.users.update_one(
-                    {"user_id": user_id},
-                    {"$set": {"company_id": fallback["company_id"], "role": fallback["role"], "permissions": fallback_permissions}}
-                )
-            else:
-                await db.users.update_one(
-                    {"user_id": user_id},
-                    {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
-                )
-        return {"status": "executed", "message": "Достъпът на счетоводителя е премахнат"}
-
-    if target_user.get("company_id") != current_user.company_id:
-        raise HTTPException(status_code=403, detail="Потребителят не е от вашата фирма")
-
-    # Remove company_id from user (don't delete user) - also reset their
-    # permissions to the forced staff role's defaults, otherwise a removed
-    # manager/staff member keeps their old permissions array (sanitize_user
-    # only backfills when it's empty, so a stale non-empty list survives
-    # the role downgrade and would still be honored by require_permission
-    # if they're later re-added to a company without an explicit re-invite).
-    await db.users.update_one(
-        {"user_id": user_id},
-        {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
-    )
-
-    return {"status": "executed", "message": "Потребителят е премахнат от фирмата"}
 
 # ===================== OWNER ACTIONS (multi-owner removal safeguard) =====================
 
-@api_router.get("/company/owner-actions")
-async def list_owner_actions(current_user: User = Depends(get_current_user)):
-    """Чакащи заявки за премахване/понижаване на собственик - видими за
-    всички собственици на фирмата, включително целта на заявката (пълна
-    прозрачност е самата защита срещу злоупотреба)."""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само собственик може да вижда тези заявки")
-    if not current_user.company_id:
-        return []
-    return await db.owner_actions.find(
-        {"company_id": current_user.company_id, "status": "pending"}, {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
 
-@api_router.post("/company/owner-actions/{action_id}/approve")
-async def approve_owner_action(action_id: str, current_user: User = Depends(get_current_user)):
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само собственик може да одобрява")
-    action = await db.owner_actions.find_one({"id": action_id, "company_id": current_user.company_id}, {"_id": 0})
-    if not action or action["status"] != "pending":
-        raise HTTPException(status_code=404, detail="Заявката не е намерена")
-    if current_user.user_id not in action["required_approver_ids"]:
-        raise HTTPException(status_code=403, detail="Не сте сред собствениците, чието одобрение се изисква за тази заявка")
 
-    approved_by = sorted(set(action.get("approved_by", [])) | {current_user.user_id})
-    all_approved = set(action["required_approver_ids"]).issubset(set(approved_by))
-    update = {"approved_by": approved_by}
-    if all_approved:
-        await execute_owner_action(action)
-        update["status"] = "executed"
-        update["resolved_at"] = datetime.now(timezone.utc)
-    await db.owner_actions.update_one({"id": action_id}, {"$set": update})
-    return {"message": "Одобрено", "status": update.get("status", "pending")}
-
-@api_router.post("/company/owner-actions/{action_id}/reject")
-async def reject_owner_action(action_id: str, current_user: User = Depends(get_current_user)):
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само собственик може да отхвърля")
-    action = await db.owner_actions.find_one({"id": action_id, "company_id": current_user.company_id}, {"_id": 0})
-    if not action or action["status"] != "pending":
-        raise HTTPException(status_code=404, detail="Заявката не е намерена")
-    # The target can always object to their own removal (extra protection
-    # on top of the required-approvers rule), same as any required approver
-    # or the person who requested it in the first place (their own withdrawal).
-    allowed = current_user.user_id in (action["required_approver_ids"] + [action["target_user_id"], action["requested_by"]])
-    if not allowed:
-        raise HTTPException(status_code=403, detail="Нямате право да отхвърлите тази заявка")
-    await db.owner_actions.update_one(
-        {"id": action_id},
-        {"$set": {"status": "rejected", "resolved_at": datetime.now(timezone.utc)}}
-    )
-    return {"message": "Заявката е отхвърлена"}
 
 # ===================== INVITATION ENDPOINTS =====================
 
-@api_router.post("/invitations")
-async def create_invitation(invitation_data: InvitationCreate, current_user: User = Depends(get_current_user)):
-    """Създава покана за нов потребител (само Owner)"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да изпраща покани")
 
-    if not current_user.company_id:
-        raise HTTPException(status_code=400, detail="Нямате фирма")
 
-    if not invitation_data.email and not invitation_data.phone:
-        raise HTTPException(status_code=400, detail="Въведете имейл или телефон")
 
-    if invitation_data.role not in ["manager", "staff", "accountant", "owner"]:
-        raise HTTPException(status_code=400, detail="Невалидна роля за покана")
-    
-    # Check if user with this email already exists in the company
-    if invitation_data.email:
-        existing_user = await db.users.find_one({
-            "email": invitation_data.email,
-            "company_id": current_user.company_id
-        })
-        if existing_user:
-            raise HTTPException(status_code=400, detail="Потребител с този имейл вече е член на фирмата")
-    
-    # Check for pending invitation - only match on whichever contact method
-    # was actually provided; a bare {"phone": None}/{"email": None} clause
-    # for the one NOT provided would otherwise match every other pending
-    # invitation that also omitted it, flagging unrelated invites as
-    # duplicates.
-    contact_clauses = []
-    if invitation_data.email:
-        contact_clauses.append({"email": invitation_data.email})
-    if invitation_data.phone:
-        contact_clauses.append({"phone": invitation_data.phone})
-
-    pending = await db.invitations.find_one({
-        "company_id": current_user.company_id,
-        "$or": contact_clauses,
-        "status": "pending"
-    })
-    if pending:
-        raise HTTPException(status_code=400, detail="Вече има активна покана за този контакт")
-    
-    invitation = Invitation(
-        company_id=current_user.company_id,
-        invited_by=current_user.user_id,
-        email=invitation_data.email,
-        phone=invitation_data.phone,
-        role=invitation_data.role,
-        permissions=resolve_permissions(invitation_data.role, invitation_data.permissions),
-    )
-    
-    await db.invitations.insert_one(invitation.dict())
-    
-    # Get company name for response
-    company = await db.companies.find_one({"id": current_user.company_id}, {"name": 1})
-    company_name = company.get("name", "Unknown") if company else "Unknown"
-    
-    return {
-        "message": "Поканата е създадена",
-        "invitation": {
-            "id": invitation.id,
-            "code": invitation.code,
-            "expires_at": invitation.expires_at.isoformat(),
-            "company_name": company_name
-        }
-    }
-
-@api_router.get("/invitations")
-async def get_invitations(current_user: User = Depends(get_current_user)):
-    """Връща всички покани за фирмата (само Owner)"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да вижда покани")
-    
-    if not current_user.company_id:
-        return []
-    
-    invitations = await db.invitations.find(
-        {"company_id": current_user.company_id},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
-    
-    return invitations
-
-@api_router.delete("/invitations/{invitation_id}")
-async def cancel_invitation(invitation_id: str, current_user: User = Depends(get_current_user)):
-    """Отменя покана (само Owner)"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да отменя покани")
-    
-    invitation = await db.invitations.find_one({
-        "id": invitation_id,
-        "company_id": current_user.company_id
-    })
-    
-    if not invitation:
-        raise HTTPException(status_code=404, detail="Поканата не е намерена")
-    
-    if invitation["status"] != "pending":
-        raise HTTPException(status_code=400, detail="Поканата вече не е активна")
-    
-    await db.invitations.update_one(
-        {"id": invitation_id},
-        {"$set": {"status": "cancelled"}}
-    )
-    
-    return {"message": "Поканата е отменена"}
-
-@api_router.post("/invitations/accept")
-@limiter.limit("10/minute")
-async def accept_invitation(request: Request, current_user: User = Depends(get_current_user)):
-    """Приема покана по код"""
-    body = await request.json()
-    code = body.get("code", "").upper().strip()
-
-    if not code:
-        raise HTTPException(status_code=400, detail="Въведете код на поканата")
-
-    # Find valid invitation
-    invitation = await db.invitations.find_one({
-        "code": code,
-        "status": "pending"
-    })
-
-    if not invitation:
-        raise HTTPException(status_code=404, detail="Невалиден или изтекъл код")
-
-    # Check expiry
-    expires_at = invitation["expires_at"]
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-
-    if expires_at < datetime.now(timezone.utc):
-        await db.invitations.update_one(
-            {"id": invitation["id"]},
-            {"$set": {"status": "expired"}}
-        )
-        raise HTTPException(status_code=400, detail="Поканата е изтекла")
-
-    # If the invitation was issued to a specific email, only that account may accept it
-    if invitation.get("email") and invitation["email"].lower() != current_user.email.lower():
-        raise HTTPException(status_code=403, detail="Тази покана е издадена за друг имейл адрес")
-
-    # Accountant AND owner invitations don't require leaving your current
-    # company first - a счетоводител can hold access to several client
-    # companies at once (see /companies/switch), and someone becoming a
-    # co-owner here very plausibly already owns a different business
-    # elsewhere. Every other role keeps the one-company rule, UNLESS the
-    # current company would be left with no one in it anyway (e.g. the
-    # throwaway company that registration auto-creates for someone who
-    # wasn't invited yet) - in that case there's no one to strand, so let
-    # them switch straight over.
-    if invitation["role"] not in ("accountant", "owner") and current_user.company_id:
-        if await company_has_other_members(current_user.company_id, current_user.user_id):
-            raise HTTPException(status_code=400, detail="Вече сте член на фирма. Първо напуснете текущата фирма.")
-
-    invitation_permissions = invitation.get("permissions") or resolve_permissions(invitation["role"], None)
-
-    # Preserve whatever company/role the user is switching away from as a
-    # membership, so they can switch back to it later.
-    if current_user.company_id:
-        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role, current_user.permissions)
-    await ensure_membership(current_user.user_id, invitation["company_id"], invitation["role"], invitation_permissions)
-
-    # Accept invitation - link user to company (this becomes their new
-    # active company/role; for a счетоводител accepting a 2nd+ invitation
-    # this switches them into the newly-joined company)
-    await db.users.update_one(
-        {"user_id": current_user.user_id},
-        {"$set": {
-            "company_id": invitation["company_id"],
-            "role": invitation["role"],
-            "permissions": invitation_permissions,
-        }}
-    )
-
-    # Mark invitation as accepted
-    await db.invitations.update_one(
-        {"id": invitation["id"]},
-        {"$set": {"status": "accepted"}}
-    )
-    
-    # Get company info
-    company = await db.companies.find_one({"id": invitation["company_id"]}, {"_id": 0})
-    
-    return {
-        "message": f"Успешно се присъединихте към {company['name'] if company else 'фирмата'}",
-        "company": company
-    }
 
 # ===================== MULTI-COMPANY ACCESS (ACCOUNTANT SWITCHER) =====================
 
-@api_router.get("/companies/memberships")
-async def get_company_memberships(current_user: User = Depends(get_current_user)):
-    """Списък с всички фирми, до които потребителят има достъп (за
-    счетоводители с достъп до няколко фирми клиенти) - използва се за
-    менюто за превключване на активната фирма."""
-    memberships = await db.company_memberships.find(
-        {"user_id": current_user.user_id}, {"_id": 0}
-    ).to_list(100)
 
-    # Backfill: make sure the currently-active company is always
-    # represented, even for users who never went through /companies/switch
-    if current_user.company_id and not any(m["company_id"] == current_user.company_id for m in memberships):
-        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role, current_user.permissions)
-        memberships.append({"company_id": current_user.company_id, "role": current_user.role})
 
-    company_ids = [m["company_id"] for m in memberships]
-    companies = await db.companies.find(
-        {"id": {"$in": company_ids}}, {"_id": 0, "id": 1, "name": 1}
-    ).to_list(1000)
-    company_names = {c["id"]: c["name"] for c in companies}
-
-    result = []
-    for m in memberships:
-        result.append({
-            "company_id": m["company_id"],
-            "company_name": company_names.get(m["company_id"], "—"),
-            "role": m["role"],
-            "is_active": m["company_id"] == current_user.company_id,
-        })
-
-    result.sort(key=lambda m: (not m["is_active"], m["company_name"]))
-    return result
-
-@api_router.post("/companies/switch")
-async def switch_active_company(request: Request, current_user: User = Depends(get_current_user)):
-    """Превключва коя фирма е активна за потребителя. Работи само за фирми,
-    за които вече има запис в company_memberships (собствена фирма или
-    приета покана като счетоводител)."""
-    body = await request.json()
-    target_company_id = body.get("company_id")
-    if not target_company_id:
-        raise HTTPException(status_code=400, detail="Липсва company_id")
-
-    if target_company_id == current_user.company_id:
-        user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
-        return sanitize_user(user_doc)
-
-    membership = await db.company_memberships.find_one({
-        "user_id": current_user.user_id,
-        "company_id": target_company_id,
-    })
-    if not membership:
-        raise HTTPException(status_code=403, detail="Нямате достъп до тази фирма")
-
-    # Preserve the company/role we're switching away from as a membership
-    if current_user.company_id:
-        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role, current_user.permissions)
-
-    target_permissions = membership.get("permissions") or resolve_permissions(membership["role"], None)
-    await db.users.update_one(
-        {"user_id": current_user.user_id},
-        {"$set": {"company_id": target_company_id, "role": membership["role"], "permissions": target_permissions}}
-    )
-
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    return sanitize_user(user_doc)
-
-@api_router.post("/company/leave")
-async def leave_company(current_user: User = Depends(get_current_user)):
-    """Напускане на фирма (не може Owner)"""
-    if not current_user.company_id:
-        raise HTTPException(status_code=400, detail="Не сте член на фирма")
-
-    if current_user.role == "accountant":
-        # Just drop this one client relationship - switch back to another
-        # membership (typically their own home company) if they have one.
-        await db.company_memberships.delete_one({
-            "user_id": current_user.user_id,
-            "company_id": current_user.company_id,
-        })
-        fallback = await db.company_memberships.find_one({"user_id": current_user.user_id}, {"_id": 0})
-        if fallback:
-            fallback_permissions = fallback.get("permissions") or resolve_permissions(fallback["role"], None)
-            await db.users.update_one(
-                {"user_id": current_user.user_id},
-                {"$set": {"company_id": fallback["company_id"], "role": fallback["role"], "permissions": fallback_permissions}}
-            )
-        else:
-            await db.users.update_one(
-                {"user_id": current_user.user_id},
-                {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
-            )
-        return {"message": "Успешно напуснахте фирмата"}
-
-    if current_user.role == "owner":
-        # Leaving is fine as long as at least one OTHER owner remains to
-        # keep the company running - with a co-owner still in place, other
-        # (non-owner) teammates aren't being stranded either. Only a truly
-        # sole owner of a company that has other people in it is blocked,
-        # since there'd be no one left with owner authority at all.
-        other_owners = await db.users.count_documents({
-            "company_id": current_user.company_id, "role": "owner", "user_id": {"$ne": current_user.user_id}
-        })
-        if other_owners == 0 and await company_has_other_members(current_user.company_id, current_user.user_id):
-            raise HTTPException(status_code=400, detail="Вие сте единственият собственик на фирма с други членове. Добавете друг собственик, преди да напуснете.")
-
-    await db.users.update_one(
-        {"user_id": current_user.user_id},
-        {"$unset": {"company_id": ""}, "$set": {"role": "staff", "permissions": resolve_permissions("staff", None)}}
-    )
-
-    return {"message": "Успешно напуснахте фирмата"}
 
 # ===================== NOTIFICATION SETTINGS ENDPOINTS =====================
 
-@api_router.get("/notifications/settings", response_model=NotificationSettings)
-async def get_notification_settings(current_user: User = Depends(get_current_user)):
-    settings = await db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    if not settings:
-        # Create default settings
-        default_settings = NotificationSettings(user_id=current_user.user_id)
-        await db.notification_settings.insert_one(default_settings.dict())
-        return default_settings
-    return NotificationSettings(**settings)
 
-@api_router.put("/notifications/settings", response_model=NotificationSettings)
-async def update_notification_settings(
-    settings_update: NotificationSettingsUpdate,
-    current_user: User = Depends(get_current_user)
-):
-    update_data = {k: v for k, v in settings_update.dict().items() if v is not None}
-    update_data["updated_at"] = datetime.now(timezone.utc)
-    
-    existing = await db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    
-    if not existing:
-        # Create new settings
-        new_settings = NotificationSettings(user_id=current_user.user_id, **update_data)
-        await db.notification_settings.insert_one(new_settings.dict())
-        return new_settings
-    
-    await db.notification_settings.update_one(
-        {"user_id": current_user.user_id},
-        {"$set": update_data}
-    )
-    
-    updated = await db.notification_settings.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    return NotificationSettings(**updated)
 
 # ===================== COMPANY ENDPOINTS =====================
 
-@api_router.post("/company", response_model=Company)
-async def create_or_update_company(company_data: CompanyCreate, current_user: User = Depends(get_current_user)):
-    """Създава нова фирма или обновява съществуваща (само Owner може да редактира)"""
-    
-    # Check if user already has a company
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    
-    if user_doc and user_doc.get("company_id"):
-        # User has a company - only owner can edit
-        if user_doc.get("role") != "owner":
-            raise HTTPException(status_code=403, detail="Само титулярят може да редактира данните на фирмата")
-        
-        # Update existing company
-        update_data = {k: v for k, v in company_data.dict().items() if v is not None}
-        update_data["updated_at"] = datetime.now(timezone.utc)
-        
-        # Don't allow EIK change if company has other users
-        other_users = await db.users.count_documents({
-            "company_id": user_doc["company_id"],
-            "user_id": {"$ne": current_user.user_id}
-        })
-        if other_users > 0 and "eik" in update_data:
-            existing = await db.companies.find_one({"id": user_doc["company_id"]})
-            if existing and existing.get("eik") != update_data["eik"]:
-                raise HTTPException(status_code=400, detail="Не може да се промени ЕИК на фирма с други потребители")
-        
-        await db.companies.update_one(
-            {"id": user_doc["company_id"]},
-            {"$set": update_data}
-        )
-        
-        updated_company = await db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
-        return Company(**updated_company)
-    else:
-        # Check if company with this EIK already exists
-        existing_company = await db.companies.find_one({"eik": company_data.eik}, {"_id": 0})
-        
-        if existing_company:
-            raise HTTPException(status_code=400, detail="Фирма с този ЕИК вече съществува. Използвайте код за присъединяване.")
-        
-        # Create new company
-        company = Company(**company_data.dict())
-        await db.companies.insert_one(company.dict())
-        
-        # Link current user to this company as owner
-        await db.users.update_one(
-            {"user_id": current_user.user_id},
-            {"$set": {"company_id": company.id, "role": "owner", "permissions": resolve_permissions("owner", None)}}
-        )
-        
-        return company
 
-@api_router.post("/companies", response_model=Company)
-async def create_additional_company(company_data: CompanyCreate, current_user: User = Depends(get_current_user)):
-    """Създава ДОПЪЛНИТЕЛНА фирма за потребител, който вече притежава (или
-    членува в) поне една - за собственик на няколко отделни фирми/ООД-та.
-    За разлика от POST /company (което създава само ако потребителят
-    изобщо няма фирма, иначе редактира текущата), този endpoint винаги
-    създава нова фирма, запазва достъпа до старата чрез company_memberships
-    (същият механизъм, по който счетоводител държи няколко клиента) и
-    превключва потребителя в новата - той може да се върне към старата по
-    всяко време през превключвателя на фирми."""
-    existing_company = await db.companies.find_one({"eik": company_data.eik}, {"_id": 0})
-    if existing_company:
-        raise HTTPException(status_code=400, detail="Фирма с този ЕИК вече съществува. Използвайте код за присъединяване.")
 
-    company = Company(**company_data.dict())
-    await db.companies.insert_one(company.dict())
 
-    if current_user.company_id:
-        await ensure_membership(current_user.user_id, current_user.company_id, current_user.role, current_user.permissions)
-    permissions = resolve_permissions("owner", None)
-    await ensure_membership(current_user.user_id, company.id, "owner", permissions)
-
-    await db.users.update_one(
-        {"user_id": current_user.user_id},
-        {"$set": {"company_id": company.id, "role": "owner", "permissions": permissions}}
-    )
-    return company
-
-@api_router.get("/company", response_model=Optional[Company])
-async def get_my_company(current_user: User = Depends(get_current_user)):
-    """Връща фирмата на текущия потребител"""
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
-    
-    if not user_doc or not user_doc.get("company_id"):
-        return None
-    
-    company = await db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
-    if not company:
-        return None
-    
-    return Company(**company)
-
-@api_router.put("/company", response_model=Company)
-async def update_company(company_update: CompanyUpdate, current_user: User = Depends(get_current_user)):
-    """Обновява фирмата на текущия потребител (само Owner)"""
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
-
-    if not user_doc or not user_doc.get("company_id"):
-        raise HTTPException(status_code=404, detail="Нямате свързана фирма. Първо създайте фирма.")
-
-    if user_doc.get("role") != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да редактира данните на фирмата")
-
-    update_data = {k: v for k, v in company_update.dict().items() if v is not None}
-    if not update_data:
-        raise HTTPException(status_code=400, detail="Няма данни за обновяване")
-    
-    update_data["updated_at"] = datetime.now(timezone.utc)
-    
-    await db.companies.update_one(
-        {"id": user_doc["company_id"]},
-        {"$set": update_data}
-    )
-    
-    updated_company = await db.companies.find_one({"id": user_doc["company_id"]}, {"_id": 0})
-    return Company(**updated_company)
 
 # (/company/users used to duplicate /auth/users here - removed; /auth/users
 # is the one the frontend actually calls, and it also merges in accountant
@@ -2028,83 +1580,16 @@ async def get_closed_days_lookup(company_id: Optional[str]) -> tuple:
     if not company_id:
         return set(), {}
     company = await db.companies.find_one({"id": company_id}, {"_id": 0, "closed_weekdays": 1})
-    closed_weekdays = set(company.get("closed_weekdays") or []) if company else set()
+    closed_weekdays: set[int] = set(company.get("closed_weekdays") or []) if company else set()
     exceptions = await db.closed_date_exceptions.find(
         {"company_id": company_id}, {"_id": 0, "date": 1, "closed": 1}
     ).to_list(2000)
     exceptions_map = {e["date"]: e["closed"] for e in exceptions}
     return closed_weekdays, exceptions_map
 
-@api_router.get("/company/closed-date-exceptions", response_model=List[ClosedDateException])
-async def get_closed_date_exceptions(current_user: User = Depends(get_current_user)):
-    """Връща еднократните изключения от седмичния график (празници,
-    извънредни затваряния или отваряния)."""
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        return []
-    exceptions = await db.closed_date_exceptions.find(
-        {"company_id": company_id}, {"_id": 0}
-    ).sort("date", 1).to_list(2000)
-    return [ClosedDateException(**e) for e in exceptions]
 
-@api_router.put("/company/closed-date-exceptions", response_model=ClosedDateException)
-async def upsert_closed_date_exception(payload: ClosedDateExceptionUpsert, current_user: User = Depends(get_current_user)):
-    """Добавя/обновява изключение за конкретна дата (само Owner)."""
-    require_permission(current_user, "manage_company")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Нямате фирма")
 
-    existing = await db.closed_date_exceptions.find_one({"company_id": company_id, "date": payload.date})
-    if existing:
-        await db.closed_date_exceptions.update_one(
-            {"company_id": company_id, "date": payload.date},
-            {"$set": {"closed": payload.closed, "label": payload.label}}
-        )
-        saved = await db.closed_date_exceptions.find_one({"company_id": company_id, "date": payload.date}, {"_id": 0})
-    else:
-        exception = ClosedDateException(company_id=company_id, date=payload.date, closed=payload.closed, label=payload.label)
-        await db.closed_date_exceptions.insert_one(exception.dict())
-        saved = exception.dict()
-    return ClosedDateException(**saved)
 
-@api_router.delete("/company/closed-date-exceptions/{date}")
-async def delete_closed_date_exception(date: str, current_user: User = Depends(get_current_user)):
-    """Премахва изключение за дата - денят се връща към седмичния график по подразбиране."""
-    require_permission(current_user, "manage_company")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Нямате фирма")
-    result = await db.closed_date_exceptions.delete_one({"company_id": company_id, "date": date})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Няма изключение за тази дата")
-    return {"message": "Изключението е премахнато"}
-
-@api_router.get("/company/open-days-count")
-async def get_open_days_count(start_date: str, end_date: str, current_user: User = Depends(get_current_user)):
-    """Брой работни (неизключени) дни в затворен интервал [start_date, end_date]
-    (YYYY-MM-DD, включително двата края) - използва се за коректно смятане
-    на среден дневен оборот, без почивните дни да го влачат надолу."""
-    company_id, _ = await get_company_scope(current_user)
-    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
-
-    start = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end = datetime.strptime(end_date, "%Y-%m-%d").date()
-    if end < start:
-        raise HTTPException(status_code=400, detail="Крайната дата е преди началната")
-
-    total_days = (end - start).days + 1
-    if total_days > 1827:  # ~5 years - far more than any real averaging window needs
-        raise HTTPException(status_code=400, detail="Периодът е твърде голям (максимум 5 години)")
-    open_days = 0
-    d = start
-    while d <= end:
-        date_str = d.strftime("%Y-%m-%d")
-        if not is_date_closed(date_str, closed_weekdays, exceptions_map):
-            open_days += 1
-        d += timedelta(days=1)
-
-    return {"open_days": open_days, "closed_days": total_days - open_days, "total_days": total_days}
 
 # ===================== AI DATA CORRECTION MODULE =====================
 
@@ -2124,7 +1609,333 @@ def _compare_key(value: str) -> str:
 def _similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
-async def normalize_supplier_name(supplier: str, company_id: Optional[str] = None) -> tuple[str, bool]:
+# ===================== ITEM MODEL: SIZE, CONTENT, BASE UNIT =====================
+# What one invoice line of an item actually holds, read from its name and
+# unit - "Доматен сос 5кг" is 5 kg a tin, "Айран 250мл" 0.25 l a cup, "Кола
+# 0,5л x 6" 3 l a pack, "Яйца 30 бр" 30 pieces - so prices and quantities
+# can be compared per kg, l or piece across pack sizes and suppliers.
+# Generic: plain units of measure, nothing trade-specific.
+
+_CONTENT_UNITS = {
+    "кг": ("кг", 1.0), "kg": ("кг", 1.0),
+    "гр": ("кг", 0.001), "г": ("кг", 0.001), "g": ("кг", 0.001),
+    "мл": ("л", 0.001), "ml": ("л", 0.001),
+    "лт": ("л", 1.0), "lt": ("л", 1.0), "л": ("л", 1.0), "l": ("л", 1.0),
+}
+_SIZE_TOKEN_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*(кг|kg|гр|г|g|мл|ml|лт|lt|л|l)(?![^\W\d_])', re.IGNORECASE)
+_MULTIPACK_RE = re.compile(r'(?:[xх×*]\s*(\d+)(?![\d.,]))|(?:(?<![\d.,])(\d+)\s*[xх×*](?![^\W\d_]))', re.IGNORECASE)
+_PIECES_RE = re.compile(r'(\d+)\s*(?:бр|броя|pcs)(?![^\W\d_])', re.IGNORECASE)
+# normalize_unit() keys sold by weight or volume: (base unit, factor to it)
+_MEASURE_UNIT_BASE = {"кг": ("кг", 1.0), "г": ("кг", 0.001), "л": ("л", 1.0), "мл": ("л", 0.001)}
+
+
+def _fmt_amount(value: float) -> str:
+    return f"{round(value, 6):g}"
+
+
+def _fmt_bare_number(n: str) -> str:
+    int_part, _, frac = n.replace(',', '.').partition('.')
+    int_part = int_part.lstrip('0') or '0'
+    frac = frac.rstrip('0')
+    return f"{int_part}.{frac}" if frac else int_part
+
+
+def item_content(name: str) -> Optional[tuple]:
+    """(amount, base unit) one line unit of this item holds, from its name:
+    "Доматен сос 5кг" -> (5, 'кг'), "Айран 250мл" -> (0.25, 'л'),
+    "Кола 0,5л x 6" -> (3, 'л'), "Яйца 30 бр" -> (30, 'бр'); None when
+    the name says nothing about size."""
+    text = (name or "").lower()
+    size = _SIZE_TOKEN_RE.search(text)
+    rest = _SIZE_TOKEN_RE.sub(' ', text)
+    multipack = _MULTIPACK_RE.search(rest)
+    count = int(next(g for g in multipack.groups() if g)) if multipack else None
+    pieces = _PIECES_RE.search(rest)
+    if size:
+        base, factor = _CONTENT_UNITS[size.group(2).lower()]
+        amount = float(size.group(1).replace(',', '.')) * factor * (count or (int(pieces.group(1)) if pieces else 1))
+        return (round(amount, 6), base) if amount > 0 else None
+    if pieces:
+        amount = int(pieces.group(1)) * (count or 1)
+        return (float(amount), "бр") if amount > 0 else None
+    return None
+
+
+def base_unit_price(unit_price: float, name: str, unit: Optional[str]) -> Optional[tuple]:
+    """(price per kg / l / piece, that base unit) for one line, or None when
+    neither the unit nor the name tells what a unit holds (a "стек" of an
+    item whose name has no size)."""
+    key = normalize_unit(unit)
+    if key in _MEASURE_UNIT_BASE:
+        base, factor = _MEASURE_UNIT_BASE[key]
+        return round(unit_price / factor, 6), base
+    content = item_content(name)
+    if content:
+        return round(unit_price / content[0], 6), content[1]
+    if key == "бр":
+        return unit_price, "бр"
+    return None
+
+
+def base_quantity(quantity: float, name: str, unit: Optional[str]) -> Optional[tuple]:
+    """(amount in kg / l / pieces, that base unit) for a line's quantity, or
+    None when what a unit holds is unknown."""
+    key = normalize_unit(unit)
+    if key in _MEASURE_UNIT_BASE:
+        base, factor = _MEASURE_UNIT_BASE[key]
+        return quantity * factor, base
+    content = item_content(name)
+    if content:
+        return quantity * content[0], content[1]
+    if key == "бр":
+        return float(quantity), "бр"
+    return None
+
+
+UNIT_LABELS = {"бр": "бр.", "оп": "оп.", "кг": "кг", "г": "г", "л": "л", "мл": "мл", "м": "м"}
+
+
+def unit_label(unit_key: str) -> str:
+    return UNIT_LABELS.get(unit_key, unit_key)
+
+
+def item_size_signature(name: str) -> tuple:
+    """The sizes and numbers in an item name, normalized and sorted
+    ("Доматен сос 5кг" -> ('5кг',), "Кока-Кола 0,5л x 6" -> ('0.5л', '6'),
+    "Кола 500мл" -> ('0.5л',) like "Кола 0.5л"). Two names that differ in
+    these are different products for pricing purposes - a 1 kg and a 5 kg
+    tin, a single bottle and a 6-pack - however similar the rest of the
+    text, so every item-merging path (fuzzy match at write time, AI
+    grouping, saved merge mappings, the owner's own "same" choice) refuses
+    to join names whose signatures differ."""
+    text = (name or "").lower()
+    tokens = [
+        f"{_fmt_amount(float(amount.replace(',', '.')) * _CONTENT_UNITS[unit.lower()][1])}{_CONTENT_UNITS[unit.lower()][0]}"
+        for amount, unit in _SIZE_TOKEN_RE.findall(text)
+    ]
+    tokens += [_fmt_bare_number(n) for n in re.findall(r'\d+(?:[.,]\d+)?', _SIZE_TOKEN_RE.sub(' ', text))]
+    return tuple(sorted(tokens))
+
+_UNIT_ALIASES = {
+    "бр": "бр", "броя": "бр", "брой": "бр", "pcs": "бр", "pc": "бр", "бройка": "бр",
+    "кг": "кг", "kg": "кг", "килограм": "кг", "килограма": "кг",
+    "г": "г", "гр": "г", "g": "г", "грам": "г",
+    "л": "л", "l": "л", "литър": "л", "литра": "л", "lt": "л",
+    "мл": "мл", "ml": "мл",
+    "м": "м", "m": "м", "метър": "м",
+    "оп": "оп", "опаковка": "оп", "опак": "оп", "пак": "оп", "пакет": "оп",
+    "стек": "стек", "кашон": "кашон", "кутия": "кутия", "кут": "кутия",
+}
+
+def normalize_unit(unit: Optional[str]) -> str:
+    """Folds the spellings OCR and people use for one unit ("бр", "бр.",
+    "БР", "броя", "pcs") into one key, so a price is only ever compared
+    with earlier prices in the same unit."""
+    key = re.sub(r'[\s.]', '', (unit or "").lower())
+    return _UNIT_ALIASES.get(key, key or "бр")
+
+def build_variant_to_canonical(mappings: List[dict]) -> tuple:
+    """(variant -> canonical, canonical -> display name) from saved
+    item_merge_mappings, skipping any variant whose size signature differs
+    from its canonical's - older AI groupings were told to merge different
+    pack sizes, and those joins must not keep comparing a 5 kg price with a
+    1 kg one. Every reader of merge mappings goes through this one place."""
+    variant_to_canonical: Dict[str, str] = {}
+    canonical_display: Dict[str, str] = {}
+    for m in mappings:
+        canonical = m["canonical_name"]
+        canonical_display[canonical] = m.get("display_name", canonical)
+        canonical_signature = item_size_signature(canonical)
+        for variant in m.get("variants", []):
+            if item_size_signature(variant) == canonical_signature:
+                variant_to_canonical[variant.lower()] = canonical
+    return variant_to_canonical, canonical_display
+
+def eik_key(value: Optional[str]) -> str:
+    """An EIK / VAT number as its digits only ("BG 123456789" -> "123456789")."""
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def invoice_number_key(value: Optional[str]) -> str:
+    """How two invoice numbers are compared: without spaces, case-blind,
+    and a purely numeric one without its leading zeros - "0000001234" read
+    off one copy and "1234" typed from another are the same invoice."""
+    key = re.sub(r"\s+", "", str(value or "")).upper()
+    if key.isdigit():
+        return key.lstrip("0") or "0"
+    return key
+
+
+async def _supplier_names(company_id: str) -> Dict[str, Dict[str, Any]]:
+    """Every supplier name the company's invoices use, with the EIKs seen
+    under it and how many invoices carry it."""
+    rows = await db.invoices.aggregate([
+        {"$match": {"company_id": company_id}},
+        {"$group": {"_id": {"s": "$supplier", "e": "$supplier_eik"}, "n": {"$sum": 1}}},
+    ]).to_list(ALL_ROWS)
+    names: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        name = (row.get("_id") or {}).get("s")
+        if not name:
+            continue
+        entry = names.setdefault(name, {"eiks": set(), "count": 0})
+        eik = eik_key((row.get("_id") or {}).get("e"))
+        if eik:
+            entry["eiks"].add(eik)
+        entry["count"] += row.get("n", 0)
+    return names
+
+
+async def find_duplicate_invoice(
+    scope: dict, supplier: str, supplier_eik: Optional[str], invoice_number: str,
+    document_type: Optional[str] = None, exclude_id: Optional[str] = None,
+) -> Optional[dict]:
+    """The company's own invoice this one would duplicate: the same
+    document number from the same supplier - the same EIK when both have
+    one (a different EIK is a different business, whatever the name), else
+    the same name. Judged over everything the company holds, not only what
+    its current members entered."""
+    number = invoice_number_key(invoice_number)
+    if not number:
+        return None
+    eik = eik_key(supplier_eik)
+    name_key = _compare_key(supplier or "")
+    who = [{"supplier": {"$regex": f"^{re.escape((supplier or '').strip())}$", "$options": "i"}}]
+    if eik:
+        who.append({"supplier_eik": {"$regex": re.escape(eik)}})
+    candidates = await db.invoices.find(
+        {"$and": [scope, {"$or": who}]},
+        {"_id": 0, "id": 1, "supplier": 1, "supplier_eik": 1, "invoice_number": 1, "user_id": 1, "date": 1, "document_type": 1},
+    ).to_list(ALL_ROWS)
+    kind = document_type or "invoice"
+    for inv in candidates:
+        if inv.get("id") == exclude_id or (inv.get("document_type") or "invoice") != kind:
+            continue
+        if invoice_number_key(inv.get("invoice_number")) != number:
+            continue
+        other_eik = eik_key(inv.get("supplier_eik"))
+        if eik and other_eik:
+            if eik == other_eik:
+                return inv
+            continue
+        if _compare_key(inv.get("supplier") or "") == name_key:
+            return inv
+    return None
+
+
+class InvoicePaymentCreate(BaseModel):
+    """A payment to a supplier on an invoice by bank."""
+    amount: float = Field(gt=0)
+    date: Optional[str] = None  # "YYYY-MM-DD", today if left out
+    method: Literal["cash", "bank_transfer", "card"] = "bank_transfer"
+    # Recorded from a bank statement: that movement's id, so reading the
+    # same statement again never pays the invoice twice.
+    bank_transaction: Optional[str] = Field(default=None, max_length=64)
+
+
+def invoice_payments_for(existing: dict, paid: float, day: date) -> List[Dict[str, Any]]:
+    """The payment history for a paid amount set at once (the "paid in
+    full" tick, an amount typed in, a corrected total): what was paid
+    before stays and a rise is one payment of the difference on this day;
+    nothing paid clears it, and a cut starts it over as one payment."""
+    history = list(existing.get("payments") or [])
+    before = float(existing.get("paid_amount") or 0)
+    if paid <= 0.005:
+        return []
+    entry = {"id": str(uuid.uuid4()), "date": day.isoformat(), "method": "bank_transfer"}
+    if paid < before - 0.005:
+        return [{**entry, "amount": round(paid, 2)}]
+    if paid > before + 0.005:
+        history.append({**entry, "amount": round(paid - before, 2)})
+    return history
+
+
+def invoice_left(invoice: dict) -> float:
+    """What is still owed on a purchase invoice: its total, less what was
+    paid and what credit notes to it took off."""
+    return max(
+        float(invoice.get("total_amount") or 0) - float(invoice.get("paid_amount") or 0)
+        - float(invoice.get("credited_amount") or 0),
+        0.0,
+    )
+
+
+def invoice_refund_due(invoice: dict) -> float:
+    """A credit note to an invoice already paid: what the supplier owes
+    back (refund or offset against the next invoice)."""
+    return max(
+        float(invoice.get("paid_amount") or 0) + float(invoice.get("credited_amount") or 0)
+        - float(invoice.get("total_amount") or 0),
+        0.0,
+    )
+
+
+def same_supplier(a: dict, b: dict) -> bool:
+    """Two documents from the same supplier: the same EIK when both have
+    one, else the same name (case, spacing and punctuation aside)."""
+    eik_a, eik_b = eik_key(a.get("supplier_eik")), eik_key(b.get("supplier_eik"))
+    if eik_a and eik_b:
+        return eik_a == eik_b
+    return bool(_compare_key(a.get("supplier") or "")) and _compare_key(a.get("supplier") or "") == _compare_key(b.get("supplier") or "")
+
+
+async def find_credited_invoice(scope: dict, credit_note: dict) -> Optional[dict]:
+    """The invoice a credit note names ("към фактура №"), from its supplier."""
+    if not (credit_note.get("credited_invoice_number") or "").strip():
+        return None
+    return await find_duplicate_invoice(
+        scope, credit_note.get("supplier") or "", credit_note.get("supplier_eik"),
+        credit_note["credited_invoice_number"], "invoice",
+    )
+
+
+async def settle_credited_invoice(invoice_id: Optional[str], scope: dict) -> None:
+    """Recounts what credit notes took off an invoice - and, for one paid by
+    bank, whether anything is still owed on it."""
+    if not invoice_id:
+        return
+    invoice = await db.invoices.find_one({**scope, "id": invoice_id}, {"_id": 0})
+    if not invoice or invoice.get("document_type") == CREDIT_NOTE:
+        return
+    notes = await db.invoices.find(
+        {**scope, "document_type": CREDIT_NOTE, "credited_invoice_id": invoice_id}, {"_id": 0, "total_amount": 1},
+    ).to_list(ALL_ROWS)
+    credited = round(sum(abs(float(note.get("total_amount") or 0)) for note in notes), 2)
+    update: Dict[str, Any] = {"credited_amount": credited}
+    if invoice.get("payment_method") == "bank_transfer":
+        settled = float(invoice.get("paid_amount") or 0) + credited >= float(invoice.get("total_amount") or 0) - 0.01
+        update["is_paid"] = settled
+        if settled and not invoice.get("paid_at"):
+            update["paid_at"] = datetime.now(timezone.utc)
+        elif not settled:
+            update["paid_at"] = None
+    await db.invoices.update_one({**scope, "id": invoice_id}, {"$set": update})
+
+
+async def link_waiting_credit_notes(scope: dict, invoice: dict) -> None:
+    """An invoice entered after credit notes that name it: they are tied to
+    it now, and what they took off counts."""
+    if invoice.get("document_type") == CREDIT_NOTE:
+        return
+    number = invoice_number_key(invoice.get("invoice_number"))
+    if not number:
+        return
+    waiting = await db.invoices.find(
+        {**scope, "document_type": CREDIT_NOTE, "credited_invoice_id": None, "credited_invoice_number": {"$nin": [None, ""]}},
+        {"_id": 0, "id": 1, "supplier": 1, "supplier_eik": 1, "credited_invoice_number": 1},
+    ).to_list(ALL_ROWS)
+    linked = False
+    for note in waiting:
+        if invoice_number_key(note.get("credited_invoice_number")) == number and same_supplier(note, invoice):
+            await db.invoices.update_one({**scope, "id": note["id"]}, {"$set": {"credited_invoice_id": invoice["id"]}})
+            linked = True
+    if linked:
+        await settle_credited_invoice(invoice["id"], scope)
+
+
+async def normalize_supplier_name(
+    supplier: str, company_id: Optional[str] = None, supplier_eik: Optional[str] = None,
+) -> tuple[str, bool]:
     """Нормализира име на доставчик/контрагент и го съпоставя с вече познати
     доставчици на фирмата, независимо от препинателни знаци, интервали и
     регистър на буквите (главни/малки)."""
@@ -2151,21 +1962,45 @@ async def normalize_supplier_name(supplier: str, company_id: Optional[str] = Non
 
     supplier_key = _compare_key(normalized)
 
+    # Форматиране - първа буква главна
+    formatted_words = []
+    for word in normalized.split():
+        if word in ['ЕООД', 'ООД', 'АД', 'ЕАД', 'ЕТ', 'СД', 'КД', 'КДА', 'LIDL', 'BILLA', 'KAUFLAND']:
+            formatted_words.append(word)
+        else:
+            formatted_words.append(word.capitalize())
+    formatted = ' '.join(formatted_words)
+
+    eik = eik_key(supplier_eik)
     # Ако има company_id, търсим съществуващ подобен доставчик
     if company_id and supplier_key:
-        existing_suppliers = await db.invoices.distinct("supplier", {"company_id": company_id})
+        known = await _supplier_names(company_id)
+
+        # The same EIK is the same supplier, whatever it was called.
+        if eik:
+            same_eik = [name for name, info in known.items() if eik in info["eiks"]]
+            if same_eik:
+                return max(same_eik, key=lambda name: known[name]["count"]), True
 
         best_match = None
         best_score = 0.0
 
-        for existing in existing_suppliers:
+        for existing, info in known.items():
             existing_key = _compare_key(existing)
             if not existing_key:
                 continue
+            # A name only ever seen with OTHER EIKs is another business -
+            # never merged into it (before, two companies with similar
+            # names became one supplier in every statistic).
+            other_business = bool(eik and info["eiks"] and eik not in info["eiks"])
 
             # Точно съвпадение с игнориране на пунктуация/регистър
             if existing_key == supplier_key:
+                if other_business:
+                    return f"{formatted} (ЕИК {eik})", False
                 return existing, True
+            if other_business:
+                continue
 
             # По-кратко име, съдържащо се изцяло в по-дългото (напр. "ИВАНОВ"
             # в "ИВАНОВ ЕООД"), почти винаги е същият контрагент, изписан
@@ -2183,16 +2018,7 @@ async def normalize_supplier_name(supplier: str, company_id: Optional[str] = Non
         if best_match and best_score >= 0.82:
             return best_match, True
 
-    # Форматиране - първа буква главна
-    words = normalized.split()
-    formatted_words = []
-    for word in words:
-        if word in ['ЕООД', 'ООД', 'АД', 'ЕАД', 'ЕТ', 'СД', 'КД', 'КДА', 'LIDL', 'BILLA', 'KAUFLAND']:
-            formatted_words.append(word)
-        else:
-            formatted_words.append(word.capitalize())
-
-    return ' '.join(formatted_words), False
+    return formatted, False
 
 async def normalize_item_name(item_name: str, company_id: Optional[str] = None) -> tuple[str, bool]:
     """Нормализира име на продукт/артикул и го обединява с вече записан
@@ -2210,25 +2036,34 @@ async def normalize_item_name(item_name: str, company_id: Optional[str] = None) 
     compare_key = _compare_key(cleaned)
     if not compare_key:
         return cleaned, False
+    signature = item_size_signature(cleaned)
+    # Имената, за които собственикът е казал "различно", не се сливат никога.
+    distinct_from = await item_distinct_names(company_id, cleaned)
 
-    # 1. Прилагаме вече запазено AI групиране (/items/ai-merge), ако има.
+    # 1. Прилагаме вече запазено AI групиране (/items/ai-merge), ако има -
+    # освен ако групата слепва различни размери (виж item_size_signature).
     mapping = await db.item_merge_mappings.find_one(
         {"company_id": company_id, "variants": cleaned},
         {"_id": 0, "canonical_name": 1}
     )
-    if mapping:
+    if (
+        mapping and item_size_signature(mapping["canonical_name"]) == signature
+        and mapping["canonical_name"] not in distinct_from
+    ):
         return mapping["canonical_name"], True
 
     # 2. Иначе - fuzzy съпоставяне с вече записани артикули на фирмата, за
     # да се слеят очевидни варианти (правопис, регистър, пунктуация) веднага,
-    # без да се чака периодичния AI анализ.
+    # без да се чака периодичния AI анализ. Само между имена с еднакви
+    # числа: "Доматен сос 1кг" и "Доматен сос 5кг" са 92% сходни, но са
+    # различни артикули с различни цени.
     existing_names = await db.item_price_history.distinct("item_name", {"company_id": company_id})
 
     best_match = None
     best_score = 0.0
     for existing in existing_names:
         existing_key = _compare_key(existing)
-        if not existing_key:
+        if not existing_key or item_size_signature(existing) != signature or existing in distinct_from:
             continue
         if existing_key == compare_key:
             return existing, existing != cleaned
@@ -2242,6 +2077,14 @@ async def normalize_item_name(item_name: str, company_id: Optional[str] = None) 
         return best_match, True
 
     return cleaned, False
+
+async def item_distinct_names(company_id: str, name: str) -> set:
+    """Item names the owner said are a different product from `name` -
+    never joined with it by any matching (see /items/catalog/different)."""
+    docs = await db.item_distinctions.find(
+        {"company_id": company_id, "$or": [{"a": name}, {"b": name}]}, {"_id": 0, "a": 1, "b": 1}
+    ).to_list(500)
+    return {d["b"] if d["a"] == name else d["a"] for d in docs}
 
 def fix_ocr_letter_errors(value: str) -> str:
     """Замества букви, лесно объркваеми с цифри при OCR (без да маха
@@ -2390,8 +2233,9 @@ async def correct_ocr_data(
     # 1. Корекция на доставчик
     if data.get("supplier"):
         normalized_supplier, was_matched = await normalize_supplier_name(
-            data["supplier"], 
-            company_id
+            data["supplier"],
+            company_id,
+            data.get("supplier_eik"),
         )
         if normalized_supplier != data["supplier"]:
             corrected["supplier"] = normalized_supplier
@@ -2505,11 +2349,26 @@ class ClaudeInvoiceExtraction(BaseModel):
     supplier: str = Field(description="Пълното име на доставчика (издателя), НЕ на получателя/купувача")
     supplier_eik: Optional[str] = Field(default=None, description="ЕИК/Булстат на доставчика, ако е видим на фактурата")
     invoice_number: str = Field(description="Номер на фактурата")
+    document_type: Literal["invoice", "credit_note"] = Field(
+        default="invoice",
+        description="credit_note, ако документът е озаглавен КРЕДИТНО ИЗВЕСТИЕ (връщане или отстъпка по по-ранна фактура); за всяка друга фактура - invoice",
+    )
+    credited_invoice_number: Optional[str] = Field(
+        default=None,
+        description="Само при кредитно известие: номерът на фактурата, към която е издадено (\"към фактура №\"); иначе null",
+    )
+    buyer: Optional[str] = Field(default=None, description="Името на получателя/купувача, както е на фактурата")
+    buyer_eik: Optional[str] = Field(default=None, description="ЕИК/Булстат на получателя/купувача, ако е видим")
+    buyer_city: Optional[str] = Field(default=None, description="Само населеното място от адреса на получателя/купувача, напр. \"Пловдив\", ако е видимо")
     invoice_date: Optional[str] = Field(default=None, description="Дата на издаване, формат YYYY-MM-DD")
     payment_due_date: Optional[str] = Field(default=None, description="Срок/падеж за плащане, формат YYYY-MM-DD, само ако е изрично отпечатан на фактурата")
     amount_without_vat: float = Field(description="Данъчна основа / обща сума без ДДС")
     vat_amount: float = Field(description="ДДС (обикновено 20%)")
     total_amount: float = Field(description="Обща сума за плащане с ДДС")
+    payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = Field(
+        default=None,
+        description="Начин на плащане, само ако е отпечатан: в брой → cash, по банков път/по сметка → bank_transfer, с карта/ПОС → card",
+    )
     items: List[ClaudeInvoiceItem] = Field(default_factory=list, description="Всички редове от таблицата с артикули/продукти/услуги на фактурата")
 
 OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за автоматично разпознаване на данни от български фактури.
@@ -2533,6 +2392,12 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 СРОК ЗА ПЛАЩАНЕ (payment_due_date):
 Много фактури печатат изрично срока/падежа за плащане - текст като "Срок за плащане", "Падеж", "Платимо до", "Дата на падеж", "Due date". Ако видиш такава изрична дата, върни я в payment_due_date (YYYY-MM-DD). Ако вместо дата е отпечатан само брой дни (напр. "Срок за плащане: 14 дни от датата на издаване"), изчисли конкретната дата спрямо датата на издаване на фактурата. Ако на фактурата изобщо няма отпечатан срок или брой дни за плащане, остави payment_due_date празно (null) - НЕ гадай и НЕ прилагай стандартен срок по подразбиране, това ще бъде направено от приложението само ако полето остане празно.
 
+НАЧИН НА ПЛАЩАНЕ (payment_method):
+Повечето фактури печатат "Начин на плащане" / "Плащане". "В брой" → cash; "По банков път", "Банков превод", "По сметка" → bank_transfer; "С карта", "Карта", "ПОС", "Дебитна/кредитна карта" → card. Ако начинът на плащане не е отпечатан, остави payment_method празно (null) - НЕ гадай: приложението ще попита човека.
+
+КРЕДИТНО ИЗВЕСТИЕ (document_type):
+Ако документът е озаглавен "КРЕДИТНО ИЗВЕСТИЕ" (връщане на стока или отстъпка по по-ранна фактура), върни document_type = "credit_note"; за всяка друга фактура (включително "ДЕБИТНО ИЗВЕСТИЕ") върни "invoice". При кредитно известие връщай сумите така, както са отпечатани, без знак минус - приложението само ги отчита като намаление на покупките. Номерът е собственият номер на известието, а не номерът на фактурата, към която е издадено - него върни отделно в credited_invoice_number.
+
 ОБЩИ ПРАВИЛА:
 - Всички суми в полетата на артикулите и amount_without_vat са БЕЗ ДДС.
 - ДДС в България обикновено е 20%.
@@ -2543,168 +2408,32 @@ OCR_SYSTEM_PROMPT = """Ти си експертен AI асистент за а�
 МНОГОСТРАНИЧНИ ФАКТУРИ:
 Понякога ще получиш НЯКОЛКО изображения една след друга (в реда, в който са заснети) - това са СТРАНИЦИ НА ЕДНА И СЪЩА ФАКТУРА, а не отделни документи. Заглавната част (доставчик, ЕИК, номер, дата) обикновено е само на първата страница - вземи я оттам. Таблицата с артикули може да продължава през няколко страници - извлечи РЕДОВЕТЕ ОТ ВСИЧКИ СТРАНИЦИ ПОРЕД, като ги обединиш в един общ списък, без да пропускаш или дублираш редове (внимавай ако последният ред на една страница и първият на следващата съвпадат - това е една и съща позиция, не я брой два пъти). Общите суми (данъчна основа, ДДС, обща сума за плащане) обикновено са отпечатани само на ПОСЛЕДНАТА страница - вземи ги оттам, а не сумирай ръчно от отделните страници."""
 
-@api_router.post("/ocr/scan", response_model=OCRResult)
-@limiter.limit("20/minute")
-async def scan_invoice(request: Request, image_base64: str = None, current_user: User = Depends(get_current_user)):
-    # OCR only ever feeds a draft into POST /invoices (which already
-    # requires manage_invoices) - gating the scan itself too means a member
-    # without that permission can't burn the company's shared, paid scan
-    # credits on a result they could never save anyway.
-    require_permission(current_user, "manage_invoices")
-    if not AI_FEATURES_ENABLED:
-        raise HTTPException(status_code=503, detail="AI разпознаването временно не е налично. Моля, въведете данните ръчно.")
-
-    body = await request.json()
-    # Multi-page capture sends a list; a single legacy image still sends
-    # the singular field - normalize both into one ordered list of pages.
-    images_data: List[str] = body.get("image_base64s") or []
-    if not images_data:
-        single = body.get("image_base64", "")
-        if single:
-            images_data = [single]
-
-    if not images_data:
-        raise HTTPException(status_code=400, detail="Липсва изображение")
-
-    MAX_OCR_PAGES = 6
-    if len(images_data) > MAX_OCR_PAGES:
-        raise HTTPException(status_code=400, detail=f"Твърде много страници (макс. {MAX_OCR_PAGES}).")
-
-    # Reject oversized images before they're decoded and forwarded to the
-    # Anthropic API - otherwise a single request can exhaust server memory
-    # on decode and amplify AI API cost with no real invoice-photo use case
-    # ever needing more than this. Base64 is ~4/3 the size of the raw
-    # bytes, so this caps each decoded page at roughly 10MB.
-    MAX_OCR_IMAGE_BASE64_CHARS = 14_000_000
-
-    image_blocks = []
-    for raw in images_data:
-        page_data = raw
-        media_type = "image/jpeg"
-        if page_data.startswith("data:") and "," in page_data:
-            header, page_data = page_data.split(",", 1)
-            header_match = re.match(r"data:([^;]+);base64", header)
-            if header_match:
-                media_type = header_match.group(1)
-        elif "," in page_data:
-            page_data = page_data.split(",")[1]
-
-        if len(page_data) > MAX_OCR_IMAGE_BASE64_CHARS:
-            raise HTTPException(status_code=413, detail="Изображението е твърде голямо. Моля, използвайте по-малка снимка (до ~10MB на страница).")
-
-        image_blocks.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": page_data}
-        })
-
-    # Get company_id for supplier matching
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-
-    # Scan-credit gate - the one real variable cost in the whole app (see
-    # SCAN CREDITS below). Checked before the AI call is made, not after,
-    # so a company with an empty balance never triggers (and never pays
-    # for) the expensive part of this endpoint.
-    if not await scan_credit_service.has_scans_remaining(company_id, current_user.user_id):
-        raise HTTPException(
-            status_code=402,
-            detail="Нямате оставащи сканирания. Купете пакет, за да продължите.",
-        )
-
-    prompt_text = (
-        "Извлечи всички данни от тази фактура: доставчика (не получателя!), ЕИК ако е видим, номер, дата, суми и ВСИЧКИ редове от таблицата с артикули."
-        if len(image_blocks) == 1 else
-        f"Изображенията по-горе са {len(image_blocks)} последователни страници на ЕДНА фактура. Извлечи всички данни от нея: доставчика (не получателя!), ЕИК ако е видим, номер, дата, сумите от последната страница и ВСИЧКИ редове от таблицата с артикули, обединени от всички страници."
-    )
-
+async def log_ai_usage(company_id: Optional[str], endpoint: str, response, extra: Optional[dict] = None):
+    """Records the real per-call token usage Anthropic's own response
+    reports, so "how much is AI actually costing us" can be answered from
+    real data instead of estimated from the code and published rates - see
+    the cost-optimization pass this was built from (no Admin API key was
+    available to pull historical numbers, so this is the measurement
+    channel going forward). Never raises - a logging failure must not break
+    the AI response it's piggybacking on."""
     try:
-        response = await anthropic_client.messages.parse(
-            model="claude-opus-5-5",
-            max_tokens=8000,
-            system=OCR_SYSTEM_PROMPT,
-            messages=[{
-                "role": "user",
-                "content": [
-                    *image_blocks,
-                    {
-                        "type": "text",
-                        "text": prompt_text
-                    }
-                ]
-            }],
-            output_format=ClaudeInvoiceExtraction,
-        )
-
-        extracted = response.parsed_output
-        if extracted is None:
-            raise HTTPException(status_code=500, detail="Не можах да разпозная фактурата")
-
-        raw_result = extracted.model_dump()
-
-        # Apply AI correction module (доставчик/продукти нормализиране и сливане)
-        correction_result = await correct_ocr_data(raw_result, company_id)
-        corrected = correction_result.corrected
-
-        if correction_result.corrections_made:
-            logger.info(f"OCR Corrections: {correction_result.corrections_made}")
-
-        # Spend exactly one scan now that the AI call actually succeeded -
-        # a failed/errored scan (any branch below) never gets charged.
-        await scan_credit_service.spend_scan(
-            company_id, current_user.user_id, current_user.name,
-            invoice_label=corrected.get("supplier") or None,
-        )
-
-        return OCRResult(
-            supplier=corrected.get("supplier", ""),
-            supplier_eik=corrected.get("supplier_eik"),
-            invoice_number=corrected.get("invoice_number", ""),
-            amount_without_vat=float(corrected.get("amount_without_vat", 0)),
-            vat_amount=float(corrected.get("vat_amount", 0)),
-            total_amount=float(corrected.get("total_amount", 0)),
-            invoice_date=corrected.get("invoice_date"),
-            payment_due_date=corrected.get("payment_due_date"),
-            items=[OCRItemResult(**item) for item in corrected.get("items", [])],
-            corrections=correction_result.corrections_made,
-            confidence=correction_result.confidence
-        )
-
-    except HTTPException:
-        raise
-    except anthropic_sdk.AuthenticationError:
-        logger.error("OCR Error: invalid or missing Anthropic API key")
-        raise HTTPException(status_code=503, detail="AI разпознаването не е конфигурирано правилно на сървъра. Моля, въведете данните ръчно.")
-    except (anthropic_sdk.RateLimitError, anthropic_sdk.OverloadedError):
-        raise HTTPException(status_code=503, detail="AI услугата за разпознаване е временно претоварена. Моля, опитайте отново след малко.")
-    except anthropic_sdk.PermissionDeniedError:
-        # Anthropic returns 403 for a depleted/too-low credit balance on the
-        # API key, not just real permission issues - this is the one case a
-        # user might reasonably describe as "hit a limit", so it gets its
-        # own distinct message instead of falling into the generic bucket
-        # below, which is indistinguishable from a transient connectivity blip.
-        logger.error("OCR Error: Anthropic API permission denied - likely a depleted/too-low credit balance")
-        raise HTTPException(status_code=503, detail="AI акаунтът на приложението няма достатъчен баланс в момента. Моля, свържете се със системния администратор.")
-    except anthropic_sdk.RequestTooLargeError:
-        raise HTTPException(status_code=413, detail="Изображението е твърде голямо за AI услугата. Моля, използвайте по-малка снимка.")
-    except anthropic_sdk.APIConnectionError:
-        logger.exception("OCR Error: could not reach the Anthropic API (network/TLS)")
-        raise HTTPException(status_code=502, detail="Сървърът не успя да се свърже с AI услугата (мрежов проблем). Моля, опитайте отново след малко.")
-    except anthropic_sdk.APIStatusError as e:
-        logger.error(f"OCR Error (API status): {e}")
-        # A depleted credit balance comes back from Anthropic as a plain 400
-        # invalid_request_error, not the 403 PermissionDeniedError handled
-        # above - confirmed from a real production log: "Error code: 400 -
-        # {'type': 'invalid_request_error', 'message': 'Your credit balance
-        # is too low to access the Anthropic API...'}". Every single request
-        # fails identically with this one, all day, regardless of retries -
-        # unlike a transient overload - so it gets the same clear balance
-        # message instead of the generic "connection error" bucket.
-        if "credit balance" in str(e).lower():
-            raise HTTPException(status_code=503, detail="AI акаунтът на приложението няма достатъчен баланс в момента. Моля, свържете се със системния администратор.")
-        raise HTTPException(status_code=502, detail="Грешка при връзка с AI услугата за разпознаване.")
+        usage = response.usage
+        await db.ai_usage_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "company_id": company_id,
+            "endpoint": endpoint,
+            "model": response.model,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+            "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
+            **(extra or {}),
+            "created_at": datetime.now(timezone.utc),
+        })
     except Exception as e:
-        logger.exception("OCR Error")
-        raise HTTPException(status_code=500, detail=f"Грешка при сканиране: {str(e)}")
+        logger.warning(f"Failed to log AI usage for {endpoint}: {e}")
+
+
 
 def ai_exception_to_http(e: Exception, log_context: str) -> HTTPException:
     """Maps a raised Anthropic SDK exception to the same kind of clear,
@@ -2793,41 +2522,10 @@ def _scan_packages_catalogue() -> List[ScanPackageOut]:
         ))
     return out
 
-@api_router.get("/scan-credits", response_model=ScanBalanceOut)
-async def get_scan_credits(current_user: User = Depends(get_current_user)):
-    summary = await scan_credit_service.get_balance_summary(current_user.company_id, current_user.user_id)
-    return ScanBalanceOut(**summary)
 
-@api_router.get("/scan-credits/packages", response_model=List[ScanPackageOut])
-async def get_scan_packages(current_user: User = Depends(get_current_user)):
-    return _scan_packages_catalogue()
 
-@api_router.get("/scan-credits/history", response_model=List[ScanTransactionOut])
-async def get_scan_credits_history(current_user: User = Depends(get_current_user)):
-    rows = await scan_credit_service.get_history(current_user.company_id, current_user.user_id)
-    return [ScanTransactionOut(**row) for row in rows]
 
-@api_router.get("/scan-credits/history/export")
-@limiter.limit("20/minute")
-async def export_scan_credits_history(request: Request, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "export_data")
-    rows = await scan_credit_service.get_history(current_user.company_id, current_user.user_id)
-    company_name = ""
-    if current_user.company_id:
-        company = await db.companies.find_one({"id": current_user.company_id})
-        company_name = company.get("name", "") if company else ""
-    excel_data = ExportService.generate_scan_credits_excel(rows, company_name)
-    await audit_service.log_action(
-        user_id=current_user.user_id, user_name=current_user.name,
-        action="export", entity_type="scan_credits_history",
-        company_id=current_user.company_id, details={"format": "excel", "count": len(rows)},
-    )
-    filename = f"scan_credits_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-    return Response(
-        content=excel_data,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+
 
 def _require_billing_enabled():
     if not BILLING_ENABLED:
@@ -2836,249 +2534,9 @@ def _require_billing_enabled():
             detail="Покупката на сканирания временно не е налична. Моля, опитайте по-късно.",
         )
 
-@api_router.post("/scan-credits/purchase/package")
-@limiter.limit("10/minute")
-async def purchase_scan_package(request: Request, payload: PurchasePackageRequest, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_billing")
-    _require_billing_enabled()
-    pkg = scan_credit_service_module.SCAN_PACKAGES.get(payload.package_id)
-    if not pkg:
-        raise HTTPException(status_code=400, detail="Непознат пакет")
-    total_scans = pkg["paid_scans"] + pkg["bonus_scans"]
-    scope_id = scan_credit_service.scope_id(current_user.company_id, current_user.user_id)
 
-    try:
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "eur",
-                    "unit_amount": round(pkg["price_eur"] * 100),
-                    "product_data": {"name": f"Фактура+ — {pkg['name']} ({total_scans} сканирания)"},
-                },
-                "quantity": 1,
-            }],
-            metadata={
-                "scope_id": scope_id,
-                "company_id": current_user.company_id or "",
-                "user_id": current_user.user_id,
-                "user_name": current_user.name,
-                "purchase_type": "package",
-                "package_id": payload.package_id,
-                "scans": str(total_scans),
-                "price_eur": str(pkg["price_eur"]),
-            },
-            success_url=f"{FRONTEND_URL}/scan-credits?purchase=success",
-            cancel_url=f"{FRONTEND_URL}/scan-credits?purchase=cancelled",
-        )
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe checkout session error (package): {e}")
-        raise HTTPException(status_code=502, detail="Грешка при свързване с платежната система.")
 
-    return {"checkout_url": session.url}
 
-@api_router.post("/scan-credits/purchase/custom")
-@limiter.limit("10/minute")
-async def purchase_scan_custom(request: Request, payload: PurchaseCustomRequest, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_billing")
-    _require_billing_enabled()
-    price_eur = scan_credit_service_module.custom_price_eur(payload.quantity)
-    scope_id = scan_credit_service.scope_id(current_user.company_id, current_user.user_id)
-
-    try:
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "eur",
-                    "unit_amount": round(price_eur * 100),
-                    "product_data": {"name": f"Фактура+ — {payload.quantity} сканирания (персонализирано)"},
-                },
-                "quantity": 1,
-            }],
-            metadata={
-                "scope_id": scope_id,
-                "company_id": current_user.company_id or "",
-                "user_id": current_user.user_id,
-                "user_name": current_user.name,
-                "purchase_type": "custom",
-                "scans": str(payload.quantity),
-                "price_eur": str(price_eur),
-            },
-            success_url=f"{FRONTEND_URL}/scan-credits?purchase=success",
-            cancel_url=f"{FRONTEND_URL}/scan-credits?purchase=cancelled",
-        )
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe checkout session error (custom): {e}")
-        raise HTTPException(status_code=502, detail="Грешка при свързване с платежната система.")
-
-    return {"checkout_url": session.url}
-
-@api_router.post("/scan-credits/auto-reload")
-@limiter.limit("10/minute")
-async def set_scan_auto_reload(request: Request, payload: AutoReloadRequest, current_user: User = Depends(get_current_user)):
-    """Enabling starts a real Stripe Subscription (one real monthly charge,
-    never a silent client-side flag) and returns a checkout_url the client
-    must complete - the subscription only takes effect once Stripe confirms
-    it via webhook. Disabling cancels the Stripe subscription immediately
-    (no "at period end" grace, no confirmation step) - a one-click, no-
-    questions-asked stop is the whole point: see the pricing conversation
-    this was built from."""
-    require_permission(current_user, "manage_billing")
-
-    if not payload.enabled:
-        subscription_id = await scan_credit_service.get_auto_reload_subscription_id(current_user.company_id, current_user.user_id)
-        if subscription_id and BILLING_ENABLED:
-            try:
-                stripe.Subscription.cancel(subscription_id)
-            except stripe.error.StripeError as e:
-                logger.error(f"Stripe subscription cancel error: {e}")
-        await scan_credit_service.set_auto_reload(current_user.company_id, current_user.user_id, enabled=False)
-        await audit_service.log_action(
-            user_id=current_user.user_id, user_name=current_user.name,
-            action="disable", entity_type="scan_auto_reload", company_id=current_user.company_id,
-        )
-        return {"auto_reload_enabled": False}
-
-    _require_billing_enabled()
-    pkg = scan_credit_service_module.SCAN_PACKAGES.get(payload.package_id)
-    if not pkg:
-        raise HTTPException(status_code=400, detail="Непознат пакет")
-    total_scans = pkg["paid_scans"] + pkg["bonus_scans"]
-    scope_id = scan_credit_service.scope_id(current_user.company_id, current_user.user_id)
-
-    try:
-        session = stripe.checkout.Session.create(
-            mode="subscription",
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "eur",
-                    "unit_amount": round(pkg["price_eur"] * 100),
-                    "recurring": {"interval": "month"},
-                    "product_data": {"name": f"Фактура+ — автоматично презареждане ({pkg['name']}, {total_scans} сканирания/месец)"},
-                },
-                "quantity": 1,
-            }],
-            metadata={
-                "scope_id": scope_id,
-                "company_id": current_user.company_id or "",
-                "user_id": current_user.user_id,
-                "user_name": current_user.name,
-                "purchase_type": "auto_reload_setup",
-                "package_id": payload.package_id,
-                "scans": str(total_scans),
-                "price_eur": str(pkg["price_eur"]),
-            },
-            success_url=f"{FRONTEND_URL}/scan-credits?auto_reload=success",
-            cancel_url=f"{FRONTEND_URL}/scan-credits?auto_reload=cancelled",
-        )
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe subscription checkout error: {e}")
-        raise HTTPException(status_code=502, detail="Грешка при свързване с платежната система.")
-
-    return {"checkout_url": session.url}
-
-@api_router.post("/webhooks/stripe")
-async def stripe_webhook(request: Request):
-    """Server-authoritative confirmation of a payment - this is the ONLY
-    code path anywhere that is allowed to credit purchased scan balance.
-    Never trust a plain "my payment succeeded" claim from an
-    authenticated-user endpoint instead of this signature-verified one;
-    that would let anyone grant themselves free scans by replaying or
-    forging the request."""
-    if not BILLING_ENABLED:
-        raise HTTPException(status_code=503, detail="Billing not configured")
-
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature", "")
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-    except (ValueError, stripe.error.SignatureVerificationError):
-        logger.error("Stripe webhook: invalid payload or signature")
-        raise HTTPException(status_code=400, detail="Invalid signature")
-
-    # Idempotency - Stripe redelivers events on any non-2xx response or
-    # timeout, so the exact same event id can arrive more than once. This
-    # must be checked before any balance mutation, not after.
-    first_time = await scan_credit_service.mark_webhook_event_processed(event["id"])
-    if not first_time:
-        return {"status": "already_processed"}
-
-    event_type = event["type"]
-    data = event["data"]["object"]
-
-    if event_type == "checkout.session.completed":
-        metadata = data.get("metadata") or {}
-        purchase_type = metadata.get("purchase_type")
-        company_id = metadata.get("company_id") or None
-        user_id = metadata.get("user_id")
-        user_name = metadata.get("user_name", "")
-
-        if purchase_type in ("package", "custom") and user_id:
-            scans = int(metadata.get("scans", 0))
-            price_eur = float(metadata.get("price_eur", 0))
-            label = (
-                f"Пакет „{scan_credit_service_module.SCAN_PACKAGES[metadata['package_id']]['name']}“"
-                if purchase_type == "package" and metadata.get("package_id") in scan_credit_service_module.SCAN_PACKAGES
-                else f"Персонализирана покупка ({scans} сканирания)"
-            )
-            await scan_credit_service.credit_purchase(
-                company_id, user_id, user_name, scans=scans, description=label,
-                price_eur=price_eur, payment_reference=data.get("id"),
-            )
-        elif purchase_type == "auto_reload_setup" and user_id:
-            # The Checkout Session itself only sets up the subscription;
-            # the recurring credit for THIS first period comes from the
-            # matching invoice.payment_succeeded event below, same as
-            # every later month - so this branch only records which
-            # subscription now backs the auto-reload toggle.
-            subscription_id = data.get("subscription")
-            await scan_credit_service.set_auto_reload(
-                company_id, user_id, enabled=True,
-                package_id=metadata.get("package_id"), subscription_id=subscription_id,
-            )
-            await audit_service.log_action(
-                user_id=user_id, user_name=user_name, action="enable",
-                entity_type="scan_auto_reload", company_id=company_id,
-                details={"package_id": metadata.get("package_id")},
-            )
-
-    elif event_type == "invoice.payment_succeeded":
-        subscription_id = data.get("subscription")
-        if subscription_id:
-            balance_doc = await db.scan_balances.find_one({"auto_reload_subscription_id": subscription_id})
-            if balance_doc and balance_doc.get("auto_reload_enabled"):
-                package_id = balance_doc.get("auto_reload_package_id")
-                pkg = scan_credit_service_module.SCAN_PACKAGES.get(package_id)
-                if pkg:
-                    total_scans = pkg["paid_scans"] + pkg["bonus_scans"]
-                    doc_company_id = balance_doc.get("company_id")
-                    # credit_purchase only uses user_id to derive the scope
-                    # when there's no company_id (see ScanCreditService.scope_id) -
-                    # recover the original one from the balance doc's own
-                    # _id in that case so the credit lands back on the same
-                    # scope it came from.
-                    doc_user_id = "" if doc_company_id else balance_doc["_id"].replace("user:", "", 1)
-                    await scan_credit_service.credit_purchase(
-                        doc_company_id, doc_user_id, "Автоматично презареждане",
-                        scans=total_scans,
-                        description=f"Автоматично презареждане — {pkg['name']}",
-                        price_eur=pkg["price_eur"], payment_reference=data.get("id"),
-                    )
-
-    elif event_type == "customer.subscription.deleted":
-        subscription_id = data.get("id")
-        balance_doc = await db.scan_balances.find_one({"auto_reload_subscription_id": subscription_id})
-        if balance_doc:
-            await db.scan_balances.update_one(
-                {"_id": balance_doc["_id"]},
-                {"$set": {"auto_reload_enabled": False, "auto_reload_package_id": None, "auto_reload_subscription_id": None}},
-            )
-
-    return {"status": "ok"}
 
 # ===================== PROTOCOL BY чл.117 ЗДДС NUMBERING =====================
 
@@ -3089,7 +2547,7 @@ async def next_protocol_number(company_id: Optional[str], user_id: str, year: in
     matches how these protocols are numbered in practice."""
     scope = company_id or f"user:{user_id}"
     counter_id = f"protocol_{scope}_{year}"
-    result = await db.counters.find_one_and_update(
+    result: Dict[str, Any] = await db.counters.find_one_and_update(
         {"_id": counter_id},
         {"$inc": {"seq": 1}},
         upsert=True,
@@ -3099,1002 +2557,377 @@ async def next_protocol_number(company_id: Optional[str], user_id: str, year: in
 
 # ===================== INVOICE ENDPOINTS =====================
 
-@api_router.post("/invoices", response_model=Invoice)
-async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_invoices")
-    # Get user's company_id
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
 
-    # Merge with an already-known counterparty regardless of punctuation or
-    # letter case, so this also applies to manually-typed/edited invoices,
-    # not just ones that came straight out of OCR.
-    normalized_supplier, _ = await normalize_supplier_name(invoice.supplier, company_id)
-    invoice.supplier = normalized_supplier
 
-    # Check for duplicate invoice
-    if company_id:
-        # If user has a company, check across all company users
-        company_users = await db.users.find({"company_id": company_id}, {"user_id": 1}).to_list(1000)
-        company_user_ids = [u["user_id"] for u in company_users]
-        
-        existing_invoice = await db.invoices.find_one({
-            "user_id": {"$in": company_user_ids},
-            "invoice_number": invoice.invoice_number,
-            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"}
-        }, {"_id": 0, "id": 1, "date": 1, "user_id": 1})
-        
-        if existing_invoice:
-            # Find who added the duplicate
-            added_by_user = await db.users.find_one({"user_id": existing_invoice["user_id"]}, {"name": 1})
-            added_by_name = added_by_user.get("name", "друг потребител") if added_by_user else "друг потребител"
-            raise HTTPException(
-                status_code=409,
-                detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече е добавена от {added_by_name}!"
-            )
-    else:
-        # No company - check only for current user
-        existing_invoice = await db.invoices.find_one({
-            "user_id": current_user.user_id,
-            "invoice_number": invoice.invoice_number,
-            "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"}
-        }, {"_id": 0, "id": 1, "date": 1})
-        
-        if existing_invoice:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Фактура с номер {invoice.invoice_number} от {invoice.supplier} вече съществува в системата!"
-            )
-    
-    invoice_dict = invoice.dict()
-    invoice_date = datetime.fromisoformat(invoice_dict["date"].replace("Z", "+00:00"))
 
-    # Suggest a VAT treatment when the caller didn't set one, based on the
-    # VAT-to-base ratio - saves the common case (standard 20%) a manual pick,
-    # while leaving anything unusual (0%, reverse charge...) for the user to
-    # classify correctly themselves.
-    if invoice_dict.get("vat_treatment") is None and invoice_dict.get("amount_without_vat"):
-        vat_ratio = invoice_dict["vat_amount"] / invoice_dict["amount_without_vat"]
-        if abs(vat_ratio - 0.20) < 0.01:
-            invoice_dict["vat_treatment"] = VatTreatment.STANDARD_20
-        elif abs(vat_ratio - 0.09) < 0.01:
-            invoice_dict["vat_treatment"] = VatTreatment.REDUCED_9
 
-    # Payment tracking - cash purchases settle on the spot, so they mark
-    # themselves paid automatically instead of asking the user to tick a box
-    # for something that's already true. Bank transfer starts unpaid and
-    # gets a due date - the caller's own date if given, otherwise a 14-day
-    # default (common B2B trade credit term), so the reminder has something
-    # to compare against even if nobody set one explicitly.
-    is_paid = False
-    paid_amount = 0.0
-    paid_at = None
-    payment_due_date = None
-    if invoice_dict.get("payment_method") == "cash":
-        is_paid = True
-        paid_amount = invoice_dict.get("total_amount", 0)
-        paid_at = invoice_date
-    elif invoice_dict.get("payment_method") == "bank_transfer":
-        if invoice_dict.get("payment_due_date"):
-            payment_due_date = datetime.fromisoformat(invoice_dict["payment_due_date"].replace("Z", "+00:00"))
-        else:
-            payment_due_date = invoice_date + timedelta(days=14)
 
-    # Reverse-charge purchases (services from abroad, ВОП...) need a
-    # self-billing протокол по чл.117 ЗДДС, issued within 15 days of the
-    # tax point - assign the next sequential number automatically so
-    # nobody has to track this by hand.
-    if invoice_dict.get("vat_treatment") == VatTreatment.REVERSE_CHARGE:
-        invoice_dict["protocol_number"] = await next_protocol_number(company_id, current_user.user_id, invoice_date.year)
 
-    # Process items and convert to dict format
-    items_list = None
-    price_alerts = []
-    item_normalized_names = {}  # item_dict["id"] -> normalized_name, reused below when backfilling invoice_id
-
-    if invoice.items:
-        items_list = []
-        for item in invoice.items:
-            item_dict = item.dict()
-            # Calculate total_price if not provided
-            if item_dict.get("total_price") is None:
-                item_dict["total_price"] = item_dict["quantity"] * item_dict["unit_price"]
-            # Calculate VAT if not provided (20%)
-            if item_dict.get("vat_amount") is None:
-                item_dict["vat_amount"] = item_dict["total_price"] * 0.2
-
-            item_dict["id"] = str(uuid.uuid4())
-            items_list.append(item_dict)
-
-            # Check price changes and create alerts if company exists
-            if company_id:
-                normalized_name, _ = await normalize_item_name(item.name, company_id)
-                item_normalized_names[item_dict["id"]] = normalized_name
-
-                # Find last price for this item from same supplier
-                last_price_record = await db.item_price_history.find_one(
-                    {
-                        "company_id": company_id,
-                        "supplier": {"$regex": f"^{re.escape(invoice.supplier)}$", "$options": "i"},
-                        "item_name": normalized_name
-                    },
-                    {"_id": 0},
-                    sort=[("invoice_date", -1)]
-                )
-                
-                # Get threshold setting
-                alert_settings = await db.price_alert_settings.find_one(
-                    {"company_id": company_id},
-                    {"_id": 0}
-                )
-                threshold = alert_settings.get("threshold_percent", 10.0) if alert_settings else 10.0
-                alert_enabled = alert_settings.get("enabled", True) if alert_settings else True
-                
-                if last_price_record and alert_enabled:
-                    old_price = last_price_record["unit_price"]
-                    new_price = item.unit_price
-                    
-                    if old_price > 0:
-                        change_percent = ((new_price - old_price) / old_price) * 100
-                        
-                        # Create alert if price increased above threshold
-                        if change_percent >= threshold:
-                            alert = PriceAlert(
-                                company_id=company_id,
-                                item_name=item.name,
-                                supplier=invoice.supplier,
-                                old_price=old_price,
-                                new_price=new_price,
-                                change_percent=round(change_percent, 2),
-                                invoice_id="",  # Will be set after invoice is created
-                                invoice_number=invoice.invoice_number
-                            )
-                            price_alerts.append(alert)
-                
-                # Save to price history
-                price_history = ItemPriceHistory(
-                    company_id=company_id,
-                    supplier=invoice.supplier,
-                    item_name=normalized_name,
-                    unit_price=item.unit_price,
-                    quantity=item.quantity,
-                    unit=item.unit,
-                    invoice_id="",  # Will be set after invoice is created
-                    invoice_number=invoice.invoice_number,
-                    invoice_date=invoice_date
-                )
-                await db.item_price_history.insert_one(price_history.dict())
-    
-    invoice_obj = Invoice(
-        user_id=current_user.user_id,
-        company_id=company_id,
-        date=invoice_date,
-        items=items_list,
-        is_paid=is_paid,
-        paid_amount=paid_amount,
-        paid_at=paid_at,
-        payment_due_date=payment_due_date,
-        **{k: v for k, v in invoice_dict.items() if k not in ["date", "items", "payment_due_date"]}
-    )
-    await db.invoices.insert_one(invoice_obj.dict())
-    
-    # Update price history and alerts with invoice_id
-    if company_id and invoice.items:
-        for item_dict in items_list:
-            normalized_name = item_normalized_names.get(item_dict["id"], item_dict["name"].strip().lower())
-            await db.item_price_history.update_many(
-                {
-                    "company_id": company_id,
-                    "invoice_number": invoice.invoice_number,
-                    "item_name": normalized_name,
-                    "invoice_id": ""
-                },
-                {"$set": {"invoice_id": invoice_obj.id}}
-            )
-        
-        # Save alerts with invoice_id
-        for alert in price_alerts:
-            alert.invoice_id = invoice_obj.id
-            await db.price_alerts.insert_one(alert.dict())
-
-        # Keep raw-material grouping fresh automatically, without the user
-        # having to trigger it - throttled inside the task itself.
-        background_tasks.add_task(maybe_schedule_ai_item_merge, company_id)
-
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="create",
-        entity_type="invoice",
-        entity_id=invoice_obj.id,
-        company_id=company_id,
-        details={"supplier": invoice_obj.supplier, "invoice_number": invoice_obj.invoice_number, "total_amount": invoice_obj.total_amount}
-    )
-
-    return invoice_obj
-
-@api_router.get("/invoices", response_model=List[Invoice])
-async def get_invoices(
-    supplier: Optional[str] = None,
-    invoice_number: Optional[str] = None,
-    search: Optional[str] = None,  # matches supplier OR invoice_number, unlike the two above which AND together
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    payment_status: Optional[str] = None,  # paid | unpaid | partial | overdue
-    current_user: User = Depends(get_current_user)
-):
-    # Same gate as creating/editing/deleting an invoice - there's no
-    # separate "view invoices" permission, so an owner unticking
-    # manage_invoices for a member must actually revoke list access too,
-    # not just the write endpoints.
-    require_permission(current_user, "manage_invoices")
-    _, query = await get_company_scope(current_user)
-
-    if supplier:
-        query["supplier"] = {"$regex": re.escape(supplier), "$options": "i"}
-    if invoice_number:
-        query["invoice_number"] = {"$regex": re.escape(invoice_number), "$options": "i"}
-    if search:
-        pattern = {"$regex": re.escape(search), "$options": "i"}
-        query["$or"] = [{"supplier": pattern}, {"invoice_number": pattern}]
-    if start_date:
-        query["date"] = {"$gte": datetime.fromisoformat(start_date.replace("Z", "+00:00"))}
-    if end_date:
-        if "date" in query:
-            query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-        else:
-            query["date"] = {"$lte": datetime.fromisoformat(end_date.replace("Z", "+00:00"))}
-    if payment_status == "paid":
-        query["is_paid"] = True
-    elif payment_status == "unpaid":
-        query["is_paid"] = False
-        query["payment_method"] = "bank_transfer"
-    elif payment_status == "partial":
-        # A subset of "unpaid" - something has been paid, but not all of it.
-        query["is_paid"] = False
-        query["payment_method"] = "bank_transfer"
-        query["paid_amount"] = {"$gt": 0}
-    elif payment_status == "overdue":
-        query["is_paid"] = False
-        query["payment_method"] = "bank_transfer"
-        query["payment_due_date"] = {"$lt": datetime.now(timezone.utc)}
-
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(1000)
-    return [Invoice(**inv) for inv in invoices]
-
-@api_router.get("/invoices/protocols/reverse-charge")
-async def get_reverse_charge_protocols(current_user: User = Depends(get_current_user)):
-    """List all reverse-charge purchases (self-billing протокол по чл.117
-    ЗДДС) across the whole company, newest first - lets the owner or
-    accountant see every protocol's number and check none has slipped
-    past its 15-day filing deadline."""
-    require_permission(current_user, "view_statistics")
-    _, query = await get_company_scope(current_user)
-    query["vat_treatment"] = VatTreatment.REVERSE_CHARGE
-
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(1000)
-    return [Invoice(**inv) for inv in invoices]
-
-@api_router.get("/invoices/{invoice_id}", response_model=Invoice)
-async def get_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_invoices")
-    _, scope = await get_company_scope(current_user)
-    invoice = await db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Фактурата не е намерена")
-    return Invoice(**invoice)
-
-@api_router.put("/invoices/{invoice_id}", response_model=Invoice)
-async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_invoices")
-    update_data = {k: v for k, v in invoice_update.dict().items() if v is not None}
-    if "date" in update_data:
-        update_data["date"] = datetime.fromisoformat(update_data["date"].replace("Z", "+00:00"))
-    if "payment_due_date" in update_data:
-        update_data["payment_due_date"] = datetime.fromisoformat(update_data["payment_due_date"].replace("Z", "+00:00"))
-
-    company_id, scope = await get_company_scope(current_user)
-    existing = await db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Фактурата не е намерена")
-
-    # Same auto-paid/due-date rules as on create, so switching an invoice's
-    # payment method later behaves the same as picking it up front.
-    cash_auto_paid = (
-        update_data.get("payment_method") == "cash"
-        and "is_paid" not in update_data
-        and "paid_amount" not in update_data
-    )
-    if cash_auto_paid:
-        update_data["is_paid"] = True
-        update_data["paid_amount"] = update_data.get("total_amount", existing.get("total_amount", 0))
-        update_data["paid_at"] = update_data.get("date", existing["date"])  # paid on the spot, at invoice date
-    if update_data.get("payment_method") == "bank_transfer" and "payment_due_date" not in update_data and not existing.get("payment_due_date"):
-        update_data["payment_due_date"] = update_data.get("date", existing["date"]) + timedelta(days=14)
-
-    if "paid_amount" in update_data and not cash_auto_paid:
-        # paid_amount is the source of truth for payment progress once
-        # given - it drives is_paid/paid_at, not the other way round, so a
-        # partial payment (0 < paid_amount < total) always shows is_paid as
-        # False with the exact remaining balance recoverable as
-        # total_amount - paid_amount (see /statistics/summary's use of it).
-        effective_total = update_data.get("total_amount", existing.get("total_amount", 0))
-        paid_amount = update_data["paid_amount"]
-        if paid_amount < 0:
-            raise HTTPException(status_code=400, detail="Платената сума не може да е отрицателна")
-        if paid_amount > effective_total + 0.01:
-            raise HTTPException(status_code=400, detail="Платената сума не може да надвишава общата сума на фактурата")
-        was_fully_paid = bool(existing.get("is_paid"))
-        now_fully_paid = paid_amount >= effective_total - 0.01
-        update_data["is_paid"] = now_fully_paid
-        if now_fully_paid and not was_fully_paid:
-            update_data["paid_at"] = datetime.now(timezone.utc)
-        elif not now_fully_paid:
-            update_data["paid_at"] = None
-    elif "is_paid" in update_data and not cash_auto_paid:
-        # Ticking "is_paid" directly (the quick mark-fully-paid/unpaid
-        # toggle, without keying in an exact amount) keeps paid_amount
-        # consistent with it, and stamps/clears paid_at to "now" - when the
-        # user actually confirmed the payment.
-        update_data["paid_at"] = datetime.now(timezone.utc) if update_data["is_paid"] else None
-        update_data["paid_amount"] = (
-            update_data.get("total_amount", existing.get("total_amount", 0))
-            if update_data["is_paid"] else 0.0
-        )
-
-    # Newly switched to reverse charge and no протокол yet - assign one,
-    # same as on create.
-    if update_data.get("vat_treatment") == VatTreatment.REVERSE_CHARGE and not existing.get("protocol_number"):
-        protocol_year = update_data.get("date", existing["date"]).year
-        update_data["protocol_number"] = await next_protocol_number(
-            company_id, current_user.user_id, protocol_year
-        )
-
-    # Existence was already confirmed above via `existing` - modified_count
-    # being 0 here just means the new values matched the old ones (e.g.
-    # re-saving unchanged fields), not that the invoice is missing.
-    await db.invoices.update_one(
-        {"id": invoice_id, **scope},
-        {"$set": update_data}
-    )
-
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="update",
-        entity_type="invoice",
-        entity_id=invoice_id,
-        company_id=company_id,
-        details={k: v for k, v in update_data.items() if k != "date"}
-    )
-
-    return Invoice(**invoice)
-
-@api_router.delete("/invoices/{invoice_id}")
-async def delete_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_invoices")
-    company_id, scope = await get_company_scope(current_user)
-    invoice = await db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
-    result = await db.invoices.delete_one({"id": invoice_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Фактурата не е намерена")
-
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="delete",
-        entity_type="invoice",
-        entity_id=invoice_id,
-        company_id=company_id,
-        # invoice_snapshot keeps the full document (not just the display
-        # summary below) so a holder of restore_deleted_data can undo an
-        # accidental delete from the audit log - see restore_audit_entry.
-        details={
-            "supplier": invoice.get("supplier"), "invoice_number": invoice.get("invoice_number"),
-            "total_amount": invoice.get("total_amount"),
-            "invoice_snapshot": invoice, "restored": False,
-        } if invoice else None
-    )
-
-    return {"message": "Фактурата е изтрита"}
-
-@api_router.post("/audit-logs/{log_id}/restore")
-async def restore_audit_entry(log_id: str, current_user: User = Depends(get_current_user)):
-    """Restores an invoice deleted earlier, from the full snapshot kept on
-    its own audit log entry. Deliberately separate from manage_invoices -
-    undoing someone else's delete (possibly days later) is a sensitive,
-    infrequent admin action, not routine invoice work, so it is gated on
-    its own permission the owner grants explicitly (see restore_deleted_data
-    in ROLE_PERMISSIONS)."""
-    require_permission(current_user, "restore_deleted_data")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Нямате фирма")
-
-    log_entry = await db.audit_logs.find_one({"id": log_id, "company_id": company_id})
-    if not log_entry:
-        raise HTTPException(status_code=404, detail="Записът не е намерен")
-    if log_entry.get("action") != "delete" or log_entry.get("entity_type") != "invoice":
-        raise HTTPException(status_code=400, detail="Това действие не може да бъде възстановено")
-
-    details = log_entry.get("details") or {}
-    if details.get("restored"):
-        raise HTTPException(status_code=400, detail="Вече е възстановена")
-    snapshot = details.get("invoice_snapshot")
-    if not snapshot:
-        raise HTTPException(status_code=400, detail="Няма запазени данни за възстановяване на тази фактура")
-
-    if await db.invoices.find_one({"id": snapshot["id"]}, {"_id": 1}):
-        raise HTTPException(status_code=400, detail="Вече съществува фактура с това ID")
-
-    await db.invoices.insert_one(dict(snapshot))
-    await db.audit_logs.update_one({"id": log_id}, {"$set": {"details.restored": True}})
-
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="restore",
-        entity_type="invoice",
-        entity_id=snapshot.get("id"),
-        company_id=company_id,
-        details={"supplier": snapshot.get("supplier"), "invoice_number": snapshot.get("invoice_number"), "total_amount": snapshot.get("total_amount")}
-    )
-
-    return {"message": "Фактурата е възстановена"}
 
 # ===================== DAILY REVENUE ENDPOINTS =====================
 
-@api_router.post("/daily-revenue", response_model=DailyRevenue)
-async def create_daily_revenue(revenue: DailyRevenueCreate, current_user: User = Depends(get_current_user)):
-    """Записва оборота за деня - ЗАМЕСТВА предишната стойност, не я
-    добавя към нея (фронтендът зарежда текущите стойности в полетата
-    при отваряне, точно за да могат да се коригират директно)."""
-    require_permission(current_user, "add_revenue")
-    company_id, scope = await get_company_scope(current_user)
 
-    # Check if ANY teammate already logged revenue for this date - the
-    # fiscal till total for a given day belongs to the whole company, not
-    # to whoever happened to type it in.
-    existing = await db.daily_revenue.find_one({**scope, "date": revenue.date}, {"_id": 0})
 
-    if existing:
-        await db.daily_revenue.update_one(
-            {"id": existing["id"]},
-            {"$set": {
-                "fiscal_revenue": revenue.fiscal_revenue,
-                "pocket_money": revenue.pocket_money,
-                "card_revenue": revenue.card_revenue,
-                "vat_rate_percent": revenue.vat_rate_percent,
-            }}
+
+
+# ===================== CUSTOMERS & RECEIVABLES (Module 7 Finding #2) =====
+
+class Customer(BaseModel):
+    """Deliberately lightweight - a name and a way to reach them, never a
+    CRM. Exists only so a receivable can say "this customer" without
+    re-typing their contact details every time; see the Module 7 audit
+    decision this was built from."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: Optional[str] = None
+    user_id: str
+    name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    # What an invoice to them names: EIK/Bulstat, VAT number, address.
+    eik: Optional[str] = None
+    vat_number: Optional[str] = None
+    address: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class CustomerCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=200)
+    notes: Optional[str] = Field(default=None, max_length=1000)
+    eik: Optional[str] = Field(default=None, max_length=20)
+    vat_number: Optional[str] = Field(default=None, max_length=20)
+    address: Optional[str] = Field(default=None, max_length=300)
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=200)
+    notes: Optional[str] = Field(default=None, max_length=1000)
+    eik: Optional[str] = Field(default=None, max_length=20)
+    vat_number: Optional[str] = Field(default=None, max_length=20)
+    address: Optional[str] = Field(default=None, max_length=300)
+
+
+async def remember_customer(
+    company_id: Optional[str], scope: dict, user_id: str, name: Optional[str],
+    eik: Optional[str] = None, address: Optional[str] = None,
+) -> Optional[str]:
+    """The customer a document is to: found by EIK (else by name, case and
+    punctuation aside), its missing EIK or address filled in from the
+    document - never overwritten; or saved as a new customer, so the next
+    invoice to them is a pick, not typing again."""
+    name = (name or "").strip()
+    if not company_id or not name:
+        return None
+    eik = (eik or "").strip() or None
+    address = (address or "").strip() or None
+    customers = await db.customers.find(scope, {"_id": 0, "id": 1, "name": 1, "eik": 1, "address": 1}).to_list(ALL_ROWS)
+    found = None
+    if eik:
+        found = next((c for c in customers if eik_key(c.get("eik")) and eik_key(c.get("eik")) == eik_key(eik)), None)
+    if not found:
+        key = _compare_key(name)
+        found = next(
+            (c for c in customers if _compare_key(c.get("name") or "") == key and (not eik or not c.get("eik"))),
+            None,
         )
-        existing["fiscal_revenue"] = revenue.fiscal_revenue
-        existing["pocket_money"] = revenue.pocket_money
-        existing["card_revenue"] = revenue.card_revenue
-        existing["vat_rate_percent"] = revenue.vat_rate_percent
-        existing.setdefault("company_id", company_id)
-        return DailyRevenue(**existing)
+    if found:
+        missing = {field: value for field, value in (("eik", eik), ("address", address)) if value and not found.get(field)}
+        if missing:
+            await db.customers.update_one({"id": found["id"]}, {"$set": missing})
+        return found["id"]
+    customer = Customer(user_id=user_id, company_id=company_id, name=name, eik=eik, address=address)
+    await db.customers.insert_one(customer.model_dump())
+    return customer.id
 
-    revenue_obj = DailyRevenue(
-        user_id=current_user.user_id,
-        company_id=company_id,
-        date=revenue.date,
-        fiscal_revenue=revenue.fiscal_revenue,
-        pocket_money=revenue.pocket_money,
-        card_revenue=revenue.card_revenue,
-        vat_rate_percent=revenue.vat_rate_percent
-    )
-    await db.daily_revenue.insert_one(revenue_obj.dict())
-    return revenue_obj
+class Receivable(BaseModel):
+    """The mirror image of an unpaid bank-transfer invoice (what the
+    business owes suppliers) - what a customer owes the business.
+    customer_name is always present and denormalized (typed freely or
+    copied from a Customer) so recording one never requires creating a
+    Customer record first."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: Optional[str] = None
+    user_id: str
+    customer_id: Optional[str] = None
+    customer_name: str
+    description: Optional[str] = None
+    amount: float
+    due_date: Optional[str] = None  # "YYYY-MM-DD"
+    is_paid: bool = False
+    paid_amount: float = 0
+    paid_at: Optional[datetime] = None
+    # Each payment received: {id, amount, date "YYYY-MM-DD", method}. A
+    # customer can pay in parts, by bank or in cash, on a day of their own.
+    payments: List[Dict[str, Any]] = []
+    # Owed on an invoice the business issued: that invoice is already
+    # revenue (and VAT) on its own date, so a payment on it is money
+    # coming in, never new revenue to log.
+    billing_document_id: Optional[str] = None
+    revenue_counted: bool = False
+    # Taken off what is owed by credit notes to its invoice - not money in.
+    credited_amount: float = 0
+    # Its document was cancelled (or deleted) after money came in: nothing
+    # is owed any more, and what was paid is the customer's to get back.
+    cancelled: bool = False
+    # Owed on a bill of a location (routers/locations): a cash payment logged
+    # as revenue goes to that location's day.
+    location_id: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-@api_router.get("/daily-revenue/today")
-async def get_today_revenue(current_user: User = Depends(get_current_user)):
-    """Get today's revenue totals for the whole company"""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    _, scope = await get_company_scope(current_user)
-    existing = await db.daily_revenue.find_one({**scope, "date": today}, {"_id": 0})
-    # Same visibility rule as /statistics/summary and /statistics/chart-data -
-    # pocket_money is a distinct sensitive field, not the whole record, so a
-    # viewer without view_pocket_money still gets fiscal/card revenue (they
-    # may hold add_revenue and legitimately need to edit those) with only
-    # pocket_money zeroed out, rather than the whole endpoint being blocked.
-    can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
 
-    if existing:
-        return {
-            "date": today,
-            "fiscal_revenue": existing.get("fiscal_revenue", 0),
-            "pocket_money": existing.get("pocket_money", 0) if can_see_pocket_money else 0
-        }
-    return {
-        "date": today,
-        "fiscal_revenue": 0,
-        "pocket_money": 0
-    }
+class ReceivableView(Receivable):
+    """A receivable as shown: what is still owed and what is to give back."""
+    left_amount: float = 0
+    refund_due: float = 0
 
-@api_router.get("/daily-revenue/by-date/{date}")
-async def get_revenue_by_date(date: str, current_user: User = Depends(get_current_user)):
-    """Get revenue for a specific date, for the whole company"""
-    _, scope = await get_company_scope(current_user)
-    existing = await db.daily_revenue.find_one({**scope, "date": date}, {"_id": 0})
-    can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
 
-    if existing:
-        return {
-            "date": date,
-            "fiscal_revenue": existing.get("fiscal_revenue", 0),
-            "pocket_money": existing.get("pocket_money", 0) if can_see_pocket_money else 0,
-            "card_revenue": existing.get("card_revenue", 0),
-            "vat_rate_percent": existing.get("vat_rate_percent", 20.0)
-        }
-    return {
-        "date": date,
-        "fiscal_revenue": 0,
-        "pocket_money": 0,
-        "card_revenue": 0,
-        "vat_rate_percent": 20.0
-    }
+def receivable_view(r: dict) -> "ReceivableView":
+    return ReceivableView(**{**r, "left_amount": round(receivable_left(r), 2), "refund_due": round(receivable_refund_due(r), 2)})
 
-@api_router.get("/daily-revenue", response_model=List[DailyRevenue])
-async def get_daily_revenues(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    _, query = await get_company_scope(current_user)
+class ReceivableCreate(BaseModel):
+    customer_id: Optional[str] = None
+    customer_name: str
+    description: Optional[str] = None
+    amount: float = Field(gt=0)
+    due_date: Optional[str] = None
 
-    if start_date:
-        query["date"] = {"$gte": start_date}
-    if end_date:
-        if "date" in query:
-            query["date"]["$lte"] = end_date
+# A bill is due this many days after it is issued unless given a date.
+BILL_TERM_DAYS = 7
+
+class ReceivablePaymentCreate(BaseModel):
+    amount: float = Field(gt=0)
+    date: Optional[str] = None  # "YYYY-MM-DD", today if left out
+    method: Literal["cash", "bank_transfer", "card"] = "cash"
+    # Recorded from a bank statement: that movement's id (see InvoicePaymentCreate).
+    bank_transaction: Optional[str] = Field(default=None, max_length=64)
+
+class ReceivableUpdate(BaseModel):
+    customer_name: Optional[str] = None
+    description: Optional[str] = None
+    amount: Optional[float] = Field(default=None, gt=0)
+    due_date: Optional[str] = None
+    is_paid: Optional[bool] = None
+    paid_amount: Optional[float] = Field(default=None, ge=0)
+
+
+
+
+
+
+
+
+
+
+# ===================== BILLING DOCUMENTS (non-fiscal bill/quote) =========
+# Module 7, Finding #3 (decided: build the non-fiscal version). A simple
+# document a craftsman or service business can hand a customer for a job -
+# explicitly NOT a sequentially-numbered VAT invoice, no fiscal metadata,
+# no NAP-declaration implications. Issuing a "bill" automatically creates
+# a Receivable (Module 11's "full non-fiscal loop": quote -> job -> bill
+# -> paid), so the owner doesn't have to record the same amount twice.
+
+class BillingDocumentType(str, Enum):
+    QUOTE = "quote"
+    BILL = "bill"
+    # An invoice issued to a customer: numbered in sequence, with VAT,
+    # revenue and VAT on its issue date, owed (a receivable) until paid.
+    INVOICE = "invoice"
+    # A credit note to a customer on one of those invoices: numbered in the
+    # same sequence, its amounts below zero - it takes revenue and VAT off on
+    # its own date, and what it credits off what is owed on the invoice.
+    CREDIT_NOTE = "credit_note"
+
+class BillingDocumentItem(BaseModel):
+    name: str
+    quantity: float = Field(default=1, gt=0)
+    unit: str = "бр."
+    unit_price: float = Field(ge=0)  # on an invoice: without VAT
+    vat_rate: float = Field(default=20, ge=0, le=100)  # an invoice's line only
+
+# The documents numbered in the invoice sequence: invoices and the credit
+# notes to them.
+NUMBERED_DOC_TYPES = ["invoice", "credit_note"]
+# Issued invoices (and credit notes, below zero) that count: every one not
+# cancelled. A cancelled one keeps its number (the numbering stays
+# unbroken) and counts for nothing.
+ISSUED_INVOICES: Dict[str, Any] = {"doc_type": {"$in": NUMBERED_DOC_TYPES}, "cancelled": {"$ne": True}}
+# What issued invoices add to income and VAT: not those rung up at the till,
+# whose money the day's till revenue already holds.
+ISSUED_INVOICE_REVENUE: Dict[str, Any] = {**ISSUED_INVOICES, "in_till": {"$ne": True}}
+
+
+async def company_logs_till(scope: dict, company_id: Optional[str] = None) -> bool:
+    """Does the business enter its till's daily revenue? Then a sale paid in
+    cash or by card went through the till (a fiscal receipt) and is in it.
+    A business that left the till out enters none: its sales are their own."""
+    if company_id and not (await modules_for_company(company_id))["till"]:
+        return False
+    since = (today_local() - timedelta(days=90)).isoformat()
+    return bool(await db.daily_revenue.find_one({**scope, "date": {"$gte": since}, "fiscal_revenue": {"$gt": 0}}, {"_id": 1}))
+INVOICE_TERM_DAYS = 14  # an issued invoice paid by bank is due 14 days on, unless given
+INVOICE_NUMBER_DIGITS = 10  # "0000000001" - the usual Bulgarian invoice number
+
+
+def invoice_vat_breakdown(items: List[Any]) -> Dict[str, Any]:
+    """An issued invoice's amounts: the base and the VAT of each rate (VAT
+    worked out on the rate's whole base, as an invoice prints it) and the
+    totals."""
+    bases: Dict[float, float] = {}
+    for item in items:
+        line = item if isinstance(item, dict) else item.model_dump()
+        rate = float(line.get("vat_rate", 20))
+        bases[rate] = bases.get(rate, 0.0) + float(line["quantity"]) * float(line["unit_price"])
+    by_rate = [
+        {"rate": rate, "base": round(base, 2), "vat": round(base * rate / 100, 2)}
+        for rate, base in sorted(bases.items(), reverse=True)
+    ]
+    net = round(sum(r["base"] for r in by_rate), 2)
+    vat = round(sum(r["vat"] for r in by_rate), 2)
+    return {"by_rate": by_rate, "amount_without_vat": net, "vat_amount": vat, "total_amount": round(net + vat, 2)}
+
+class BillingDocument(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: Optional[str] = None
+    user_id: str
+    doc_type: BillingDocumentType = BillingDocumentType.BILL
+    customer_id: Optional[str] = None
+    customer_name: str
+    items: List[BillingDocumentItem] = []
+    notes: Optional[str] = None
+    issue_date: str  # "YYYY-MM-DD"
+    # When a bill is due (its receivable's due date) - BILL_TERM_DAYS after
+    # the issue date unless given; quotes have none.
+    due_date: Optional[str] = None
+    total_amount: float = 0
+    receivable_id: Optional[str] = None  # set when this doc created a receivable (bills, invoices owed)
+    # An issued invoice only: its number, the customer as the invoice names
+    # them, how it is paid, the base and the VAT (total_amount is with VAT).
+    invoice_number: Optional[str] = None
+    customer_eik: Optional[str] = None
+    customer_address: Optional[str] = None
+    payment_method: Optional[str] = None  # cash | card (paid when issued) | bank_transfer (owed)
+    amount_without_vat: float = 0
+    vat_amount: float = 0
+    vat_by_rate: List[Dict[str, Any]] = []
+    # Set when the business is not registered for VAT: the invoice carries
+    # no VAT and says why.
+    vat_exempt_basis: Optional[str] = None
+    cancelled: bool = False
+    cancelled_at: Optional[datetime] = None
+    # Issued in another program and entered here (scanned or typed): its own
+    # number, kept in the numbering, but no PDF of ours.
+    external: bool = False
+    # Paid in cash or by card through the till: the sale is on that day's
+    # fiscal receipts already, so its money is in the day's till revenue -
+    # never counted a second time as income or VAT (ISSUED_INVOICE_REVENUE).
+    in_till: bool = False
+    # A credit note: the invoice it is to (its number and date are printed on it).
+    credited_document_id: Optional[str] = None
+    credited_invoice_number: Optional[str] = None
+    credited_issue_date: Optional[str] = None
+    # An invoice: what its credit notes (not cancelled) took off, above zero.
+    credited_amount: float = 0
+    # A quote: valid until (YYYY-MM-DD), open / accepted / declined (an open
+    # one past its date reads as expired), and the bill or invoice made of it.
+    valid_until: Optional[str] = None
+    quote_status: Optional[str] = None
+    converted_document_id: Optional[str] = None
+    # A bill or an invoice made of a quote: that quote.
+    source_quote_id: Optional[str] = None
+    # Issued from an invoice that repeats (routers/recurring_invoices), for
+    # its month "YYYY-MM": the month's invoice is this one, never a second.
+    recurring_invoice_id: Optional[str] = None
+    recurring_month: Optional[str] = None
+    # The location it was sold at (routers/locations); None: the whole business.
+    location_id: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class BillingDocumentView(BillingDocument):
+    """A bill or an invoice as listed, with where its money stands: paid,
+    partly_paid, owed, overdue or credited (settled by credit notes) - from
+    its receivable, or paid when issued in cash or by card."""
+    payment_status: Optional[str] = None
+    paid_amount: Optional[float] = None
+    amount_left: Optional[float] = None
+    refund_due: Optional[float] = None
+
+
+def billing_payment_of(doc: dict, receivable: Optional[dict], today: str) -> Dict[str, Any]:
+    """Where a document's money stands (see BillingDocumentView)."""
+    if doc.get("doc_type") not in ("bill", "invoice") or doc.get("cancelled"):
+        return {}
+    if receivable:
+        left = receivable_left(receivable)
+        paid = float(receivable.get("paid_amount") or 0)
+        if left <= 0.005:
+            status = "paid" if paid > 0 else "credited"
+        elif receivable.get("due_date") and str(receivable["due_date"]) < today:
+            status = "overdue"
         else:
-            query["date"] = {"$lte": end_date}
+            status = "partly_paid" if paid > 0 else "owed"
+        return {"payment_status": status, "paid_amount": round(paid, 2), "amount_left": round(left, 2),
+                "refund_due": round(receivable_refund_due(receivable), 2)}
+    if doc.get("payment_method") in ("cash", "card"):
+        return {"payment_status": "paid", "paid_amount": round(float(doc.get("total_amount") or 0), 2),
+                "amount_left": 0.0, "refund_due": 0.0}
+    return {}
 
-    can_see_pocket_money = get_financial_visibility(current_user)["pocket_money"]
-    revenues = await db.daily_revenue.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
-    if not can_see_pocket_money:
-        for r in revenues:
-            r["pocket_money"] = 0
-    return [DailyRevenue(**r) for r in revenues]
+class BillingDocumentCreate(BaseModel):
+    doc_type: BillingDocumentType = BillingDocumentType.BILL
+    customer_id: Optional[str] = None
+    customer_name: str
+    items: List[BillingDocumentItem] = Field(min_length=1)
+    notes: Optional[str] = None
+    issue_date: Optional[str] = None
+    due_date: Optional[str] = None
+    customer_eik: Optional[str] = None
+    customer_address: Optional[str] = None
+    payment_method: Optional[Literal["cash", "bank_transfer", "card"]] = None
+    # An invoice only: a number of the business's own to continue from (its
+    # last one issued elsewhere + 1); left out, the next after the last one here.
+    invoice_number: Optional[str] = Field(default=None, pattern=r"^\d{1,10}$")
+    # An invoice issued in another program, entered with its own number.
+    external: bool = False
+    # Paid in cash or by card: was it rung up at the till (a fiscal receipt)?
+    # Left out, yes when the business enters its till's daily revenue.
+    in_till: Optional[bool] = None
+    # A credit note: the invoice it is to (its customer, rates and payment
+    # are that invoice's). Its notes are the reason for it.
+    credited_document_id: Optional[str] = None
+    # A quote: valid until (YYYY-MM-DD); left out, QUOTE_VALID_DAYS on.
+    valid_until: Optional[str] = None
+    # A bill or an invoice made of a quote: that quote (it is then accepted).
+    from_quote_id: Optional[str] = None
+    location_id: Optional[str] = Field(default=None, max_length=64)
+
+
+# A quote is valid this many days after it is issued unless given a date.
+QUOTE_VALID_DAYS = 30
+QUOTE_STATUSES = ("open", "accepted", "declined")
+
+
+class QuoteStatusUpdate(BaseModel):
+    status: Literal["open", "accepted", "declined"]
+
+
+
+
+
 
 # ===================== NON-INVOICE EXPENSE ENDPOINTS =====================
 
-@api_router.post("/expenses", response_model=NonInvoiceExpense)
-async def create_expense(expense: NonInvoiceExpenseCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_expenses")
-    company_id, _ = await get_company_scope(current_user)
-    expense_obj = NonInvoiceExpense(
-        user_id=current_user.user_id,
-        company_id=company_id,
-        **expense.dict()
-    )
-    await db.expenses.insert_one(expense_obj.dict())
-    return expense_obj
 
-@api_router.get("/expenses", response_model=List[NonInvoiceExpense])
-async def get_expenses(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    require_permission(current_user, "view_off_book_expenses")
-    _, query = await get_company_scope(current_user)
 
-    if start_date:
-        query["date"] = {"$gte": start_date}
-    if end_date:
-        if "date" in query:
-            query["date"]["$lte"] = end_date
-        else:
-            query["date"] = {"$lte": end_date}
 
-    expenses = await db.expenses.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
-    return [NonInvoiceExpense(**e) for e in expenses]
-
-@api_router.delete("/expenses/{expense_id}")
-async def delete_expense(expense_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "add_expenses")
-    _, scope = await get_company_scope(current_user)
-    result = await db.expenses.delete_one({"id": expense_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Разходът не е намерен")
-    return {"message": "Разходът е изтрит"}
 
 # ===================== PERSONAL EXPENSES & ROI ENDPOINTS =====================
 
-@api_router.post("/personal-expenses")
-async def create_personal_expense(
-    expense: PersonalExpenseCreate,
-    current_user: User = Depends(get_current_user)
-):
-    """Създава личен разход/инвестиция (само за собственик)"""
-    # Check if user is owner
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярът може да управлява лични разходи")
-    
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Няма свързана фирма")
-    
-    expense_obj = PersonalExpense(
-        user_id=current_user.user_id,
-        company_id=company_id,
-        amount=expense.amount,
-        description=expense.description,
-        expense_type=PersonalExpenseType(expense.expense_type),
-        category=PersonalExpenseCategory(expense.category),
-        period_month=expense.period_month,
-        period_year=expense.period_year,
-        supplier_id=expense.supplier_id,
-        project_name=expense.project_name,
-        notes=expense.notes
-    )
-    
-    await db.personal_expenses.insert_one(expense_obj.dict())
-    return {"message": "Личният разход е записан", "id": expense_obj.id}
 
-@api_router.get("/personal-expenses")
-async def get_personal_expenses(
-    month: Optional[int] = None,
-    year: Optional[int] = None,
-    expense_type: Optional[str] = None,
-    category: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Връща личните разходи на собственика (изисква view_personal_investments)"""
-    require_permission(current_user, "view_personal_investments")
 
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        return {"personal_expenses": []}
-    query = {"company_id": company_id}
 
-    if month:
-        query["period_month"] = month
-    if year:
-        query["period_year"] = year
-    if expense_type:
-        query["expense_type"] = expense_type
-    if category:
-        query["category"] = category
-    
-    expenses = await db.personal_expenses.find(query, {"_id": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(1000)
-    return {"personal_expenses": expenses}
-
-@api_router.delete("/personal-expenses/{expense_id}")
-async def delete_personal_expense(
-    expense_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Изтрива личен разход (само за собственик)"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярът може да управлява лични разходи")
-
-    # Scoped by company, not just this owner's own user_id - a company can
-    # have more than one owner, and GET /personal-expenses already shows
-    # every owner's entries together, so any owner should be able to
-    # delete any of them, not only the ones they personally entered.
-    company_id, _ = await get_company_scope(current_user)
-    result = await db.personal_expenses.delete_one({
-        "id": expense_id,
-        "company_id": company_id
-    })
-    
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Разходът не е намерен")
-    
-    return {"message": "Личният разход е изтрит"}
-
-@api_router.get("/roi/analysis")
-@limiter.limit("20/minute")
-async def get_roi_analysis(
-    request: Request,
-    month: Optional[int] = None,
-    year: Optional[int] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    ROI анализ - изчислява възвръщаемост на личната инвестиция.
-    Изисква view_personal_investments.
-    """
-    require_permission(current_user, "view_personal_investments")
-
-    # Default to current month/year
-    now = datetime.now(timezone.utc)
-    target_month = month or now.month
-    target_year = year or now.year
-
-    # Build period dates
-    period_start = f"{target_year}-{target_month:02d}-01"
-    if target_month == 12:
-        period_end = f"{target_year + 1}-01-01"
-    else:
-        period_end = f"{target_year}-{target_month + 1:02d}-01"
-
-    # Personal expenses are scoped to the whole company (not
-    # current_user.user_id) so a delegated viewer with the permission above
-    # sees the OWNER's personal ledger, not an always-empty query for
-    # themselves - personal expenses are always entered by the owner.
-    company_id, scope = await get_company_scope(current_user)
-    personal_expenses = await db.personal_expenses.find({
-        "company_id": company_id,
-        "period_month": target_month,
-        "period_year": target_year
-    }, {"_id": 0, "amount": 1, "expense_type": 1}).to_list(1000) if company_id else []
-
-    total_personal = sum(e.get("amount", 0) for e in personal_expenses)
-    total_investment = sum(e.get("amount", 0) for e in personal_expenses if e.get("expense_type") == "investment")
-
-    # Get business revenue for period
-    revenues = await db.daily_revenue.find({
-        **scope,
-        "date": {"$gte": period_start, "$lt": period_end}
-    }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
-
-    # Same redaction convention as get_summary: a viewer without
-    # view_personal_investments never reaches this endpoint at all, but the
-    # two sensitive-field permissions are orthogonal to it - someone can have
-    # view_personal_investments without view_pocket_money/view_off_book_expenses,
-    # so the raw totals are zeroed out of every aggregate below unless this
-    # viewer is also allowed to see that specific field.
-    visibility = get_financial_visibility(current_user)
-    total_fiscal_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues)
-    total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues)
-    effective_pocket_money = total_pocket_money if visibility["pocket_money"] else 0
-    total_revenue = total_fiscal_revenue + effective_pocket_money
-
-    # Get business expenses (invoices + non-invoice expenses)
-    invoices = await db.invoices.find({
-        **scope,
-        "date": {
-            "$gte": datetime.fromisoformat(period_start + "T00:00:00+00:00"),
-            "$lt": datetime.fromisoformat(period_end + "T00:00:00+00:00")
-        }
-    }, {"_id": 0, "total_amount": 1}).to_list(1000)
-
-    business_expenses = await db.expenses.find({
-        **scope,
-        "date": {"$gte": period_start, "$lt": period_end}
-    }, {"_id": 0, "amount": 1}).to_list(1000)
-
-    total_invoice_expense = sum(i.get("total_amount", 0) for i in invoices)
-    total_off_book_expense = sum(e.get("amount", 0) for e in business_expenses)
-    effective_off_book_expense = total_off_book_expense if visibility["off_book_expenses"] else 0
-    total_business_expense = total_invoice_expense + effective_off_book_expense
-
-    # Calculate profit and ROI from the already-effective (not raw) totals
-    total_profit = total_revenue - total_business_expense
-
-    # ROI = (Печалба / Лична инвестиция) * 100
-    if total_personal > 0:
-        roi_percent = (total_profit / total_personal) * 100
-    else:
-        roi_percent = 0 if total_profit <= 0 else 100
-
-    is_profitable = total_profit > 0
-    investment_covered = total_profit >= total_personal
-
-    # Печалбата (и всичко изчислено пряко от нея - ROI, is_profitable,
-    # investment_covered, AI препоръките) е независимо скриваема по
-    # view_profit, както при get_summary - иначе зрител без това право би я
-    # видял изписана в текст през ai_insights, дори полетата по-долу да са null.
-    if visibility["profit"]:
-        # Generate AI insights. Each daily_revenue record is one day with
-        # turnover actually logged, so its count is a reasonable proxy for how
-        # much real history backs this period's numbers (a calendar month can
-        # be mostly empty early on, or sparsely filled for a seasonal business).
-        ai_insights = await generate_roi_insights(
-            total_personal=total_personal,
-            total_investment=total_investment,
-            total_revenue=total_revenue,
-            total_profit=total_profit,
-            roi_percent=roi_percent,
-            is_profitable=is_profitable,
-            investment_covered=investment_covered,
-            days_with_data=len(revenues),
-        )
-    else:
-        ai_insights = ["🔒 Нямаш право да виждаш печалбата за избрания период"]
-
-    return {
-        "period": {"month": target_month, "year": target_year},
-        "period_start": period_start,
-        "period_end": period_end,
-        "total_personal_investment": round(total_personal, 2),
-        "total_investment_only": round(total_investment, 2),
-        "total_revenue": round(total_revenue, 2),
-        "total_business_expense": round(total_business_expense, 2),
-        "total_profit": round(total_profit, 2) if visibility["profit"] else None,
-        "roi_percent": round(roi_percent, 1) if visibility["profit"] else None,
-        "is_profitable": is_profitable if visibility["profit"] else None,
-        "investment_covered": investment_covered if visibility["profit"] else None,
-        "ai_insights": ai_insights
-    }
-
-async def generate_roi_insights(
-    total_personal: float,
-    total_investment: float,
-    total_revenue: float,
-    total_profit: float,
-    roi_percent: float,
-    is_profitable: bool,
-    investment_covered: bool,
-    days_with_data: int = 0,
-) -> List[str]:
-    """Генерира AI управленски предложения за ROI"""
-    insights = []
-
-    # Basic insights без AI (винаги налични)
-    if total_personal == 0:
-        insights.append("📊 Няма въведени лични разходи за периода")
-        return insights
-
-    # ROI/profit swing wildly on a handful of days (one big invoice, one
-    # slow week) - flag that explicitly so the owner doesn't read a strong
-    # scaling/reinvestment suggestion into what's still a noisy sample.
-    # MIN_RELIABLE_DAYS is a judgment call, not a measured threshold - about
-    # a month and a half is the point where day-to-day noise usually stops
-    # dominating the trend for a small shop.
-    MIN_RELIABLE_DAYS = 45
-    data_is_sparse = days_with_data < MIN_RELIABLE_DAYS
-    if data_is_sparse:
-        day_word = "ден" if days_with_data == 1 else "дни"
-        insights.append(
-            f"📅 Анализът обхваща само {days_with_data} {day_word} с въведен оборот - "
-            f"изчакайте поне {MIN_RELIABLE_DAYS}-60 дни натрупани данни, преди да вземате "
-            "решения за мащабиране на база тези цифри"
-        )
-
-    if investment_covered:
-        insights.append("✅ Бизнесът покрива личната инвестиция за периода")
-    elif is_profitable:
-        diff = total_personal - total_profit
-        insights.append(f"⚠️ Печалбата не покрива напълно личната инвестиция (остават {diff:.2f} €)")
-    else:
-        insights.append("❌ Работиш повече за бизнеса, отколкото бизнесът за теб")
-
-    if roi_percent > 100:
-        insights.append(f"🚀 Отличен ROI: {roi_percent:.1f}% - инвестицията се изплаща многократно")
-    elif roi_percent > 50:
-        insights.append(f"📈 Добър ROI: {roi_percent:.1f}%")
-    elif roi_percent > 0:
-        insights.append(f"📉 Нисък ROI: {roi_percent:.1f}% - има място за подобрение")
-    elif roi_percent < -50:
-        insights.append(f"🔴 Отрицателен ROI: {roi_percent:.1f}% - необходим е анализ на разходите")
-    
-    # Personal contribution ratio
-    if total_revenue > 0:
-        personal_ratio = (total_personal / total_revenue) * 100
-        if personal_ratio > 50:
-            insights.append(f"⚠️ Личната контрибуция ({personal_ratio:.1f}%) е висока спрямо оборота")
-        elif personal_ratio > 30:
-            insights.append(f"📊 Личната контрибуция е {personal_ratio:.1f}% от оборота")
-    
-    # Try to get AI enhanced insights
-    try:
-        if not AI_FEATURES_ENABLED:
-            raise RuntimeError("AI features disabled")
-
-        if data_is_sparse:
-            guidance = (
-                f"Периодът има само {days_with_data} дни с въведени данни - твърде малко за "
-                "надежден дългосрочен извод. НЕ предлагай конкретна сума за реинвестиране или "
-                "мащабиране на база тези цифри. Вместо това посъветвай собственика да изчака "
-                f"поне {MIN_RELIABLE_DAYS}-60 дни натрупани данни, евентуално с кратко наблюдение "
-                "върху засегашната тенденция."
-            )
-        else:
-            guidance = "Дай конкретна препоръка какво може да направи собственикът за подобрение."
-
-        prompt = f"""Анализирай тези финансови показатели за малък бизнес (период с {days_with_data} дни данни):
-- Лична инвестиция на собственика: {total_personal:.2f} €
-- Общ оборот: {total_revenue:.2f} €
-- Печалба: {total_profit:.2f} €
-- ROI: {roi_percent:.1f}%
-
-{guidance}
-Дай ЕДНА кратка препоръка (до 15 думи). Отговори директно с препоръката, без въвеждащ текст,
-и посочвай сумите винаги в евро (€), никога в лева."""
-
-        response = await anthropic_client.messages.create(
-            model="claude-opus-5-5",
-            max_tokens=200,
-            system="Ти си финансов съветник за малък бизнес. Давай кратки, ясни и практични съвети на български, като посочваш всички суми в евро (€), никога в лева.",
-            messages=[{"role": "user", "content": prompt}],
-        )
-        ai_recommendation = next((b.text for b in response.content if b.type == "text"), "").strip()
-
-        if ai_recommendation and len(ai_recommendation) < 200:
-            insights.append(f"💡 AI препоръка: {ai_recommendation}")
-    except Exception as e:
-        logger.warning(f"AI insights generation failed: {str(e)}")
-    
-    return insights
-
-@api_router.get("/roi/trend")
-async def get_roi_trend(
-    months: int = 6,
-    current_user: User = Depends(get_current_user)
-):
-    """Връща ROI тренд за последните N месеца (изисква view_personal_investments)"""
-    require_permission(current_user, "view_personal_investments")
-
-    company_id, scope = await get_company_scope(current_user)
-    visibility = get_financial_visibility(current_user)
-    now = datetime.now(timezone.utc)
-    trend_data = []
-
-    for i in range(months - 1, -1, -1):
-        # Calculate target month
-        target_month = now.month - i
-        target_year = now.year
-        
-        while target_month <= 0:
-            target_month += 12
-            target_year -= 1
-        
-        # Get ROI for this month
-        period_start = f"{target_year}-{target_month:02d}-01"
-        if target_month == 12:
-            period_end = f"{target_year + 1}-01-01"
-        else:
-            period_end = f"{target_year}-{target_month + 1:02d}-01"
-        
-        # Personal expenses - company-scoped, see get_roi_analysis for why.
-        personal = await db.personal_expenses.find({
-            "company_id": company_id,
-            "period_month": target_month,
-            "period_year": target_year
-        }, {"_id": 0, "amount": 1}).to_list(1000) if company_id else []
-        total_personal = sum(p.get("amount", 0) for p in personal)
-        
-        # Revenue - effective pocket_money, same redaction as get_roi_analysis
-        revenues = await db.daily_revenue.find({
-            **scope,
-            "date": {"$gte": period_start, "$lt": period_end}
-        }, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}).to_list(1000)
-        effective_pocket_money = sum(r.get("pocket_money", 0) for r in revenues) if visibility["pocket_money"] else 0
-        total_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues) + effective_pocket_money
-
-        # Business expenses - effective off-book expenses
-        invoices = await db.invoices.find({
-            **scope,
-            "date": {
-                "$gte": datetime.fromisoformat(period_start + "T00:00:00+00:00"),
-                "$lt": datetime.fromisoformat(period_end + "T00:00:00+00:00")
-            }
-        }, {"_id": 0, "total_amount": 1}).to_list(1000)
-
-        expenses = await db.expenses.find({
-            **scope,
-            "date": {"$gte": period_start, "$lt": period_end}
-        }, {"_id": 0, "amount": 1}).to_list(1000)
-
-        effective_off_book_expense = sum(e.get("amount", 0) for e in expenses) if visibility["off_book_expenses"] else 0
-        total_expense = sum(i.get("total_amount", 0) for i in invoices) + effective_off_book_expense
-        total_profit = total_revenue - total_expense
-
-        roi = (total_profit / total_personal * 100) if total_personal > 0 else (0 if total_profit <= 0 else 100)
-
-        # profit/roi_percent са независимо скриваеми по view_profit, както в
-        # get_roi_analysis - личната инвестиция (personal_investment) остава
-        # видима, защото целият /roi/trend endpoint вече изисква
-        # view_personal_investments за достъп.
-        trend_data.append({
-            "month": target_month,
-            "year": target_year,
-            "label": f"{target_month:02d}/{target_year}",
-            "personal_investment": round(total_personal, 2),
-            "revenue": round(total_revenue, 2),
-            "profit": round(total_profit, 2) if visibility["profit"] else None,
-            "roi_percent": round(roi, 1) if visibility["profit"] else None
-        })
-
-    return {"trend": trend_data, "months": months}
 
 # ===================== PERSONAL WALLET (Лично тефтерче) =====================
 # A household-finance ledger for money the owner withdraws FROM the company
@@ -4123,34 +2956,291 @@ def _month_bounds(dt: datetime) -> tuple:
         last_day = dt.replace(month=dt.month + 1, day=1) - timedelta(days=1)
     return start, last_day.strftime("%Y-%m-%d")
 
-async def _compute_month_profit(company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str) -> float:
-    """Minimal standalone re-derivation of get_summary's profit formula for
-    one month, used so this module doesn't need get_summary's full
-    permission-redaction machinery - whoever reaches these endpoints already
-    holds a personal-wallet permission, which implies the owner trusts them
-    with exactly this level of financial detail."""
-    date_query = {"$gte": start_date, "$lte": end_date}
-    revenues = await db.daily_revenue.find(
-        {**scope, "date": date_query}, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1}
-    ).to_list(1000)
-    invoices = await db.invoices.find(
-        {**scope, "date": {
-            "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
-            "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
-        }}, {"_id": 0, "total_amount": 1}
-    ).to_list(1000)
-    expenses = await db.expenses.find(
-        {**scope, "date": date_query}, {"_id": 0, "amount": 1}
-    ).to_list(1000)
-    payroll_cost = await get_payroll_cost_for_period(company_id, user_id, start_date, end_date)
-    depreciation_cost = await get_depreciation_cost_for_period(company_id, user_id, start_date, end_date)
+def _profit_formula(
+    fiscal_revenue: float, pocket_money: float, invoice_total: float,
+    off_book_expenses: float, payroll_cost: float, depreciation_cost: float,
+    issued_invoices: float = 0.0,
+) -> tuple:
+    """The one income/expense formula get_summary (routers/statistics.py)
+    and _compute_month_profit below both must stay in sync on: income =
+    fiscal revenue + pocket money; expense = supplier invoices + off-book
+    expenses + payroll + depreciation. Pulled out as its own function so
+    there is exactly one formula to get right, not two hand-maintained
+    copies that could silently drift apart - each caller still decides
+    separately whether pocket_money/off_book_expenses is the real value
+    or zeroed out for a viewer who can't see it (or, for
+    _compute_month_profit, always the real value - see its own docstring).
+    Returns (total_income, total_expense), not the subtraction, since
+    get_summary also reports each side on its own. Invoices the business
+    issued to customers are income on their issue date, like the till."""
+    total_income = fiscal_revenue + pocket_money + issued_invoices
+    total_expense = invoice_total + off_book_expenses + payroll_cost + depreciation_cost
+    return total_income, total_expense
 
-    total_income = sum(r.get("fiscal_revenue", 0) + r.get("pocket_money", 0) for r in revenues)
-    total_expense = (
-        sum(i.get("total_amount", 0) for i in invoices)
-        + sum(e.get("amount", 0) for e in expenses)
-        + payroll_cost + depreciation_cost
+# Invoices that are expenses of their day: not the purchase of a fixed
+# asset (asset_id set when an asset is linked to its invoice).
+NOT_AN_ASSET: Dict[str, Any] = {"asset_id": None}
+
+
+def counted_period(period: Period) -> Period:
+    """The days of a period that count now: a period still running counts
+    through today ("so far" - its revenue and invoices up to today, and the
+    share of the month's payroll and depreciation for the days gone by),
+    any other period as a whole. The one rule Home's summary, the budget,
+    the personal wallet, ROI and the chat read the current month by -
+    before, only Home did, and the rest set a whole month of salaries
+    against half a month of revenue."""
+    today = today_local()
+    return (period.through(today) if period.contains(today) else None) or period
+
+
+async def period_totals(company_id: Optional[str], scope: dict, user_id: str, period: Period) -> Dict[str, Any]:
+    """Every money total of one period, read the one way all modules share:
+    the period's whole business days (services/business_calendar), every
+    record in them - summed in the database, never a first-1000 slice - and
+    monthly costs (payroll, depreciation) by their share of days in the
+    period. Raw values, no visibility redaction: each caller applies its
+    viewer's own (period_income_expense below does it for the profit
+    formula), so two screens asking for the same period start from the
+    same numbers."""
+    # An invoice for a fixed asset is not an expense of its day - the asset
+    # is expensed through its depreciation month by month - but its VAT is
+    # still a credit, and it is still one of the period's invoices. A credit
+    # note takes its (negative) amounts off every sum and is not counted as
+    # an invoice.
+    invoices = await db.invoices.aggregate([
+        {"$match": {**scope, "date": period.datetime_filter(), **NOT_AN_ASSET}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "net": {"$sum": "$amount_without_vat"}}},
+    ]).to_list(ALL_ROWS)
+    all_invoices = await db.invoices.aggregate([
+        {"$match": {**scope, "date": period.datetime_filter()}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
+                    "count": {"$sum": {"$cond": [{"$eq": ["$document_type", CREDIT_NOTE]}, 0, 1]}}}},
+    ]).to_list(ALL_ROWS)
+    revenue = await db.daily_revenue.aggregate([
+        {"$match": {**scope, "date": period.text_filter()}},
+        {"$group": {"_id": None, "fiscal": {"$sum": "$fiscal_revenue"},
+                    "pocket": {"$sum": "$pocket_money"}, "card": {"$sum": "$card_revenue"}}},
+    ]).to_list(ALL_ROWS)
+    # The till's sales by VAT rate: a day split by the groups of its daily
+    # report counts each group at its own rate, any other day whole at its
+    # one rate (services/revenue_vat).
+    revenue_by_rate = await db.daily_revenue.aggregate([
+        {"$match": {**scope, "date": period.text_filter(), "vat_groups.0": {"$exists": False}}},
+        {"$group": {"_id": "$vat_rate_percent", "fiscal": {"$sum": "$fiscal_revenue"}}},
+    ]).to_list(ALL_ROWS) + await db.daily_revenue.aggregate([
+        {"$match": {**scope, "date": period.text_filter(), "vat_groups.0": {"$exists": True}}},
+        {"$unwind": "$vat_groups"},
+        {"$group": {"_id": "$vat_groups.rate_percent", "fiscal": {"$sum": "$vat_groups.amount"}}},
+    ]).to_list(ALL_ROWS)
+    revenue_days = await db.daily_revenue.distinct("date", {**scope, "date": period.text_filter()})
+    expenses = await db.expenses.aggregate([
+        {"$match": {**scope, "date": period.text_filter(), **NOT_WAGES}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(ALL_ROWS)
+    # Invoices issued to customers: revenue and VAT on their issue date.
+    issued_rows = await db.billing_documents.aggregate([
+        {"$match": {**scope, **ISSUED_INVOICE_REVENUE, "issue_date": period.text_filter()}},
+        {"$group": {"_id": "$payment_method", "total": {"$sum": "$total_amount"}, "vat": {"$sum": "$vat_amount"},
+                    "net": {"$sum": "$amount_without_vat"},
+                    "count": {"$sum": {"$cond": [{"$eq": ["$doc_type", "credit_note"]}, 0, 1]}}}},
+    ]).to_list(ALL_ROWS)
+    issued = {field: sum(float(row.get(field) or 0) for row in issued_rows) for field in ("total", "vat", "net", "count")}
+    # How the money of those invoices came: cash, card, or by bank (owed until paid).
+    issued_by_method: Dict[str, float] = {"cash": 0.0, "card": 0.0, "bank_transfer": 0.0}
+    for row in issued_rows:
+        method = row.get("_id") if row.get("_id") in issued_by_method else "bank_transfer"
+        issued_by_method[method] += float(row.get("total") or 0)
+
+    # VAT inside fiscal revenue at each part's own rate (20% unless set,
+    # 9%, 0%...) - summed per rate, which is the same sum record by record.
+    fiscal_vat = sum(
+        revenue_vat.vat_of(revenue_vat.rate_of(row["_id"]), float(row.get("fiscal") or 0)) for row in revenue_by_rate
     )
+    till = revenue[0] if revenue else {}
+    invoice = invoices[0] if invoices else {}
+    every_invoice = all_invoices[0] if all_invoices else {}
+    return {
+        "period": period,
+        "fiscal_revenue": float(till.get("fiscal") or 0),
+        "pocket_money": float(till.get("pocket") or 0),
+        "card_revenue": float(till.get("card") or 0),
+        "fiscal_vat": fiscal_vat,
+        "invoice_total": float(invoice.get("total") or 0),
+        "invoice_vat": float(every_invoice.get("vat") or 0),
+        "invoice_net": float(invoice.get("net") or 0),
+        "invoice_count": int(every_invoice.get("count") or 0),
+        "asset_invoice_total": float(every_invoice.get("total") or 0) - float(invoice.get("total") or 0),
+        "off_book_expenses": float(expenses[0].get("total") or 0) if expenses else 0.0,
+        "issued_invoice_total": float(issued.get("total") or 0),
+        "issued_invoice_vat": float(issued.get("vat") or 0),
+        "issued_invoice_net": float(issued.get("net") or 0),
+        "issued_invoice_count": int(issued.get("count") or 0),
+        "issued_by_method": issued_by_method,
+        "payroll_cost": await get_payroll_cost_for_period(company_id, user_id, period.start, period.end),
+        "depreciation_cost": await get_depreciation_cost_for_period(company_id, user_id, period.start, period.end),
+        "revenue_days": sorted(d for d in revenue_days if isinstance(d, str)),
+        # Company money spent personally (the personal notebook) - never a
+        # business expense; only its viewers see it, apart (personal_use).
+        "personal_withdrawals": await personal_withdrawals_for_period(company_id, period),
+    }
+
+
+async def personal_withdrawals_for_period(company_id: Optional[str], period: Period) -> float:
+    """What the personal notebook recorded as company money spent
+    personally, on the days of the period."""
+    if not company_id:
+        return 0.0
+    rows = await db.personal_wallet_entries.aggregate([
+        {"$match": {"company_id": company_id, "date": period.text_filter()}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(ALL_ROWS)
+    return float(rows[0].get("total") or 0) if rows else 0.0
+
+
+def personal_use(totals: Dict[str, Any], profit: Optional[float], visibility: dict) -> Dict[str, Optional[float]]:
+    """The personal notebook beside the business's own numbers, for its
+    viewers only: what was spent personally in the period and - for whoever
+    also sees the profit - what is left in the business after it. Nulls
+    for everyone else: their numbers are the business's alone."""
+    if not visibility.get("personal_wallet"):
+        return {"personal_withdrawals": None, "left_after_personal": None}
+    spent = round(totals.get("personal_withdrawals", 0.0), 2)
+    return {
+        "personal_withdrawals": spent,
+        "left_after_personal": round(profit - spent, 2) if profit is not None else None,
+    }
+
+
+def round_to_cents_keeping_total(values: List[float]) -> List[float]:
+    """Amounts rounded to the cent so that together they make exactly the
+    rounded total (largest remainder): the cents a day's share loses go to
+    the days that lost the most, never a sum off by a few cents."""
+    if not values:
+        return []
+    exact = [float(value or 0) * 100 for value in values]
+    floors = [math.floor(cents) for cents in exact]
+    missing = int(round(sum(exact))) - sum(floors)
+    order = sorted(range(len(exact)), key=lambda i: exact[i] - floors[i], reverse=True)
+    for i in order[:max(0, missing)]:
+        floors[i] += 1
+    return [round(cents / 100, 2) for cents in floors]
+
+
+def period_income_expense(totals: Dict[str, Any], visibility: Optional[dict] = None) -> tuple:
+    """(income, expense) of period_totals through _profit_formula - with a
+    viewer's visibility, hidden pocket money, off-book expenses and payroll
+    count as zero (the same redaction /statistics/summary applies); without
+    one, the real values. The personal notebook is never part of either."""
+    show_pocket = visibility is None or visibility["pocket_money"]
+    show_off_book = visibility is None or visibility["off_book_expenses"]
+    show_payroll = visibility is None or visibility.get("payroll", True)
+    return _profit_formula(
+        fiscal_revenue=totals["fiscal_revenue"], pocket_money=totals["pocket_money"] if show_pocket else 0,
+        invoice_total=totals["invoice_total"], off_book_expenses=totals["off_book_expenses"] if show_off_book else 0,
+        payroll_cost=totals["payroll_cost"] if show_payroll else 0, depreciation_cost=totals["depreciation_cost"],
+        issued_invoices=totals.get("issued_invoice_total", 0.0),
+    )
+
+
+async def issued_invoices_by_day(scope: dict, period: Period) -> Dict[str, Dict[str, float]]:
+    """Invoices issued to customers on each day of the period ("YYYY-MM-DD"
+    -> {"total", "vat"}): revenue and VAT of their issue date, so a day's
+    chart and the period's totals read the same documents."""
+    rows = await db.billing_documents.find(
+        {**scope, **ISSUED_INVOICE_REVENUE, "issue_date": period.text_filter()},
+        {"_id": 0, "issue_date": 1, "total_amount": 1, "vat_amount": 1},
+    ).to_list(ALL_ROWS)
+    days: Dict[str, Dict[str, float]] = {}
+    for row in rows:
+        day = str(row.get("issue_date") or "")[:10]
+        entry = days.setdefault(day, {"total": 0.0, "vat": 0.0})
+        entry["total"] += float(row.get("total_amount") or 0)
+        entry["vat"] += float(row.get("vat_amount") or 0)
+    return days
+
+
+async def monthly_costs_by_day(
+    company_id: Optional[str], user_id: str, period: Period, include_payroll: bool = True,
+) -> Dict[str, Dict[str, float]]:
+    """Payroll and depreciation falling on each day of the period, in two
+    parts ("YYYY-MM-DD" -> {"monthly": EUR, "wages": EUR}): "monthly" is the
+    month's payroll and depreciation spread evenly over its days - a cost of
+    the month, not of the day, so a day chart keeps it out of its bars;
+    "wages" is what Work Schedule paid for the shifts worked that day. A
+    chart's days add up to exactly what period_totals counts for the same
+    period. Without `include_payroll` (a viewer who does not keep the
+    payroll) the payroll and the wages are out, as in their totals."""
+    per_month: Dict[tuple, float] = {}
+    for year, month in period.months():
+        whole = Period.month(year, month)
+        payroll = (
+            await get_payroll_cost_for_period(company_id, user_id, whole.start, whole.end, include_wages=False)
+            if include_payroll else 0.0
+        )
+        per_month[(year, month)] = payroll + await get_depreciation_cost_for_period(company_id, user_id, whole.start, whole.end)
+    # Wages paid by Work Schedule fall on the days that were worked.
+    wages = await schedule_wages_by_day(company_id, user_id, period) if include_payroll else {}
+    return {
+        day.isoformat(): {
+            "monthly": per_month[(day.year, day.month)] / days_in_month(day.year, day.month),
+            "wages": wages.get(day.isoformat(), 0.0),
+        }
+        for day in period.iter_days()
+    }
+
+
+# A day-by-day pace means nothing over an open-ended or many-year range.
+PACE_MAX_DAYS = 1830
+
+
+async def period_pace(
+    company_id: Optional[str], period: Period, income: float, revenue_days: List[str],
+    unprojected: float = 0.0,
+) -> Optional[Dict[str, Any]]:
+    """How a period is going, day by day - the rule every screen shows for
+    "average per day" and "expected end":
+
+    - average per day = income / the days revenue was entered on (a day
+      nobody entered is unknown, never a zero-revenue day; a closed day
+      or a day still to come is not a day of the average);
+    - expected end, for a period still running = average per day x every
+      open day of the period (closed days from the company's calendar).
+
+    `income` and `revenue_days` are the period's totals so far (counted
+    through today for a running period). `unprojected` is income that is
+    no day's takings - invoices issued so far: added to the expected end
+    as it is, never averaged over the days."""
+    if period.days > PACE_MAX_DAYS:
+        return None
+    today = today_local()
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+    open_days = [day for day in period.iter_days() if not is_date_closed(day.isoformat(), closed_weekdays, exceptions_map)]
+    is_current = period.contains(today)
+    entered = len(revenue_days)
+    average = income / entered if entered else None
+    expected = average * len(open_days) + unprojected if is_current and average is not None else None
+    return {
+        "is_current": is_current,
+        "open_days": len(open_days),
+        "open_days_so_far": sum(1 for day in open_days if day <= today),
+        "revenue_days": entered,
+        "avg_per_revenue_day": round(average, 2) if average is not None else None,
+        "expected_income": round(expected, 2) if expected is not None else None,
+    }
+
+
+async def _compute_month_profit(
+    company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str,
+    visibility: Optional[dict] = None,
+) -> float:
+    """Profit for the personal-wallet module, read through period_totals
+    like every other profit in the app - the business's own profit, before
+    any personal use (the notebook takes that off itself). With a viewer's
+    visibility, what they may not see (pocket money, off-book expenses, the
+    payroll) is out of it, as out of their totals."""
+    totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
+    total_income, total_expense = period_income_expense(totals, visibility)
     return total_income - total_expense
 
 def generate_wallet_advice(
@@ -4159,8 +3249,8 @@ def generate_wallet_advice(
     wants_total: float,
     category_totals: dict,
     last_month_category_totals: dict,
-    profit_this_month: float,
-    safe_to_spend: float,
+    profit_this_month: Optional[float],
+    safe_to_spend: Optional[float],
     threshold_percent: float,
     spent_percent_of_profit: Optional[float],
     upcoming: list,
@@ -4220,902 +3310,1916 @@ def generate_wallet_advice(
 
     # Upcoming recurring obligations that would eat into what's still safe to spend.
     for item in upcoming:
-        note = f"📅 Предстои плащане „{item['description']}“ ({item['amount']:.2f} €) на {item['next_due_date']}"
-        if safe_to_spend - item["amount"] < 0:
+        note = f"📅 Предстои плащане „{item['description']}“ ({fmt_eur(item['amount'])}) на {item['next_due_date']}"
+        if safe_to_spend is not None and safe_to_spend - item["amount"] < 0:
             note += " - текущото „безопасно за теглене“ не го покрива"
         advice.append(note)
 
     return advice
 
-@api_router.post("/personal-wallet/entries")
-async def create_personal_wallet_entry(
-    entry: PersonalWalletEntryCreate,
-    current_user: User = Depends(get_current_user)
-):
-    require_permission(current_user, "add_personal_wallet_entries")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Няма свързана фирма")
 
-    entry_obj = PersonalWalletEntry(
-        user_id=current_user.user_id,
-        company_id=company_id,
-        category=entry.category,
-        description=entry.description,
-        amount=entry.amount,
-        date=entry.date,
-        is_recurring=entry.is_recurring,
-        next_due_date=entry.next_due_date,
-        recurring_until=entry.recurring_until,
-        notes=entry.notes,
-    )
-    await db.personal_wallet_entries.insert_one(entry_obj.dict())
 
-    await audit_service.log_action(
-        user_id=current_user.user_id, user_name=current_user.name,
-        action="create", entity_type="personal_wallet", entity_id=entry_obj.id,
-        company_id=company_id,
-        details={"category": entry.category.value, "amount": entry.amount, "description": entry.description},
-    )
-    return {"message": "Разходът е записан", "id": entry_obj.id}
 
-@api_router.get("/personal-wallet/entries")
-async def get_personal_wallet_entries(
-    category: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    require_permission(current_user, "view_personal_wallet")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        return {"entries": []}
 
-    query: dict = {"company_id": company_id}
-    if category:
-        query["category"] = category
-    if start_date or end_date:
-        query["date"] = {}
-        if start_date:
-            query["date"]["$gte"] = start_date
-        if end_date:
-            query["date"]["$lte"] = end_date
 
-    entries = await db.personal_wallet_entries.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
-    return {"entries": entries}
 
-@api_router.put("/personal-wallet/entries/{entry_id}")
-async def update_personal_wallet_entry(
-    entry_id: str,
-    update: PersonalWalletEntryUpdate,
-    current_user: User = Depends(get_current_user)
-):
-    require_permission(current_user, "manage_personal_wallet")
-    company_id, _ = await get_company_scope(current_user)
-    existing = await db.personal_wallet_entries.find_one({"id": entry_id, "company_id": company_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Записът не е намерен")
-
-    update_data = {k: (v.value if hasattr(v, "value") else v) for k, v in update.dict(exclude_unset=True).items()}
-    update_data["updated_at"] = datetime.now(timezone.utc)
-    await db.personal_wallet_entries.update_one({"id": entry_id, "company_id": company_id}, {"$set": update_data})
-
-    await audit_service.log_action(
-        user_id=current_user.user_id, user_name=current_user.name,
-        action="update", entity_type="personal_wallet", entity_id=entry_id,
-        company_id=company_id, details={k: v for k, v in update_data.items() if k != "updated_at"},
-    )
-    entry = await db.personal_wallet_entries.find_one({"id": entry_id}, {"_id": 0})
-    return PersonalWalletEntry(**entry)
-
-@api_router.delete("/personal-wallet/entries/{entry_id}")
-async def delete_personal_wallet_entry(entry_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_personal_wallet")
-    company_id, _ = await get_company_scope(current_user)
-    existing = await db.personal_wallet_entries.find_one({"id": entry_id, "company_id": company_id})
-    result = await db.personal_wallet_entries.delete_one({"id": entry_id, "company_id": company_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Записът не е намерен")
-
-    await audit_service.log_action(
-        user_id=current_user.user_id, user_name=current_user.name,
-        action="delete", entity_type="personal_wallet", entity_id=entry_id,
-        company_id=company_id,
-        details={"category": existing.get("category"), "amount": existing.get("amount"), "description": existing.get("description")} if existing else None,
-    )
-    return {"message": "Записът е изтрит"}
-
-@api_router.get("/personal-wallet/settings")
-async def get_personal_wallet_settings(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "view_personal_wallet")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        return {"alert_threshold_percent": 80.0}
-    settings = await db.personal_wallet_settings.find_one({"company_id": company_id}, {"_id": 0})
-    return {"alert_threshold_percent": settings.get("alert_threshold_percent", 80.0) if settings else 80.0}
-
-@api_router.put("/personal-wallet/settings")
-async def update_personal_wallet_settings(
-    update: PersonalWalletSettingsUpdate,
-    current_user: User = Depends(get_current_user)
-):
-    require_permission(current_user, "manage_personal_wallet")
-    company_id, _ = await get_company_scope(current_user)
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Няма свързана фирма")
-
-    await db.personal_wallet_settings.update_one(
-        {"company_id": company_id},
-        {"$set": {"company_id": company_id, "alert_threshold_percent": update.alert_threshold_percent}},
-        upsert=True,
-    )
-    await audit_service.log_action(
-        user_id=current_user.user_id, user_name=current_user.name,
-        action="update", entity_type="personal_wallet_settings", company_id=company_id,
-        details={"alert_threshold_percent": update.alert_threshold_percent},
-    )
-    return {"alert_threshold_percent": update.alert_threshold_percent}
-
-@api_router.get("/personal-wallet/summary")
-async def get_personal_wallet_summary(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "view_personal_wallet")
-    company_id, scope = await get_company_scope(current_user)
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Няма свързана фирма")
-
-    now = datetime.now(timezone.utc)
-    start_date, end_date = _month_bounds(now)
-    if now.month == 1:
-        prev_month_dt = now.replace(year=now.year - 1, month=12, day=1)
-    else:
-        prev_month_dt = now.replace(month=now.month - 1, day=1)
-    prev_start, prev_end = _month_bounds(prev_month_dt)
-
-    entries = await db.personal_wallet_entries.find(
-        {"company_id": company_id, "date": {"$gte": start_date, "$lte": end_date}}, {"_id": 0}
-    ).to_list(2000)
-    prev_entries = await db.personal_wallet_entries.find(
-        {"company_id": company_id, "date": {"$gte": prev_start, "$lte": prev_end}}, {"_id": 0, "category": 1, "amount": 1}
-    ).to_list(2000)
-
-    total_spent = sum(e.get("amount", 0) for e in entries)
-    category_totals: dict = {}
-    for e in entries:
-        category_totals[e["category"]] = category_totals.get(e["category"], 0) + e.get("amount", 0)
-    prev_category_totals: dict = {}
-    for e in prev_entries:
-        prev_category_totals[e["category"]] = prev_category_totals.get(e["category"], 0) + e.get("amount", 0)
-    prev_total_spent = sum(prev_category_totals.values())
-
-    needs_total = sum(v for k, v in category_totals.items() if k in {c.value for c in WALLET_NEEDS_CATEGORIES})
-    wants_total = sum(v for k, v in category_totals.items() if k in {c.value for c in WALLET_WANTS_CATEGORIES})
-
-    profit_this_month = await _compute_month_profit(company_id, scope, current_user.user_id, start_date, end_date)
-
-    today_str = now.strftime("%Y-%m-%d")
-    two_weeks_str = (now + timedelta(days=14)).strftime("%Y-%m-%d")
-    upcoming_docs = await db.personal_wallet_entries.find(
-        {
-            "company_id": company_id, "is_recurring": True,
-            "next_due_date": {"$gte": today_str, "$lte": two_weeks_str},
-            # Once a lease/contract/subscription's own end date has passed,
-            # stop flagging it as an upcoming obligation - $or with None
-            # matches entries predating this field too.
-            "$or": [{"recurring_until": None}, {"recurring_until": {"$gte": today_str}}],
-        },
-        {"_id": 0, "description": 1, "amount": 1, "next_due_date": 1, "category": 1, "recurring_until": 1},
-    ).sort("next_due_date", 1).to_list(50)
-    upcoming_due_total = sum(
-        u.get("amount", 0) for u in upcoming_docs if u.get("next_due_date", "") <= (now + timedelta(days=7)).strftime("%Y-%m-%d")
-    )
-
-    settings = await db.personal_wallet_settings.find_one({"company_id": company_id}, {"_id": 0})
-    threshold_percent = settings.get("alert_threshold_percent", 80.0) if settings else 80.0
-
-    safe_to_spend = round(profit_this_month - total_spent - upcoming_due_total, 2)
-    spent_percent_of_profit = round(total_spent / profit_this_month * 100, 1) if profit_this_month > 0 else None
-
-    status = "ok"
-    if spent_percent_of_profit is not None:
-        if spent_percent_of_profit >= threshold_percent:
-            status = "danger"
-        elif spent_percent_of_profit >= threshold_percent * 0.6:
-            status = "warning"
-    elif profit_this_month <= 0 and total_spent > 0:
-        status = "danger"
-
-    advice = generate_wallet_advice(
-        total_spent=total_spent, needs_total=needs_total, wants_total=wants_total,
-        category_totals=category_totals, last_month_category_totals=prev_category_totals,
-        profit_this_month=profit_this_month, safe_to_spend=safe_to_spend,
-        threshold_percent=threshold_percent, spent_percent_of_profit=spent_percent_of_profit,
-        upcoming=upcoming_docs,
-    )
-
-    return {
-        "period": {"start": start_date, "end": end_date},
-        "total_spent": round(total_spent, 2),
-        "prev_month_total_spent": round(prev_total_spent, 2),
-        "category_totals": {k: round(v, 2) for k, v in category_totals.items()},
-        "needs_total": round(needs_total, 2),
-        "wants_total": round(wants_total, 2),
-        "profit_this_month": round(profit_this_month, 2),
-        "safe_to_spend": safe_to_spend,
-        "threshold_percent": threshold_percent,
-        "spent_percent_of_profit": spent_percent_of_profit,
-        "status": status,
-        "upcoming": upcoming_docs,
-        "advice": advice,
-    }
 
 # ===================== STATISTICS ENDPOINTS =====================
 
-@api_router.get("/statistics/summary")
-async def get_summary(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_month_only: bool = True,  # Default to current month
-    current_user: User = Depends(get_current_user)
-):
-    # If no dates provided and current_month_only is True, use current month
-    if not start_date and not end_date and current_month_only:
-        now = datetime.now(timezone.utc)
-        start_date = now.replace(day=1).strftime("%Y-%m-%d")
-        # Last day of the current month - NOT the first day of the next one.
-        # Every query built from date_query/end_date below treats end_date as
-        # an INCLUSIVE boundary ($lte, or the payroll/depreciation helper's
-        # "not later than end_date"), so passing the 1st of next month here
-        # would let a record dated exactly on the 1st (revenue, expense,
-        # invoice, or a payroll/depreciation entry someone entered early)
-        # leak into THIS month's summary as well as its own month's.
-        if now.month == 12:
-            last_day = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
-        end_date = last_day.strftime("%Y-%m-%d")
-    
-    date_query = {}
-    
-    if start_date:
-        date_query["$gte"] = start_date
-    if end_date:
-        date_query["$lte"] = end_date
-    
-    company_id, scope = await get_company_scope(current_user)
 
-    # Get invoices
-    inv_query = dict(scope)
-    if start_date or end_date:
-        inv_query["date"] = {}
-        if start_date:
-            inv_query["date"]["$gte"] = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-        if end_date:
-            inv_query["date"]["$lte"] = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+# ===================== "ASK YOUR OWN NUMBERS" AI CHAT (Module 4, Finding #3) =====================
+# Explicitly NOT a general chatbot and never talks to NAP or any outside
+# system - it answers only from the company's own stored invoices/
+# expenses/revenue. The model never queries the database itself: this
+# module computes a small, company-scoped digest of real numbers FIRST
+# (the exact same visibility rules as /statistics/summary above), then
+# asks the model only to phrase an answer FROM that digest. That's what
+# keeps the hard part - scoping/safety - in this Python code instead of
+# in anything the model decides to do, and it's also why the API always
+# hands the digest back alongside the answer: the frontend shows the real
+# numbers behind the answer, never a bare verdict.
 
-    invoices = await db.invoices.find(inv_query, {"_id": 0, "total_amount": 1, "vat_amount": 1}).to_list(1000)
-
-    # Outstanding payables (what's currently owed to suppliers) - always
-    # company-wide, never scoped to the period filter above: an invoice from
-    # two months ago that's still unpaid is still owed today, so it would be
-    # misleading to only surface it while browsing that particular month.
-    unpaid_query = {**scope, "payment_method": "bank_transfer", "is_paid": False}
-    unpaid_invoices = await db.invoices.find(unpaid_query, {"_id": 0, "total_amount": 1, "paid_amount": 1, "payment_due_date": 1}).to_list(1000)
-    now_ts = datetime.now(timezone.utc)
-    # Mongo drivers hand back naive UTC datetimes by default (no tz_aware
-    # flag set on the client), which can't be compared directly to an
-    # aware datetime.now(timezone.utc) - same fix as the session-expiry
-    # check above.
-    def _is_overdue(inv):
-        due = inv.get("payment_due_date")
-        if not due:
-            return False
-        if due.tzinfo is None:
-            due = due.replace(tzinfo=timezone.utc)
-        return due < now_ts
-    overdue_invoices = [inv for inv in unpaid_invoices if _is_overdue(inv)]
-
-    # Get daily revenues
-    rev_query = dict(scope)
-    if date_query:
-        rev_query["date"] = date_query
-    revenues = await db.daily_revenue.find(rev_query, {"_id": 0, "fiscal_revenue": 1, "pocket_money": 1, "card_revenue": 1, "vat_rate_percent": 1}).to_list(1000)
-
-    # Get expenses
-    exp_query = dict(scope)
-    if date_query:
-        exp_query["date"] = date_query
-    expenses = await db.expenses.find(exp_query, {"_id": 0, "amount": 1}).to_list(1000)
-
-    # Get payroll cost (real employer cost: gross + employer contributions +
-    # benefits), for the same period
-    total_payroll_cost = await get_payroll_cost_for_period(company_id, current_user.user_id, start_date, end_date)
-
-    # Get depreciation expense (ДМА) for the same period
-    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, current_user.user_id, start_date, end_date)
-
-    # Calculate totals
-    visibility = get_financial_visibility(current_user)
-    total_invoice_amount = sum(inv.get("total_amount", 0) for inv in invoices)
-    total_invoice_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
-    total_fiscal_revenue = sum(r.get("fiscal_revenue", 0) for r in revenues)
-    total_pocket_money = sum(r.get("pocket_money", 0) for r in revenues)
-    total_expenses = sum(e.get("amount", 0) for e in expenses)
-
-    # Every aggregate below folds in the RAW pocket-money/off-book-expense
-    # totals only when this viewer may see them - otherwise the "effective"
-    # value used in every downstream sum is zero, so income/expense/profit/
-    # the cash-card split all come out as a fully coherent analytical
-    # picture for exactly the data this viewer's access includes, not the
-    # real numbers with one line item merely blanked in the UI.
-    effective_pocket_money = total_pocket_money if visibility["pocket_money"] else 0
-    effective_off_book_expenses = total_expenses if visibility["off_book_expenses"] else 0
-
-    # Card portion of the fiscalized revenue; everything else (the rest of
-    # fiscal_revenue plus all of pocket_money, which is cash by definition)
-    # counts as cash.
-    total_card_revenue = sum(r.get("card_revenue", 0) for r in revenues)
-    total_cash_revenue = total_fiscal_revenue - total_card_revenue + effective_pocket_money
-
-    # The outstanding balance, not the invoice's full amount - a partially
-    # paid invoice (paid_amount > 0 but < total_amount, still is_paid=False)
-    # should only count what's actually still owed.
-    total_unpaid_amount = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in unpaid_invoices)
-    total_overdue_amount = sum(inv.get("total_amount", 0) - inv.get("paid_amount", 0) for inv in overdue_invoices)
-
-    # ДДС от фискализиран оборот - изчислено по действителната ставка на
-    # всеки запис (20% стандартна, 9% намалена, 0% и т.н.), а не с фиксирано
-    # предположение за 20% - важно за хотели/ресторанти/хлебарници и др.
-    # Нито джобчето, нито разходите "в канала" влизат в ДДС, така че тази
-    # сметка е еднаква за всеки зрител независимо от финансовата видимост.
-    fiscal_vat = sum(
-        r.get("fiscal_revenue", 0) * r.get("vat_rate_percent", 20.0) / (100 + r.get("vat_rate_percent", 20.0))
-        for r in revenues
-        if r.get("vat_rate_percent", 20.0) > 0
-    )
-
-    # Общ ДДС за плащане = ДДС от продажби - ДДС от покупки (фактури)
-    vat_to_pay = fiscal_vat - total_invoice_vat
-
-    # Общ приход (фискализиран + джобче, ако е видимо)
-    total_income = total_fiscal_revenue + effective_pocket_money
-
-    # Общ разход (фактури + разходи без фактури, ако са видими + персонал + амортизации)
-    total_expense = total_invoice_amount + effective_off_book_expenses + total_payroll_cost + total_depreciation_expense
-
-    # Печалбата е независимо скриваема от съставните ѝ части - тя влиза или
-    # излиза от отговора само по view_profit, макар вече да е изчислена
-    # спрямо ефективните (не суровите) приход/разход по-горе.
+async def _business_digest_period(
+    company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str, visibility: dict
+) -> dict:
+    """One period's totals for the chat digest - period_totals with the same
+    visibility redaction as /statistics/summary, so the chat and Home give
+    the same figures for the same period."""
+    totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
+    total_income, total_expense = period_income_expense(totals, visibility)
     profit = round(total_income - total_expense, 2) if visibility["profit"] else None
-
     return {
-        "total_invoice_amount": round(total_invoice_amount, 2),
-        "total_invoice_vat": round(total_invoice_vat, 2),
-        "total_fiscal_revenue": round(total_fiscal_revenue, 2),
-        # None (not 0) when hidden, so the frontend can tell "genuinely
-        # zero" apart from "you don't have access to this field".
-        "total_pocket_money": round(total_pocket_money, 2) if visibility["pocket_money"] else None,
-        "fiscal_vat": round(fiscal_vat, 2),
-        "vat_to_pay": round(vat_to_pay, 2),
-        "total_non_invoice_expenses": round(total_expenses, 2) if visibility["off_book_expenses"] else None,
-        "total_payroll_cost": round(total_payroll_cost, 2),
-        "total_depreciation_expense": round(total_depreciation_expense, 2),
-        "total_income": round(total_income, 2),
-        "total_expense": round(total_expense, 2),
+        "revenue": round(total_income, 2),
+        "expenses": round(total_expense, 2),
         "profit": profit,
-        "invoice_count": len(invoices),
-        "total_cash_revenue": round(total_cash_revenue, 2),
-        "total_card_revenue": round(total_card_revenue, 2),
-        "total_unpaid_amount": round(total_unpaid_amount, 2),
-        "unpaid_invoice_count": len(unpaid_invoices),
-        "total_overdue_amount": round(total_overdue_amount, 2),
-        "overdue_invoice_count": len(overdue_invoices),
-        "financial_visibility": visibility,
+        # Company money spent personally and what is left after it - for
+        # viewers of the personal notebook only (null for anyone else).
+        **personal_use(totals, profit, visibility),
+        "invoice_count": totals["invoice_count"],
+        # Part of revenue: invoices issued to customers (with VAT).
+        "issued_invoices": round(totals["issued_invoice_total"], 2),
+        "issued_invoice_count": totals["issued_invoice_count"],
     }
 
-@api_router.get("/statistics/chart-data")
-async def get_chart_data(
-    period: str = "week",  # week, month, year
-    current_user: User = Depends(get_current_user)
-):
-    now = datetime.now(timezone.utc)
-    
-    if period == "week":
-        start = now - timedelta(days=7)
-    elif period == "month":
-        start = now - timedelta(days=30)
-    else:
-        start = now - timedelta(days=365)
-    
-    start_str = start.strftime("%Y-%m-%d")
-
-    company_id, scope = await get_company_scope(current_user)
-    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
-
-    # Get data
-    inv_query = {**scope, "date": {"$gte": start}}
-    invoices = await db.invoices.find(inv_query, {"_id": 0, "date": 1, "total_amount": 1, "vat_amount": 1}).to_list(1000)
-
-    rev_query = {**scope, "date": {"$gte": start_str}}
-    revenues = await db.daily_revenue.find(rev_query, {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1}).to_list(1000)
-
-    exp_query = {**scope, "date": {"$gte": start_str}}
-    expenses = await db.expenses.find(exp_query, {"_id": 0, "date": 1, "amount": 1}).to_list(1000)
-
-    # Same cascade as get_summary: a hidden field's contribution is zeroed
-    # out of the daily bars, not just omitted from a separate total, so the
-    # chart itself stays a coherent picture for this viewer.
-    visibility = get_financial_visibility(current_user)
-
-    # Group by date
+async def _business_digest_top_expenses(scope: dict, start_date: str, end_date: str, visibility: dict, limit: int = 8) -> List[dict]:
+    """Top suppliers (invoices) and, only if this viewer may see them, top
+    off-book expense descriptions - for 'what are my biggest expenses'
+    style questions."""
     from collections import defaultdict
 
-    daily_data = defaultdict(lambda: {"income": 0, "expense": 0, "vat": 0})
+    period = Period.parse(start_date, end_date)
+    invoices = await db.invoices.find(
+        {**scope, "date": period.datetime_filter(), **NOT_AN_ASSET}, {"_id": 0, "total_amount": 1, "supplier": 1}
+    ).to_list(ALL_ROWS)
 
+    by_name: Dict[str, float] = defaultdict(float)
     for inv in invoices:
-        date_str = inv["date"].strftime("%Y-%m-%d") if isinstance(inv["date"], datetime) else inv["date"][:10]
-        daily_data[date_str]["expense"] += inv.get("total_amount", 0)
-        daily_data[date_str]["vat"] -= inv.get("vat_amount", 0)  # ДДС кредит
-
-    for rev in revenues:
-        date_str = rev["date"][:10] if isinstance(rev["date"], str) else rev["date"].strftime("%Y-%m-%d")
-        pocket_money = rev.get("pocket_money", 0) if visibility["pocket_money"] else 0
-        daily_data[date_str]["income"] += rev.get("fiscal_revenue", 0) + pocket_money
-        rate = rev.get("vat_rate_percent", 20.0)
-        if rate > 0:
-            daily_data[date_str]["vat"] += rev.get("fiscal_revenue", 0) * rate / (100 + rate)  # ДДС от продажби
+        by_name[inv.get("supplier") or "—"] += inv.get("total_amount", 0)
+    items: List[Dict[str, Any]] = [{"name": name, "amount": round(amount, 2), "source": "invoice"} for name, amount in by_name.items()]
 
     if visibility["off_book_expenses"]:
+        expenses = await db.expenses.find(
+            {**scope, "date": period.text_filter(), **NOT_WAGES}, {"_id": 0, "amount": 1, "description": 1}
+        ).to_list(ALL_ROWS)
+        by_desc: Dict[str, float] = defaultdict(float)
         for exp in expenses:
-            date_str = exp["date"][:10] if isinstance(exp["date"], str) else exp["date"].strftime("%Y-%m-%d")
-            daily_data[date_str]["expense"] += exp.get("amount", 0)
+            by_desc[exp.get("description") or "—"] += exp.get("amount", 0)
+        items += [{"name": name, "amount": round(amount, 2), "source": "off_book"} for name, amount in by_desc.items()]
 
-    # Zero-fill every calendar day in the window - a day with no invoice/
-    # revenue/expense record at all (a genuine closed day, but also just a
-    # slow day with nothing entered) previously wouldn't appear in the chart
-    # at all, silently shortening it. Touching daily_data[date_str] here
-    # materializes it as a real 0/0/0 entry via the defaultdict.
-    d = start.date()
-    end_date = now.date()
-    while d <= end_date:
-        daily_data[d.strftime("%Y-%m-%d")]
-        d += timedelta(days=1)
+    items.sort(key=lambda x: x["amount"], reverse=True)
+    return items[:limit]
 
-    # Convert to list sorted by date
-    chart_data = []
-    for date_str in sorted(daily_data.keys()):
-        chart_data.append({
-            "date": date_str,
-            "label": date_str[5:],  # MM-DD
-            "income": round(daily_data[date_str]["income"], 2),
-            "expense": round(daily_data[date_str]["expense"], 2),
-            "vat": round(daily_data[date_str]["vat"], 2),
-            "is_closed": is_date_closed(date_str, closed_weekdays, exceptions_map),
+def receivable_left(r: dict) -> float:
+    """What is still owed on a receivable - its amount less what was paid
+    in parts and what credit notes took off; nothing once its document is
+    cancelled."""
+    if r.get("cancelled"):
+        return 0.0
+    owed = float(r.get("amount") or 0) - float(r.get("paid_amount") or 0) - float(r.get("credited_amount") or 0)
+    return max(owed, 0.0)
+
+
+def receivable_refund_due(r: dict) -> float:
+    """What the business is to give back on a receivable: paid beyond what
+    the credit notes left owed - or all that was paid once its document is
+    cancelled."""
+    paid = float(r.get("paid_amount") or 0)
+    if r.get("cancelled"):
+        return paid
+    return max(paid + float(r.get("credited_amount") or 0) - float(r.get("amount") or 0), 0.0)
+
+
+# What a receivable's balance is read from.
+RECEIVABLE_BALANCE_FIELDS = {"_id": 0, "amount": 1, "paid_amount": 1, "credited_amount": 1, "cancelled": 1, "due_date": 1}
+
+
+async def receivables_summary_for(scope: dict) -> dict:
+    """What customers owe now and what of it is overdue - one count for the
+    receivables screen, the signal and the assistant."""
+    now_str = today_local().isoformat()
+    unpaid = await db.receivables.find({**scope, "is_paid": False}, RECEIVABLE_BALANCE_FIELDS).to_list(ALL_ROWS)
+    still_owed = [r for r in unpaid if receivable_left(r) > 0]
+    overdue = [r for r in still_owed if r.get("due_date") and r["due_date"] < now_str]
+    return {
+        "total_owed": round(sum(receivable_left(r) for r in still_owed), 2),
+        "unpaid_count": len(still_owed),
+        "total_overdue": round(sum(receivable_left(r) for r in overdue), 2),
+        "overdue_count": len(overdue),
+    }
+
+
+async def _business_digest_receivables(scope: dict) -> dict:
+    """What customers owe the business - the mirror image of
+    unpaid_invoices above, and a glaring gap in the original digest: a
+    question like 'кой ми дължи пари?' had no data to answer from at all.
+    Same aggregation as GET /receivables/summary, kept in sync by hand
+    since that endpoint lives in routers/receivables.py (star-imported
+    from here, not the other way around)."""
+    return await receivables_summary_for(scope)
+
+async def _business_digest_vat_due(
+    company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str
+) -> float:
+    """VAT owed to NAP for this period (sales VAT minus purchase VAT) - the
+    same period_totals as /statistics/summary's vat_to_pay. Role-invariant:
+    neither pocket_money nor off-book expenses feed into VAT, so this needs
+    no extra permission gate beyond the whole endpoint's own
+    view_statistics."""
+    totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
+    return round(totals["fiscal_vat"] - totals["invoice_vat"], 2)
+
+async def _business_digest_roi(company_id: Optional[str], scope: dict, user_id: str, visibility: dict) -> dict:
+    """The current month's ROI snapshot for the chat digest: personal money
+    put in this month against the month's profit - profit read through
+    period_totals like everywhere else (payroll and depreciation
+    included). Gated by view_personal_investments at the call site, same
+    as the real endpoint; profit/roi_percent/investment_covered are
+    independently null-able by view_profit within that."""
+    month = Period.current_month()
+    personal_expenses = await db.personal_expenses.find({
+        "company_id": company_id, "period_month": month.start.month, "period_year": month.start.year
+    }, {"_id": 0, "amount": 1}).to_list(ALL_ROWS) if company_id else []
+    total_personal = sum(e.get("amount", 0) for e in personal_expenses)
+
+    totals = await period_totals(company_id, scope, user_id, counted_period(month))
+    total_income, total_expense = period_income_expense(totals, visibility)
+    total_profit = total_income - total_expense
+    roi_percent = (total_profit / total_personal * 100) if total_personal > 0 else (0 if total_profit <= 0 else 100)
+
+    return {
+        "total_personal_investment": round(total_personal, 2),
+        "total_profit": round(total_profit, 2) if visibility["profit"] else None,
+        "roi_percent": round(roi_percent, 1) if visibility["profit"] else None,
+        "investment_covered": (total_profit >= total_personal) if visibility["profit"] else None,
+    }
+
+async def _business_digest_assets(scope: dict) -> dict:
+    """Same aggregation as GET /assets/summary."""
+    assets = await db.assets.find(scope, {"_id": 0}).to_list(ALL_ROWS)
+    enriched = [enrich_asset_with_depreciation(a) for a in assets]
+    active = [a for a in enriched if a["status"] != "disposed"]
+    return {
+        "active_count": len(active),
+        "total_net_book_value": round(sum(a["net_book_value"] for a in active), 2),
+        "monthly_depreciation_total": round(sum(a["monthly_depreciation"] for a in active if a["status"] == "active"), 2),
+    }
+
+async def _business_digest_payroll(company_id: Optional[str], user_id: str, scope: dict, start_date: str, end_date: str) -> dict:
+    """This period's payroll cost (already folded into expenses above) plus
+    a headcount, for 'колко служители имам'/'колко ми струват заплатите'
+    style questions."""
+    total_cost = await get_payroll_cost_for_period(company_id, user_id, start_date, end_date)
+    employee_count = await db.employees.count_documents({**scope, "active": True})
+    return {"total_employer_cost": round(total_cost, 2), "employee_count": employee_count}
+
+async def _business_digest_schedule(company_id: Optional[str], start_date: str, end_date: str) -> dict:
+    """Work Schedule's hours/pay for this period, what's not yet marked
+    paid, and who's on leave today - the schedule-side mirror of
+    _business_digest_payroll above, for "колко часа отработи екипът"/"кой
+    е в отпуск" style questions that payroll's own numbers can't answer."""
+    if not company_id:
+        return {"total_hours": 0, "estimated_pay": 0, "unpaid_amount": 0, "on_leave_today": []}
+    # Deferred import - routers/schedule.py itself does `from server import
+    # *`, so a top-level import here would cycle; safe by request time.
+    from routers.schedule import _resolve_occurrences, payable_totals
+    shifts = await db.work_shifts.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
+    occurrences = await _resolve_occurrences(shifts, company_id, start_date, end_date) if shifts else []
+    total_hours, total_pay, _ = payable_totals(occurrences)
+    payments = await db.schedule_payments.find(
+        {"company_id": company_id, "period_start": {"$lte": end_date}, "period_end": {"$gte": start_date}},
+        {"_id": 0, "amount": 1},
+    ).to_list(1000)
+    unpaid = round(max(total_pay - sum(p.get("amount", 0) for p in payments), 0), 2)
+
+    today_str = today_local().isoformat()
+    on_leave = await db.employee_leave.find(
+        {"company_id": company_id, "start_date": {"$lte": today_str}, "end_date": {"$gte": today_str}},
+        {"_id": 0, "employee_name": 1, "leave_type": 1},
+    ).to_list(100)
+    return {
+        "total_hours": total_hours, "estimated_pay": total_pay, "unpaid_amount": unpaid,
+        "on_leave_today": [
+            f"{e['employee_name']} (болничен)" if e.get("leave_type") == LeaveType.SICK.value else e["employee_name"]
+            for e in on_leave
+        ],
+    }
+
+async def _business_digest_scan_credits(company_id: Optional[str], user_id: str) -> dict:
+    """No extra permission gate - same as GET /scan-credits, visible to
+    any authenticated team member since it's a shared company resource,
+    not private financial data."""
+    summary = await scan_credit_service.get_balance_summary(company_id, user_id)
+    return {
+        "total_remaining": summary["free_remaining"] + summary["purchased_balance"],
+        "auto_reload_enabled": summary.get("auto_reload_enabled", False),
+    }
+
+class ChatHistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str
+
+class BusinessChatQuery(BaseModel):
+    question: str
+    # Prior turns of THIS chat session, oldest first - the client resends
+    # them on every call since this endpoint is otherwise fully stateless.
+    # Without this, every message was its own context-free request and the
+    # model had no idea what a follow-up question ("сравни с него", "ами
+    # миналата седмица?") was even referring to - a real bug, not just a
+    # narrow-data limitation. Capped server-side regardless of what the
+    # client sends (see ask_my_numbers).
+    history: List[ChatHistoryTurn] = []
+    # The app's current UI language - the answer used to be hardcoded to
+    # Bulgarian regardless of this, so a viewer with the UI set to English
+    # got an English screen around a Bulgarian answer. Defaults to "bg"
+    # for an older client that doesn't send it yet.
+    language: Literal["bg", "en"] = "bg"
+
+class BusinessChatResponse(BaseModel):
+    answer: str
+    digest: dict
+
+
+# ===================== PROACTIVE SECOND BRAIN ENGINE (Module 11, Finding #1) =====================
+# Every piece of intelligence this audit found - the forecast engine,
+# price alerts, scan-credit runway, budget thresholds, reorder nudges,
+# receivables due dates - already existed as its own separate signal,
+# each bolted onto the push pipeline independently. This is the one
+# ranking layer over all of them: it recomputes each signal fresh, scores
+# how urgent it is, and returns one ordered "here's what matters today"
+# list - the single source both GET /proactive/signals (the Home
+# morning-briefing card) and the once-daily digest push below read from,
+# so a sixth or seventh signal later is one more builder in the list, not
+# a new push pipeline bolted on separately.
+#
+# This deliberately does NOT replace any of the existing dedicated push
+# triggers (budget alert, VAT threshold, scan-credit depletion, calendar
+# reminders) - those already have their own proven per-signal dedup and
+# are still the right way to fire the instant something genuinely urgent
+# crosses a line. This engine is the layer above them.
+
+# Below this priority, a signal is real but not worth interrupting anyone
+# with a push - it still shows in GET /proactive/signals for whenever
+# they next open the app. Tuned deliberately high: a once-daily digest
+# that fires on every minor thing is exactly the notification-fatigue
+# failure mode this engine exists to avoid.
+PROACTIVE_PUSH_WORTHY_PRIORITY = 70
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+# The language the signals are written in: the viewer's app language. Home
+# and GET /proactive/signals pass it; the morning push takes the one the
+# person's app last said (users.language). Every builder writes its words
+# through tr(bulgarian, english) and its amounts through tr_eur - one switch
+# for one computation, a context variable, so a request in the other
+# language at the same moment never sees it.
+_SIGNALS_ENGLISH: contextvars.ContextVar[bool] = contextvars.ContextVar("signals_english", default=False)
+_MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August",
+              "September", "October", "November", "December"]
+_WEEKDAY_NAMES_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def signals_in_english() -> bool:
+    return _SIGNALS_ENGLISH.get()
+
+
+def tr(bg: str, en: str) -> str:
+    """A signal's words in the viewer's language."""
+    return en if _SIGNALS_ENGLISH.get() else bg
+
+
+def tr_eur(value: Optional[float]) -> str:
+    return fmt_eur(value, _SIGNALS_ENGLISH.get())
+
+
+def tr_amount(value: Optional[float]) -> str:
+    return fmt_amount(value, _SIGNALS_ENGLISH.get())
+
+
+def tr_count(count: int, bg_one: str, bg_many: str, en_one: str, en_many: str) -> str:
+    """"1 фактура", "3 фактури" - "1 invoice", "3 invoices"."""
+    return f"{count} {tr(bg_one if count == 1 else bg_many, en_one if count == 1 else en_many)}"
+
+
+def tr_day(day: date) -> str:
+    """"21 ноември" - "21 November"."""
+    return tr(f"{day.day} {_MONTHS_BG_GENITIVE[day.month - 1]}", f"{day.day} {_MONTHS_EN[day.month - 1]}")
+
+
+def tr_month(year: int, month: int) -> str:
+    """"ноември 2026" - "November 2026" (in a sentence)."""
+    return tr(f"{_MONTHS_BG_GENITIVE[month - 1]} {year}", f"{_MONTHS_EN[month - 1]} {year}")
+
+
+def tr_and_more(count: int) -> str:
+    """" и още 2" - " and 2 more"; nothing for none."""
+    return tr(f" и още {count}", f" and {count} more") if count > 0 else ""
+
+async def _latest_invoice_date_by_supplier(scope: dict, suppliers: set) -> Dict[str, datetime]:
+    """Newest invoice date per supplier (keys lower-cased), one indexed
+    query per supplier - only ever asked for the few with overdue invoices."""
+    latest: Dict[str, datetime] = {}
+    for supplier in suppliers:
+        docs = await db.invoices.find(
+            {**scope, "supplier": {"$regex": f"^{re.escape(supplier)}$", "$options": "i"}},
+            {"_id": 0, "date": 1},
+        ).sort("date", -1).limit(1).to_list(1)
+        if docs and isinstance(docs[0].get("date"), datetime):
+            latest[supplier.lower()] = _as_utc(docs[0]["date"])
+    return latest
+
+async def split_overdue_invoices(scope: dict) -> tuple:
+    """(unpaid, overdue, likely_paid) for bank-transfer purchase invoices.
+
+    likely_paid = overdue invoices from a supplier the company bought from
+    again AFTER the due date: suppliers rarely keep delivering to a customer
+    who doesn't pay, so these are far more often paid by bank and simply
+    never ticked in the app than really overdue. The rest of `overdue` is
+    what stays a money-at-risk warning."""
+    unpaid = await db.invoices.find(
+        {**scope, "payment_method": "bank_transfer", "is_paid": False},
+        {"_id": 0, "id": 1, "supplier": 1, "total_amount": 1, "paid_amount": 1, "credited_amount": 1, "payment_due_date": 1},
+    ).to_list(ALL_ROWS)
+    # Overdue once the due day has passed, on the business's calendar - the
+    # same rule as /statistics/summary and the invoice list's filter.
+    today = today_local()
+    overdue = [
+        inv for inv in unpaid
+        if isinstance(inv.get("payment_due_date"), datetime)
+        and (due_day := business_day(inv["payment_due_date"])) is not None and due_day < today
+    ]
+    latest = await _latest_invoice_date_by_supplier(scope, {inv.get("supplier") or "" for inv in overdue} - {""})
+    likely_paid = [
+        inv for inv in overdue
+        if (inv.get("supplier") or "").lower() in latest
+        and latest[(inv.get("supplier") or "").lower()] > _as_utc(inv["payment_due_date"])
+    ]
+    likely_ids = {inv["id"] for inv in likely_paid}
+    really_overdue = [inv for inv in overdue if inv["id"] not in likely_ids]
+    return unpaid, really_overdue, likely_paid
+
+def _owed(invoices: List[dict]) -> float:
+    return sum(invoice_left(inv) for inv in invoices)
+
+# Where a Home signal leads: the exact tab of Statistics its card is on
+# (prices, reorder and weekday cards live under Items, the forecast under
+# Overview), not just the screen.
+STATS_ITEMS_ROUTE = "/(tabs)/stats?tab=items"
+STATS_OVERVIEW_ROUTE = "/(tabs)/stats?tab=overview"
+
+async def _signal_unpaid_invoices(company_id, scope, current_user, visibility) -> List[dict]:
+    """Unpaid supplier invoices, split three ways: really overdue (money at
+    risk, critical), overdue but most likely already paid (a question with a
+    one-tap "mark paid" - before, they were a permanent red alarm for any
+    owner who pays by bank and doesn't tick invoices off), and not yet due.
+
+    Only for someone who may see invoices (manage_invoices) or the
+    company's figures (view_statistics) - before, anyone in the company got
+    the amounts owed, on Home and in the morning push."""
+    if not {"manage_invoices", "view_statistics"} & set(current_user.permissions or []):
+        return []
+    unpaid, overdue, likely_paid = await split_overdue_invoices(scope)
+    if not unpaid:
+        return []
+    signals = []
+    if overdue:
+        signals.append({
+            "key": "unpaid_invoices", "severity": "critical", "priority": 90,
+            "title": tr("Просрочени фактури към доставчици", "Overdue supplier invoices"),
+            "detail": tr(
+                f"{len(overdue)} от {len(unpaid)} неплатени фактури са просрочени - общо {tr_eur(_owed(overdue))}.",
+                f"{len(overdue)} of {len(unpaid)} unpaid {'invoice' if len(unpaid) == 1 else 'invoices'} "
+                f"{'is' if len(overdue) == 1 else 'are'} overdue - {tr_eur(_owed(overdue))} in all.",
+            ),
+            "route": "/(tabs)/invoices?paymentFilter=overdue",
+            "fingerprint": "overdue|" + ",".join(sorted(inv["id"] for inv in overdue)),
         })
+    if likely_paid:
+        suppliers = sorted({inv.get("supplier") or "" for inv in likely_paid} - {""})
+        names = ", ".join(suppliers[:3]) + tr_and_more(len(suppliers) - 3)
+        count = len(likely_paid)
+        signals.append({
+            "key": "invoices_likely_paid", "severity": "info", "priority": 50,
+            "title": (tr(f"{count} просрочени фактури изглеждат платени", f"{count} overdue invoices look paid") if count > 1
+                      else tr("Просрочена фактура изглежда платена", "An overdue invoice looks paid")),
+            "detail": tr(
+                f"Купуваш от {names} и след падежа - най-вероятно са платени по банка, "
+                f"но не са отбелязани ({tr_eur(_owed(likely_paid))}). Отбележи ги като платени?",
+                f"You kept buying from {names} after the due date - most likely paid by bank "
+                f"but not marked ({tr_eur(_owed(likely_paid))}). Mark them as paid?",
+            ),
+            "route": "/(tabs)/invoices?paymentFilter=overdue",
+            "fingerprint": ",".join(sorted(inv["id"] for inv in likely_paid)),
+            "actions": ["mark_paid", "snooze"],
+            "invoice_ids": [inv["id"] for inv in likely_paid],
+        })
+    if not overdue and not likely_paid:
+        signals.append({
+            "key": "unpaid_invoices", "severity": "warning", "priority": 45,
+            "title": tr("Неплатени фактури към доставчици", "Unpaid supplier invoices"),
+            "detail": tr(
+                f"{len(unpaid)} неплатени фактури на обща стойност {tr_eur(_owed(unpaid))}.",
+                f"{tr_count(len(unpaid), '', '', 'unpaid invoice', 'unpaid invoices')} - {tr_eur(_owed(unpaid))} in all.",
+            ),
+            "route": "/(tabs)/invoices?paymentFilter=unpaid",
+            "fingerprint": "unpaid|" + ",".join(sorted(inv["id"] for inv in unpaid)),
+        })
+    return signals
 
-    return chart_data
+def _count_bg(count: int, one: str, many: str) -> str:
+    return f"{count} {one if count == 1 else many}"
 
-@api_router.get("/statistics/suppliers")
-async def get_supplier_statistics(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Get comprehensive supplier statistics with trends, alerts, and rankings"""
-    require_permission(current_user, "view_statistics")
-    from collections import defaultdict
-    from datetime import timedelta
 
-    # Unlike get_summary, this endpoint has no period selector in the UI -
-    # the frontend always calls it with no dates, expecting an all-time
-    # supplier-relationship overview (total/active/inactive suppliers, top-3
-    # concentration). Defaulting to the current month here used to hide
-    # every supplier with no invoices yet this month, making the whole tab
-    # read as empty for any account between scans.
-    now = datetime.now(timezone.utc)
+async def _signal_receivables(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """What customers owe - counted as debts AND as customers (before, two
+    overdue invoices of one customer read "2 customers owe"), with who owes
+    the most."""
+    if "add_revenue" not in set(current_user.permissions or []):
+        return None
+    today = today_local().isoformat()
+    open_debts = [
+        r for r in await db.receivables.find(
+            {**scope, "is_paid": False}, {**RECEIVABLE_BALANCE_FIELDS, "customer_id": 1, "customer_name": 1},
+        ).to_list(ALL_ROWS)
+        if receivable_left(r) > 0
+    ]
+    if not open_debts:
+        return None
+    overdue = [r for r in open_debts if r.get("due_date") and str(r["due_date"]) < today]
+    shown = overdue or open_debts
 
-    # Build query for current period
-    _, query = await get_company_scope(current_user)
-    if start_date or end_date:
-        query["date"] = {}
-        if start_date:
-            query["date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-        if end_date:
-            query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
+    def customer_of(r: dict) -> str:
+        return r.get("customer_id") or _compare_key(r.get("customer_name") or "")
 
-    # Get all invoices for the period
-    invoices = await db.invoices.find(query, {
-        "_id": 0,
-        "supplier": 1,
-        "total_amount": 1,
-        "vat_amount": 1,
-        "amount_without_vat": 1,
-        "date": 1
-    }).to_list(10000)
-    
-    # Group by supplier with detailed data
-    supplier_data = defaultdict(lambda: {
-        "total_amount": 0,
-        "total_vat": 0,
-        "total_net": 0,
-        "invoice_count": 0,
-        "dates": [],
-        "amounts": []
+    owed_by: Dict[str, float] = {}
+    names: Dict[str, str] = {}
+    for r in shown:
+        owed_by[customer_of(r)] = owed_by.get(customer_of(r), 0.0) + receivable_left(r)
+        names.setdefault(customer_of(r), (r.get("customer_name") or "").strip())
+    top = max(owed_by, key=lambda key: owed_by[key])
+    total = sum(owed_by.values())
+    customers = tr_count(len(owed_by), "клиент", "клиента", "customer", "customers")
+    most = (tr(f" Най-много дължи {names[top]} - {tr_eur(owed_by[top])}.", f" {names[top]} owes the most - {tr_eur(owed_by[top])}.")
+            if len(owed_by) > 1 else tr(f" Дължи {names[top]}.", f" Owed by {names[top]}."))
+    if overdue:
+        debts = tr_count(len(shown), "просрочено вземане", "просрочени вземания", "overdue payment", "overdue payments")
+        return {
+            "key": "receivables", "severity": "critical", "priority": 85,
+            "title": tr("Просрочени вземания от клиенти", "Overdue payments from customers"),
+            "detail": tr(f"{debts} от {customers} - общо {tr_eur(total)}.{most}", f"{debts} from {customers} - {tr_eur(total)} in all.{most}"),
+            "route": "/receivables",
+        }
+    debts = tr_count(len(shown), "неплатено вземане", "неплатени вземания", "unpaid payment", "unpaid payments")
+    return {
+        "key": "receivables", "severity": "info", "priority": 35,
+        "title": tr("Чакащи плащания от клиенти", "Payments due from customers"),
+        "detail": tr(f"{debts} от {customers} - общо {tr_eur(total)}.{most}", f"{debts} from {customers} - {tr_eur(total)} in all.{most}"),
+        "route": "/receivables",
+    }
+
+
+# The owner's own copy of the data is looked at again after this long.
+BACKUP_REMIND_DAYS = 45
+
+
+async def _signal_backup(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """The owner's own copy of the data (a backup only the owner makes):
+    none yet once there is something to lose, or the last one 45+ days old."""
+    if current_user.role != "owner":
+        return None
+    latest = await db.backup_metadata.find(
+        {"user_id": current_user.user_id}, {"_id": 0, "created_at": 1},
+    ).sort("created_at", -1).limit(1).to_list(1)
+    if latest:
+        last_day = business_day(latest[0].get("created_at"))
+        days = (today_local() - last_day).days if last_day else 0
+        if days < BACKUP_REMIND_DAYS:
+            return None
+        detail = tr(f"Последният архив е отпреди {days} дни. Създай нов и го пази извън приложението.",
+                    f"Your last backup is {days} days old. Make a new one and keep it outside the app.")
+        fingerprint = f"backup|{last_day}"
+    else:
+        entered = await db.invoices.count_documents(scope) + await db.daily_revenue.count_documents(scope)
+        if entered < 20:
+            return None
+        detail = tr("Още нямаш архив на данните си. Създай го и го пази извън приложението - на телефона или в облака.",
+                    "You have no backup of your data yet. Make one and keep it outside the app - on your phone or in the cloud.")
+        fingerprint = "backup|none"
+    return {
+        "key": "backup", "severity": "info", "priority": 30, "title": tr("Архив на данните", "Data backup"),
+        "detail": detail, "route": "/backup", "fingerprint": fingerprint,
+    }
+
+
+async def _signal_two_factor(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """A second step at login, suggested to whoever sees the whole business
+    (owner, manager) once there is something to protect - dismissed, it
+    does not come back."""
+    if current_user.role not in ("owner", "manager") or current_user.two_factor_enabled:
+        return None
+    entered = await db.invoices.count_documents(scope) + await db.daily_revenue.count_documents(scope)
+    if entered < 20:
+        return None
+    return {
+        "key": "two_factor", "severity": "info", "priority": 28, "title": tr("Защити входа", "Protect your sign-in"),
+        "detail": tr("Включи втора стъпка при вход - код от телефона след паролата. Някой с паролата ти пак няма да влезе.",
+                     "Turn on a second step at sign-in - a code from your phone after the password. "
+                     "Someone with your password still won't get in."),
+        "route": "/account-security", "fingerprint": "two_factor|off",
+    }
+
+
+def payment_week(today: date) -> Tuple[date, date, bool]:
+    """The days whose payments a week's notice covers: the rest of this
+    week through Sunday - or, at the weekend, the week ahead."""
+    if today.weekday() >= 5:
+        return today, today + timedelta(days=13 - today.weekday()), True
+    return today, today + timedelta(days=6 - today.weekday()), False
+
+
+async def _signal_payments_this_week(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """What is to be paid this week: invoices by bank falling due and the
+    recurring expenses whose day comes (an invoice that already came for
+    one is counted once, as the invoice)."""
+    perms = set(current_user.permissions or [])
+    if not {"manage_invoices", "view_statistics"} & perms:
+        return None
+    today = today_local()
+    start, end, next_week = payment_week(today)
+    unpaid, _, _ = await split_overdue_invoices(scope)
+    due = [
+        inv for inv in unpaid
+        if isinstance(inv.get("payment_due_date"), datetime)
+        and (day := business_day(inv["payment_due_date"])) is not None and start <= day <= end
+        and invoice_left(inv) > 0
+    ]
+    recurring: List[Tuple[str, float]] = []
+    seen_items: set = set()
+    if company_id and {"manage_budget", "view_statistics"} & perms:
+        items = await recurring_service.active_items(db, company_id)
+        months = sorted({(start.year, start.month), (end.year, end.month)})
+        for year, month in months if items else []:
+            records = await recurring_service.load_month_records(db, scope, [item["id"] for item in items], year, month)
+            occurrences = recurring_service.resolve_month(items, year, month, records)
+            for item in items:
+                occurrence = occurrences.get(item["id"])
+                if not occurrence or occurrence["state"] not in recurring_service.UNPAID_STATES:
+                    continue
+                if recurring_service.item_kind(item) != recurring_service.INVOICE and not visibility.get("off_book_expenses"):
+                    continue
+                day = business_day(occurrence["due_date"])
+                if day and start <= day <= end and (item["id"], year, month) not in seen_items:
+                    seen_items.add((item["id"], year, month))
+                    recurring.append((str(item.get("description") or "").strip(), float(occurrence["expected_amount"])))
+    if not due and not recurring:
+        return None
+    parts = []
+    if due:
+        parts.append(tr_count(len(due), "фактура", "фактури", "invoice", "invoices")
+                     + tr(" за ", " for ") + tr_eur(sum(invoice_left(inv) for inv in due)))
+    if recurring:
+        named = ", ".join(f"{name} {tr_eur(amount)}" for name, amount in recurring[:2])
+        if len(recurring) > 2:
+            rest = recurring[2:]
+            named += (tr(" и още ", " and ")
+                      + tr_count(len(rest), "периодичен разход", "периодични разхода", "more recurring expense", "more recurring expenses")
+                      + tr(" за ", " for ") + tr_eur(sum(a for _, a in rest)))
+        parts.append(named)
+    when = tr("Следващата седмица", "Next week") if next_week else tr("Тази седмица", "This week")
+    return {
+        "key": "payments_this_week", "severity": "info", "priority": 55,
+        "title": tr("Плащания следващата седмица", "Payments next week") if next_week else tr("Плащания тази седмица", "Payments this week"),
+        "detail": tr(f"{when} (до {end.strftime('%d.%m')}) плащаш {' и '.join(parts)}.",
+                     f"{when} (through {end.strftime('%d.%m')}) you pay {' and '.join(parts)}."),
+        "route": "/(tabs)/invoices?paymentFilter=unpaid",
+        "fingerprint": f"{start.isoformat()}|" + ",".join(sorted(inv["id"] for inv in due))
+                       + "|" + ",".join(sorted(f"{i}:{y}-{m}" for i, y, m in seen_items)),
+    }
+
+async def month_payroll(company_id: Optional[str], scope: dict, year: int, month: int, expect: bool = True) -> Dict[str, float]:
+    """A month's payroll: what is recorded for it (the entries counted in
+    expenses) and what is still expected - each active employee without an
+    entry for the month, by their salary and the month's rates. Together
+    they are the month's payroll, each person once."""
+    entries = await db.payroll_entries.find(
+        {**scope, "period_year": year, "period_month": month},
+        {"_id": 0, "employee_id": 1, "total_employer_cost": 1, "counted_in_expenses": 1},
+    ).to_list(ALL_ROWS)
+    recorded = sum(float(e.get("total_employer_cost") or 0) for e in entries if e.get("counted_in_expenses") is not False)
+    expected = 0.0
+    if expect:
+        have = {e.get("employee_id") for e in entries}
+        month_key = f"{year}-{month:02d}"
+        employees = await db.employees.find({**scope, "active": True}, {"_id": 0}).to_list(ALL_ROWS)
+        pending = [
+            e for e in employees
+            if e.get("id") not in have and not (e.get("hire_date") and str(e["hire_date"])[:7] > month_key)
+        ]
+        if pending:
+            rates = await get_payroll_rates_dict(company_id, year, month)
+            expected = sum(
+                calculate_payroll(
+                    float(e.get("base_salary") or 0), e.get("agreement_type") or "gross", rates, 0,
+                    float(e.get("food_vouchers") or 0), float(e.get("additional_insurance") or 0),
+                )["total_employer_cost"]
+                for e in pending
+            )
+    return {"recorded": round(recorded, 2), "expected": round(expected, 2)}
+
+
+# The usual margin is read off this many full months before the current one.
+BREAK_EVEN_MONTHS = 3
+
+
+async def break_even_for(company_id: Optional[str], scope: dict, current_user: User) -> dict:
+    """What has to be sold this month for it to end at zero, and what that
+    asks of today (services/break_even): the month's fixed costs - payroll,
+    recurring expenses, depreciation - over the usual margin of the last
+    full months. The same income and expenses as the profit on Home."""
+    visibility = get_financial_visibility(current_user)
+    today = today_local()
+    month = Period.month_of(today)
+    month_key = today.strftime("%Y-%m")
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "modules": 1}) if company_id else None
+    modules = company_modules(company)
+    off_book_visible = bool(visibility["off_book_expenses"])
+
+    async def month_figures(period: Period, through: date) -> dict:
+        totals = await period_totals(company_id, scope, current_user.user_id, period)
+        income, _ = period_income_expense(totals, visibility)
+        recurring = await recurring_service.month_projection(
+            db, company_id, scope, period.start.year, period.start.month, through, off_book_visible,
+        )
+        # What follows the sales: every invoice and expense that is not a
+        # recurring one (payroll and depreciation are counted apart).
+        variable = totals["invoice_total"] + (totals["off_book_expenses"] if off_book_visible else 0) - recurring["paid_so_far"]
+        return {
+            "month": period.start.strftime("%Y-%m"), "income": income, "variable": max(variable, 0.0),
+            "revenue_days": len(totals["revenue_days"]), "issued": float(totals.get("issued_invoice_total") or 0),
+        }
+
+    def says_enough(months: List[dict]) -> bool:
+        income = sum(m["income"] for m in months)
+        if income <= 0:
+            return False
+        mostly_invoices = sum(m["issued"] for m in months) > 0.5 * income
+        return mostly_invoices or sum(m["revenue_days"] for m in months) >= break_even_service.MIN_REVENUE_DAYS
+
+    past: List[dict] = []
+    first = month.start
+    for _ in range(BREAK_EVEN_MONTHS):
+        first = (first - timedelta(days=1)).replace(day=1)
+        period = Period.month_of(first)
+        past.append(await month_figures(period, period.end))
+    used = [m for m in past if m["income"] > 0]
+    basis = "last_months"
+    if not says_enough(used):
+        # A business in its first months: the month so far, once it says enough.
+        so_far = month.through(today) or month
+        used = [await month_figures(so_far, today)]
+        basis = "this_month"
+    margin = break_even_service.usual_margin(used) if says_enough(used) else None
+    if margin is None:
+        return {
+            "available": False, "reason": "not_enough_data", "month": month_key,
+            "message": "Още няма достатъчно въведени приходи и разходи, за да се види обичайният марж.",
+        }
+    if margin <= 0.01:
+        return {
+            "available": False, "reason": "no_margin", "month": month_key,
+            "message": "За последните месеци разходите за стока и материали са колкото приходите или повече - "
+                       "при този марж няма точка на рентабилност.",
+        }
+
+    # The payroll for whoever keeps it - out of anyone else's fixed costs,
+    # as out of their totals.
+    show_payroll = bool(visibility.get("payroll", True))
+    payroll = (
+        await month_payroll(company_id, scope, today.year, today.month, expect=modules["payroll"])
+        if show_payroll else {"recorded": 0.0, "expected": 0.0}
+    )
+    wages = await schedule_wages_for_period(company_id, current_user.user_id, month.through(today) or month) if show_payroll else 0.0
+    depreciation = await get_depreciation_cost_for_period(company_id, current_user.user_id, month.start, month.end)
+    recurring_now = await recurring_service.month_projection(db, company_id, scope, today.year, today.month, today, off_book_visible)
+    fixed = {
+        "payroll": round(payroll["recorded"] + payroll["expected"] + wages, 2),
+        "recurring": round(recurring_now["month_total"], 2),
+        "depreciation": round(depreciation, 2),
+    }
+    fixed["total"] = round(sum(fixed.values()), 2)
+    if fixed["total"] <= 0:
+        return {
+            "available": False, "reason": "no_fixed_costs", "month": month_key,
+            "message": "Няма въведени постоянни разходи за месеца - добавете заплатите и периодичните разходи (наем, абонаменти).",
+        }
+
+    before_today = month.through(today - timedelta(days=1))
+    income_before = 0.0
+    if before_today:
+        income_before, _ = period_income_expense(await period_totals(company_id, scope, current_user.user_id, before_today), visibility)
+    income_today, _ = period_income_expense(
+        await period_totals(company_id, scope, current_user.user_id, Period.day(today)), visibility,
+    )
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+    open_days = [
+        day for day in (today + timedelta(days=n) for n in range((month.end - today).days + 1))
+        if not is_date_closed(day.isoformat(), closed_weekdays, exceptions_map)
+    ]
+    return {
+        "available": True, "month": month_key,
+        "fixed_costs": fixed,
+        # The salaries are hidden from this viewer: the fixed costs are without them.
+        "payroll_left_out": not show_payroll and modules["payroll"],
+        "margin_percent": round(margin * 100, 1),
+        "margin_basis": {"kind": basis, "months": [m["month"] for m in used]},
+        **break_even_service.work_out(fixed["total"], margin, income_before, income_today, len(open_days), today in open_days),
+    }
+
+
+# The till revenue a usual weekday brings: the last 8 weeks of it.
+CASH_FLOW_REVENUE_WEEKS = 8
+CASH_FLOW_MAX_DAYS = 90
+
+
+def sees_cash_flow(current_user: User) -> bool:
+    """The money ahead puts everything together (payroll, VAT, profit-level
+    totals): for whoever sees the statistics and the profit."""
+    visibility = get_financial_visibility(current_user)
+    return bool(visibility.get("statistics") and visibility.get("profit"))
+
+
+async def latest_cash_position(company_id: Optional[str]) -> Optional[dict]:
+    if not company_id:
+        return None
+    rows = await db.cash_positions.find({"company_id": company_id}, {"_id": 0}).sort(
+        [("date", -1), ("created_at", -1)]
+    ).limit(1).to_list(1)
+    return rows[0] if rows else None
+
+
+async def _cash_flow_pay_day(company: Optional[dict], scope: dict) -> int:
+    """The day salaries are paid: as the owner set it, else the usual day
+    payroll was recorded on in the last half year, else the month's end."""
+    chosen = ((company or {}).get("cash_flow") or {}).get("pay_day")
+    if isinstance(chosen, int) and 1 <= chosen <= 31:
+        return chosen
+    since = datetime.now(timezone.utc) - timedelta(days=183)
+    recorded = await db.payroll_entries.find({**scope, "created_at": {"$gte": since}}, {"_id": 0, "created_at": 1}).to_list(ALL_ROWS)
+    days_of_month = [day.day for row in recorded if (day := business_day(row.get("created_at"))) is not None]
+    return cash_flow_service.usual_pay_day(days_of_month) or 31
+
+
+async def cash_flow_projection(company_id: Optional[str], scope: dict, current_user: User, days: int = 30) -> dict:
+    """Will the money last? The days ahead from the money the business has
+    now (services/cash_flow), each thing counted once: what customers owe by
+    its due date and the usual till revenue; the supplier invoices by their
+    due date (an overdue one today), the recurring expenses still to pay,
+    the month's payroll on its pay day and the VAT by the 14th."""
+    days = max(7, min(int(days or 30), CASH_FLOW_MAX_DAYS))
+    today = today_local()
+    end = today + timedelta(days=days - 1)
+    visibility = get_financial_visibility(current_user)
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0}) if company_id else None
+    modules = company_modules(company)
+    months = sorted({((today + timedelta(days=i)).year, (today + timedelta(days=i)).month) for i in range(days)})
+    events: List[cash_flow_service.CashEvent] = []
+    notes: List[str] = []
+
+    # What customers owe, by its due date; an overdue debt is money that may
+    # come - shown apart, never counted as coming.
+    overdue_receivables = 0.0
+    no_due_receivables = 0.0
+    receivables = await db.receivables.find(
+        {**scope, "is_paid": False}, {**RECEIVABLE_BALANCE_FIELDS, "customer_name": 1},
+    ).to_list(ALL_ROWS)
+    for receivable in receivables:
+        left = receivable_left(receivable)
+        if left <= 0:
+            continue
+        due = business_day(receivable.get("due_date"))
+        if due is None:
+            no_due_receivables += left
+        elif due < today:
+            overdue_receivables += left
+        else:
+            events.append(cash_flow_service.CashEvent(due, left, cash_flow_service.RECEIVABLE, receivable.get("customer_name") or "Клиент"))
+
+    # Invoices that repeat, not issued yet for their month: their money by
+    # the due date they will have. One issued is a debt above - never both.
+    if modules["billing"]:
+        from routers.recurring_invoices import expected_receipts
+        for day, amount, label in await expected_receipts(company_id, scope, today, end):
+            events.append(cash_flow_service.CashEvent(day, amount, cash_flow_service.SUBSCRIPTION, label))
+
+    # Supplier invoices still to pay, by their due date - an overdue one (or
+    # one without a date) is to pay now.
+    unpaid, _, _ = await split_overdue_invoices(scope)
+    for invoice in unpaid:
+        left = invoice_left(invoice)
+        if left <= 0:
+            continue
+        due = business_day(invoice["payment_due_date"]) if isinstance(invoice.get("payment_due_date"), datetime) else None
+        events.append(cash_flow_service.CashEvent(
+            due or today, -left, cash_flow_service.INVOICE, invoice.get("supplier") or "Доставчик", overdue=due is not None and due < today,
+        ))
+
+    # Recurring expenses still to pay in the months ahead (an invoice that
+    # already came for one is the invoice above, not this).
+    items = await recurring_service.active_items(db, company_id)
+    for year, month in months if items else []:
+        records = await recurring_service.load_month_records(db, scope, [item["id"] for item in items], year, month)
+        occurrences = recurring_service.resolve_month(items, year, month, records)
+        for item in items:
+            occurrence = occurrences.get(item["id"])
+            if not occurrence or occurrence["state"] not in recurring_service.UNPAID_STATES:
+                continue
+            if recurring_service.item_kind(item) != recurring_service.INVOICE and not visibility.get("off_book_expenses"):
+                continue
+            due = business_day(occurrence["due_date"])
+            if due is not None:
+                events.append(cash_flow_service.CashEvent(
+                    due, -float(occurrence["expected_amount"]), cash_flow_service.RECURRING,
+                    str(item.get("description") or "Периодичен разход").strip(), overdue=due < today,
+                ))
+
+    # The month's payroll on its pay day - for whoever has no payroll
+    # recorded for that month yet (a recorded one is not expected again).
+    # Only for whoever keeps the payroll: the salaries are theirs to see.
+    pay_day = await _cash_flow_pay_day(company, scope)
+    if modules["payroll"] and not visibility.get("payroll", True):
+        notes.append("Без заплатите - скрити са за вашия достъп.")
+    if modules["payroll"] and visibility.get("payroll", True):
+        for year, month in months:
+            day = date(year, month, min(pay_day, days_in_month(year, month)))
+            if not (today <= day <= end):
+                continue
+            still_expected = (await month_payroll(company_id, scope, year, month))["expected"]
+            if still_expected > 0:
+                events.append(cash_flow_service.CashEvent(day, -still_expected, cash_flow_service.PAYROLL, "Заплати и осигуровки"))
+
+    # Company money spent personally, coming due (the personal notebook's
+    # coming payments) - for its viewers only: it leaves the business's
+    # money all the same.
+    if visibility.get("personal_wallet") and company_id:
+        coming = await db.personal_wallet_entries.find(
+            {
+                "company_id": company_id, "is_recurring": True,
+                "next_due_date": {"$gte": today.isoformat(), "$lte": end.isoformat()},
+                "$or": [{"recurring_until": None}, {"recurring_until": {"$gte": today.isoformat()}}],
+            },
+            {"_id": 0, "description": 1, "amount": 1, "next_due_date": 1},
+        ).to_list(ALL_ROWS)
+        for entry in coming:
+            due = business_day(entry.get("next_due_date"))
+            if due is not None and float(entry.get("amount") or 0) > 0:
+                events.append(cash_flow_service.CashEvent(
+                    due, -float(entry["amount"]), cash_flow_service.PERSONAL,
+                    str(entry.get("description") or "Лично плащане").strip(),
+                ))
+
+    # VAT for a month is paid by the 14th of the next one.
+    if company_vat_registered(company):
+        for year, month in months:
+            day = date(year, month, 14)
+            if not (today <= day <= end):
+                continue
+            prev_year, prev_month = (year, month - 1) if month > 1 else (year - 1, 12)
+            totals = await period_totals(company_id, scope, current_user.user_id, counted_period(Period.month(prev_year, prev_month)))
+            vat = round(float(totals.get("fiscal_vat") or 0) - float(totals.get("invoice_vat") or 0), 2)
+            if vat > 0:
+                so_far = " (досега)" if Period.month(prev_year, prev_month).contains(today) else ""
+                events.append(cash_flow_service.CashEvent(day, -vat, cash_flow_service.VAT, f"ДДС за {_MONTHS_BG_GENITIVE[prev_month - 1]}{so_far}"))
+
+    # The usual till revenue of each weekday, on the days the business works.
+    weekday_revenue: Dict[int, float] = {}
+    revenue_from = today
+    if modules["till"]:
+        since = (today - timedelta(weeks=CASH_FLOW_REVENUE_WEEKS)).isoformat()
+        rows = await db.daily_revenue.find(
+            {**scope, "date": {"$gte": since, "$lt": today.isoformat()}}, {"_id": 0, "date": 1, "fiscal_revenue": 1},
+        ).to_list(ALL_ROWS)
+        weekday_revenue = cash_flow_service.weekday_averages(rows)
+        if not weekday_revenue and rows:
+            notes.append("Още няма достатъчно дни с оборот за обичайния оборот - въведете още няколко.")
+    closed_weekdays, exceptions_map = await get_closed_days_lookup(company_id)
+
+    position = await latest_cash_position(company_id)
+    start_balance = float(position["cash"] or 0) + float(position["bank"] or 0) if position else 0.0
+    if position:
+        position_day = business_day(position.get("date")) or today
+        # Entered today: today's money so far is in it - the usual revenue starts tomorrow.
+        if position_day >= today or await db.daily_revenue.find_one({**scope, "date": today.isoformat()}, {"_id": 1}):
+            revenue_from = today + timedelta(days=1)
+        age = (today - position_day).days
+        if age > 7:
+            notes.append(f"Наличността е от {position_day.strftime('%d.%m')} - обновете я за по-точна прогноза.")
+    else:
+        notes.append("Въведете колко пари имате сега (в брой и в банка) - прогнозата тръгва от тях.")
+    if modules["billing"]:
+        notes.append("Бъдещи фактури към клиенти не са в прогнозата (освен повтарящите се) - само вземанията, които вече са записани.")
+
+    result = cash_flow_service.project(
+        start_balance, today, days, events, weekday_revenue,
+        lambda day: is_date_closed(day.isoformat(), closed_weekdays, exceptions_map), revenue_from,
+    )
+    result.update({
+        "position": {
+            "cash": round(float(position["cash"] or 0), 2), "bank": round(float(position["bank"] or 0), 2),
+            "date": position.get("date"), "age_days": (today - (business_day(position.get("date")) or today)).days,
+        } if position else None,
+        "overdue_receivables": round(overdue_receivables, 2),
+        "receivables_without_due_date": round(no_due_receivables, 2),
+        "usual_revenue_by_weekday": {str(k): round(v, 2) for k, v in sorted(weekday_revenue.items())},
+        "pay_day": pay_day,
+        "notes": notes,
     })
-    
-    for inv in invoices:
-        supplier = inv.get("supplier", "Неизвестен")
-        amount = inv.get("total_amount", 0)
-        supplier_data[supplier]["total_amount"] += amount
-        supplier_data[supplier]["total_vat"] += inv.get("vat_amount", 0)
-        supplier_data[supplier]["total_net"] += inv.get("amount_without_vat", 0)
-        supplier_data[supplier]["invoice_count"] += 1
-        
-        date_val = inv.get("date")
-        if isinstance(date_val, datetime):
-            supplier_data[supplier]["dates"].append(date_val)
-            supplier_data[supplier]["amounts"].append(amount)
-    
-    # Calculate inactivity threshold (30 days)
-    inactivity_days = 30
-    inactive_threshold = now - timedelta(days=inactivity_days)
-    
-    # Build comprehensive supplier list
-    suppliers_list = []
-    total_all = 0
-    
-    for supplier, data in supplier_data.items():
-        total_all += data["total_amount"]
-        
-        # Calculate first/last delivery
-        sorted_dates = sorted(data["dates"]) if data["dates"] else []
-        first_delivery = sorted_dates[0] if sorted_dates else None
-        last_delivery = sorted_dates[-1] if sorted_dates else None
-        
-        # Make dates timezone-aware if they aren't
-        if last_delivery and last_delivery.tzinfo is None:
-            last_delivery = last_delivery.replace(tzinfo=timezone.utc)
-        if first_delivery and first_delivery.tzinfo is None:
-            first_delivery = first_delivery.replace(tzinfo=timezone.utc)
-        
-        # Determine status
-        is_active = last_delivery and last_delivery > inactive_threshold if last_delivery else False
-        days_inactive = (now - last_delivery).days if last_delivery else 999
-        
-        # Calculate average
-        avg = data["total_amount"] / data["invoice_count"] if data["invoice_count"] > 0 else 0
-        
-        # Calculate standard deviation for anomaly detection
-        amounts = data["amounts"]
-        if len(amounts) >= 2:
-            mean_amount = sum(amounts) / len(amounts)
-            variance = sum((x - mean_amount) ** 2 for x in amounts) / len(amounts)
-            std_dev = variance ** 0.5
-        else:
-            mean_amount = avg
-            std_dev = 0
-        
-        suppliers_list.append({
-            "supplier": supplier,
-            "total_amount": round(data["total_amount"], 2),
-            "total_vat": round(data["total_vat"], 2),
-            "total_net": round(data["total_net"], 2),
-            "invoice_count": data["invoice_count"],
-            "avg_invoice": round(avg, 2),
-            "first_delivery": first_delivery.strftime("%Y-%m-%d") if first_delivery else None,
-            "last_delivery": last_delivery.strftime("%Y-%m-%d") if last_delivery else None,
-            "is_active": is_active,
-            "days_inactive": days_inactive if not is_active else 0,
-            "std_dev": round(std_dev, 2)
-        })
-    
-    # Add dependency percentage
-    for s in suppliers_list:
-        s["dependency_percent"] = round((s["total_amount"] / total_all * 100), 1) if total_all > 0 else 0
-    
-    # Sort by total amount for TOP by amount
-    top_by_amount = sorted(suppliers_list, key=lambda x: x["total_amount"], reverse=True)[:10]
-    
-    # TOP by frequency
-    top_by_frequency = sorted(suppliers_list, key=lambda x: x["invoice_count"], reverse=True)[:10]
-    
-    # TOP by average invoice
-    top_by_avg = sorted(suppliers_list, key=lambda x: x["avg_invoice"], reverse=True)[:10]
-    
-    # Inactive suppliers
-    inactive_suppliers = [s for s in suppliers_list if not s["is_active"]]
-    inactive_suppliers.sort(key=lambda x: x["days_inactive"], reverse=True)
-    
-    # High dependency alert (>30%)
-    high_dependency = [s for s in suppliers_list if s["dependency_percent"] > 30]
-    
-    # Calculate totals
-    total_vat = sum(s["total_vat"] for s in suppliers_list)
-    total_net = sum(s["total_net"] for s in suppliers_list)
-    total_invoices = sum(s["invoice_count"] for s in suppliers_list)
-    
-    # Executive summary
-    top_3_concentration = sum(s["dependency_percent"] for s in top_by_amount[:3]) if len(top_by_amount) >= 3 else 0
-    top_5_concentration = sum(s["dependency_percent"] for s in top_by_amount[:5]) if len(top_by_amount) >= 5 else 0
-    
+    return result
+
+
+# The names the cash flow gives a payment with none of its own, in English.
+_CASH_LABELS_EN = {
+    "Доставчик": "Supplier", "Клиент": "Customer", "Периодичен разход": "Recurring expense",
+    "Лично плащане": "Personal payment", "Заплати и осигуровки": "Salaries and insurance",
+}
+
+
+def _cash_event_label(event: dict) -> str:
+    """A payment's name in a signal: its own (a supplier, a description), or
+    the cash flow's word for it in the viewer's language."""
+    label = str(event.get("label") or "")
+    if not signals_in_english():
+        return label
+    if event.get("kind") == cash_flow_service.VAT:
+        return "VAT"
+    return _CASH_LABELS_EN.get(label, label)
+
+
+async def _signal_cash_flow(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Will the money last the next 30 days? Weeks before it runs short:
+    the day it goes below zero, how low, and the biggest payments before it.
+    Only once the owner said how much money there is."""
+    if not sees_cash_flow(current_user) or not await latest_cash_position(company_id):
+        return None
+    flow = await cash_flow_projection(company_id, scope, current_user, 30)
+    if not flow["first_negative"]:
+        return None
+    first = date.fromisoformat(flow["first_negative"])
+    lowest = flow["lowest"]
+    biggest = sorted(
+        (e for e in flow["events"] if e["amount"] < 0 and e["date"] <= flow["lowest"]["date"]), key=lambda e: e["amount"],
+    )[:2]
+    before = ", ".join(f"{_cash_event_label(e)} {tr_eur(abs(e['amount']))}" for e in biggest)
+    days_left = (first - today_local()).days
+    lowest_day = date.fromisoformat(lowest['date']).strftime('%d.%m')
+    detail = tr(
+        f"Около {first.strftime('%d.%m')} парите може да не стигнат: най-ниско {tr_eur(lowest['balance'])} на {lowest_day}."
+        + (f" Най-големите плащания дотогава: {before}." if before else ""),
+        f"Around {first.strftime('%d.%m')} the money may run short: lowest {tr_eur(lowest['balance'])} on {lowest_day}."
+        + (f" The biggest payments before then: {before}." if before else ""),
+    )
     return {
-        "period": {
-            "start_date": start_date,
-            "end_date": end_date
-        },
-        "executive_summary": {
-            "top_3_concentration": round(top_3_concentration, 1),
-            "top_5_concentration": round(top_5_concentration, 1),
-            "total_suppliers": len(suppliers_list),
-            "active_suppliers": len([s for s in suppliers_list if s["is_active"]]),
-            "inactive_suppliers": len(inactive_suppliers),
-            "high_dependency_count": len(high_dependency),
-            "largest_supplier": top_by_amount[0]["supplier"] if top_by_amount else None,
-            "largest_amount": top_by_amount[0]["total_amount"] if top_by_amount else 0
-        },
-        "totals": {
-            "total_amount": round(total_all, 2),
-            "total_vat": round(total_vat, 2),
-            "total_net": round(total_net, 2),
-            "supplier_count": len(suppliers_list),
-            "invoice_count": total_invoices
-        },
-        "top_by_amount": top_by_amount,
-        "top_by_frequency": top_by_frequency,
-        "top_by_avg": top_by_avg,
-        "inactive_suppliers": inactive_suppliers[:10],
-        "high_dependency_alerts": high_dependency,
-        "all_suppliers": suppliers_list
+        "key": "cash_flow", "severity": "critical" if days_left <= 7 else "warning",
+        "priority": 88 if days_left <= 7 else 70, "title": tr("Паричен поток", "Cash flow"), "detail": detail,
+        "route": "/cash-flow", "fingerprint": f"cash_flow|{flow['first_negative']}",
     }
 
-@api_router.get("/statistics/supplier/{supplier_name}/detailed")
-async def get_detailed_supplier_stats(
-    supplier_name: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Get detailed statistics for a specific supplier with trends"""
-    require_permission(current_user, "view_statistics")
-    from collections import defaultdict
-    from urllib.parse import unquote
 
-    supplier_name = unquote(supplier_name)
+async def _signal_accountant_pack(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Last month's documents for the accountant (routers/accountant_pack)."""
+    from routers.accountant_pack import accountant_pack_signal
+    return await accountant_pack_signal(company_id, scope, current_user)
 
-    # Get all invoices for this supplier (no date filter for full history)
-    _, query = await get_company_scope(current_user)
-    query["supplier"] = {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}
 
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", 1).to_list(10000)
-    
-    if not invoices:
+async def _signal_payment_reminders(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Reminders to customers due now (routers/payment_reminders)."""
+    from routers.payment_reminders import payment_reminders_signal
+    return await payment_reminders_signal(company_id, scope, current_user)
+
+
+async def _signal_deadlines(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """The owner's own deadlines, past or near (routers/deadlines)."""
+    from routers.deadlines import deadlines_signal
+    return await deadlines_signal(company_id, scope, current_user)
+
+
+async def _signal_margins(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Selling prices whose margin fell as purchases got dearer (routers/price_list)."""
+    from routers.price_list import margins_signal
+    return await margins_signal(company_id, scope, current_user)
+
+
+async def _signal_recurring_invoices(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """This month's repeating invoices ready to issue (routers/recurring_invoices)."""
+    from routers.recurring_invoices import recurring_invoices_signal
+    return await recurring_invoices_signal(company_id, scope, current_user)
+
+
+async def _signal_scan_credits(company_id, scope, current_user, visibility) -> Optional[dict]:
+    if "manage_invoices" not in set(current_user.permissions or []):
+        return None
+    forecast = await scan_credit_service.get_depletion_forecast(current_user.company_id, current_user.user_id)
+    if forecast["insufficient_data"] or forecast["days_remaining"] is None:
+        return None
+    days = forecast["days_remaining"]
+    if days > 7:
+        return None
+    severity = "critical" if days <= 1 else "warning"
+    priority = 92 if days <= 1 else (75 if days <= 3 else 55)
+    body = (
+        tr("Кредитите ти за сканиране вече са на привършване.", "Your scan credits are about to run out.") if days <= 0 else
+        tr(f"При текущия темп кредитите ти за сканиране ще свършат за около {days} {'ден' if days == 1 else 'дни'}.",
+           f"At the current pace your scan credits run out in about {days} {'day' if days == 1 else 'days'}.")
+    )
+    return {"key": "scan_credits", "severity": severity, "priority": priority,
+            "title": tr("Кредитите за сканиране свършват", "Scan credits are running out"), "detail": body, "route": "/scan-credits"}
+
+async def _signal_budget(company_id, scope, current_user, visibility) -> Optional[dict]:
+    if not company_id or "manage_budget" not in set(current_user.permissions or []):
+        return None
+    status = await compute_budget_status(company_id, today_local().strftime("%Y-%m"), visibility)
+    if not status:
+        return None
+    if status["is_exceeded"]:
         return {
-            "supplier": supplier_name,
-            "found": False,
-            "invoice_count": 0
+            "key": "budget", "severity": "critical", "priority": 88,
+            "title": tr("Бюджетът е надхвърлен", "Budget exceeded"),
+            "detail": tr(f"Разходите вече са {tr_eur(status['total_spent'])} при лимит {tr_eur(status['expense_limit'])}.",
+                         f"Expenses are already {tr_eur(status['total_spent'])} against a limit of {tr_eur(status['expense_limit'])}."),
+            "route": "/budget",
         }
-    
-    now = datetime.now(timezone.utc)
-    
-    # Basic stats
-    total_amount = sum(inv.get("total_amount", 0) for inv in invoices)
-    total_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
-    total_net = sum(inv.get("amount_without_vat", 0) for inv in invoices)
-    avg_invoice = total_amount / len(invoices) if invoices else 0
-    
-    # Extract dates
-    dates = []
-    amounts = []
-    for inv in invoices:
-        date_val = inv.get("date")
-        if isinstance(date_val, datetime):
-            dates.append(date_val)
-            amounts.append(inv.get("total_amount", 0))
-    
-    first_delivery = min(dates) if dates else None
-    last_delivery = max(dates) if dates else None
-    
-    # Ensure timezone consistency for date calculations
-    if last_delivery:
-        if last_delivery.tzinfo is None:
-            last_delivery = last_delivery.replace(tzinfo=timezone.utc)
-        days_inactive = (now - last_delivery).days
-    else:
-        days_inactive = 999
-    
-    is_active = days_inactive <= 30
-    
-    # Monthly breakdown
-    monthly_data = defaultdict(lambda: {"amount": 0, "count": 0})
-    for inv in invoices:
-        date_val = inv.get("date")
-        if isinstance(date_val, datetime):
-            month_key = date_val.strftime("%Y-%m")
-            monthly_data[month_key]["amount"] += inv.get("total_amount", 0)
-            monthly_data[month_key]["count"] += 1
-    
-    # Sort monthly data
-    sorted_months = sorted(monthly_data.keys())
-    monthly_trend = []
-    prev_amount = 0
-    for month in sorted_months[-12:]:  # Last 12 months
-        data = monthly_data[month]
-        growth = ((data["amount"] - prev_amount) / prev_amount * 100) if prev_amount > 0 else 0
-        monthly_trend.append({
-            "month": month,
-            "amount": round(data["amount"], 2),
-            "count": data["count"],
-            "growth_percent": round(growth, 1)
-        })
-        prev_amount = data["amount"]
-    
-    # Calculate anomalies
-    if len(amounts) >= 3:
-        mean_amount = sum(amounts) / len(amounts)
-        variance = sum((x - mean_amount) ** 2 for x in amounts) / len(amounts)
-        std_dev = variance ** 0.5
-        threshold = mean_amount + (2 * std_dev)
-        
-        anomalies = []
-        for inv in invoices:
-            if inv.get("total_amount", 0) > threshold:
-                date_val = inv.get("date")
-                date_str = date_val.strftime("%Y-%m-%d") if isinstance(date_val, datetime) else str(date_val)[:10]
-                anomalies.append({
-                    "date": date_str,
-                    "amount": inv.get("total_amount", 0),
-                    "invoice_number": inv.get("invoice_number"),
-                    "deviation_percent": round((inv.get("total_amount", 0) - mean_amount) / mean_amount * 100, 1)
-                })
-    else:
-        anomalies = []
-    
-    # Recent invoices
-    recent_invoices = []
-    for inv in invoices[-10:][::-1]:
-        date_val = inv.get("date")
-        date_str = date_val.strftime("%Y-%m-%d") if isinstance(date_val, datetime) else str(date_val)[:10]
-        recent_invoices.append({
-            "id": inv.get("id"),
-            "invoice_number": inv.get("invoice_number"),
-            "date": date_str,
-            "total_amount": inv.get("total_amount", 0),
-            "vat_amount": inv.get("vat_amount", 0)
-        })
-    
-    return {
-        "supplier": supplier_name,
-        "found": True,
-        "overview": {
-            "total_amount": round(total_amount, 2),
-            "total_vat": round(total_vat, 2),
-            "total_net": round(total_net, 2),
-            "invoice_count": len(invoices),
-            "avg_invoice": round(avg_invoice, 2),
-            "first_delivery": first_delivery.strftime("%Y-%m-%d") if first_delivery else None,
-            "last_delivery": last_delivery.strftime("%Y-%m-%d") if last_delivery else None,
-            "is_active": is_active,
-            "days_inactive": days_inactive if not is_active else 0
-        },
-        "monthly_trend": monthly_trend,
-        "anomalies": anomalies,
-        "recent_invoices": recent_invoices
-    }
-
-@api_router.get("/statistics/suppliers/compare")
-async def compare_suppliers(
-    suppliers: str,  # comma-separated supplier names
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Compare multiple suppliers"""
-    require_permission(current_user, "view_statistics")
-    from urllib.parse import unquote
-
-    supplier_names = [unquote(s.strip()) for s in suppliers.split(",") if s.strip()]
-    
-    if len(supplier_names) < 2 or len(supplier_names) > 5:
-        raise HTTPException(status_code=400, detail="Изберете между 2 и 5 доставчика за сравнение")
-    
-    # Build date query
-    date_query = {}
-    if start_date:
-        date_query["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-    if end_date:
-        date_query["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
-    
-    comparison = []
-    _, base_scope = await get_company_scope(current_user)
-
-    for supplier_name in supplier_names:
-        query = {**base_scope, "supplier": {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}}
-        if date_query:
-            query["date"] = date_query
-        
-        invoices = await db.invoices.find(query, {"_id": 0, "total_amount": 1, "date": 1}).to_list(10000)
-        
-        total = sum(inv.get("total_amount", 0) for inv in invoices)
-        count = len(invoices)
-        avg = total / count if count > 0 else 0
-        
-        comparison.append({
-            "supplier": supplier_name,
-            "total_amount": round(total, 2),
-            "invoice_count": count,
-            "avg_invoice": round(avg, 2)
-        })
-    
-    # Calculate max for percentage calculation
-    max_amount = max(c["total_amount"] for c in comparison) if comparison else 1
-    max_count = max(c["invoice_count"] for c in comparison) if comparison else 1
-    
-    for c in comparison:
-        c["amount_percent"] = round(c["total_amount"] / max_amount * 100, 1) if max_amount > 0 else 0
-        c["count_percent"] = round(c["invoice_count"] / max_count * 100, 1) if max_count > 0 else 0
-    
-    return {
-        "suppliers": comparison,
-        "period": {"start_date": start_date, "end_date": end_date}
-    }
-
-@api_router.get("/statistics/supplier/{supplier_name}")
-async def get_single_supplier_stats(
-    supplier_name: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Get detailed statistics for a specific supplier"""
-    require_permission(current_user, "view_statistics")
-    _, query = await get_company_scope(current_user)
-    query["supplier"] = {"$regex": f"^{re.escape(supplier_name)}$", "$options": "i"}
-
-    if start_date or end_date:
-        query["date"] = {}
-        if start_date:
-            query["date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-        if end_date:
-            query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
-    
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(1000)
-    
-    if not invoices:
+    if status["is_alert"]:
         return {
-            "supplier": supplier_name,
-            "invoice_count": 0,
-            "total_amount": 0,
-            "invoices": []
+            "key": "budget", "severity": "warning", "priority": 65,
+            "title": tr("Приближаваш бюджетния лимит", "Nearing the budget limit"),
+            "detail": tr(f"Разходите са на {status['percent_used']:.0f}% от лимита от {tr_eur(status['expense_limit'])}.",
+                         f"Expenses are at {status['percent_used']:.0f}% of the {tr_eur(status['expense_limit'])} limit."),
+            "route": "/budget",
         }
-    
-    total_amount = sum(inv.get("total_amount", 0) for inv in invoices)
-    total_vat = sum(inv.get("vat_amount", 0) for inv in invoices)
-    total_net = sum(inv.get("amount_without_vat", 0) for inv in invoices)
-    
-    # Format invoices
-    formatted_invoices = []
-    for inv in invoices:
-        date_val = inv.get("date")
-        if isinstance(date_val, datetime):
-            date_str = date_val.strftime("%Y-%m-%d")
-        else:
-            date_str = str(date_val)[:10]
-        
-        formatted_invoices.append({
-            "id": inv.get("id"),
-            "invoice_number": inv.get("invoice_number"),
-            "date": date_str,
-            "total_amount": inv.get("total_amount", 0),
-            "vat_amount": inv.get("vat_amount", 0),
-            "amount_without_vat": inv.get("amount_without_vat", 0)
-        })
-    
+    return None
+
+def _eur(value: float) -> str:
+    return fmt_amount(value)
+
+
+async def _signal_price_alerts(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Unread price alerts, weighed by money: the total monthly cost of the
+    price rises (change x usual monthly quantity), not how many alerts
+    there are - a 280 EUR/month rise on pitas must outrank a 2 EUR/month
+    one on detergent, which the old per-alert count ranked equally.
+    Suspected pack misreads are questions about the data and are named
+    separately, never counted as price rises."""
+    if "view_statistics" not in set(current_user.permissions or []):
+        return None
+    unread = await db.price_alerts.find(
+        {**scope, "status": "unread"},
+        {"_id": 0, "id": 1, "item_name": 1, "supplier": 1, "kind": 1, "monthly_impact": 1, "change_percent": 1,
+         "old_price": 1, "new_price": 1, "pack_multiple": 1, "invoice_number": 1},
+    ).to_list(500)
+    if not unread:
+        return None
+    # Done = these alerts seen; a new one brings the signal back.
+    fingerprint = ",".join(sorted(str(a.get("id")) for a in unread))
+    packs = [a for a in unread if a.get("kind") == "pack_suspect"]
+    changes = [a for a in unread if a.get("kind") != "pack_suspect"]
+    rises = sorted(
+        (a for a in changes if (a.get("monthly_impact") or 0) > 0),
+        key=lambda a: a["monthly_impact"], reverse=True,
+    )
+    monthly_total = sum(a["monthly_impact"] for a in rises)
+
+    pack_note = ""
+    if packs:
+        p = packs[0]
+        pack_note = tr(
+            f"\"{p['item_name']}\" във фактура {p.get('invoice_number', '')}: цената е точно "
+            f"{p.get('pack_multiple')}× обичайната - стек ли е?",
+            f"\"{p['item_name']}\" on invoice {p.get('invoice_number', '')}: the price is exactly "
+            f"{p.get('pack_multiple')}× the usual - is it a pack?",
+        )
+        if len(packs) > 1:
+            pack_note += tr(f" (+{len(packs) - 1} още за проверка)", f" (+{len(packs) - 1} more to check)")
+
+    if rises:
+        top = rises[0]
+        others = len(changes) - 1
+        change = f"{tr_amount(top['old_price'])} → {tr_eur(top['new_price'])} ({top['change_percent']:+.0f}%)"
+        detail = tr(
+            f"\"{top['item_name']}\" при {top['supplier']}: {change}, ≈ {tr_amount(top['monthly_impact'])} € на месец.",
+            f"\"{top['item_name']}\" from {top['supplier']}: {change}, ≈ {tr_amount(top['monthly_impact'])} € a month.",
+        )
+        if others > 0:
+            detail += tr(f" Още {others} промени.", f" {others} more {'change' if others == 1 else 'changes'}.")
+        if pack_note:
+            detail += tr(f" Провери и: {pack_note}", f" Also check: {pack_note}")
+        return {
+            "key": "price_alerts", "severity": "warning" if monthly_total >= 100 else "info",
+            "priority": min(75, round(45 + min(30, monthly_total / 20))),
+            "title": tr(f"Доставките поскъпват с ≈ {tr_amount(monthly_total)} € на месец",
+                        f"Supplies cost ≈ {tr_amount(monthly_total)} € a month more"),
+            "detail": detail,
+            "route": STATS_ITEMS_ROUTE,
+            "fingerprint": fingerprint,
+        }
+    if packs:
+        return {
+            "key": "price_alerts", "severity": "info", "priority": 48,
+            "title": tr("Провери опаковка във фактура", "Check a pack on an invoice"),
+            "detail": pack_note[0].upper() + pack_note[1:] if pack_note else "",
+            "route": STATS_ITEMS_ROUTE,
+            "fingerprint": fingerprint,
+        }
+    # Only falls or alerts from before money impact was measured
     return {
-        "supplier": supplier_name,
-        "invoice_count": len(invoices),
-        "total_amount": round(total_amount, 2),
-        "total_vat": round(total_vat, 2),
-        "total_net": round(total_net, 2),
-        "avg_invoice": round(total_amount / len(invoices), 2) if invoices else 0,
-        "invoices": formatted_invoices
+        "key": "price_alerts", "severity": "info", "priority": 40,
+        "title": tr("Промени в цените на доставчици", "Supplier price changes"),
+        "detail": tr(f"{len(changes)} непрочетени известия за промяна в цените.",
+                     f"{tr_count(len(changes), '', '', 'unread price change alert', 'unread price change alerts')}."),
+        "route": STATS_ITEMS_ROUTE,
+        "fingerprint": fingerprint,
     }
+
+async def _signal_reorder(company_id, scope, current_user, visibility) -> List[dict]:
+    """Up to two signals from one cadence computation: "time to reorder"
+    for the most significant overdue item, and - for an item not bought
+    for more than 4 of its own cycles - the question "do you still buy
+    it?", whose answer either stops reminders for it until it is bought
+    again or keeps quiet until the next purchase."""
+    if not company_id or "view_statistics" not in set(current_user.permissions or []):
+        return []
+    nudges, stale = await reorder_overview(company_id)
+    signals = []
+    if stale:
+        item = stale[0]
+        signals.append({
+            "key": "reorder_stale", "severity": "info", "priority": 30,
+            "title": tr(f"Още ли купуваш \"{item['item_name']}\"?", f"Do you still buy \"{item['item_name']}\"?"),
+            "detail": tr(
+                f"Поръчваше го на всеки {item['median_days_between']} дни, а последната покупка беше "
+                f"преди {item['days_since_last']} дни. Ако вече не го купуваш, спирам напомнянията за него.",
+                f"You ordered it every {item['median_days_between']} days, and the last purchase was "
+                f"{item['days_since_last']} days ago. If you no longer buy it, I'll stop the reminders for it.",
+            ),
+            "route": STATS_ITEMS_ROUTE,
+            "fingerprint": f"{item['item_key']}|{item['last_purchase_date']}",
+            "actions": ["still_buying", "discontinue"],
+            "item_key": item["item_key"],
+        })
+    if not nudges:
+        return signals
+    # reorder_overview already ranks by business impact (how overdue
+    # relative to its own cadence, weighted by what reordering it is
+    # usually worth) - nudges[0] is the single most worth surfacing, not
+    # just whichever item happens to have the largest raw day gap.
+    top = nudges[0]
+    overdue_ratio = top["days_since_last"] / top["median_days_between"] if top["median_days_between"] else 1.5
+    # Kept well below every financial-risk signal's priority range
+    # (scan_credits/budget/unpaid go up to 90+) - this is a soft,
+    # pattern-based suggestion, never urgent enough to rank above an
+    # actual money problem, however overdue the pattern looks.
+    priority = min(50, round(30 + (overdue_ratio - 1.5) * 10))
+    value_note = (tr(f" (обичайно за ~{tr_eur(top['avg_order_value'])})", f" (usually ~{tr_eur(top['avg_order_value'])})")
+                  if top.get("avg_order_value") else "")
+    # Recommended quantity turns this from a bare "it's been a while" nudge
+    # into something actionable - get_reorder_recommendations' same
+    # trend-adjusted suggestion (see _compute_recurring_item_cadences),
+    # just for the single most-worth-surfacing item here.
+    quantity_note = (
+        tr(f" Препоръчано количество: ~{top['recommended_quantity']} {top['unit'].rstrip('.')}.",
+           f" Suggested quantity: ~{top['recommended_quantity']} {top['unit'].rstrip('.')}.")
+        if top.get("recommended_quantity") else ""
+    )
+    signals.append({
+        "key": "reorder", "severity": "info", "priority": priority,
+        "title": tr("Време е за нова поръчка", "Time to reorder"),
+        "detail": tr(
+            f"\"{top['item_name']}\" обикновено се поръчва на всеки {top['median_days_between']} дни{value_note} - вече мина {top['days_since_last']}.{quantity_note}",
+            f"\"{top['item_name']}\" is usually ordered every {top['median_days_between']} days{value_note} - it has been {top['days_since_last']}.{quantity_note}",
+        ),
+        "route": STATS_ITEMS_ROUTE,
+        # Done = until it is bought again (the day count in the text
+        # changes daily, so the text itself can't identify it)
+        "fingerprint": f"{top['item_key']}|{top['last_purchase_date']}",
+    })
+    return signals
+
+# A heads-up before a month that last year was far from the company's
+# usual month, shown from this day of the month before - only when the
+# company's own history shows its months follow last year's (see
+# forecast_service._year_back_analysis), never from assumptions about a
+# trade or a season.
+YEAR_BACK_NOTICE_FROM_DAY = 15
+YEAR_BACK_NOTICE_MIN_DEVIATION = 0.25
+# Below / above last year's same months by this much is worth a warning
+# (the yearly-rhythm counterpart of the trend warning).
+YEAR_BACK_WARNING_PERCENT = 15
+
+
+def _forecast_trend_signal(revenue_forecast: dict, expense_forecast: dict) -> Optional[dict]:
+    """Revenue falling or expenses rising. For a company whose months
+    follow last year's, measured against the same months last year - a
+    turn its yearly rhythm explains is not a fall or a rise."""
+    month = f"{now_local():%Y-%m}"
+    if revenue_forecast.get("method") == "year_back":
+        vs_last_year = revenue_forecast.get("vs_last_year_percent")
+        if vs_last_year is not None and vs_last_year <= -YEAR_BACK_WARNING_PERCENT:
+            return {
+                "key": "forecast_revenue", "severity": "warning", "priority": 60,
+                "title": tr("Оборотът е под миналогодишния", "Revenue is below last year's"),
+                "detail": tr(f"През последните месеци оборотът ти е с около {abs(vs_last_year):.0f}% по-нисък от същите месеци миналата година.",
+                             f"In recent months your revenue has been about {abs(vs_last_year):.0f}% lower than in the same months last year."),
+                "route": STATS_OVERVIEW_ROUTE,
+                "fingerprint": f"below_last_year|{month}",
+            }
+    elif (
+        revenue_forecast["trend"] == "decreasing"
+        and revenue_forecast["confidence"] >= 0.5
+        and abs(revenue_forecast["trend_percent"]) >= 15
+    ):
+        return {
+            "key": "forecast_revenue", "severity": "warning", "priority": 60,
+            "title": tr("Оборотът показва низходяща тенденция", "Revenue is trending down"),
+            "detail": tr(f"Оборотът ти намалява с около {abs(revenue_forecast['trend_percent']):.0f}% спрямо предходния период.",
+                         f"Your revenue is down about {abs(revenue_forecast['trend_percent']):.0f}% on the previous period."),
+            "route": STATS_OVERVIEW_ROUTE,
+            "fingerprint": f"decreasing|{month}",
+        }
+    if expense_forecast.get("method") == "year_back":
+        vs_last_year = expense_forecast.get("vs_last_year_percent")
+        if vs_last_year is not None and vs_last_year >= YEAR_BACK_WARNING_PERCENT:
+            return {
+                "key": "forecast_expense", "severity": "warning", "priority": 58,
+                "title": tr("Разходите са над миналогодишните", "Expenses are above last year's"),
+                "detail": tr(f"През последните месеци разходите ти са с около {vs_last_year:.0f}% по-високи от същите месеци миналата година.",
+                             f"In recent months your expenses have been about {vs_last_year:.0f}% higher than in the same months last year."),
+                "route": STATS_OVERVIEW_ROUTE,
+                "fingerprint": f"above_last_year|{month}",
+            }
+    elif (
+        expense_forecast["trend"] == "increasing"
+        and expense_forecast["confidence"] >= 0.5
+        and abs(expense_forecast["trend_percent"]) >= 15
+    ):
+        return {
+            "key": "forecast_expense", "severity": "warning", "priority": 58,
+            "title": tr("Разходите показват възходяща тенденция", "Expenses are trending up"),
+            "detail": tr(f"Разходите ти нарастват с около {abs(expense_forecast['trend_percent']):.0f}% спрямо предходния период.",
+                         f"Your expenses are up about {abs(expense_forecast['trend_percent']):.0f}% on the previous period."),
+            "route": STATS_OVERVIEW_ROUTE,
+            "fingerprint": f"increasing|{month}",
+        }
+    return None
+
+
+def _year_back_notice(kind: str, forecast: dict) -> Optional[dict]:
+    """Next month, read from last year: a heads-up when last year's same
+    month was far above (or, for revenue, below) the company's average
+    month - with the forecast for it, so it can be planned for."""
+    next_month = (forecast.get("forecast") or [None])[0]
+    year_back = forecast.get("year_back") or {}
+    if not next_month or next_month.get("basis") != "year_back":
+        return None
+    last_year, average = next_month.get("same_month_last_year"), year_back.get("last_12_months_average")
+    if last_year is None or not average:
+        return None
+    deviation = last_year / average - 1
+    if abs(deviation) < YEAR_BACK_NOTICE_MIN_DEVIATION or (kind == "expense" and deviation < 0):
+        return None
+    month_index = int(next_month["month"][5:7]) - 1
+    month_name = tr(_MONTHS_BG_GENITIVE[month_index], _MONTHS_EN[month_index])
+    percent = round(abs(deviation) * 100)
+    forecast_text = tr(f"Прогнозата за {month_name}: около {tr_amount(next_month['predicted_amount'])} €.",
+                       f"The forecast for {month_name}: about {tr_amount(next_month['predicted_amount'])} €.")
+    if kind == "revenue" and deviation > 0:
+        title = tr("Предстои по-силен месец", "A stronger month is coming")
+        detail = tr(f"Миналата година през {month_name} оборотът беше с {percent}% над средния ти месец. "
+                    f"{forecast_text} Планирай навреме покупките и работата.",
+                    f"Last year in {month_name} revenue was {percent}% above your average month. "
+                    f"{forecast_text} Plan purchases and work in time.")
+    elif kind == "revenue":
+        title = tr("Предстои по-слаб месец", "A weaker month is coming")
+        detail = tr(f"Миналата година през {month_name} оборотът беше с {percent}% под средния ти месец. "
+                    f"{forecast_text} Планирай навреме плащанията и паричния поток.",
+                    f"Last year in {month_name} revenue was {percent}% below your average month. "
+                    f"{forecast_text} Plan payments and cash flow in time.")
+    else:
+        title = tr("Предстои месец с повече разходи", "A month with more expenses is coming")
+        detail = tr(f"Миналата година през {month_name} разходите бяха с {percent}% над средния ти месец. "
+                    f"{forecast_text} Провери навреме какво предстои за плащане.",
+                    f"Last year in {month_name} expenses were {percent}% above your average month. "
+                    f"{forecast_text} Check in time what is coming up to pay.")
+    return {
+        "key": f"year_back_{kind}", "severity": "info", "priority": 42 if kind == "revenue" else 40,
+        "title": title, "detail": detail, "route": STATS_OVERVIEW_ROUTE,
+        "fingerprint": next_month["month"],
+    }
+
+
+async def _signal_forecast(company_id, scope, current_user, visibility) -> List[dict]:
+    if not company_id or "view_statistics" not in set(current_user.permissions or []):
+        return []
+    # Each viewer's forecast leaves out what they may not see, the same as
+    # the forecast card's own endpoints.
+    revenue_forecast = await forecast_service.get_revenue_forecast(
+        company_id, months_ahead=1, include_pocket_money=visibility["pocket_money"]
+    )
+    expense_forecast = await forecast_service.get_expense_forecast(
+        company_id, months_ahead=1, include_off_book_expenses=visibility["off_book_expenses"],
+        include_payroll=visibility.get("payroll", True),
+    )
+    signals: List[dict] = []
+    trend_signal = _forecast_trend_signal(revenue_forecast, expense_forecast)
+    if trend_signal:
+        signals.append(trend_signal)
+    if today_local().day >= YEAR_BACK_NOTICE_FROM_DAY:
+        for kind, forecast in (("revenue", revenue_forecast), ("expense", expense_forecast)):
+            notice = _year_back_notice(kind, forecast)
+            if notice:
+                signals.append(notice)
+    return signals
+
+async def _signal_schedule_unpaid(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Work Schedule's hours*rate estimate for this month, minus whatever's
+    already been marked paid via schedule payments - the schedule-side
+    mirror of _signal_unpaid_invoices, so a mounting pile of unpaid hourly
+    pay shows up here the same way an unpaid supplier invoice does, instead
+    of only being visible to someone who happens to open Pay-run."""
+    if not company_id or "manage_payroll" not in set(current_user.permissions or []):
+        return None
+    # Deferred import: routers/schedule.py itself does `from server import
+    # *`, so importing it at server.py's own module level would cycle -
+    # safe here because every router is already fully loaded by the time
+    # any request (and so this function) actually runs.
+    from routers.schedule import _resolve_occurrences, payable_totals
+    month_start, month_end = _month_bounds(now_local())
+    shifts = await db.work_shifts.find({"company_id": company_id}, {"_id": 0}).to_list(5000)
+    if not shifts:
+        return None
+    occurrences = await _resolve_occurrences(shifts, company_id, month_start, month_end)
+    _, total_pay, _ = payable_totals(occurrences)
+    if total_pay <= 0:
+        return None
+    payments = await db.schedule_payments.find(
+        {"company_id": company_id, "period_start": {"$lte": month_end}, "period_end": {"$gte": month_start}},
+        {"_id": 0, "amount": 1},
+    ).to_list(1000)
+    unpaid = round(total_pay - sum(p.get("amount", 0) for p in payments), 2)
+    if unpaid <= 0:
+        return None
+    return {
+        "key": "schedule_unpaid", "severity": "info", "priority": 38,
+        "title": tr("Неплатени часове по график", "Unpaid scheduled hours"),
+        "detail": tr(f"Екипът е отработил часове на стойност {tr_eur(unpaid)} този месец, които още не са маркирани като платени.",
+                     f"The team has worked hours worth {tr_eur(unpaid)} this month that are not marked as paid yet."),
+        "route": "/pay-run",
+    }
+
+async def _signal_team_on_leave(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """A quiet, low-priority reminder of who's away today - cheap context
+    for a manager about to plan shifts or wonder why someone's not around,
+    not an alert about anything going wrong."""
+    if not company_id or "manage_budget" not in set(current_user.permissions or []):
+        return None
+    today = today_local().isoformat()
+    entries = await db.employee_leave.find(
+        {"company_id": company_id, "start_date": {"$lte": today}, "end_date": {"$gte": today}},
+        {"_id": 0, "employee_name": 1, "leave_type": 1},
+    ).to_list(100)
+    if not entries:
+        return None
+    sick = [e.get("leave_type") == LeaveType.SICK.value for e in entries]
+    names = ", ".join(e["employee_name"] for e in entries[:3])
+    more = tr_and_more(len(entries) - 3)
+    one = len(entries) == 1
+    if all(sick):
+        verb = tr("е в болничен", "is on sick leave") if one else tr("са в болничен", "are on sick leave")
+    elif any(sick):
+        # Some on leave, some on sick leave: each sick one is marked.
+        sick_mark = tr(" (болничен)", " (sick leave)")
+        names = ", ".join(f"{e['employee_name']}{sick_mark}" if is_sick else e["employee_name"] for e, is_sick in zip(entries[:3], sick))
+        verb = tr("отсъстват", "are away")
+    else:
+        verb = tr("е в отпуск", "is on leave") if one else tr("са в отпуск", "are on leave")
+    return {
+        "key": "team_on_leave", "severity": "info", "priority": 25,
+        "title": tr("Екипът днес", "The team today"),
+        "detail": tr(f"{names}{more} {verb} днес.", f"{names}{more} {verb} today."),
+        "route": "/work-schedule",
+    }
+
+async def _signal_personal_wallet(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """personal-wallet spending already computes its own status/advice
+    (generate_wallet_advice above) for the dashboard teaser, but that
+    never reached this ranked list - a "danger" personal-spending status
+    was invisible everywhere _signal_budget's business-side equivalent is
+    visible. Reuses get_personal_wallet_summary's own computation rather
+    than re-deriving it."""
+    if not company_id or "view_personal_wallet" not in set(current_user.permissions or []):
+        return None
+    # Deferred import - see _signal_schedule_unpaid's comment above.
+    from routers.roi_wallet import get_personal_wallet_summary
+    summary = await get_personal_wallet_summary(current_user=current_user)
+    if summary["status"] == "ok" or not summary.get("advice"):
+        return None
+    severity = "critical" if summary["status"] == "danger" else "warning"
+    return {
+        "key": "personal_wallet", "severity": severity, "priority": 80 if severity == "critical" else 55,
+        "title": (tr("Личните тегления надхвърлят безопасния лимит", "Personal withdrawals are over the safe limit")
+                  if severity == "critical" else
+                  tr("Личните тегления се доближават до лимита", "Personal withdrawals are nearing the limit")),
+        "detail": summary["advice"][0] if not signals_in_english() else _wallet_detail_en(summary, severity),
+        "route": "/personal-expenses",
+        "fingerprint": f"{summary['status']}|{now_local():%Y-%m}",
+    }
+
+def _wallet_detail_en(summary: dict, severity: str) -> str:
+    """The personal notebook's warning in English (its own advice is written in Bulgarian)."""
+    spent = summary.get("spent_percent_of_profit")
+    limit = summary.get("threshold_percent")
+    if spent is None:
+        return "Look at the personal notebook: this month's withdrawals need attention."
+    if severity == "critical":
+        return (f"Personal withdrawals are already {spent:.0f}% of the month's profit"
+                + (f" (limit {limit:.0f}%)" if limit is not None else "") + " - the business risks overspending.")
+    return f"Personal withdrawals have reached {spent:.0f}% of the profit - watch them closely until the end of the month."
+
+
+# Bulgarian weekday names, index 0=Monday matching Python's own
+# datetime.weekday() - shared by both weekday-pattern signals below.
+_WEEKDAY_NAMES_BG = ["понеделник", "вторник", "сряда", "четвъртък", "петък", "събота", "неделя"]
+
+
+def _weekday_name(weekday: int) -> str:
+    """"петък" - "Fridays" (as in "on Fridays")."""
+    return tr(_WEEKDAY_NAMES_BG[weekday], f"{_WEEKDAY_NAMES_EN[weekday]}s")
+
+async def _signal_weak_weekday(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Module: cross-data-source insight #2 - a weekday open every week
+    that consistently earns far less than the rest of the week, found by
+    bucketing daily revenue by weekday over the trailing 8 weeks (see
+    routers/statistics.py's _weak_day_suggestion for the full maths).
+    Generic: works from data every business already logs (daily revenue),
+    nothing item- or trade-specific."""
+    if not company_id or "view_statistics" not in set(current_user.permissions or []):
+        return None
+    from routers.statistics import _weak_day_suggestion
+    suggestion = await _weak_day_suggestion(company_id)
+    if not suggestion:
+        return None
+    day_name = _weekday_name(suggestion["weekday"])
+    return {
+        "key": "weak_weekday", "severity": "info", "priority": 35,
+        "fingerprint": str(suggestion["weekday"]),
+        "title": tr("Един ден от седмицата изостава", "One weekday lags behind"),
+        "detail": tr(
+            f"Оборотът ти в {day_name} е средно {tr_eur(suggestion['avg_revenue'])} - "
+            f"с {suggestion['percent_below_average']}% под обичайния ти ден "
+            f"({tr_eur(suggestion['overall_avg_revenue'])}). Струва ли си пълен работен ден?",
+            f"Your revenue on {day_name} averages {tr_eur(suggestion['avg_revenue'])} - "
+            f"{suggestion['percent_below_average']}% below your usual day "
+            f"({tr_eur(suggestion['overall_avg_revenue'])}). Is a full working day worth it?",
+        ),
+        "route": STATS_ITEMS_ROUTE,
+    }
+
+async def _signal_staffing_mismatch(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Module: cross-data-source insight #1 - a weekday that's fully
+    staffed but earns far less per scheduled labor-hour than another
+    equally-staffed weekday, found by dividing the same revenue-by-
+    weekday pattern by Work Schedule's own scheduled hours (see
+    routers/statistics.py's _staffing_rebalance_suggestion). Needs both
+    view_statistics (revenue) and manage_budget (schedule/payroll) - same
+    gate _signal_schedule_unpaid already uses for schedule-derived data."""
+    if not company_id or not {"view_statistics", "manage_budget"} <= set(current_user.permissions or []):
+        return None
+    from routers.statistics import _staffing_rebalance_suggestion
+    suggestion = await _staffing_rebalance_suggestion(company_id)
+    if not suggestion:
+        return None
+    over_name = _weekday_name(suggestion["overstaffed_weekday"])
+    under_name = _weekday_name(suggestion["understaffed_weekday"])
+    return {
+        "key": "staffing_mismatch", "severity": "info", "priority": 36,
+        "fingerprint": f"{suggestion['overstaffed_weekday']}|{suggestion['understaffed_weekday']}",
+        "title": tr("Графикът не пасва на оборота", "The schedule doesn't fit the revenue"),
+        "detail": tr(
+            f"В {over_name} имаш пълен екип, но оборотът на отработен час е само "
+            f"{suggestion['overstaffed_percent_of_average']}% от средното; в {under_name} "
+            f"същият екип изкарва {suggestion['understaffed_percent_of_average']}%. "
+            f"Обмисли да преместиш ~{suggestion['suggested_hours_to_move']} часа от "
+            f"{over_name} към {under_name}.",
+            f"On {over_name} you have a full team, but revenue per worked hour is only "
+            f"{suggestion['overstaffed_percent_of_average']}% of the average; on {under_name} "
+            f"the same team makes {suggestion['understaffed_percent_of_average']}%. "
+            f"Consider moving ~{suggestion['suggested_hours_to_move']} hours from "
+            f"{over_name} to {under_name}.",
+        ),
+        "route": STATS_ITEMS_ROUTE,
+    }
+
+_MONTHS_BG_GENITIVE = [
+    "януари", "февруари", "март", "април", "май", "юни",
+    "юли", "август", "септември", "октомври", "ноември", "декември",
+]
+
+def _bg_day_list(dates: List[str]) -> str:
+    """'2026-11-02', '2026-11-05', '2026-11-09' -> '2, 5 и 9 ноември'
+    ('2, 5 and 9 November' in English signals)."""
+    months = _MONTHS_EN if signals_in_english() else _MONTHS_BG_GENITIVE
+    parsed = [datetime.strptime(d, "%Y-%m-%d") for d in dates]
+    if len({(p.year, p.month) for p in parsed}) == 1:
+        parts = [str(p.day) for p in parsed]
+        suffix = f" {months[parsed[0].month - 1]}"
+    else:
+        parts = [f"{p.day} {months[p.month - 1]}" for p in parsed]
+        suffix = ""
+    joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + tr(" и ", " and ") + parts[-1]
+    return joined + suffix
+
+async def _signal_vat_registration(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """One question for whoever runs the company profile: is the business
+    registered for VAT? The VAT cards and the VAT on its invoices follow
+    the answer - asked, never guessed from an empty VAT number field."""
+    if not company_id or "manage_company" not in set(current_user.permissions or []):
+        return None
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1})
+    if not vat_registration_unanswered(company):
+        return None
+    return {
+        "key": "vat_registration", "severity": "info", "priority": 30,
+        "title": tr("Регистрирана ли е фирмата по ЗДДС?", "Is the business registered for VAT?"),
+        "detail": tr(
+            "От отговора зависи дали програмата показва ДДС за плащане и дали издадените фактури са с ДДС. "
+            "Отбележи го в настройките на фирмата - прагът и регистрацията остават работа на счетоводителя.",
+            "The answer decides whether the app shows VAT to pay and whether your issued invoices carry VAT. "
+            "Set it in the company settings - the threshold and the registration stay with your accountant.",
+        ),
+        "route": "/company-settings",
+    }
+
+async def _signal_missing_revenue(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Open days of the last two weeks with no revenue entered, for a
+    company that otherwise logs its days. Those days are now left out of
+    weekday patterns and trends instead of counting as zero revenue - this
+    asks for the missing numbers, and opens the entry form on the most
+    recent missing day."""
+    if not company_id or "add_revenue" not in set(current_user.permissions or []):
+        return None
+    from routers.statistics import _missing_revenue_days
+    missing = await _missing_revenue_days(company_id)
+    if not missing:
+        return None
+    shown = missing[-5:]
+    days_text = _bg_day_list(shown)
+    if len(missing) > len(shown):
+        days_text = tr(f"{days_text} (и още {len(missing) - len(shown)})", f"{days_text} (and {len(missing) - len(shown)} more)")
+    many = len(missing) >= 3
+    return {
+        "key": "missing_revenue", "severity": "warning" if many else "info",
+        "priority": 55 if many else 40,
+        "title": (tr(f"Липсва оборот за {_bg_day_list([missing[-1]])}", f"Revenue missing for {_bg_day_list([missing[-1]])}")
+                  if len(missing) == 1 else tr(f"Липсва оборот за {len(missing)} дни", f"Revenue missing for {len(missing)} days")),
+        "detail": tr(
+            f"Няма въведен оборот за {days_text}. Без тях седмичните изводи "
+            "и прогнозите не са точни - въведи ги или отбележи деня като почивен.",
+            f"No revenue entered for {days_text}. Without it the weekly insights "
+            "and forecasts are off - enter it or mark the day as closed.",
+        ),
+        "route": f"/(tabs)?revenueDate={missing[-1]}",
+        "fingerprint": missing[-1],
+    }
+
+async def _signal_payroll_rates_year(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """A new year: the minimum and maximum insurance income usually change
+    on 1 January. Asked in the first quarter of whoever keeps payroll, for a
+    business that does payroll, until rates dated this year are saved."""
+    if not company_id or "manage_payroll" not in set(current_user.permissions or []):
+        return None
+    today = today_local()
+    if today.month > 3:
+        return None
+    if not await db.employees.find_one({"company_id": company_id}, {"_id": 1}):
+        return None
+    stored = await db.payroll_rates.find_one({"company_id": company_id}, {"_id": 0})
+    if any(version["effective_from"] >= f"{today.year}-01" for version in payroll_rate_versions(stored)):
+        return None
+    return {
+        "key": "payroll_rates_year", "severity": "info", "priority": 34, "route": "/payroll",
+        "fingerprint": f"payroll_rates_{today.year}",
+        "title": tr(f"Осигурителните ставки за {today.year}", f"Insurance rates for {today.year}"),
+        "detail": tr(
+            "В началото на годината обикновено се променят минималният и максималният осигурителен доход. "
+            "Провери ставките и ги запиши „в сила от“ януари - ведомостите от миналата година остават със своите.",
+            "The minimum and maximum insurable income usually change at the start of the year. "
+            "Check the rates and save them as effective from January - last year's payrolls keep theirs.",
+        ),
+    }
+
+async def _signal_recurring_expenses(company_id, scope, current_user, visibility) -> List[dict]:
+    """Questions about the recurring expenses - see routers/recurring.py
+    (imported at the bottom of this module, resolved at call time)."""
+    return await recurring_expense_signals(company_id, current_user)
+
+_PROACTIVE_SIGNAL_BUILDERS = [
+    _signal_unpaid_invoices, _signal_receivables, _signal_scan_credits,
+    _signal_budget, _signal_price_alerts, _signal_reorder, _signal_forecast,
+    _signal_schedule_unpaid, _signal_team_on_leave, _signal_personal_wallet,
+    _signal_weak_weekday, _signal_staffing_mismatch, _signal_missing_revenue,
+    _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
+    _signal_payments_this_week, _signal_backup, _signal_two_factor, _signal_cash_flow,
+    _signal_accountant_pack, _signal_payment_reminders, _signal_recurring_invoices, _signal_margins,
+    _signal_deadlines,
+]
+
+# Signals about money at risk can only be put off for a few days, never
+# dismissed - a dismissed overdue-invoice warning is exactly how an overdue
+# invoice gets forgotten. Every other signal is an insight or a nudge and
+# can also be marked done/hidden: it then stays hidden until its situation
+# changes (a different fingerprint), not for ever.
+# The modules a signal speaks for: while the business leaves one of them
+# out, the signal stays quiet (a business without a till is never told of
+# days without till revenue).
+SIGNAL_MODULES: Dict[str, Tuple[str, ...]] = {
+    "missing_revenue": ("till",),
+    "weak_weekday": ("till",),
+    "staffing_mismatch": ("team", "till"),
+    "schedule_unpaid": ("team",),
+    "team_on_leave": ("payroll",),
+    "payroll_rates_year": ("payroll",),
+    "personal_wallet": ("wallet",),
+    "receivables": ("billing",),
+    "payment_reminders": ("billing",),
+    "recurring_invoices": ("billing",),
+}
+
+# A deadline the owner set is put off, never dismissed for good.
+SNOOZE_ONLY_SIGNALS = {"unpaid_invoices", "receivables", "scan_credits", "budget", "schedule_unpaid", "deadlines"}
+SIGNAL_SNOOZE_DAYS = 3
+# A dismissed insight is looked at afresh after this long even if unchanged.
+SIGNAL_DISMISS_DAYS = 90
+
+def signal_fingerprint(signal: dict) -> str:
+    """What a "done" on this signal refers to. A builder gives its own
+    when its text changes daily for the same situation (days counters);
+    otherwise the text itself identifies the situation - its Bulgarian
+    text, whichever language shows it, so a "done" holds in both."""
+    raw = signal.get("fingerprint") or signal.get("_text_fingerprint") or f"{signal['title']}|{signal['detail']}"
+    return hashlib.sha1(f"{signal['key']}|{raw}".encode()).hexdigest()[:16]
+
+
+async def _run_signal_builder(builder, company_id, scope, current_user: User, visibility: dict) -> List[dict]:
+    """One builder's signals as a list - none when it failed (logged)."""
+    try:
+        produced = await builder(company_id, scope, current_user, visibility)
+    except Exception:
+        logger.exception(f"Proactive engine: {builder.__name__} failed")
+        return []
+    if isinstance(produced, list):
+        return [s for s in produced if s]
+    return [produced] if produced else []
+
+async def get_proactive_signals(current_user: User, english: bool = False) -> List[dict]:
+    """Computes and ranks every signal this viewer is allowed to see - shared
+    by GET /proactive/signals (the Home card) and the daily digest push
+    tick below. Each builder softly skips itself (returns None) when the
+    viewer lacks the relevant permission or the underlying endpoint it
+    reuses has nothing to report - a missing permission for one signal
+    never fails the whole list, and a crash in one builder (logged, never
+    raised) never hides every other signal. A builder may also return a
+    list of signals.
+
+    Remembers what this viewer said about each signal (signal_states): a
+    snoozed signal stays away for SIGNAL_SNOOZE_DAYS, a dismissed one until
+    its fingerprint changes - before this, every signal came back every
+    day however many times it had been seen and dealt with.
+
+    Written in English for an app in English (english), in Bulgarian
+    otherwise - the keys, routes and fingerprints are the same in both."""
+    company_id, scope = await get_company_scope(current_user)
+    visibility = get_financial_visibility(current_user)
+    signals: List[dict] = []
+    language = _SIGNALS_ENGLISH.set(english)
+    try:
+        for builder in _PROACTIVE_SIGNAL_BUILDERS:
+            produced = await _run_signal_builder(builder, company_id, scope, current_user, visibility)
+            if english and any(not s.get("fingerprint") for s in produced):
+                # A signal told apart by its text is told apart by the
+                # Bulgarian one: the builder once more in Bulgarian.
+                in_bulgarian = _SIGNALS_ENGLISH.set(False)
+                try:
+                    twins = {s["key"]: s for s in await _run_signal_builder(builder, company_id, scope, current_user, visibility)}
+                finally:
+                    _SIGNALS_ENGLISH.reset(in_bulgarian)
+                for s in produced:
+                    twin = twins.get(s["key"])
+                    if not s.get("fingerprint") and twin:
+                        s["_text_fingerprint"] = f"{twin['title']}|{twin['detail']}"
+            signals.extend(produced)
+    finally:
+        _SIGNALS_ENGLISH.reset(language)
+
+    for s in signals:
+        explicit = bool(s.get("fingerprint"))
+        s["fingerprint"] = signal_fingerprint(s)
+        s.pop("_text_fingerprint", None)
+        s.setdefault("actions", ["snooze"] if s["key"] in SNOOZE_ONLY_SIGNALS else ["snooze", "dismiss"])
+        # What "new" is judged on (see routers/ai_insights.mark_new_signals):
+        # the builder's own fingerprint names a situation (a new price
+        # alert, another missing day, another overdue invoice); a text-only
+        # one changes with daily counters, so there the signal and its
+        # severity are the situation (a budget going from 80% to over).
+        s["situation"] = s["fingerprint"] if explicit else f"{s['key']}|{s['severity']}"
+
+    states = await db.signal_states.find(
+        {"user_id": current_user.user_id, "until": {"$gt": datetime.now(timezone.utc)}},
+        {"_id": 0, "key": 1, "fingerprint": 1, "action": 1},
+    ).to_list(1000)
+    snoozed = {st["key"] for st in states if st.get("action") == "snooze"}
+    dismissed = {(st["key"], st.get("fingerprint")) for st in states if st.get("action") == "dismiss"}
+    modules = await modules_for_company(company_id)
+    signals = [
+        s for s in signals
+        if s["key"] not in snoozed and (s["key"], s["fingerprint"]) not in dismissed
+        and all(modules.get(module, True) for module in SIGNAL_MODULES.get(s["key"], ()))
+    ]
+    signals.sort(key=lambda s: s["priority"], reverse=True)
+    return signals
+
+
+def _push_hour(prefs: dict) -> int:
+    hour = prefs.get("daily_push_hour")
+    if isinstance(hour, int) and DAILY_PUSH_EARLIEST_HOUR <= hour <= DAILY_PUSH_LATEST_HOUR:
+        return hour
+    return DAILY_PUSH_DEFAULT_HOUR
+
+def periodic_day_is_today(days: List[int], today: date) -> bool:
+    """Whether a reminder on these days of the month falls on today. A day
+    past this month's end (31 in April, 29-31 in February) falls on the
+    month's last day - before, such a reminder silently skipped the month."""
+    last = days_in_month(today.year, today.month)
+    return any(min(d, last) == today.day for d in days if isinstance(d, int) and d >= 1)
+
+def review_summary_text(signals: List[dict], english: bool = False) -> str:
+    """The daily review in one line: what waits (top three), or that nothing does."""
+    if not signals:
+        return ("All good – nothing in the Daily briefing waits for you." if english
+                else "Всичко е наред – в Дневния преглед няма нищо, което чака действие.")
+    top = [s["title"] for s in signals[:3]]
+    body = ("Waiting for you: " if english else "Чака те: ") + "; ".join(top) + "."
+    if len(signals) > len(top):
+        more = len(signals) - len(top)
+        body += f" And {more} more in the Daily briefing." if english else f" И още {more} в Дневния преглед."
+    return body
+
+
+def app_in_english(user_doc: Optional[dict]) -> bool:
+    """The language the person's app last said it shows (users.language)."""
+    return bool(user_doc) and (user_doc or {}).get("language") == "en"
+
+
+async def remember_app_language(user_id: str, language: Optional[str]) -> None:
+    """Keeps the language the person's app shows, for what the program
+    writes to them on its own (the morning push). Written only when it
+    changes."""
+    if language not in ("bg", "en"):
+        return
+    await db.users.update_one({"user_id": user_id, "language": {"$ne": language}}, {"$set": {"language": language}})
+
+async def _morning_push_tick(now: Optional[datetime] = None):
+    """The morning push: once per person per day, at the hour they chose on
+    the business's own calendar (DAILY_PUSH_DEFAULT_HOUR unless changed),
+    never from DAILY_PUSH_QUIET_FROM on.
+
+    Each person gets THEIR OWN daily review: the signals are computed with
+    that person's own permissions (get_proactive_signals), so a manager is
+    never sent the owner's personal-wallet warning and someone who may not
+    see invoice amounts never finds them on a lock screen. Before, the
+    owner's view was computed once per company and the same text went to
+    everyone with view_statistics, ~20 hours after the previous one - so it
+    drifted through the day and into the night.
+
+    The review is pushed only when its top signal clears
+    PROACTIVE_PUSH_WORTHY_PRIORITY. On a day the person picked for a
+    periodic reminder, that reminder (the top three, or that nothing waits)
+    is the morning push instead of a second one. Only people with a device
+    registered for pushes are looked at - there is no one else to tell."""
+    now = now or datetime.now(timezone.utc)
+    local_now = now.astimezone(BUSINESS_TZ)
+    if local_now.hour >= DAILY_PUSH_QUIET_FROM:
+        return
+    today = local_now.date()
+    today_str = today.isoformat()
+
+    user_ids = sorted(set(await db.push_subscriptions.distinct("user_id")))
+    if not user_ids:
+        return
+    prefs_by_user = {
+        doc["user_id"]: doc for doc in await db.notification_settings.find(
+            {"user_id": {"$in": user_ids}}, {"_id": 0}
+        ).to_list(ALL_ROWS)
+    }
+    state_by_user = {
+        doc["user_id"]: doc for doc in await db.daily_push_state.find(
+            {"user_id": {"$in": user_ids}}, {"_id": 0}
+        ).to_list(ALL_ROWS)
+    }
+
+    for user_id in user_ids:
+        prefs = prefs_by_user.get(user_id) or {}
+        if local_now.hour < _push_hour(prefs):
+            continue
+        periodic_due = bool(
+            prefs.get("periodic_enabled")
+            and periodic_day_is_today(prefs.get("periodic_dates") or [], today)
+            and prefs.get("periodic_last_sent_date") != today_str
+        )
+        review_due = (
+            prefs.get("daily_push_enabled", True) is not False
+            and (state_by_user.get(user_id) or {}).get("last_day") != today_str
+        )
+        if not (periodic_due or review_due):
+            continue
+
+        user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+        if not user_doc:
+            continue
+        english = app_in_english(user_doc)
+        try:
+            signals = await get_proactive_signals(User(**sanitize_user(dict(user_doc))), english)
+        except Exception:
+            logger.exception(f"Morning push: signals failed for {user_id}")
+            continue
+
+        sent_key = None
+        if periodic_due:
+            await push_service.send_to_user(
+                db, user_id, title="Reminder" if english else "Периодично напомняне",
+                body=review_summary_text(signals, english),
+                data={"type": "periodic_reminder", "route": "/(tabs)"},
+            )
+            await db.notification_settings.update_one(
+                {"user_id": user_id}, {"$set": {"periodic_last_sent_date": today_str}},
+            )
+            sent_key = "periodic_reminder"
+        elif signals and signals[0]["priority"] >= PROACTIVE_PUSH_WORTHY_PRIORITY:
+            top = signals[0]
+            others = len(signals) - 1
+            if others <= 0:
+                body = top["detail"]
+            elif english:
+                body = f"{top['detail']} (+{others} more to look at)"
+            else:
+                body = f"{top['detail']} (+{others} друго изискващо внимание)"
+            await push_service.send_to_user(
+                db, user_id, title=f"{'Daily briefing' if english else 'Днешен преглед'}: {top['title']}", body=body,
+                data={"type": "proactive_digest", "signal_key": top["key"], "route": top.get("route") or "/(tabs)"},
+            )
+            sent_key = top["key"]
+        # Looked at once a day either way: a quiet morning is not
+        # recomputed every hour until something becomes push-worthy.
+        await db.daily_push_state.update_one(
+            {"user_id": user_id},
+            {"$set": {"user_id": user_id, "last_day": today_str, "checked_at": now, "sent": sent_key}},
+            upsert=True,
+        )
+
+async def _morning_push_loop():
+    while True:
+        try:
+            await _morning_push_tick()
+        except Exception as e:
+            logger.error(f"Morning push loop error: {e}")
+        # Every 10 minutes: a push is due within minutes of the chosen
+        # hour, and a person already looked at today costs one lookup.
+        await asyncio.sleep(600)
+
+async def start_morning_push_loop():
+    asyncio.create_task(_morning_push_loop())
+
+
+
+
+
 
 # ===================== EXPORT ENDPOINTS =====================
 # (Simple whole-list Excel/PDF export lives at /export/invoices/excel and
@@ -5123,199 +5227,8 @@ async def get_single_supplier_stats(
 # company-scoped and Cyrillic-safe. An older, buggier, ASCII-only inline
 # duplicate of both used to live here and has been removed.)
 
-@api_router.get("/export/statistics/pdf")
-@limiter.limit("20/minute")
-async def export_statistics_pdf(
-    request: Request,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Export a one-page financial report (summary + top suppliers/items) as PDF"""
-    require_permission(current_user, "export_data")
-    stats = await get_summary(start_date=start_date, end_date=end_date, current_month_only=not (start_date or end_date), current_user=current_user)
-    suppliers_data = await get_supplier_statistics(start_date=start_date, end_date=end_date, current_user=current_user)
-    items_data = await get_item_statistics(start_date=start_date, end_date=end_date, top_n=10, current_user=current_user)
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    company_name = ""
-    if company_id:
-        company = await db.companies.find_one({"id": company_id})
-        company_name = company.get("name", "") if company else ""
 
-    period_label = ""
-    if start_date and end_date:
-        period_label = f"Период: {start_date[:10]} - {end_date[:10]}"
-
-    try:
-        pdf_data = ExportService.generate_statistics_pdf(
-            stats=stats,
-            top_suppliers=suppliers_data.get("top_by_amount", []),
-            top_items=items_data.get("top_by_value", []),
-            company_name=company_name,
-            period_label=period_label
-        )
-
-        await audit_service.log_action(
-            user_id=current_user.user_id,
-            user_name=current_user.name,
-            action="export",
-            entity_type="statistics",
-            company_id=company_id,
-            details={"format": "pdf"}
-        )
-
-        filename = f"statistics_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-        return Response(
-            content=pdf_data,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
-    except ImportError:
-        raise HTTPException(status_code=500, detail="PDF export not available")
-
-@api_router.get("/export/vat-ledger/excel")
-@limiter.limit("20/minute")
-async def export_vat_ledger_excel(
-    request: Request,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Export a working ДДС purchases/sales ledger (Дневник на покупки и
-    продажби) for the given period, grouped by VAT-rate category - meant
-    as the accountant's source data for filing, not a byte-exact copy of
-    NRA's own file layout."""
-    require_permission(current_user, "export_data")
-    now = datetime.now(timezone.utc)
-    # end_date must be the LAST day of the month, not the 1st of the next
-    # one - both queries below treat it as an inclusive boundary (through
-    # 23:59:59 / plain $lte), so a tax ledger meant for "this month" would
-    # otherwise also pull in the 1st of next month's purchases and sales,
-    # double-counting that day across two consecutive VAT filings.
-    if not start_date and not end_date:
-        start_date = now.replace(day=1).strftime("%Y-%m-%d")
-        if now.month == 12:
-            last_day = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            last_day = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
-        end_date = last_day.strftime("%Y-%m-%d")
-
-    company_id, scope = await get_company_scope(current_user)
-
-    inv_query = dict(scope)
-    inv_query["date"] = {
-        "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
-        "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
-    }
-    purchases = await db.invoices.find(inv_query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", 1).to_list(10000)
-
-    rev_query = dict(scope)
-    rev_query["date"] = {"$gte": start_date, "$lte": end_date}
-    sales = await db.daily_revenue.find(rev_query, {"_id": 0}).sort("date", 1).to_list(10000)
-
-    # Same redaction get_summary/get_chart_data apply to pocket_money - a
-    # raw export must never show a viewer a field the aggregated views
-    # already hide from them (e.g. an accountant with export_data but
-    # without view_pocket_money).
-    if not get_financial_visibility(current_user)["pocket_money"]:
-        for rev in sales:
-            rev["pocket_money"] = 0
-
-    company_name = ""
-    if company_id:
-        company = await db.companies.find_one({"id": company_id})
-        company_name = company.get("name", "") if company else ""
-
-    period_label = f"Период: {start_date} - {end_date}"
-
-    try:
-        excel_data = ExportService.generate_vat_ledger_excel(
-            purchases=purchases,
-            sales=sales,
-            company_name=company_name,
-            period_label=period_label
-        )
-
-        await audit_service.log_action(
-            user_id=current_user.user_id,
-            user_name=current_user.name,
-            action="export",
-            entity_type="vat_ledger",
-            company_id=company_id,
-            details={"format": "excel", "start_date": start_date, "end_date": end_date}
-        )
-
-        filename = f"dnevnik_pokupki_prodajbi_{start_date}_{end_date}.xlsx"
-        return Response(
-            content=excel_data,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
-    except ImportError:
-        raise HTTPException(status_code=500, detail="Excel export not available")
-
-@api_router.get("/export/employee-compliance/excel")
-@limiter.limit("20/minute")
-async def export_employee_compliance_excel(
-    request: Request,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Export the list of employees who worked on an official holiday
-    (Чл. 262 КТ extra-pay entitlement) and employee leave for a period, so
-    the accountant can attach it to the required company/personnel documents."""
-    require_permission(current_user, "export_data")
-    now = datetime.now(timezone.utc)
-    if not start_date and not end_date:
-        start_date = now.replace(month=1, day=1).strftime("%Y-%m-%d")
-        end_date = now.strftime("%Y-%m-%d")
-
-    company_id, scope = await get_company_scope(current_user)
-
-    hw_query = dict(scope)
-    hw_query["date"] = {"$gte": start_date, "$lte": end_date}
-    holiday_work = await db.employee_holiday_work.find(hw_query, {"_id": 0}).sort("date", 1).to_list(10000)
-
-    leave_query = dict(scope)
-    leave_query["end_date"] = {"$gte": start_date}
-    leave_query["start_date"] = {"$lte": end_date}
-    leave = await db.employee_leave.find(leave_query, {"_id": 0}).sort("start_date", 1).to_list(10000)
-
-    company_name = ""
-    if company_id:
-        company = await db.companies.find_one({"id": company_id})
-        company_name = company.get("name", "") if company else ""
-
-    period_label = f"Период: {start_date} - {end_date}"
-
-    try:
-        excel_data = ExportService.generate_employee_compliance_excel(
-            holiday_work=holiday_work,
-            leave=leave,
-            company_name=company_name,
-            period_label=period_label
-        )
-
-        await audit_service.log_action(
-            user_id=current_user.user_id,
-            user_name=current_user.name,
-            action="export",
-            entity_type="employee_compliance",
-            company_id=company_id,
-            details={"format": "excel", "start_date": start_date, "end_date": end_date}
-        )
-
-        filename = f"praznici_otpuski_{start_date}_{end_date}.xlsx"
-        return Response(
-            content=excel_data,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
-    except ImportError:
-        raise HTTPException(status_code=500, detail="Excel export not available")
 
 # ===================== BACKUP ENDPOINTS =====================
 
@@ -5338,761 +5251,29 @@ class BackupMetadata(BaseModel):
     invoice_count: int
     revenue_count: int
     expense_count: int
-    google_drive_file_id: Optional[str] = None
 
-# Restore-only input models: validated shapes for what /backup/restore will
-# accept, matching what /backup/create produces. company_id/user_id are
-# deliberately NOT accepted here - they're always overwritten server-side
-# from the caller's own session, so a restore can never inject records
-# into (or spoof ownership from) a different company.
-class RestoreInvoice(BaseModel):
-    id: str
-    supplier: str
-    supplier_eik: Optional[str] = None
-    invoice_number: str
-    amount_without_vat: float
-    vat_amount: float
-    total_amount: float
-    vat_treatment: Optional[str] = None
-    protocol_number: Optional[str] = None
-    date: str
-    image_base64: Optional[str] = None
-    notes: Optional[str] = None
-    items: Optional[List[dict]] = None
-    created_at: Optional[str] = None
 
-class RestoreDailyRevenue(BaseModel):
-    id: str
-    date: str
-    fiscal_revenue: float = 0
-    pocket_money: float = 0
-    vat_rate_percent: float = 20.0
-    created_at: Optional[str] = None
 
-class RestoreExpense(BaseModel):
-    id: str
-    description: str
-    amount: float
-    date: str
-    created_at: Optional[str] = None
 
-class BackupRestoreRequest(BaseModel):
-    invoices: List[RestoreInvoice] = []
-    daily_revenues: List[RestoreDailyRevenue] = []
-    expenses: List[RestoreExpense] = []
 
-@api_router.post("/backup/create")
-@limiter.limit("5/minute")
-async def create_backup(request: Request, current_user: User = Depends(get_current_user)):
-    """Създава backup на всички данни на ЦЯЛАТА фирма (не само тези,
-    въведени лично от текущия потребител), за да е реален backup на
-    книгите на компанията."""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да прави резервно копие")
-
-    import json
-
-    company_id, scope = await get_company_scope(current_user)
-
-    # Събиране на фактури
-    invoices = await db.invoices.find(scope, {"_id": 0}).to_list(10000)
-
-    # Конвертиране на datetime обекти
-    for inv in invoices:
-        if isinstance(inv.get("date"), datetime):
-            inv["date"] = inv["date"].isoformat()
-        if isinstance(inv.get("created_at"), datetime):
-            inv["created_at"] = inv["created_at"].isoformat()
-
-    # Събиране на дневни обороти
-    revenues = await db.daily_revenue.find(scope, {"_id": 0}).to_list(10000)
-
-    for rev in revenues:
-        if isinstance(rev.get("date"), datetime):
-            rev["date"] = rev["date"].isoformat()
-        if isinstance(rev.get("created_at"), datetime):
-            rev["created_at"] = rev["created_at"].isoformat()
-
-    # Събиране на разходи
-    expenses = await db.expenses.find(scope, {"_id": 0}).to_list(10000)
-
-    for exp in expenses:
-        if isinstance(exp.get("date"), datetime):
-            exp["date"] = exp["date"].isoformat()
-        if isinstance(exp.get("created_at"), datetime):
-            exp["created_at"] = exp["created_at"].isoformat()
-    
-    # Събиране на данни за фирма
-    company_data = None
-    if company_id:
-        company_data = await db.companies.find_one({"id": company_id}, {"_id": 0})
-        if company_data:
-            if isinstance(company_data.get("created_at"), datetime):
-                company_data["created_at"] = company_data["created_at"].isoformat()
-            if isinstance(company_data.get("updated_at"), datetime):
-                company_data["updated_at"] = company_data["updated_at"].isoformat()
-    
-    backup_data = {
-        "id": str(uuid.uuid4()),
-        "user_id": current_user.user_id,
-        "user_email": current_user.email,
-        "user_name": current_user.name,
-        "company_id": company_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "app_version": "1.0.0",
-        "invoices": invoices,
-        "daily_revenues": revenues,
-        "expenses": expenses,
-        "company": company_data,
-        "statistics": {
-            "invoice_count": len(invoices),
-            "revenue_count": len(revenues),
-            "expense_count": len(expenses)
-        }
-    }
-    
-    # Записване на metadata за backup
-    backup_json = json.dumps(backup_data, ensure_ascii=False)
-    metadata = BackupMetadata(
-        user_id=current_user.user_id,
-        file_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-        size_bytes=len(backup_json.encode('utf-8')),
-        invoice_count=len(invoices),
-        revenue_count=len(revenues),
-        expense_count=len(expenses)
-    )
-    
-    await db.backup_metadata.insert_one(metadata.dict())
-    
-    return backup_data
-
-@api_router.get("/backup/list")
-async def list_backups(current_user: User = Depends(get_current_user)):
-    """Връща списък с всички backups на потребителя"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да вижда резервните копия")
-
-    backups = await db.backup_metadata.find(
-        {"user_id": current_user.user_id},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
-    
-    return {"backups": backups}
-
-@api_router.post("/backup/restore")
-@limiter.limit("5/minute")
-async def restore_backup(request: Request, backup_data: BackupRestoreRequest, current_user: User = Depends(get_current_user)):
-    """Възстановява данни от backup - само Owner, само в собствената му
-    фирма (company_id винаги се презаписва от сесията, никога от подадените
-    данни). Всеки запис се обработва поотделно, за да не провали един
-    невалиден ред цялото възстановяване."""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да възстановява резервно копие")
-
-    company_id, _ = await get_company_scope(current_user)
-
-    restored_counts = {"invoices": 0, "revenues": 0, "expenses": 0}
-    skipped_counts = {"invoices": 0, "revenues": 0, "expenses": 0}
-
-    # One existence-check query per collection instead of one per record -
-    # a backup can hold thousands of rows, and this was previously an
-    # N+1 (a find_one per item) on top of the N inserts already needed.
-    existing_invoice_ids = {
-        d["id"] for d in await db.invoices.find(
-            {"id": {"$in": [inv.id for inv in backup_data.invoices]}}, {"id": 1}
-        ).to_list(len(backup_data.invoices) or 1)
-    }
-    existing_revenue_ids = {
-        d["id"] for d in await db.daily_revenue.find(
-            {"id": {"$in": [r.id for r in backup_data.daily_revenues]}}, {"id": 1}
-        ).to_list(len(backup_data.daily_revenues) or 1)
-    }
-    existing_expense_ids = {
-        d["id"] for d in await db.expenses.find(
-            {"id": {"$in": [e.id for e in backup_data.expenses]}}, {"id": 1}
-        ).to_list(len(backup_data.expenses) or 1)
-    }
-
-    # Възстановяване на фактури
-    for invoice in backup_data.invoices:
-        try:
-            if invoice.id in existing_invoice_ids:
-                continue
-            doc = invoice.dict()
-            doc["user_id"] = current_user.user_id
-            doc["company_id"] = company_id
-            doc["date"] = datetime.fromisoformat(doc["date"].replace("Z", "+00:00"))
-            doc["created_at"] = (
-                datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
-                if doc.get("created_at") else datetime.now(timezone.utc)
-            )
-            await db.invoices.insert_one(doc)
-            restored_counts["invoices"] += 1
-        except Exception as e:
-            logger.warning(f"Backup restore: skipped invalid invoice {invoice.id}: {e}")
-            skipped_counts["invoices"] += 1
-
-    # Възстановяване на дневни обороти (date си остава низ "YYYY-MM-DD",
-    # както при нормално създаване - НЕ datetime обект)
-    for revenue in backup_data.daily_revenues:
-        try:
-            if revenue.id in existing_revenue_ids:
-                continue
-            doc = revenue.dict()
-            doc["user_id"] = current_user.user_id
-            doc["company_id"] = company_id
-            doc["date"] = doc["date"][:10]
-            doc["created_at"] = (
-                datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
-                if doc.get("created_at") else datetime.now(timezone.utc)
-            )
-            await db.daily_revenue.insert_one(doc)
-            restored_counts["revenues"] += 1
-        except Exception as e:
-            logger.warning(f"Backup restore: skipped invalid daily revenue {revenue.id}: {e}")
-            skipped_counts["revenues"] += 1
-
-    # Възстановяване на разходи (date също остава низ)
-    for expense in backup_data.expenses:
-        try:
-            if expense.id in existing_expense_ids:
-                continue
-            doc = expense.dict()
-            doc["user_id"] = current_user.user_id
-            doc["company_id"] = company_id
-            doc["date"] = doc["date"][:10]
-            doc["created_at"] = (
-                datetime.fromisoformat(doc["created_at"].replace("Z", "+00:00"))
-                if doc.get("created_at") else datetime.now(timezone.utc)
-            )
-            await db.expenses.insert_one(doc)
-            restored_counts["expenses"] += 1
-        except Exception as e:
-            logger.warning(f"Backup restore: skipped invalid expense {expense.id}: {e}")
-            skipped_counts["expenses"] += 1
-    
-    return {
-        "success": True,
-        "message": "Данните са възстановени успешно",
-        "restored": restored_counts,
-        "skipped": skipped_counts
-    }
-
-@api_router.get("/backup/status")
-async def get_backup_status(current_user: User = Depends(get_current_user)):
-    """Връща статус на последния backup"""
-    if current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Само титулярят може да вижда статуса на резервните копия")
-
-    last_backup = await db.backup_metadata.find_one(
-        {"user_id": current_user.user_id},
-        {"_id": 0}
-    )
-    
-    if last_backup:
-        return {
-            "has_backup": True,
-            "last_backup_date": last_backup.get("created_at"),
-            "file_name": last_backup.get("file_name"),
-            "statistics": {
-                "invoices": last_backup.get("invoice_count", 0),
-                "revenues": last_backup.get("revenue_count", 0),
-                "expenses": last_backup.get("expense_count", 0)
-            }
-        }
-    
-    return {
-        "has_backup": False,
-        "last_backup_date": None
-    }
 
 # ===================== ITEM PRICE TRACKING =====================
 
-@api_router.get("/items/price-alerts")
-async def get_price_alerts(
-    status: Optional[str] = None,  # unread, read, dismissed
-    invoice_id: Optional[str] = None,  # за показване на конкретна фактура кои артикули са с повишена цена
-    current_user: User = Depends(get_current_user)
-):
-    """Връща ценови аларми за фирмата"""
-    # Deliberately NOT gated on view_statistics - invoices.tsx calls this
-    # per-invoice (with invoice_id set) to show "+X% vs last purchase"
-    # badges on line items for ANY user who can view that invoice, not
-    # just users with the advanced-statistics permission.
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
 
-    if not company_id:
-        return {"alerts": [], "total": 0, "unread_count": 0}
 
-    query = {"company_id": company_id}
-    if status:
-        query["status"] = status
-    if invoice_id:
-        query["invoice_id"] = invoice_id
 
-    alerts = await db.price_alerts.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
-    
-    # Count unread
-    unread_count = await db.price_alerts.count_documents({"company_id": company_id, "status": "unread"})
-    
-    return {
-        "alerts": alerts,
-        "total": len(alerts),
-        "unread_count": unread_count
-    }
 
-@api_router.put("/items/price-alerts/{alert_id}")
-async def update_price_alert(
-    alert_id: str,
-    request: Request,
-    current_user: User = Depends(get_current_user)
-):
-    """Обновява статус на аларма (read, dismissed)"""
-    body = await request.json()
-    status = body.get("status")
-    
-    if status not in ["read", "dismissed"]:
-        raise HTTPException(status_code=400, detail="Невалиден статус")
-    
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    result = await db.price_alerts.update_one(
-        {"id": alert_id, "company_id": company_id},
-        {"$set": {"status": status}}
-    )
 
-    # matched_count (not modified_count) correctly means "not found" -
-    # modified_count is also 0 when the alert already had this exact
-    # status (e.g. marking an already-read alert read again), which isn't
-    # an error.
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Алармата не е намерена")
-    
-    return {"message": "Статусът е обновен"}
+class PriceAlertMuteCreate(BaseModel):
+    item_name: str
+    supplier: str
 
-@api_router.get("/items/price-alert-settings")
-async def get_price_alert_settings(current_user: User = Depends(get_current_user)):
-    """Връща настройки за ценови аларми"""
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {"threshold_percent": 10.0, "enabled": True}
-    
-    settings = await db.price_alert_settings.find_one({"company_id": company_id}, {"_id": 0})
-    
-    if not settings:
-        return {"threshold_percent": 10.0, "enabled": True}
-    
-    return {
-        "threshold_percent": settings.get("threshold_percent", 10.0),
-        "enabled": settings.get("enabled", True)
-    }
 
-@api_router.put("/items/price-alert-settings")
-async def update_price_alert_settings(
-    request: Request,
-    current_user: User = Depends(get_current_user)
-):
-    """Обновява настройки за ценови аларми"""
-    # Company-wide config for the price-tracking feature, same domain as
-    # the rest of /items/* and /statistics/items/* - gated on view_statistics
-    # like them, instead of any authenticated member being able to change
-    # it for everyone.
-    require_permission(current_user, "view_statistics")
-    body = await request.json()
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Нямате фирма")
-    
-    update_data = {}
-    if "threshold_percent" in body:
-        update_data["threshold_percent"] = float(body["threshold_percent"])
-    if "enabled" in body:
-        update_data["enabled"] = bool(body["enabled"])
-    
-    existing = await db.price_alert_settings.find_one({"company_id": company_id})
-    
-    if existing:
-        await db.price_alert_settings.update_one(
-            {"company_id": company_id},
-            {"$set": update_data}
-        )
-    else:
-        settings = PriceAlertSettings(company_id=company_id, **update_data)
-        await db.price_alert_settings.insert_one(settings.dict())
-    
-    return {"message": "Настройките са запазени"}
 
-@api_router.get("/items/price-history/{item_name}")
-async def get_item_price_history(
-    item_name: str,
-    supplier: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Връща история на цените за артикул"""
-    require_permission(current_user, "view_statistics")
-    from urllib.parse import unquote
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {"history": [], "statistics": {}}
-    
-    item_name = unquote(item_name).strip().lower()
-    
-    query = {
-        "company_id": company_id,
-        "item_name": item_name
-    }
-    if supplier:
-        query["supplier"] = {"$regex": f"^{re.escape(unquote(supplier))}$", "$options": "i"}
-    
-    history = await db.item_price_history.find(query, {"_id": 0}).sort("invoice_date", 1).to_list(1000)
-    
-    if not history:
-        return {"history": [], "statistics": {}}
-    
-    # Calculate statistics
-    prices = [h["unit_price"] for h in history]
-    avg_price = sum(prices) / len(prices) if prices else 0
-    min_price = min(prices) if prices else 0
-    max_price = max(prices) if prices else 0
-    
-    # Calculate variance
-    if len(prices) > 1:
-        variance = sum((p - avg_price) ** 2 for p in prices) / len(prices)
-        std_dev = variance ** 0.5
-    else:
-        std_dev = 0
-    
-    # Trend (last 3 vs first 3)
-    if len(prices) >= 6:
-        first_avg = sum(prices[:3]) / 3
-        last_avg = sum(prices[-3:]) / 3
-        trend_percent = ((last_avg - first_avg) / first_avg * 100) if first_avg > 0 else 0
-    else:
-        trend_percent = 0
-    
-    # Format history for response
-    formatted_history = []
-    for h in history:
-        date_val = h.get("invoice_date")
-        date_str = date_val.strftime("%Y-%m-%d") if isinstance(date_val, datetime) else str(date_val)[:10]
-        formatted_history.append({
-            "date": date_str,
-            "supplier": h.get("supplier"),
-            "unit_price": h.get("unit_price"),
-            "quantity": h.get("quantity"),
-            "unit": h.get("unit"),
-            "invoice_number": h.get("invoice_number")
-        })
-    
-    return {
-        "item_name": item_name,
-        "history": formatted_history,
-        "statistics": {
-            "avg_price": round(avg_price, 2),
-            "min_price": round(min_price, 2),
-            "max_price": round(max_price, 2),
-            "std_dev": round(std_dev, 2),
-            "trend_percent": round(trend_percent, 1),
-            "total_records": len(history)
-        }
-    }
 
-@api_router.get("/statistics/items")
-async def get_item_statistics(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    top_n: int = 10,
-    current_user: User = Depends(get_current_user)
-):
-    """Връща статистика за артикули - топ N по брой и стойност"""
-    require_permission(current_user, "view_statistics")
-    from collections import defaultdict
 
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {
-            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0},
-            "top_by_quantity": [],
-            "top_by_value": [],
-            "top_by_frequency": [],
-            "price_trends": []
-        }
-    
-    # Build date query
-    query = {"company_id": company_id}
-    if start_date or end_date:
-        query["invoice_date"] = {}
-        if start_date:
-            query["invoice_date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-        if end_date:
-            query["invoice_date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
-    
-    # Get all price history records
-    history = await db.item_price_history.find(query, {"_id": 0}).to_list(10000)
-    
-    if not history:
-        return {
-            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0},
-            "top_by_quantity": [],
-            "top_by_value": [],
-            "top_by_frequency": [],
-            "price_trends": []
-        }
-    
-    # Aggregate by item
-    item_stats = defaultdict(lambda: {
-        "quantity": 0,
-        "total_value": 0,
-        "frequency": 0,
-        "prices": [],
-        "suppliers": set()
-    })
-    
-    for record in history:
-        name = record["item_name"]
-        price = record["unit_price"]
-        qty = record["quantity"]
-        
-        item_stats[name]["quantity"] += qty
-        item_stats[name]["total_value"] += price * qty
-        item_stats[name]["frequency"] += 1
-        item_stats[name]["prices"].append(price)
-        item_stats[name]["suppliers"].add(record["supplier"])
-    
-    # Calculate statistics for each item
-    items_list = []
-    for name, stats in item_stats.items():
-        prices = stats["prices"]
-        avg_price = sum(prices) / len(prices) if prices else 0
-        
-        # Price variance
-        if len(prices) > 1:
-            variance = sum((p - avg_price) ** 2 for p in prices) / len(prices)
-            price_variance = (variance ** 0.5) / avg_price * 100 if avg_price > 0 else 0
-        else:
-            price_variance = 0
-        
-        # Trend
-        if len(prices) >= 4:
-            first_half = sum(prices[:len(prices)//2]) / (len(prices)//2)
-            second_half = sum(prices[len(prices)//2:]) / (len(prices) - len(prices)//2)
-            trend = ((second_half - first_half) / first_half * 100) if first_half > 0 else 0
-        else:
-            trend = 0
-        
-        items_list.append({
-            "item_name": name,
-            "quantity": round(stats["quantity"], 2),
-            "total_value": round(stats["total_value"], 2),
-            "frequency": stats["frequency"],
-            "avg_price": round(avg_price, 2),
-            "min_price": round(min(prices), 2) if prices else 0,
-            "max_price": round(max(prices), 2) if prices else 0,
-            "price_variance": round(price_variance, 1),
-            "trend_percent": round(trend, 1),
-            "supplier_count": len(stats["suppliers"])
-        })
-    
-    # Sort by different criteria
-    top_by_quantity = sorted(items_list, key=lambda x: x["quantity"], reverse=True)[:top_n]
-    top_by_value = sorted(items_list, key=lambda x: x["total_value"], reverse=True)[:top_n]
-    top_by_frequency = sorted(items_list, key=lambda x: x["frequency"], reverse=True)[:top_n]
-    
-    # Items with significant price changes
-    price_trends = sorted(
-        [i for i in items_list if abs(i["trend_percent"]) > 5],
-        key=lambda x: abs(x["trend_percent"]),
-        reverse=True
-    )[:top_n]
-    
-    # Totals
-    total_quantity = sum(i["quantity"] for i in items_list)
-    total_value = sum(i["total_value"] for i in items_list)
-    
-    return {
-        "totals": {
-            "total_items": round(total_quantity, 2),
-            "total_value": round(total_value, 2),
-            "unique_items": len(items_list)
-        },
-        "top_by_quantity": top_by_quantity,
-        "top_by_value": top_by_value,
-        "top_by_frequency": top_by_frequency,
-        "price_trends": price_trends
-    }
-
-@api_router.get("/items/price-inflation")
-async def get_price_inflation(
-    start_date: str,
-    end_date: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Обща 'инфлация' на покупните цени за избран период - за всеки
-    артикул, купен поне два пъти в периода, сравнява цената при първата и
-    последната покупка, после осреднява промяната претеглено спрямо
-    реално похарчената сума за артикула (не проста средна аритметична) -
-    така артикул, купуван често за големи суми, тежи повече в общия
-    процент от такъв, купен веднъж за дребна сума."""
-    require_permission(current_user, "view_statistics")
-    from collections import defaultdict
-
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-
-    empty_response = {
-        "period": {"start_date": start_date, "end_date": end_date},
-        "overall_change_percent": 0,
-        "items_compared": 0,
-        "total_weighted_spend": 0,
-        "items": [],
-    }
-    if not company_id:
-        return empty_response
-
-    query = {
-        "company_id": company_id,
-        "invoice_date": {
-            "$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00"),
-            "$lte": datetime.fromisoformat(end_date + "T23:59:59+00:00"),
-        },
-    }
-    history = await db.item_price_history.find(query, {"_id": 0}).sort("invoice_date", 1).to_list(10000)
-    if not history:
-        return empty_response
-
-    by_item = defaultdict(list)
-    for record in history:
-        by_item[record["item_name"]].append(record)
-
-    items_result = []
-    for item_name, records in by_item.items():
-        if len(records) < 2:
-            continue  # Only one purchase in the period - no comparison point
-        first, last = records[0], records[-1]
-        start_price = first["unit_price"]
-        end_price = last["unit_price"]
-        if start_price <= 0:
-            continue
-        change_percent = ((end_price - start_price) / start_price) * 100
-        spend_in_period = sum(r["unit_price"] * r["quantity"] for r in records)
-
-        items_result.append({
-            "item_name": item_name,
-            "supplier": last["supplier"],
-            "start_price": round(start_price, 2),
-            "end_price": round(end_price, 2),
-            "change_percent": round(change_percent, 1),
-            "spend_in_period": round(spend_in_period, 2),
-            "purchase_count": len(records),
-            "first_date": first["invoice_date"].date().isoformat(),
-            "last_date": last["invoice_date"].date().isoformat(),
-        })
-
-    items_result.sort(key=lambda x: x["change_percent"], reverse=True)
-
-    total_weight = sum(i["spend_in_period"] for i in items_result)
-    if total_weight > 0:
-        overall_change = sum(i["change_percent"] * i["spend_in_period"] for i in items_result) / total_weight
-    else:
-        overall_change = 0
-
-    return {
-        "period": {"start_date": start_date, "end_date": end_date},
-        "overall_change_percent": round(overall_change, 1),
-        "items_compared": len(items_result),
-        "total_weighted_spend": round(total_weight, 2),
-        "items": items_result,
-    }
-
-@api_router.get("/statistics/items/{item_name}/by-supplier")
-async def get_item_by_supplier(
-    item_name: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Сравнява цените на артикул между различни доставчици"""
-    require_permission(current_user, "view_statistics")
-    from collections import defaultdict
-    from urllib.parse import unquote
-
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {"item_name": item_name, "suppliers": []}
-    
-    normalized_name = unquote(item_name).strip().lower()
-    
-    history = await db.item_price_history.find(
-        {"company_id": company_id, "item_name": normalized_name},
-        {"_id": 0}
-    ).to_list(10000)
-    
-    if not history:
-        return {"item_name": item_name, "suppliers": [], "recommendation": None}
-    
-    # Group by supplier
-    supplier_data = defaultdict(lambda: {"prices": [], "quantities": [], "dates": []})
-    
-    for record in history:
-        supplier = record["supplier"]
-        supplier_data[supplier]["prices"].append(record["unit_price"])
-        supplier_data[supplier]["quantities"].append(record["quantity"])
-        date_val = record.get("invoice_date")
-        if isinstance(date_val, datetime):
-            supplier_data[supplier]["dates"].append(date_val)
-    
-    # Calculate stats per supplier
-    suppliers = []
-    for supplier, data in supplier_data.items():
-        prices = data["prices"]
-        avg = sum(prices) / len(prices) if prices else 0
-        last_date = max(data["dates"]) if data["dates"] else None
-        
-        suppliers.append({
-            "supplier": supplier,
-            "avg_price": round(avg, 2),
-            "min_price": round(min(prices), 2) if prices else 0,
-            "max_price": round(max(prices), 2) if prices else 0,
-            "last_price": round(prices[-1], 2) if prices else 0,
-            "purchase_count": len(prices),
-            "total_quantity": round(sum(data["quantities"]), 2),
-            "last_purchase": last_date.strftime("%Y-%m-%d") if last_date else None
-        })
-    
-    # Sort by average price (cheapest first)
-    suppliers.sort(key=lambda x: x["avg_price"])
-    
-    # Recommendation
-    recommendation = None
-    if len(suppliers) >= 2:
-        cheapest = suppliers[0]
-        most_expensive = suppliers[-1]
-        if cheapest["avg_price"] > 0:
-            savings_percent = ((most_expensive["avg_price"] - cheapest["avg_price"]) / most_expensive["avg_price"] * 100)
-            if savings_percent > 5:
-                recommendation = {
-                    "best_supplier": cheapest["supplier"],
-                    "avg_price": cheapest["avg_price"],
-                    "potential_savings_percent": round(savings_percent, 1)
-                }
-    
-    return {
-        "item_name": item_name,
-        "suppliers": suppliers,
-        "recommendation": recommendation
-    }
 
 # ===================== AI ITEM MERGING =====================
 
@@ -6130,26 +5311,48 @@ async def run_ai_item_merge(company_id: str) -> dict:
         items_text = "\n".join(unique_items[:200])
 
         prompt = f"""Анализирай следния списък с имена на продукти/суровини и групирай сходните продукти.
-Търси продукти, които са едни и същи, но са записани по различен начин: различен регистър на буквите, пунктуация, съкращения, правописни грешки, синоними, различен словоред или разфасовка на един и същ артикул.
+Търси продукти, които са едни и същи, но са записани по различен начин: различен регистър на буквите, пунктуация, съкращения, правописни грешки, синоними или различен словоред.
 
 Списък с продукти:
 {items_text}
 
 Не групирай продукти, които са наистина различни (например "Олио" и "Оцет" са РАЗЛИЧНИ продукти).
+НИКОГА не групирай различни размери или разфасовки на един продукт (например "Доматен сос 1кг" и "Доматен сос 5кг", или "Кола 0.5л" и "Кола 0.5л x 6") - те имат различна цена и количество и трябва да останат отделни.
 Групирай САМО ако очевидно става дума за същия продукт/суровина с различно изписване.
 Върни само групи с 2 или повече варианта - пропусни продукти без дубликат."""
 
-        response = await anthropic_client.messages.parse(
+        response = await anthropic_client.messages.parse(  # type: ignore[union-attr]  # guarded by the AI_FEATURES_ENABLED check above; anthropic_client is non-None whenever that is true
             model="claude-opus-5-5",
             max_tokens=8000,
             system="Ти си експертен асистент за анализ и групиране на продукти/суровини за малък бизнес в България.",
             messages=[{"role": "user", "content": prompt}],
             output_format=ItemMergeResult,
         )
+        await log_ai_usage(company_id, "item_merge", response)
 
         parsed = response.parsed_output
         groups = parsed.groups if parsed else []
-        merged_groups = [g.model_dump() for g in groups if g.canonical_name and g.variants]
+        distinct_pairs = {
+            (d["a"], d["b"]) for d in await db.item_distinctions.find(
+                {"company_id": company_id}, {"_id": 0, "a": 1, "b": 1}
+            ).to_list(5000)
+        }
+        # The prompt forbids joining different sizes, but this is enforced
+        # here too: a size-mismatched variant is dropped, and a group left
+        # with nothing to merge is dropped with it.
+        merged_groups: List[Dict[str, Any]] = []
+        for g in groups:
+            if not g.canonical_name:
+                continue
+            signature = item_size_signature(g.canonical_name)
+            canonical_key = g.canonical_name.lower()
+            same_size = [
+                v for v in g.variants
+                if item_size_signature(v) == signature
+                and tuple(sorted((canonical_key, v.lower()))) not in distinct_pairs
+            ]
+            if any(v.lower() != g.canonical_name.lower() for v in same_size):
+                merged_groups.append({"canonical_name": g.canonical_name, "variants": same_size})
 
         # Save merge mappings to database
         for group in merged_groups:
@@ -6218,210 +5421,18 @@ async def maybe_schedule_ai_item_merge(company_id: Optional[str]):
     except Exception as e:
         logger.error(f"Background AI item merge error: {str(e)}")
 
-@api_router.post("/items/ai-merge")
-@limiter.limit("10/minute")
-async def ai_merge_similar_items(
-    request: Request,
-    current_user: User = Depends(get_current_user)
-):
-    # Gated on view_statistics, same as the rest of the statistics suite -
-    # this is a paid AI call that overwrites company-wide merge mappings
-    # everyone's item stats rely on, not something any authenticated member
-    # should be able to trigger regardless of their actual permissions.
-    require_permission(current_user, "view_statistics")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
 
-    if not company_id:
-        return {"merged_groups": [], "total_merged": 0}
 
-    try:
-        return await run_ai_item_merge(company_id)
-    except Exception as e:
-        raise ai_exception_to_http(e, "AI item merge error")
 
-@api_router.get("/items/merge-mappings")
-async def get_merge_mappings(current_user: User = Depends(get_current_user)):
-    """Връща текущите сливания на продукти"""
-    require_permission(current_user, "view_statistics")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {"mappings": []}
-    
-    mappings = await db.item_merge_mappings.find(
-        {"company_id": company_id},
-        {"_id": 0}
-    ).to_list(1000)
-    
-    return {"mappings": mappings}
-
-@api_router.delete("/items/merge-mappings/{canonical_name}")
-async def delete_merge_mapping(
-    canonical_name: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Изтрива сливане на продукти"""
-    require_permission(current_user, "view_statistics")
-    from urllib.parse import unquote
-
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        raise HTTPException(status_code=404, detail="Фирмата не е намерена")
-    
-    result = await db.item_merge_mappings.delete_one({
-        "company_id": company_id,
-        "canonical_name": unquote(canonical_name).lower()
-    })
-    
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Сливането не е намерено")
-    
-    return {"message": "Сливането е изтрито"}
-
-@api_router.get("/statistics/items/merged")
-async def get_merged_item_statistics(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    top_n: int = 10,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Връща статистика за артикули с приложени AI сливания.
-    Сходните продукти са обединени в една позиция.
-    """
-    require_permission(current_user, "view_statistics")
-    from collections import defaultdict
-
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {
-            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0, "merged_items": 0},
-            "top_by_quantity": [],
-            "top_by_value": [],
-            "merge_applied": False
-        }
-    
-    # Get merge mappings
-    mappings = await db.item_merge_mappings.find(
-        {"company_id": company_id},
-        {"_id": 0}
-    ).to_list(1000)
-    
-    # Create variant to canonical mapping
-    variant_to_canonical = {}
-    canonical_display = {}
-    for m in mappings:
-        canonical = m["canonical_name"]
-        canonical_display[canonical] = m.get("display_name", canonical)
-        for variant in m.get("variants", []):
-            variant_to_canonical[variant.lower()] = canonical
-    
-    # Build date query
-    query = {"company_id": company_id}
-    if start_date or end_date:
-        query["invoice_date"] = {}
-        if start_date:
-            query["invoice_date"]["$gte"] = datetime.fromisoformat(start_date + "T00:00:00+00:00")
-        if end_date:
-            query["invoice_date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
-    
-    # Get all price history records
-    history = await db.item_price_history.find(query, {"_id": 0}).to_list(10000)
-    
-    if not history:
-        return {
-            "totals": {"total_items": 0, "total_value": 0, "unique_items": 0, "merged_items": 0},
-            "top_by_quantity": [],
-            "top_by_value": [],
-            "merge_applied": bool(mappings)
-        }
-    
-    # Aggregate with merging
-    item_stats = defaultdict(lambda: {
-        "display_name": "",
-        "quantity": 0,
-        "total_value": 0,
-        "frequency": 0,
-        "prices": [],
-        "suppliers": set(),
-        "original_names": set()
-    })
-    
-    merged_count = 0
-    for record in history:
-        original_name = record["item_name"]
-        name_lower = original_name.lower()
-        
-        # Apply merge mapping
-        if name_lower in variant_to_canonical:
-            canonical = variant_to_canonical[name_lower]
-            display = canonical_display.get(canonical, canonical.title())
-            merged_count += 1
-        else:
-            canonical = name_lower
-            display = original_name
-        
-        price = record["unit_price"]
-        qty = record["quantity"]
-        
-        item_stats[canonical]["display_name"] = display
-        item_stats[canonical]["quantity"] += qty
-        item_stats[canonical]["total_value"] += price * qty
-        item_stats[canonical]["frequency"] += 1
-        item_stats[canonical]["prices"].append(price)
-        item_stats[canonical]["suppliers"].add(record["supplier"])
-        item_stats[canonical]["original_names"].add(original_name)
-    
-    # Calculate totals
-    total_items = sum(s["frequency"] for s in item_stats.values())
-    total_value = sum(s["total_value"] for s in item_stats.values())
-    unique_items = len(item_stats)
-    
-    # Build top lists
-    items_list = []
-    for canonical, stats in item_stats.items():
-        prices = stats["prices"]
-        avg_price = sum(prices) / len(prices) if prices else 0
-        
-        items_list.append({
-            "name": stats["display_name"],
-            "canonical_name": canonical,
-            "total_quantity": round(stats["quantity"], 2),
-            "total_value": round(stats["total_value"], 2),
-            "frequency": stats["frequency"],
-            "avg_price": round(avg_price, 2),
-            "supplier_count": len(stats["suppliers"]),
-            "original_names": list(stats["original_names"])[:5]  # Show max 5 variants
-        })
-    
-    # Sort for top lists
-    top_by_quantity = sorted(items_list, key=lambda x: x["total_quantity"], reverse=True)[:top_n]
-    top_by_value = sorted(items_list, key=lambda x: x["total_value"], reverse=True)[:top_n]
-    
-    return {
-        "totals": {
-            "total_items": total_items,
-            "total_value": round(total_value, 2),
-            "unique_items": unique_items,
-            "merged_items": merged_count
-        },
-        "top_by_quantity": top_by_quantity,
-        "top_by_value": top_by_value,
-        "merge_applied": bool(mappings),
-        "merge_groups_count": len(mappings)
-    }
 
 # ===================== EXPORT ENDPOINTS =====================
 
 from services.export_service import ExportService
 from services.audit_service import AuditService
 from services.forecast_service import ForecastService
+from services import recurring_service
+from services import cash_flow as cash_flow_service
+from services import break_even as break_even_service
 from services import import_service
 from services import push_service
 
@@ -6430,101 +5441,41 @@ audit_service = AuditService(db)
 forecast_service = ForecastService(db)
 scan_credit_service = ScanCreditService(db)
 
-@api_router.get("/export/invoices/excel")
-@limiter.limit("20/minute")
-async def export_invoices_excel(
-    request: Request,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Export invoices to Excel"""
-    require_permission(current_user, "export_data")
-    company_id, query = await get_company_scope(current_user)
+async def send_price_alert_pushes(company_id: str, alerts: List["PriceAlert"]):
+    """Fire-and-forget background task: pushes a real phone notification for
+    price alerts raised by the invoice just scanned, mirroring
+    _budget_alert_tick's push pattern below. Alerts reaching this point are
+    already filtered by price_alert_settings/price_alert_mutes (see
+    create_invoice), so every alert here is one the push should fire for -
+    no further muting check is needed."""
+    if not alerts:
+        return
+    recipients = await db.users.find(
+        {"company_id": company_id, "permissions": "manage_invoices"}, {"_id": 0, "user_id": 1}
+    ).to_list(100)
+    recipient_ids = [r["user_id"] for r in recipients]
+    if not recipient_ids:
+        return
 
-    if start_date:
-        query["date"] = {"$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00")}
-    if end_date:
-        if "date" not in query:
-            query["date"] = {}
-        query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
-    
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(10000)
-    
-    # Get company name
-    company_name = ""
-    if company_id:
-        company = await db.companies.find_one({"id": company_id})
-        company_name = company.get("name", "") if company else ""
-    
-    try:
-        excel_data = ExportService.generate_invoices_excel(invoices, company_name)
-        
-        # Log export
-        await audit_service.log_action(
-            user_id=current_user.user_id,
-            user_name=current_user.name,
-            action="export",
-            entity_type="invoices",
-            company_id=company_id,
-            details={"format": "excel", "count": len(invoices)}
-        )
-        
-        filename = f"invoices_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-        return Response(
-            content=excel_data,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
-    except ImportError:
-        raise HTTPException(status_code=500, detail="Excel export not available")
+    if len(alerts) == 1:
+        a = alerts[0]
+        title = "Промяна в цена"
+        body = f"{a.item_name} при {a.supplier}: {fmt_amount(a.old_price)} → {fmt_eur(a.new_price)} ({a.change_percent:+.1f}%)"
+        if a.monthly_impact:
+            body += f", ≈ {_eur(a.monthly_impact)} € на месец"
+    else:
+        title = "Промени в цени"
+        body = f"{len(alerts)} артикула с променена цена в последната сканирана фактура."
+        total = sum(a.monthly_impact or 0 for a in alerts)
+        if total:
+            body += f" Общо ≈ {_eur(total)} € на месец."
 
-@api_router.get("/export/invoices/pdf")
-@limiter.limit("20/minute")
-async def export_invoices_pdf(
-    request: Request,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Export invoices to PDF"""
-    require_permission(current_user, "export_data")
-    company_id, query = await get_company_scope(current_user)
+    await push_service.send_to_users(
+        db, recipient_ids, title=title, body=body,
+        data={"type": "price_alert"},
+    )
 
-    if start_date:
-        query["date"] = {"$gte": datetime.fromisoformat(start_date + "T00:00:00+00:00")}
-    if end_date:
-        if "date" not in query:
-            query["date"] = {}
-        query["date"]["$lte"] = datetime.fromisoformat(end_date + "T23:59:59+00:00")
-    
-    invoices = await db.invoices.find(query, {"_id": 0, "image_base64": 0, "image_base64s": 0}).sort("date", -1).to_list(10000)
-    
-    company_name = ""
-    if company_id:
-        company = await db.companies.find_one({"id": company_id})
-        company_name = company.get("name", "") if company else ""
-    
-    try:
-        pdf_data = ExportService.generate_invoices_pdf(invoices, company_name)
-        
-        await audit_service.log_action(
-            user_id=current_user.user_id,
-            user_name=current_user.name,
-            action="export",
-            entity_type="invoices",
-            company_id=company_id,
-            details={"format": "pdf", "count": len(invoices)}
-        )
-        
-        filename = f"invoices_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-        return Response(
-            content=pdf_data,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
-    except ImportError:
-        raise HTTPException(status_code=500, detail="PDF export not available")
+
 
 # ===================== BUDGET ENDPOINTS =====================
 
@@ -6533,118 +5484,75 @@ class BudgetCreate(BaseModel):
     expense_limit: float
     alert_threshold: float = 80.0
 
-@api_router.get("/budget")
-async def get_budgets(current_user: User = Depends(get_current_user)):
-    """Get all budgets for company"""
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {"budgets": []}
-    
-    budgets = await db.budgets.find({"company_id": company_id}, {"_id": 0}).sort("month", -1).to_list(24)
-    return {"budgets": budgets}
 
-@api_router.post("/budget")
-async def create_budget(budget: BudgetCreate, current_user: User = Depends(get_current_user)):
-    """Create or update budget for a month"""
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        raise HTTPException(status_code=400, detail="No company associated")
-    
-    # Check if budget exists for this month
-    existing = await db.budgets.find_one({"company_id": company_id, "month": budget.month})
-    
-    if existing:
-        await db.budgets.update_one(
-            {"company_id": company_id, "month": budget.month},
-            {"$set": {"expense_limit": budget.expense_limit, "alert_threshold": budget.alert_threshold}}
-        )
-    else:
-        budget_doc = {
-            "id": str(uuid.uuid4()),
-            "company_id": company_id,
-            "month": budget.month,
-            "expense_limit": budget.expense_limit,
-            "alert_threshold": budget.alert_threshold,
-            "created_at": datetime.now(timezone.utc)
-        }
-        await db.budgets.insert_one(budget_doc)
-    
-    return {"message": "Budget saved"}
 
-@api_router.get("/budget/status")
-async def get_budget_status(current_user: User = Depends(get_current_user)):
-    """Get current month budget status"""
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {"has_budget": False}
-    
-    current_month = datetime.now().strftime("%Y-%m")
-    budget = await db.budgets.find_one({"company_id": company_id, "month": current_month}, {"_id": 0})
-
+async def compute_budget_status(company_id: str, month: str, visibility: Optional[dict] = None) -> Optional[dict]:
+    """Shared by the live /budget/status endpoint and the background
+    threshold-alert tick below, so both agree exactly on what "percent
+    used" means (invoices + off-book expenses + payroll + depreciation).
+    With a viewer's visibility, what they may not see (off-book expenses,
+    the payroll) is out of their figures, as out of their totals; without
+    one, the whole company's. Returns None if the company has no budget set
+    for that month."""
+    budget = await db.budgets.find_one({"company_id": company_id, "month": month}, {"_id": 0})
     if not budget:
-        return {"has_budget": False}
+        return None
 
-    # Calculate current expenses. Bounded at both ends - an unbounded $gte
-    # alone would also pull in any future-dated invoice/expense (a
-    # pre-scheduled invoice, a typo'd date) into THIS month's budget check.
-    now = datetime.now(timezone.utc)
-    month_start_str = f"{current_month}-01"
-    month_start = datetime.fromisoformat(f"{month_start_str}T00:00:00+00:00")
-    if now.month == 12:
-        month_end_date = now.replace(year=now.year + 1, month=1, day=1) - timedelta(days=1)
-    else:
-        month_end_date = now.replace(month=now.month + 1, day=1) - timedelta(days=1)
-    month_end_str = month_end_date.strftime("%Y-%m-%d")
-    month_end = datetime.fromisoformat(f"{month_end_str}T00:00:00+00:00")
-    _, scope = await get_company_scope(current_user)
-
-    invoices = await db.invoices.find(
-        {**scope, "date": {"$gte": month_start, "$lte": month_end}},
-        {"total_amount": 1}
-    ).to_list(10000)
-
-    expenses = await db.expenses.find(
-        {**scope, "date": {"$gte": month_start_str, "$lte": month_end_str}},
-        {"amount": 1}
-    ).to_list(10000)
-
-    # Payroll and depreciation are real, recurring costs of running the
-    # business - a budget cap that only tracked invoices and off-book
-    # expenses would silently ignore the two costs guaranteed to happen
-    # every month, and understate how close the company actually is to its
-    # limit. Same helpers and period bounds as /statistics/summary.
-    total_payroll_cost = await get_payroll_cost_for_period(company_id, current_user.user_id, month_start_str, month_end_str)
-    total_depreciation_expense = await get_depreciation_cost_for_period(company_id, current_user.user_id, month_start_str, month_end_str)
-
-    total_spent = sum(inv.get("total_amount", 0) for inv in invoices)
-    total_spent += sum(exp.get("amount", 0) for exp in expenses)
-    total_spent += total_payroll_cost
-    total_spent += total_depreciation_expense
+    # The month's spend, read through period_totals like Home and every
+    # other module - every invoice and off-book expense of the month's
+    # days, plus its payroll and depreciation (real, recurring costs a
+    # budget cap must not ignore).
+    year, mon = int(month[:4]), int(month[5:7])
+    scope = await company_data_scope(company_id)
+    whole = Period.month(year, mon)
+    # A month still running counts through today, like Home (counted_period):
+    # the invoices and off-book expenses so far, and the days gone by of
+    # the month's payroll and depreciation - not a whole month of salaries
+    # on its first day. user_id is unused by the payroll/depreciation
+    # helpers whenever company_id is set - a placeholder is safe.
+    counted = counted_period(whole)
+    totals = await period_totals(company_id, scope, "", counted)
+    show_off_book = visibility is None or bool(visibility.get("off_book_expenses"))
+    show_payroll = visibility is None or bool(visibility.get("payroll", True))
+    total_payroll_cost = totals["payroll_cost"] if show_payroll else 0.0
+    total_depreciation_expense = totals["depreciation_cost"]
+    off_book = totals["off_book_expenses"] if show_off_book else 0.0
+    variable_so_far = totals["invoice_total"] + off_book
+    total_spent = variable_so_far + total_payroll_cost + total_depreciation_expense
 
     limit = budget.get("expense_limit", 0)
     threshold = budget.get("alert_threshold", 80)
-    
+
     percent_used = (total_spent / limit * 100) if limit > 0 else 0
     is_alert = percent_used >= threshold
     is_exceeded = percent_used >= 100
-    
+
+    # Where the month is heading: purchases at their pace so far, plus the
+    # month's whole payroll and depreciation (fixed, not a pace), plus its
+    # recurring expenses as they are - paid or still to come, never spread
+    # as a pace (rent paid on the 5th is not a daily rate).
+    expected_month_end = None
+    if counted.days < whole.days:
+        fixed_whole_month = (
+            (await get_payroll_cost_for_period(company_id, "", whole.start, whole.end) if show_payroll else 0.0)
+            + await get_depreciation_cost_for_period(company_id, "", whole.start, whole.end)
+        )
+        recurring = await recurring_service.month_projection(db, company_id, scope, year, mon, counted.end, show_off_book)
+        paced = max(0.0, variable_so_far - recurring["paid_so_far"])
+        expected_month_end = round(paced / counted.days * whole.days + recurring["month_total"] + fixed_whole_month, 2)
+
     return {
+        "is_running": counted.days < whole.days,
+        "counted_through": counted.end.isoformat(),
+        "expected_month_end": expected_month_end,
+        "expected_percent": round(expected_month_end / limit * 100, 1) if expected_month_end is not None and limit > 0 else None,
         "has_budget": True,
-        "month": current_month,
+        "month": month,
         "expense_limit": limit,
         "total_spent": round(total_spent, 2),
-        "total_invoice_amount": round(sum(inv.get("total_amount", 0) for inv in invoices), 2),
-        "total_non_invoice_expenses": round(sum(exp.get("amount", 0) for exp in expenses), 2),
-        "total_payroll_cost": round(total_payroll_cost, 2),
+        "total_invoice_amount": round(totals["invoice_total"], 2),
+        "total_non_invoice_expenses": round(off_book, 2) if show_off_book else None,
+        "total_payroll_cost": round(total_payroll_cost, 2) if show_payroll else None,
         "total_depreciation_expense": round(total_depreciation_expense, 2),
         "remaining": round(max(0, limit - total_spent), 2),
         "percent_used": round(percent_used, 1),
@@ -6653,118 +5561,15 @@ async def get_budget_status(current_user: User = Depends(get_current_user)):
         "is_exceeded": is_exceeded
     }
 
-# ===================== RECURRING EXPENSES =====================
 
-class RecurringExpenseCreate(BaseModel):
-    description: str
-    amount: float
-    day_of_month: int  # 1-28
-    category: Optional[str] = None
+# Recurring expenses: routers/recurring.py and services/recurring_service.py.
 
-@api_router.get("/recurring-expenses")
-async def get_recurring_expenses(current_user: User = Depends(get_current_user)):
-    """Get recurring expenses"""
-    # Same gate as the /budget endpoints this feature lives alongside in
-    # budget.tsx (which already hides the whole screen without
-    # manage_budget) - without it, a member lacking that permission could
-    # still call the API directly.
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        return {"recurring_expenses": []}
-    
-    expenses = await db.recurring_expenses.find(
-        {"company_id": company_id},
-        {"_id": 0}
-    ).to_list(100)
-    
-    return {"recurring_expenses": expenses}
 
-@api_router.post("/recurring-expenses")
-async def create_recurring_expense(
-    expense: RecurringExpenseCreate,
-    current_user: User = Depends(get_current_user)
-):
-    """Create recurring expense"""
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    if not company_id:
-        raise HTTPException(status_code=400, detail="No company associated")
-    
-    if expense.day_of_month < 1 or expense.day_of_month > 28:
-        raise HTTPException(status_code=400, detail="Day must be between 1 and 28")
-    
-    expense_doc = {
-        "id": str(uuid.uuid4()),
-        "company_id": company_id,
-        "user_id": current_user.user_id,
-        "description": expense.description,
-        "amount": expense.amount,
-        "day_of_month": expense.day_of_month,
-        "category": expense.category,
-        "is_active": True,
-        "last_generated": None,
-        "created_at": datetime.now(timezone.utc)
-    }
-    
-    await db.recurring_expenses.insert_one(expense_doc)
-    return {"message": "Recurring expense created", "id": expense_doc["id"]}
 
-@api_router.delete("/recurring-expenses/{expense_id}")
-async def delete_recurring_expense(expense_id: str, current_user: User = Depends(get_current_user)):
-    """Delete recurring expense"""
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    
-    result = await db.recurring_expenses.delete_one({"id": expense_id, "company_id": company_id})
-    
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Expense not found")
-    
-    return {"message": "Deleted"}
 
 # ===================== FORECAST ENDPOINTS =====================
 
-@api_router.get("/forecast/expenses")
-async def get_expense_forecast(
-    months_ahead: int = 3,
-    current_user: User = Depends(get_current_user)
-):
-    """Get expense forecast. Gated on view_statistics, matching the
-    frontend's own gate for the forecast card on the stats screen."""
-    require_permission(current_user, "view_statistics")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
 
-    if not company_id:
-        return {"error": "No company"}
-
-    visibility = get_financial_visibility(current_user)
-    return await forecast_service.get_expense_forecast(
-        company_id, months_ahead,
-        include_off_book_expenses=visibility["off_book_expenses"],
-    )
-
-@api_router.get("/forecast/revenue")
-async def get_revenue_forecast(
-    months_ahead: int = 3,
-    current_user: User = Depends(get_current_user)
-):
-    """Get revenue forecast. Gated on view_statistics, matching the
-    frontend's own gate for the forecast card on the stats screen."""
-    require_permission(current_user, "view_statistics")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-
-    if not company_id:
-        return {"error": "No company"}
-
-    return await forecast_service.get_revenue_forecast(company_id, months_ahead)
 
 # ===================== PAYROLL / ВЕДОМОСТ ЗА ЗАПЛАТИ =====================
 
@@ -6774,7 +5579,7 @@ class PayrollAgreementType(str, Enum):
 
 class Employee(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
+    user_id: str  # who CREATED/owns this payroll record (scope field, see simple_scope_query) - not the employee's own login
     company_id: Optional[str] = None
     name: str
     position: Optional[str] = None
@@ -6784,6 +5589,20 @@ class Employee(BaseModel):
     food_vouchers: float = 0  # ваучери за храна, месечно
     additional_insurance: float = 0  # ДДЗО, месечно
     active: bool = True
+    # Optional link to this SAME person's actual app account (a company
+    # member with their own login), distinct from the `user_id` field
+    # above. Lets the work-schedule feature cross-check a shift against
+    # this employee's already-recorded leave - an Employee payroll record
+    # doesn't require a login at all (e.g. kitchen staff who never use the
+    # app), so this stays optional rather than merging the two identities.
+    linked_user_id: Optional[str] = None
+    # The location they work at (routers/locations) - its payroll goes there.
+    location_id: Optional[str] = None
+    # Paid annual leave, in working days a year (чл. 155 КТ: at least 20),
+    # and the unused days carried into a year - {"year", "days"} - entered
+    # once; the years after it are worked out (employee_leave_balance).
+    annual_leave_days: float = 20
+    leave_carryover: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class EmployeeCreate(BaseModel):
@@ -6794,6 +5613,9 @@ class EmployeeCreate(BaseModel):
     agreement_type: PayrollAgreementType = PayrollAgreementType.GROSS
     food_vouchers: float = 0
     additional_insurance: float = 0
+    linked_user_id: Optional[str] = None
+    annual_leave_days: float = Field(default=20, ge=0, le=365)
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
@@ -6804,6 +5626,10 @@ class EmployeeUpdate(BaseModel):
     food_vouchers: Optional[float] = None
     additional_insurance: Optional[float] = None
     active: Optional[bool] = None
+    linked_user_id: Optional[str] = None
+    annual_leave_days: Optional[float] = Field(default=None, ge=0, le=365)
+    # "" takes them off any location.
+    location_id: Optional[str] = Field(default=None, max_length=64)
 
 class PayrollRates(BaseModel):
     company_id: str
@@ -6830,6 +5656,9 @@ class PayrollEntryCreate(BaseModel):
     bonus_amount: float = Field(default=0, ge=0)
     notes: Optional[str] = None
     image_base64: Optional[str] = None
+    # A month already paid to this person through Work Schedule needs an
+    # explicit yes (answered 428 otherwise).
+    confirm_double_pay: bool = False
 
 def calculate_payroll(
     base_amount: float,
@@ -6886,215 +5715,158 @@ def calculate_payroll(
         "employee_contributions": round(employee_contributions, 2),
         "employer_contributions": round(employer_contributions, 2),
         "income_tax": round(income_tax, 2),
+        # Only ever non-zero for a ведомост imported from the accountant's
+        # own PDF (see PAYROLL PDF IMPORT below) - this formula-based
+        # estimate has no concept of an advance/garnishment/other
+        # withholding, so it's always 0 here.
+        "other_deductions": 0.0,
         "net_amount": round(net_amount, 2),
         "food_vouchers": round(food_vouchers, 2),
         "additional_insurance": round(additional_insurance, 2),
         "total_employer_cost": round(total_employer_cost, 2),
     }
 
-async def get_payroll_rates_dict(company_id: Optional[str]) -> dict:
-    if not company_id:
-        return dict(DEFAULT_PAYROLL_RATES)
-    rates = await db.payroll_rates.find_one({"company_id": company_id}, {"_id": 0})
-    if not rates:
-        return dict(DEFAULT_PAYROLL_RATES)
-    return {**DEFAULT_PAYROLL_RATES, **rates}
+# The rates before any version was dated: they count from the start.
+RATES_FROM_THE_START = "2000-01"
 
-@api_router.get("/payroll/rates")
-async def get_payroll_rates(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    return await get_payroll_rates_dict(company_id)
 
-@api_router.put("/payroll/rates")
-async def update_payroll_rates(request: Request, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Нямате фирма")
+def payroll_rate_versions(stored: Optional[dict]) -> List[dict]:
+    """The company's payroll rates as dated versions, oldest first: each
+    {"effective_from": "YYYY-MM", <the five rates>}. Rates saved before
+    versions existed are one version that counts from the start."""
+    if not stored:
+        return []
+    versions = [
+        {**DEFAULT_PAYROLL_RATES, **{k: v for k, v in version.items() if k in DEFAULT_PAYROLL_RATES},
+         "effective_from": str(version.get("effective_from") or RATES_FROM_THE_START)}
+        for version in (stored.get("versions") or []) if isinstance(version, dict)
+    ]
+    if not versions:
+        versions = [{**DEFAULT_PAYROLL_RATES, **{k: v for k, v in stored.items() if k in DEFAULT_PAYROLL_RATES},
+                     "effective_from": RATES_FROM_THE_START}]
+    return sorted(versions, key=lambda version: version["effective_from"])
 
-    body = await request.json()
-    update_data = {k: float(v) for k, v in body.items() if k in DEFAULT_PAYROLL_RATES}
 
-    existing = await db.payroll_rates.find_one({"company_id": company_id})
-    if existing:
-        await db.payroll_rates.update_one({"company_id": company_id}, {"$set": update_data})
-    else:
-        rates = PayrollRates(company_id=company_id, **{**DEFAULT_PAYROLL_RATES, **update_data})
-        await db.payroll_rates.insert_one(rates.dict())
+def rates_in_effect(versions: List[dict], month_key: str) -> dict:
+    """The version in effect in a month: the last one dated on or before
+    it - or, for a month before every version, the earliest."""
+    if not versions:
+        return {**DEFAULT_PAYROLL_RATES, "effective_from": None}
+    chosen = versions[0]
+    for version in versions:
+        if version["effective_from"] <= month_key:
+            chosen = version
+    return dict(chosen)
 
-    return await get_payroll_rates_dict(company_id)
 
-@api_router.post("/employees", response_model=Employee)
-async def create_employee(employee: EmployeeCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+async def get_payroll_rates_dict(company_id: Optional[str], year: Optional[int] = None, month: Optional[int] = None) -> dict:
+    """The payroll rates in effect in a month (this month unless given) -
+    a payroll for last December is worked out with December's rates, not
+    with the ones that took effect in January."""
+    if year is None or month is None:
+        today = today_local()
+        year, month = today.year, today.month
+    stored = await db.payroll_rates.find_one({"company_id": company_id}, {"_id": 0}) if company_id else None
+    versions = payroll_rate_versions(stored)
+    rates = rates_in_effect(versions, f"{year}-{month:02d}")
+    rates["versions"] = versions
+    return rates
 
-    employee_obj = Employee(user_id=current_user.user_id, company_id=company_id, **employee.dict())
-    await db.employees.insert_one(employee_obj.dict())
-    return employee_obj
+# ===================== PAYROLL PDF IMPORT (ведомост от счетоводителя) =====================
+# calculate_payroll above is an ESTIMATE (see its own docstring) - useful
+# when there's no real figure yet, but once the accountant's actual
+# ведомост PDF exists it is the authoritative source, not this app's own
+# approximation. This lets that real PDF (either of the two standard
+# Bulgarian payroll-software layouts - a single-person "Ведомост за
+# договори за управление и контрол" for a managing director, or a
+# multi-employee "Разчетно-платежна ведомост") be parsed directly into
+# payroll_entries, carrying the real numbers through untouched rather than
+# re-deriving them from calculate_payroll's own formula.
+class ClaudePayrollImportEntry(BaseModel):
+    name: str = Field(description="Пълното име на лицето (служител или управител) точно както е изписано до 'Име:'")
+    egn: Optional[str] = Field(default=None, description="ЕГН на лицето, ако е видимо до 'ЕГН:'")
+    position: Optional[str] = Field(default=None, description="Длъжност, ако е изписана (напр. след 'длъжност:')")
+    gross_amount: float = Field(description="Брутното трудово възнаграждение за периода - полето 'Брутна заплата', или 'Сума за отработени дни' в документа за управление и контрол. НЕ включва осигуровки или данък.")
+    insurance_base: float = Field(description="Осигурителният доход за лицето - полето 'Осигурителен доход'")
+    employee_contributions: float = Field(description="Сборът от ВСИЧКИ осигурителни и здравни вноски за сметка на самия служител/осигурен (редовете, означени с 'от осигурен' или 'от осиг-н' - напр. ФПенсии, ФОбщо заб., ФБезраб., ЗО, ДЗПО). НЕ включва данъка върху дохода и НЕ включва 'Други удръжки', 'Аванс' или 'Запор'.")
+    employer_contributions: float = Field(description="Сборът от ВСИЧКИ осигурителни и здравни вноски за сметка на работодателя/осигурителя (редовете, означени с 'от осигурител' или 'от осиг-л' - напр. ФПенсии, ФОбщо заб., ФБезраб., ЗО, ДЗПО, Фонд ТЗПБ, Фонд ГВРС).")
+    income_tax: float = Field(description="Полето 'Данък за месеца' (данък върху дохода за текущия период)")
+    other_deductions: float = Field(default=0, description="Сборът от 'Други удръжки', 'Аванс' и 'Запор върху възнаграждението', ако има такива - обикновено 0")
+    net_amount: float = Field(description="Полето 'Сума за получаване' - нетната сума, която лицето реално получава")
 
-@api_router.get("/employees", response_model=List[Employee])
-async def get_employees(active_only: bool = False, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
+class ClaudePayrollImportExtraction(BaseModel):
+    period_month: int = Field(description="Месецът, за който е ведомостта (1-12), от заглавието 'за [месец] [година] г.'")
+    period_year: int = Field(description="Годината, за която е ведомостта")
+    entries: List[ClaudePayrollImportEntry] = Field(default_factory=list, description="Едно физическо лице на запис - може да е само едно (управител) или няколко (служители)")
 
-    query = simple_scope_query(company_id, current_user.user_id)
-    if active_only:
-        query["active"] = True
+PAYROLL_IMPORT_SYSTEM_PROMPT = """Ти си експертен AI асистент за разпознаване на данни от български ведомости за заплати.
 
-    employees = await db.employees.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
-    return [Employee(**e) for e in employees]
+Документът е ЕДИН от следните два стандартни формата на счетоводен софтуер за заплати:
+1. "Ведомост за договори за управление и контрол" - за управител/управляващ съдружник по договор за управление и контрол, обикновено само ЕДНО лице.
+2. "Разчетно - платежна ведомост" - за служители на трудов договор, обикновено НЯКОЛКО лица едно след друго, всяко в собствена секция, започваща с "Име: ... длъжност: ...".
 
-@api_router.put("/employees/{employee_id}", response_model=Employee)
-async def update_employee(employee_id: str, update: EmployeeUpdate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    update_data = {k: v for k, v in update.dict().items() if v is not None}
-    _, scope = await get_company_scope(current_user)
-    result = await db.employees.update_one({"id": employee_id, **scope}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Служителят не е намерен")
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    return Employee(**employee)
+ВАЖНО - ПРОПУСНИ ОБОБЩАВАЩИЯ РЕД: И двата формата завършват с обобщаваща секция "Общо:", която сумира всички лица от документа в едни общи числа. Това НЕ Е отделно физическо лице - НИКОГА не го добавяй като отделен запис в 'entries'. Ако в документа има само едно лице (управителския формат), секцията "Общо:" просто повтаря неговите числа - пак я пропускай, връщай само реалната секция с "Име:".
 
-@api_router.delete("/employees/{employee_id}")
-async def delete_employee(employee_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.employees.delete_one({"id": employee_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Служителят не е намерен")
-    return {"message": "Служителят е изтрит"}
+Етикетите на удръжките се различават леко между двата формата, но означават едно и също:
+- "от осигурен" (управителски формат) = "от осиг-н" (служителски формат) = за сметка на самия служител/управител.
+- "от осигурител" (управителски формат) = "от осиг-л" (служителски формат) = за сметка на работодателя.
 
-@api_router.post("/payroll/preview")
-async def preview_payroll(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
-    """Изчислява разбивка без да записва - за преглед преди потвърждение."""
-    require_permission(current_user, "manage_budget")
-    company_id, scope = await get_company_scope(current_user)
-    employee = await db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Служителят не е намерен")
+Прегледай ЦЯЛОТО изображение внимателно, страница по страница - не пропускай лица само защото са в края на документ с много страници. Извлечи числата ТОЧНО както са отпечатани, не закръгляй и не измисляй стойности, които не се виждат."""
 
-    rates = await get_payroll_rates_dict(company_id)
 
-    base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
 
-    return calculate_payroll(
-        base_amount=base_amount,
-        agreement_type=employee["agreement_type"],
-        rates=rates,
-        bonus_amount=entry.bonus_amount,
-        food_vouchers=employee.get("food_vouchers", 0),
-        additional_insurance=employee.get("additional_insurance", 0),
-    )
 
-@api_router.post("/payroll")
-async def create_payroll_entry(entry: PayrollEntryCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, scope = await get_company_scope(current_user)
-    employee = await db.employees.find_one({"id": entry.employee_id, **scope}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Служителят не е намерен")
 
-    rates = await get_payroll_rates_dict(company_id)
 
-    base_amount = entry.net_target if employee["agreement_type"] == "net" and entry.net_target is not None else (entry.gross_amount if entry.gross_amount is not None else employee["base_salary"])
 
-    breakdown = calculate_payroll(
-        base_amount=base_amount,
-        agreement_type=employee["agreement_type"],
-        rates=rates,
-        bonus_amount=entry.bonus_amount,
-        food_vouchers=employee.get("food_vouchers", 0),
-        additional_insurance=employee.get("additional_insurance", 0),
-    )
 
-    existing = await db.payroll_entries.find_one({
-        "employee_id": entry.employee_id,
-        "period_month": entry.period_month,
-        "period_year": entry.period_year,
-    })
-    if existing:
-        raise HTTPException(status_code=409, detail="Вече има ведомост за този служител за този месец")
-
-    doc = {
-        "id": str(uuid.uuid4()),
-        "user_id": current_user.user_id,
-        "company_id": company_id,
-        "employee_id": entry.employee_id,
-        "employee_name": employee["name"],
-        "period_month": entry.period_month,
-        "period_year": entry.period_year,
-        "bonus_amount": round(entry.bonus_amount, 2),
-        "notes": entry.notes,
-        "image_base64": entry.image_base64,
-        "created_at": datetime.now(timezone.utc),
-        **breakdown,
-    }
-    await db.payroll_entries.insert_one(doc)
-
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="create",
-        entity_type="payroll",
-        entity_id=doc["id"],
-        company_id=company_id,
-        details={"employee": employee["name"], "period": f"{entry.period_month}/{entry.period_year}", "total_employer_cost": breakdown["total_employer_cost"]}
-    )
-
-    doc.pop("_id", None)
-    doc.pop("image_base64", None)
-    return doc
-
-@api_router.get("/payroll")
-async def get_payroll_entries(
-    year: Optional[int] = None,
-    month: Optional[int] = None,
-    current_user: User = Depends(get_current_user)
-):
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-
-    query = simple_scope_query(company_id, current_user.user_id)
-    if year:
-        query["period_year"] = year
-    if month:
-        query["period_month"] = month
-
-    entries = await db.payroll_entries.find(query, {"_id": 0, "image_base64": 0}).sort([("period_year", -1), ("period_month", -1)]).to_list(1000)
-    return entries
-
-@api_router.delete("/payroll/{entry_id}")
-async def delete_payroll_entry(entry_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.payroll_entries.delete_one({"id": entry_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Записът не е намерен")
-    return {"message": "Записът е изтрит"}
-
-async def get_payroll_cost_for_period(company_id: Optional[str], user_id: str, start_date: Optional[str], end_date: Optional[str]) -> float:
-    """Сумира total_employer_cost на всички ведомостни записи, чийто месец
-    попада в зададения период - използвано в /statistics/summary и в
-    прогнозата за разходи, за да включат реалния разход за персонал."""
+async def get_payroll_cost_for_period(
+    company_id: Optional[str], user_id: str, start_date: Any, end_date: Any, include_wages: bool = True,
+) -> float:
+    """Employer cost (total_employer_cost) of the payroll entries for the
+    period - used by period_totals, so by /statistics/summary, the budget,
+    the chat and the forecast. A payroll entry is the cost of its whole
+    month, so a period gets the share of it that its days cover: a full
+    month all of it, a week 7/30 of a 30-day month, a range over two
+    months its share of each - never the whole month in the week of the
+    1st and nothing in the others. Bounds are days ("YYYY-MM-DD" or date);
+    None for an open end. Entries with counted_in_expenses=False are left
+    out - the owner/accountant can exclude one (a duplicate, a wrong
+    import) without deleting it."""
+    period = Period.parse(start_date, end_date, default=Period(OPEN_START, OPEN_END))
     query = simple_scope_query(company_id, user_id)
-    entries = await db.payroll_entries.find(query, {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1}).to_list(10000)
+    entries = await db.payroll_entries.find(
+        query, {"_id": 0, "period_month": 1, "period_year": 1, "total_employer_cost": 1, "counted_in_expenses": 1}
+    ).to_list(ALL_ROWS)
 
     total = 0.0
     for e in entries:
-        period_date = f"{e['period_year']}-{e['period_month']:02d}-01"
-        if start_date and period_date < start_date[:10]:
+        if e.get("counted_in_expenses") is False:
             continue
-        if end_date and period_date > end_date[:10]:
-            continue
-        total += e.get("total_employer_cost", 0)
+        share = period.month_share(int(e["period_year"]), int(e["period_month"]))
+        if share:
+            total += (e.get("total_employer_cost") or 0) * share
+    if include_wages:
+        total += await schedule_wages_for_period(company_id, user_id, period)
     return total
+
+
+async def schedule_wages_for_period(company_id: Optional[str], user_id: str, period: Period) -> float:
+    """Wages paid through Work Schedule for the days of the period - on the
+    days actually worked, not spread like a monthly salary."""
+    rows = await db.expenses.aggregate([
+        {"$match": {**simple_scope_query(company_id, user_id), "kind": SCHEDULE_WAGES, "date": period.text_filter()}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(ALL_ROWS)
+    return float(rows[0].get("total") or 0) if rows else 0.0
+
+
+async def schedule_wages_by_day(company_id: Optional[str], user_id: str, period: Period) -> Dict[str, float]:
+    rows = await db.expenses.aggregate([
+        {"$match": {**simple_scope_query(company_id, user_id), "kind": SCHEDULE_WAGES, "date": period.text_filter()}},
+        {"$group": {"_id": "$date", "total": {"$sum": "$amount"}}},
+    ]).to_list(ALL_ROWS)
+    return {str(row["_id"])[:10]: float(row.get("total") or 0) for row in rows if row.get("_id")}
 
 # ===================== OFFICIAL HOLIDAYS / РАБОТА НА ПРАЗНИЦИ И ОТПУСКИ =====================
 # Tracks which employees worked on an official Bulgarian public holiday
@@ -7178,15 +5950,12 @@ def _holiday_name_for_date(date_str: str) -> Optional[str]:
             return h["name"]
     return None
 
-@api_router.get("/holidays")
-async def get_holidays(year: int, current_user: User = Depends(get_current_user)):
-    """Официалният календар на неработните дни за годината - публична
-    информация, не се филтрира по фирма."""
-    return get_bulgarian_public_holidays(year)
 
 class EmployeeHolidayWork(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     company_id: str
+    # Who entered it - a business with no company record is scoped by it.
+    user_id: Optional[str] = None
     employee_id: str
     employee_name: str  # snapshot - survives the employee being renamed/deactivated later
     date: str  # YYYY-MM-DD, must be an official holiday
@@ -7204,15 +5973,33 @@ class LeaveType(str, Enum):
     UNPAID = "unpaid"    # Неплатена
     SICK = "sick"         # Болнична
 
+class SickReason(str, Enum):
+    """Why the sick-leave sheet was issued - what the accountant needs to
+    know who pays what. Never the diagnosis: the employer needs no health
+    details, and the program keeps none."""
+    ILLNESS = "illness"              # Общо заболяване
+    WORK_ACCIDENT = "work_accident"  # Трудова злополука
+    OCCUPATIONAL = "occupational"    # Професионална болест
+    FAMILY_CARE = "family_care"      # Гледане на болен член от семейството
+    MATERNITY = "maternity"          # Бременност и раждане
+    OTHER = "other"                  # Друго
+
 class EmployeeLeave(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     company_id: str
+    # Who entered it - a business with no company record is scoped by it.
+    user_id: Optional[str] = None
     employee_id: str
     employee_name: str
     leave_type: LeaveType
     start_date: str
     end_date: str
     note: Optional[str] = None
+    # A sick leave's sheet, as the employer gets it: its number, the reason
+    # and whether it continues an earlier sheet (only for sick leave).
+    sheet_number: Optional[str] = None
+    sick_reason: Optional[SickReason] = None
+    is_continuation: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class EmployeeLeaveCreate(BaseModel):
@@ -7221,6 +6008,109 @@ class EmployeeLeaveCreate(BaseModel):
     start_date: str
     end_date: str
     note: Optional[str] = None
+    sheet_number: Optional[str] = Field(default=None, max_length=30)
+    sick_reason: Optional[SickReason] = None
+    is_continuation: bool = False
+
+class EmployeeLeaveUpdate(BaseModel):
+    """A leave entry corrected: what is sent changes (the employee stays)."""
+    leave_type: Optional[LeaveType] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    note: Optional[str] = None
+    sheet_number: Optional[str] = Field(default=None, max_length=30)
+    sick_reason: Optional[SickReason] = None
+    is_continuation: Optional[bool] = None
+
+class LeaveSettingsUpdate(BaseModel):
+    """An employee's paid leave: days a year, and the unused days carried
+    into a year (from the years before the program knew them)."""
+    annual_leave_days: Optional[float] = Field(default=None, ge=0, le=365)
+    carryover_year: Optional[int] = Field(default=None, ge=2000, le=2100)
+    carryover_days: Optional[float] = Field(default=None, ge=0, le=365)
+
+
+def leave_working_days(start: date, end: date) -> int:
+    """Working days from start to end, both included: paid leave is counted
+    in them (Monday to Friday, not an official holiday, its moved days off
+    included)."""
+    holidays: Dict[int, set] = {}
+    count = 0
+    day = start
+    while day <= end:
+        if day.weekday() < 5:
+            if day.year not in holidays:
+                holidays[day.year] = {h["date"] for h in get_bulgarian_public_holidays(day.year)}
+            if day.isoformat() not in holidays[day.year]:
+                count += 1
+        day += timedelta(days=1)
+    return count
+
+
+def _leave_entitlement(employee: dict, year: int) -> float:
+    """The year's paid leave: the days a year, in proportion to the part
+    of the year employed in the year of hiring."""
+    annual = float(employee.get("annual_leave_days", 20) or 0)
+    hired = business_day(employee.get("hire_date")) if employee.get("hire_date") else None
+    if hired is None or hired.year < year:
+        return annual
+    if hired.year > year:
+        return 0.0
+    year_days = (date(year, 12, 31) - date(year, 1, 1)).days + 1
+    employed = (date(year, 12, 31) - hired).days + 1
+    return float(round(annual * employed / year_days))
+
+
+def employee_leave_balance(employee: dict, paid_leave: List[dict], year: int, today: date) -> Dict[str, Any]:
+    """An employee's paid leave in a year: carried over, the year's own
+    days, used (to today), planned (booked later) and what remains. The
+    unused days of a year carry into the next."""
+    def used_in(y: int) -> Dict[str, int]:
+        first, last = date(y, 1, 1), date(y, 12, 31)
+        taken = planned = 0
+        for entry in paid_leave:
+            start, end = business_day(entry.get("start_date")), business_day(entry.get("end_date"))
+            if not start or not end:
+                continue
+            start, end = max(start, first), min(end, last)
+            if start > end:
+                continue
+            if end <= today:
+                taken += leave_working_days(start, end)
+            elif start > today:
+                planned += leave_working_days(start, end)
+            else:
+                taken += leave_working_days(start, today)
+                planned += leave_working_days(today + timedelta(days=1), end)
+        return {"used": taken, "planned": planned}
+
+    # Counted from the year whose carried days were entered - else from the
+    # year the program began keeping this employee (or the hiring, if
+    # later): what was used before it is not known, so nothing is assumed
+    # unused (before, someone hired years ago showed a hundred days left).
+    carry = employee.get("leave_carryover") or {}
+    hired = business_day(employee.get("hire_date")) if employee.get("hire_date") else None
+    created = employee.get("created_at")
+    kept_from = created.year if isinstance(created, datetime) else (
+        int(str(created)[:4]) if str(created or "")[:4].isdigit() else year
+    )
+    first_year = int(carry["year"]) if carry.get("year") else max(kept_from, hired.year if hired else kept_from)
+    carried = float(carry.get("days") or 0) if carry.get("year") else 0.0
+    for y in range(first_year, year):
+        spent = used_in(y)
+        carried = max(carried + _leave_entitlement(employee, y) - spent["used"] - spent["planned"], 0.0)
+    if year < first_year:
+        carried = 0.0
+    entitlement = _leave_entitlement(employee, year)
+    spent = used_in(year)
+    return {
+        "employee_id": employee["id"], "employee_name": employee.get("name"), "year": year,
+        "annual_leave_days": float(employee.get("annual_leave_days", 20) or 0),
+        "carried_over": round(carried, 1), "entitlement": round(entitlement, 1),
+        "used": spent["used"], "planned": spent["planned"],
+        "remaining": round(carried + entitlement - spent["used"] - spent["planned"], 1),
+    }
+
 
 async def _get_employee_for_company(employee_id: str, company_id: Optional[str], current_user: User) -> dict:
     query = simple_scope_query(company_id, current_user.user_id, id=employee_id)
@@ -7229,93 +6119,203 @@ async def _get_employee_for_company(employee_id: str, company_id: Optional[str],
         raise HTTPException(status_code=404, detail="Служителят не е намерен")
     return employee
 
-@api_router.post("/employees/holiday-work", response_model=EmployeeHolidayWork)
-async def create_holiday_work(payload: EmployeeHolidayWorkCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    employee = await _get_employee_for_company(payload.employee_id, company_id, current_user)
 
-    holiday_name = _holiday_name_for_date(payload.date)
-    if not holiday_name:
-        raise HTTPException(status_code=400, detail="Избраната дата не е официален празник")
+# ===================== WORK SCHEDULE / РАБОТЕН ГРАФИК =====================
+# A shift is assigned to a real team-member account (user_id - someone who
+# can log in and see "their own shifts"), not to the separate payroll-only
+# Employee record above, which doesn't require a login at all. The two are
+# cross-referenced only for the leave-conflict check, via Employee's
+# optional linked_user_id.
 
-    entry = EmployeeHolidayWork(
-        company_id=company_id or "",
-        employee_id=payload.employee_id,
-        employee_name=employee["name"],
-        date=payload.date,
-        holiday_name=holiday_name,
-        note=payload.note,
+WORK_SHIFT_REPEAT_PATTERNS = ("none", "daily", "weekly", "monthly")
+# A recurring series must still end somewhere - "repeat every Monday
+# forever" has no natural stopping point to show a manager, and an
+# unbounded series would make every future query scan further back in
+# time for no benefit. Capped well past repeat_until so a reasonable
+# multi-month schedule is never silently truncated.
+WORK_SHIFT_MAX_HORIZON_DAYS = 400
+
+class WorkShiftCreate(BaseModel):
+    user_id: str
+    date: str  # "YYYY-MM-DD" - the anchor date (first/only occurrence)
+    start_time: str  # "HH:MM"
+    end_time: str  # "HH:MM" - may be earlier than start_time for an overnight shift
+    repeat_pattern: str = "none"  # "none" | "daily" | "weekly" | "monthly"
+    repeat_until: Optional[str] = None  # required when repeat_pattern != "none"
+    hourly_rate: Optional[float] = None
+    note: Optional[str] = None
+
+class WorkShiftUpdate(BaseModel):
+    date: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    repeat_pattern: Optional[str] = None
+    repeat_until: Optional[str] = None
+    hourly_rate: Optional[float] = None
+    note: Optional[str] = None
+
+class WorkShift(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    user_id: str
+    created_by: str
+    date: str
+    start_time: str
+    end_time: str
+    repeat_pattern: str = "none"
+    repeat_until: Optional[str] = None
+    hourly_rate: Optional[float] = None
+    note: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+def _shift_hours(start_time: str, end_time: str) -> float:
+    """Duration of one occurrence in hours. end_time < start_time means an
+    overnight shift (e.g. 22:00-06:00), not a negative-length mistake."""
+    sh, sm = (int(x) for x in start_time.split(":"))
+    eh, em = (int(x) for x in end_time.split(":"))
+    minutes = (eh * 60 + em) - (sh * 60 + sm)
+    if minutes <= 0:
+        minutes += 24 * 60
+    return round(minutes / 60, 2)
+
+def _expand_shift_occurrences(shift: dict, range_start: str, range_end: str) -> List[str]:
+    """Concrete calendar dates (within [range_start, range_end]) this shift
+    template actually falls on. A 'none' shift occurs exactly once, on its
+    own date. A recurring one repeats daily/weekly/monthly from that date
+    up to repeat_until (or the query window's end, whichever is sooner -
+    and never past WORK_SHIFT_MAX_HORIZON_DAYS out, regardless of
+    repeat_until, so one series can't make a single list call scan years
+    of dates)."""
+    anchor = date.fromisoformat(shift["date"])
+    window_start = date.fromisoformat(range_start)
+    window_end = date.fromisoformat(range_end)
+    series_end = min(window_end, anchor + timedelta(days=WORK_SHIFT_MAX_HORIZON_DAYS))
+    if shift.get("repeat_until"):
+        series_end = min(series_end, date.fromisoformat(shift["repeat_until"]))
+
+    pattern = shift.get("repeat_pattern", "none")
+    if pattern == "none":
+        return [anchor.isoformat()] if window_start <= anchor <= window_end else []
+
+    occurrences = []
+    cursor = anchor
+    while cursor <= series_end:
+        if cursor >= window_start:
+            occurrences.append(cursor.isoformat())
+        if pattern == "daily":
+            cursor = cursor + timedelta(days=1)
+        elif pattern == "weekly":
+            cursor = cursor + timedelta(days=7)
+        elif pattern == "monthly":
+            y, m = _ym_add(cursor.year, cursor.month, 1)
+            # Same 1-28 simplification RecurringExpense's day_of_month
+            # already relies on, to sidestep "Feb 30th" overflow.
+            cursor = date(y, m, min(anchor.day, 28))
+        else:
+            break
+    return occurrences
+
+async def _leave_conflict_for(company_id: Optional[str], user_id: str, occ_date: str) -> Optional[dict]:
+    """Whether this team member already has recorded leave covering
+    occ_date, by way of an Employee payroll record explicitly linked to
+    their account (linked_user_id) - returns None (no conflict data, not
+    "no conflict") when no such link exists, same soft-skip the proactive
+    signals engine uses elsewhere for a permission/data gap."""
+    if not company_id:
+        return None
+    employee = await db.employees.find_one(
+        {"company_id": company_id, "linked_user_id": user_id}, {"_id": 0, "id": 1}
     )
-    await db.employee_holiday_work.insert_one(entry.dict())
-    return entry
-
-@api_router.get("/employees/holiday-work", response_model=List[EmployeeHolidayWork])
-async def list_holiday_work(start_date: Optional[str] = None, end_date: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    query = dict(scope)
-    if start_date or end_date:
-        query["date"] = {}
-        if start_date:
-            query["date"]["$gte"] = start_date
-        if end_date:
-            query["date"]["$lte"] = end_date
-    entries = await db.employee_holiday_work.find(query, {"_id": 0}).sort("date", 1).to_list(10000)
-    return [EmployeeHolidayWork(**e) for e in entries]
-
-@api_router.delete("/employees/holiday-work/{entry_id}")
-async def delete_holiday_work(entry_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.employee_holiday_work.delete_one({"id": entry_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Записът не е намерен")
-    return {"message": "Записът е изтрит"}
-
-@api_router.post("/employees/leave", response_model=EmployeeLeave)
-async def create_leave(payload: EmployeeLeaveCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, _ = await get_company_scope(current_user)
-    employee = await _get_employee_for_company(payload.employee_id, company_id, current_user)
-
-    if payload.end_date < payload.start_date:
-        raise HTTPException(status_code=400, detail="Крайната дата е преди началната")
-
-    entry = EmployeeLeave(
-        company_id=company_id or "",
-        employee_id=payload.employee_id,
-        employee_name=employee["name"],
-        leave_type=payload.leave_type,
-        start_date=payload.start_date,
-        end_date=payload.end_date,
-        note=payload.note,
+    if not employee:
+        return None
+    return await db.employee_leave.find_one(
+        {"company_id": company_id, "employee_id": employee["id"], "start_date": {"$lte": occ_date}, "end_date": {"$gte": occ_date}},
+        {"_id": 0},
     )
-    await db.employee_leave.insert_one(entry.dict())
-    return entry
 
-@api_router.get("/employees/leave", response_model=List[EmployeeLeave])
-async def list_leave(start_date: Optional[str] = None, end_date: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    query = dict(scope)
-    # Overlap match - a leave period only needs to intersect the requested
-    # window, not fall entirely inside it (e.g. leave spanning month-end).
-    if start_date:
-        query["end_date"] = {"$gte": start_date}
-    if end_date:
-        query["start_date"] = {"$lte": end_date}
-    entries = await db.employee_leave.find(query, {"_id": 0}).sort("start_date", 1).to_list(10000)
-    return [EmployeeLeave(**e) for e in entries]
+# A correction to ONE occurrence's hours/pay - e.g. the employee actually
+# left early, or the manager and employee disagree on the scheduled time
+# and settle on a different figure. Deliberately separate from WorkShift
+# itself: editing the shift template changes the PLAN (and every future
+# occurrence with it), while an adjustment corrects what actually
+# happened on one specific date, without touching the plan or any other
+# occurrence of a recurring series. At most one per (shift_id, date) -
+# re-adjusting the same date replaces the previous correction rather than
+# stacking a second one.
+class ShiftAdjustmentCreate(BaseModel):
+    actual_hours: float
+    actual_hourly_rate: Optional[float] = None  # None keeps the shift's own rate
+    reason: str  # required - this exists for disputes, so every correction must say why
 
-@api_router.delete("/employees/leave/{entry_id}")
-async def delete_leave(entry_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.employee_leave.delete_one({"id": entry_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Записът не е намерен")
-    return {"message": "Записът е изтрит"}
+class ShiftAdjustment(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    shift_id: str
+    user_id: str
+    date: str
+    actual_hours: float
+    actual_hourly_rate: Optional[float] = None
+    reason: str
+    adjusted_by: str
+    adjusted_by_name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Work Schedule's hours*rate estimate is deliberately NOT counted in
+# business expenses automatically (unlike the formal payroll entries
+# above) - the owner/manager decides WHEN that money has actually gone
+# out, by explicitly marking a period as paid. That action creates a
+# real off-book expense (same `expenses` collection /statistics/summary
+# already totals) and records this marker so the same period can't be
+# paid twice and the UI can show what's already been settled.
+class SchedulePaymentCreate(BaseModel):
+    user_id: str
+    period_start: str  # "YYYY-MM-DD"
+    period_end: str
+    # Paying hours to someone whose formal payroll already covers the same
+    # month needs an explicit yes (answered 428 otherwise).
+    confirm_double_pay: bool = False
+
+class SchedulePayment(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    user_id: str
+    user_name: str
+    period_start: str
+    period_end: str
+    total_hours: float
+    amount: float
+    expense_id: str  # the first of the resulting db.expenses records (older payments: the only one)
+    # One wages record per day worked; deleting the payment removes them all.
+    expense_ids: List[str] = []
+    paid_by: str
+    paid_by_name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# Private, manager-only performance notes on a team member - never shown to
+# the team member themselves (unlike everything else in the app, which is
+# either self-facing or openly shared across the team). Any manager
+# (manage_budget) can add one; only the person who wrote a note can delete
+# it, so one manager's assessment can't be silently erased by another.
+TEAM_NOTE_TYPES = ("positive", "negative")
+
+class TeamNoteCreate(BaseModel):
+    user_id: str
+    note_type: str  # "positive" | "negative"
+    text: str
+
+class TeamNote(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: str
+    user_id: str
+    note_type: str
+    text: str
+    created_by: str
+    created_by_name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+
+
 
 # ===================== FIXED ASSETS / ДЪЛГОТРАЙНИ АКТИВИ (ДМА) =====================
 
@@ -7329,7 +6329,7 @@ class AssetCategory(str, Enum):
     CAT_VII = "cat_vii"   # Други амортизируеми активи
 
 # Максимални годишни данъчни амортизационни норми по чл. 55 ЗКПО
-ASSET_CATEGORY_INFO = {
+ASSET_CATEGORY_INFO: Dict[str, Dict[str, Any]] = {
     "cat_i": {"label": "Категория I – Сгради, съоръжения, предавателни устройства", "max_rate": 4.0},
     "cat_ii": {"label": "Категория II – Машини, производствено оборудване, апаратура", "max_rate": 30.0},
     "cat_iii": {"label": "Категория III – Превозни средства (без леки автомобили), пътни настилки", "max_rate": 10.0},
@@ -7367,6 +6367,10 @@ class FixedAsset(BaseModel):
     responsible_person: Optional[str] = None  # материално отговорно лице
     image_base64: Optional[str] = None
     notes: Optional[str] = None
+    # The purchase invoice: while linked, that invoice is not an expense of
+    # its day (the asset is expensed by its depreciation), VAT still counts.
+    invoice_id: Optional[str] = None
+    invoice_label: Optional[str] = None
     status: AssetStatus = AssetStatus.ACTIVE
     disposal_date: Optional[str] = None
     disposal_reason: Optional[str] = None
@@ -7385,6 +6389,7 @@ class FixedAssetCreate(BaseModel):
     responsible_person: Optional[str] = None
     image_base64: Optional[str] = None
     notes: Optional[str] = None
+    invoice_id: Optional[str] = None
 
 class FixedAssetUpdate(BaseModel):
     name: Optional[str] = None
@@ -7396,6 +6401,8 @@ class FixedAssetUpdate(BaseModel):
     responsible_person: Optional[str] = None
     image_base64: Optional[str] = None
     notes: Optional[str] = None
+    # "" unlinks the purchase invoice; None leaves the link as it is.
+    invoice_id: Optional[str] = None
 
 class AssetDisposeRequest(BaseModel):
     disposal_date: str
@@ -7452,7 +6459,7 @@ def get_asset_accumulated_depreciation(asset: dict, as_of_year: int, as_of_month
     return round(min(accumulated, asset["acquisition_value"]), 2)
 
 def enrich_asset_with_depreciation(asset: dict) -> dict:
-    now = datetime.now(timezone.utc)
+    now = today_local()
     accumulated = get_asset_accumulated_depreciation(asset, now.year, now.month)
     net_book_value = round(asset["acquisition_value"] - accumulated, 2)
     asset["monthly_depreciation"] = round(compute_asset_monthly_depreciation(asset["acquisition_value"], asset["annual_depreciation_rate_percent"]), 2)
@@ -7465,7 +6472,7 @@ def enrich_asset_with_depreciation(asset: dict) -> dict:
 async def next_asset_inventory_number(company_id: Optional[str], user_id: str) -> str:
     scope = company_id or f"user:{user_id}"
     counter_id = f"asset_{scope}"
-    result = await db.counters.find_one_and_update(
+    result: Dict[str, Any] = await db.counters.find_one_and_update(
         {"_id": counter_id},
         {"$inc": {"seq": 1}},
         upsert=True,
@@ -7473,155 +6480,27 @@ async def next_asset_inventory_number(company_id: Optional[str], user_id: str) -
     )
     return f"ДМА-{result['seq']:04d}"
 
-@api_router.get("/assets/categories")
-async def get_asset_categories(current_user: User = Depends(get_current_user)):
-    return {
-        "categories": [{"value": k, **v} for k, v in ASSET_CATEGORY_INFO.items()],
-        "low_value_threshold": ASSET_LOW_VALUE_THRESHOLD_EUR,
-    }
 
-@api_router.post("/assets", response_model=FixedAsset)
-async def create_asset(asset: FixedAssetCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
 
-    category_info = ASSET_CATEGORY_INFO[asset.category.value]
-    rate = asset.annual_depreciation_rate_percent
-    if rate is None:
-        rate = category_info["max_rate"]
-    elif rate > category_info["max_rate"] and asset.category.value != "cat_vi":
-        raise HTTPException(status_code=400, detail=f"Нормата не може да надвишава {category_info['max_rate']}% за {category_info['label']}")
-    elif rate <= 0:
-        raise HTTPException(status_code=400, detail="Нормата трябва да е положително число")
 
-    inventory_number = await next_asset_inventory_number(company_id, current_user.user_id)
 
-    asset_obj = FixedAsset(
-        user_id=current_user.user_id,
-        company_id=company_id,
-        inventory_number=inventory_number,
-        annual_depreciation_rate_percent=rate,
-        **asset.dict(exclude={"annual_depreciation_rate_percent"})
-    )
-    await db.assets.insert_one(asset_obj.dict())
 
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="create",
-        entity_type="asset",
-        entity_id=asset_obj.id,
-        company_id=company_id,
-        details={"name": asset_obj.name, "inventory_number": inventory_number, "acquisition_value": asset_obj.acquisition_value}
-    )
 
-    return enrich_asset_with_depreciation(asset_obj.dict())
 
-@api_router.get("/assets")
-async def get_assets(status: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-
-    query = simple_scope_query(company_id, current_user.user_id)
-    assets = await db.assets.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    enriched = [enrich_asset_with_depreciation(a) for a in assets]
-    if status:
-        enriched = [a for a in enriched if a["status"] == status]
-    return enriched
-
-@api_router.get("/assets/summary")
-async def get_assets_summary(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-
-    query = simple_scope_query(company_id, current_user.user_id)
-    assets = await db.assets.find(query, {"_id": 0}).to_list(1000)
-    enriched = [enrich_asset_with_depreciation(a) for a in assets]
-
-    active = [a for a in enriched if a["status"] != "disposed"]
-    disposed = [a for a in enriched if a["status"] == "disposed"]
-
-    return {
-        "total_acquisition_value": round(sum(a["acquisition_value"] for a in active), 2),
-        "total_accumulated_depreciation": round(sum(a["accumulated_depreciation"] for a in active), 2),
-        "total_net_book_value": round(sum(a["net_book_value"] for a in active), 2),
-        "monthly_depreciation_total": round(sum(a["monthly_depreciation"] for a in active if a["status"] == "active"), 2),
-        "active_count": len(active),
-        "disposed_count": len(disposed),
-    }
-
-@api_router.put("/assets/{asset_id}", response_model=FixedAsset)
-async def update_asset(asset_id: str, update: FixedAssetUpdate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    existing = await db.assets.find_one({"id": asset_id, **scope}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Активът не е намерен")
-
-    update_data = {k: v for k, v in update.dict().items() if v is not None}
-
-    category = update_data.get("category", existing["category"])
-    if "annual_depreciation_rate_percent" in update_data:
-        category_info = ASSET_CATEGORY_INFO[category]
-        if update_data["annual_depreciation_rate_percent"] > category_info["max_rate"] and category != "cat_vi":
-            raise HTTPException(status_code=400, detail=f"Нормата не може да надвишава {category_info['max_rate']}% за {category_info['label']}")
-
-    await db.assets.update_one({"id": asset_id, **scope}, {"$set": update_data})
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    return enrich_asset_with_depreciation(asset)
-
-@api_router.post("/assets/{asset_id}/dispose", response_model=FixedAsset)
-async def dispose_asset(asset_id: str, request: AssetDisposeRequest, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    company_id, scope = await get_company_scope(current_user)
-    existing = await db.assets.find_one({"id": asset_id, **scope}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Активът не е намерен")
-
-    await db.assets.update_one(
-        {"id": asset_id, **scope},
-        {"$set": {
-            "status": "disposed",
-            "disposal_date": request.disposal_date,
-            "disposal_reason": request.disposal_reason,
-        }}
-    )
-
-    await audit_service.log_action(
-        user_id=current_user.user_id,
-        user_name=current_user.name,
-        action="dispose",
-        entity_type="asset",
-        entity_id=asset_id,
-        company_id=company_id,
-        details={"name": existing["name"], "reason": request.disposal_reason}
-    )
-
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    return enrich_asset_with_depreciation(asset)
-
-@api_router.delete("/assets/{asset_id}")
-async def delete_asset(asset_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "manage_budget")
-    _, scope = await get_company_scope(current_user)
-    result = await db.assets.delete_one({"id": asset_id, **scope})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Активът не е намерен")
-    return {"message": "Активът е изтрит"}
-
-async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: str, start_date: Optional[str], end_date: Optional[str]) -> float:
-    """Сумира амортизацията за всички активи, чиито месечни начисления
-    попадат в зададения период - използвано в /statistics/summary и в
-    прогнозата за разходи, аналогично на get_payroll_cost_for_period."""
+async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: str, start_date: Any, end_date: Any) -> float:
+    """Depreciation of every asset for the period - each month's charge by
+    the share of its days the period covers, like payroll above. Months run
+    from the asset's first depreciation month to its disposal, or to the
+    current month."""
+    period = Period.parse(start_date, end_date, default=Period(OPEN_START, OPEN_END))
     query = simple_scope_query(company_id, user_id)
-    assets = await db.assets.find(query, {"_id": 0}).to_list(10000)
+    assets = await db.assets.find(query, {"_id": 0}).to_list(ALL_ROWS)
     if not assets:
         return 0.0
 
-    now = datetime.now(timezone.utc)
+    today = today_local()
+    first_month = (period.start.year, period.start.month)
+    last_month = (period.end.year, period.end.month)
     total = 0.0
     for asset in assets:
         start_y, start_m = get_asset_depreciation_start_ym(asset["in_service_date"])
@@ -7629,17 +6508,11 @@ async def get_depreciation_cost_for_period(company_id: Optional[str], user_id: s
             dd = datetime.fromisoformat(asset["disposal_date"][:10])
             end_y, end_m = dd.year, dd.month
         else:
-            end_y, end_m = now.year, now.month
+            end_y, end_m = today.year, today.month
 
-        y, m = start_y, start_m
-        while (y, m) <= (end_y, end_m):
-            month_key = f"{y}-{m:02d}-01"
-            if start_date and month_key < start_date[:10]:
-                y, m = _ym_add(y, m, 1)
-                continue
-            if end_date and month_key > end_date[:10]:
-                break
-            total += get_asset_depreciation_for_month(asset, y, m)
+        y, m = max((start_y, start_m), first_month)
+        while (y, m) <= min((end_y, end_m), last_month):
+            total += get_asset_depreciation_for_month(asset, y, m) * period.month_share(y, m)
             y, m = _ym_add(y, m, 1)
 
     return round(total, 2)
@@ -7699,7 +6572,7 @@ async def get_conversation_recipients(current_user: User, conversation_id: str) 
     Raises 404 if the conversation doesn't exist / isn't this company's,
     403 if it exists but current_user isn't a participant."""
     if conversation_id == _team_channel_id(current_user.company_id or ""):
-        members = await get_team_members(current_user.company_id)
+        members = await get_team_members(current_user.company_id or "")
         return [m["user_id"] for m in members if m["user_id"] != current_user.user_id]
 
     conversation = await db.dm_conversations.find_one(
@@ -7768,219 +6641,21 @@ class CalendarEvent(BaseModel):
     reminder_sent: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-@api_router.get("/collab/members")
-async def list_collab_members(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    if not current_user.company_id:
-        return []
-    return await get_team_members(current_user.company_id)
 
-@api_router.post("/calendar/events", response_model=CalendarEvent)
-async def create_calendar_event(payload: CalendarEventCreate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    if not current_user.company_id:
-        raise HTTPException(status_code=400, detail="Нямате активна фирма")
-    if payload.visibility not in ("personal", "shared"):
-        raise HTTPException(status_code=400, detail="Невалидна видимост")
-    event = CalendarEvent(
-        company_id=current_user.company_id,
-        creator_id=current_user.user_id,
-        creator_name=current_user.name,
-        **payload.dict(),
-    )
-    await db.calendar_events.insert_one(event.dict())
-    return event
 
-@api_router.get("/calendar/events", response_model=List[CalendarEvent])
-async def list_calendar_events(start: Optional[str] = None, end: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    if not current_user.company_id:
-        return []
-    query: Dict[str, Any] = {
-        "company_id": current_user.company_id,
-        "$or": [{"visibility": "shared"}, {"creator_id": current_user.user_id}],
-    }
-    date_filter: Dict[str, Any] = {}
-    if start:
-        date_filter["$gte"] = start
-    if end:
-        date_filter["$lte"] = end
-    if date_filter:
-        query["event_date"] = date_filter
-    events = await db.calendar_events.find(query, {"_id": 0}).sort("event_date", 1).to_list(1000)
-    return events
 
-@api_router.put("/calendar/events/{event_id}", response_model=CalendarEvent)
-async def update_calendar_event(event_id: str, payload: CalendarEventUpdate, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    existing = await db.calendar_events.find_one({"id": event_id, "company_id": current_user.company_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Събитието не е намерено")
-    if existing["creator_id"] != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Само създателят може да редактира това събитие")
 
-    update_data = {k: v for k, v in payload.dict(exclude_unset=True).items()}
-    if "visibility" in update_data and update_data["visibility"] not in ("personal", "shared"):
-        raise HTTPException(status_code=400, detail="Невалидна видимост")
-    # Any change to when the reminder should fire (or whether one exists at
-    # all) needs to re-arm it - otherwise an edit made after the original
-    # time had already passed would never send a reminder for the new time.
-    if {"event_date", "event_time", "reminder_minutes_before"} & update_data.keys():
-        update_data["reminder_sent"] = False
-    if update_data:
-        await db.calendar_events.update_one({"id": event_id}, {"$set": update_data})
-    return await db.calendar_events.find_one({"id": event_id}, {"_id": 0})
 
-@api_router.delete("/calendar/events/{event_id}")
-async def delete_calendar_event(event_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    existing = await db.calendar_events.find_one({"id": event_id, "company_id": current_user.company_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Събитието не е намерено")
-    if existing["creator_id"] != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Само създателят може да изтрива това събитие")
-    await db.calendar_events.delete_one({"id": event_id})
-    return {"message": "Изтрито"}
 
-@api_router.get("/messages/conversations")
-async def list_conversations(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    if not current_user.company_id:
-        return []
 
-    team_id = _team_channel_id(current_user.company_id)
-    members = await get_team_members(current_user.company_id)
-    member_by_id = {m["user_id"]: m for m in members}
 
-    dm_conversations = await db.dm_conversations.find(
-        {"company_id": current_user.company_id, "participant_ids": current_user.user_id}, {"_id": 0}
-    ).to_list(200)
 
-    conversation_ids = [team_id] + [c["id"] for c in dm_conversations]
-    reads = await db.conversation_reads.find(
-        {"conversation_id": {"$in": conversation_ids}, "user_id": current_user.user_id}, {"_id": 0}
-    ).to_list(len(conversation_ids))
-    last_read = {r["conversation_id"]: r["last_read_at"] for r in reads}
-
-    async def summarize(conversation_id: str, name: str, picture: Optional[str]):
-        last_message = await db.messages.find_one(
-            {"conversation_id": conversation_id}, {"_id": 0}, sort=[("created_at", -1)]
-        )
-        unread_query: Dict[str, Any] = {"conversation_id": conversation_id, "sender_id": {"$ne": current_user.user_id}}
-        if conversation_id in last_read:
-            unread_query["created_at"] = {"$gt": last_read[conversation_id]}
-        unread_count = await db.messages.count_documents(unread_query)
-        return {
-            "conversation_id": conversation_id,
-            "name": name,
-            "picture": picture,
-            "last_message": last_message["text"] if last_message else None,
-            "last_message_at": last_message["created_at"] if last_message else None,
-            "unread_count": unread_count,
-        }
-
-    result = [await summarize(team_id, "Екипен чат", None)]
-    for c in dm_conversations:
-        other_id = next((uid for uid in c["participant_ids"] if uid != current_user.user_id), None)
-        other = member_by_id.get(other_id)
-        name = other["name"] if other else "Потребител"
-        picture = other["picture"] if other else None
-        result.append(await summarize(c["id"], name, picture))
-
-    result.sort(key=lambda c: c["last_message_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-    return result
-
-@api_router.post("/messages/dm/start")
-async def start_dm(request: Request, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    body = await request.json()
-    other_user_id = body.get("user_id")
-    if not other_user_id or other_user_id == current_user.user_id:
-        raise HTTPException(status_code=400, detail="Невалиден получател")
-    members = await get_team_members(current_user.company_id or "")
-    if not any(m["user_id"] == other_user_id for m in members):
-        raise HTTPException(status_code=404, detail="Потребителят не е намерен в екипа")
-    conversation_id = await get_or_create_dm_conversation(current_user.company_id, current_user.user_id, other_user_id)
-    return {"conversation_id": conversation_id}
-
-@api_router.get("/messages/{conversation_id}")
-async def get_messages(conversation_id: str, before: Optional[str] = None, limit: int = 50, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    await get_conversation_recipients(current_user, conversation_id)
-    query: Dict[str, Any] = {"company_id": current_user.company_id, "conversation_id": conversation_id}
-    if before:
-        query["created_at"] = {"$lt": datetime.fromisoformat(before.replace("Z", "+00:00"))}
-    messages = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(min(limit, 200))
-    messages.reverse()
-    return messages
-
-@api_router.post("/messages/{conversation_id}")
-async def send_message(conversation_id: str, request: Request, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    body = await request.json()
-    text = (body.get("text") or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Съобщението е празно")
-    text = text[:2000]
-
-    recipients = await get_conversation_recipients(current_user, conversation_id)
-
-    now = datetime.now(timezone.utc)
-    message = {
-        "id": str(uuid.uuid4()),
-        "company_id": current_user.company_id,
-        "conversation_id": conversation_id,
-        "sender_id": current_user.user_id,
-        "sender_name": current_user.name,
-        "text": text,
-        "created_at": now,
-    }
-    await db.messages.insert_one(dict(message))
-    await db.conversation_reads.update_one(
-        {"conversation_id": conversation_id, "user_id": current_user.user_id},
-        {"$set": {"last_read_at": now, "company_id": current_user.company_id}},
-        upsert=True,
-    )
-    background_tasks.add_task(notify_new_message, conversation_id, current_user, text, recipients)
-    return message
-
-@api_router.post("/messages/{conversation_id}/read")
-async def mark_conversation_read(conversation_id: str, current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "team_collaboration")
-    await get_conversation_recipients(current_user, conversation_id)
-    await db.conversation_reads.update_one(
-        {"conversation_id": conversation_id, "user_id": current_user.user_id},
-        {"$set": {"last_read_at": datetime.now(timezone.utc), "company_id": current_user.company_id}},
-        upsert=True,
-    )
-    return {"message": "OK"}
 
 class PushSubscriptionIn(BaseModel):
     endpoint: str
     keys: Dict[str, str]
 
-@api_router.post("/push/subscribe")
-async def push_subscribe(payload: PushSubscriptionIn, current_user: User = Depends(get_current_user)):
-    await db.push_subscriptions.update_one(
-        {"endpoint": payload.endpoint},
-        {"$set": {
-            "user_id": current_user.user_id,
-            "company_id": current_user.company_id,
-            "endpoint": payload.endpoint,
-            "keys": payload.keys,
-            "updated_at": datetime.now(timezone.utc),
-        }},
-        upsert=True,
-    )
-    return {"message": "OK"}
 
-@api_router.post("/push/unsubscribe")
-async def push_unsubscribe(request: Request, current_user: User = Depends(get_current_user)):
-    body = await request.json()
-    endpoint = body.get("endpoint")
-    if endpoint:
-        await db.push_subscriptions.delete_one({"endpoint": endpoint, "user_id": current_user.user_id})
-    return {"message": "OK"}
 
 # ===================== IN-APP FEEDBACK =====================
 
@@ -7988,45 +6663,21 @@ class FeedbackCreate(BaseModel):
     message: str = Field(..., min_length=3, max_length=2000)
     is_anonymous: bool = False
 
-@api_router.post("/feedback")
-async def submit_feedback(payload: FeedbackCreate, current_user: User = Depends(get_current_user)):
-    doc = {
-        "id": str(uuid.uuid4()),
-        "message": payload.message,
-        "is_anonymous": payload.is_anonymous,
-        "created_at": datetime.now(timezone.utc),
-    }
-    # An anonymous submission carries no identity at all, by design - not
-    # even for internal linking - so the choice the user made in the app is
-    # actually honored, not just hidden in the UI.
-    if not payload.is_anonymous:
-        doc["user_name"] = current_user.name
-        doc["user_email"] = current_user.email
-        doc["company_id"] = current_user.company_id
-    await db.feedback_submissions.insert_one(doc)
-    return {"message": "OK"}
 
-@api_router.get("/feedback")
-async def list_feedback(current_user: User = Depends(get_current_user)):
-    # There's no support domain/inbox yet (see privacy-policy.tsx note) - this
-    # is a stopgap so submitted feedback is actually reachable in the
-    # meantime, restricted to the app's own developer rather than any
-    # company's owner.
-    if current_user.email != ADMIN_EMAIL:
-        raise HTTPException(status_code=403, detail="Няма достъп")
-    items = await db.feedback_submissions.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return items
 
-async def _calendar_reminder_tick():
+async def _calendar_reminder_tick(now: Optional[datetime] = None):
     """One pass over due-and-unsent calendar reminders. Split out from the
     loop below so a test can call it directly without sleeping."""
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     candidates = await db.calendar_events.find(
         {"reminder_minutes_before": {"$ne": None}, "reminder_sent": {"$ne": True}}, {"_id": 0}
     ).to_list(500)
     for ev in candidates:
         try:
-            event_dt = datetime.fromisoformat(f"{ev['event_date']}T{ev.get('event_time') or '09:00'}:00").replace(tzinfo=timezone.utc)
+            # The time someone types for an event is the business's local
+            # time - before, it was read as UTC and a 10:00 reminder came
+            # two or three hours late.
+            event_dt = datetime.fromisoformat(f"{ev['event_date']}T{ev.get('event_time') or '09:00'}:00").replace(tzinfo=BUSINESS_TZ)
         except ValueError:
             continue
         remind_at = event_dt - timedelta(minutes=ev["reminder_minutes_before"])
@@ -8048,7 +6699,6 @@ async def _calendar_reminder_loop():
             logger.error(f"Calendar reminder loop error: {e}")
         await asyncio.sleep(180)
 
-@app.on_event("startup")
 async def start_calendar_reminder_loop():
     # In-process only - if this dyno is asleep (free-tier idle scale-down) a
     # reminder simply fires on the next request that wakes it instead of
@@ -8056,6 +6706,199 @@ async def start_calendar_reminder_loop():
     # hitting a small internal endpoint would be the fix if exact timing
     # ever matters more than "eventually, once the app is open again".
     asyncio.create_task(_calendar_reminder_loop())
+
+async def _budget_alert_tick():
+    """Pushes a real phone notification the moment a company crosses its
+    monthly budget's alert threshold (and again, separately, if it goes on
+    to exceed the budget entirely) - unlike the in-app price-change alerts,
+    nobody has to have the app open to find out. Each of the two crossings
+    fires at most once per month per company: alert_sent/exceeded_sent on
+    the budget document (reset whenever the limit/threshold itself changes,
+    see create_budget) is the dedupe, exactly like calendar's reminder_sent.
+
+    Exposed as its own tick function (called from the loop below) so a test
+    can call it directly without sleeping.
+
+    Each member is written with their own figures - what they may not see
+    (off-book expenses, the payroll) is out of them, as out of their screen -
+    and alerted once their own figures cross: alert_sent_to/exceeded_sent_to
+    hold who has been (the old alert_sent/exceeded_sent - sent to everyone
+    of that time)."""
+    current_month = today_local().strftime("%Y-%m")
+    budgets = await db.budgets.find({"month": current_month}, {"_id": 0}).to_list(1000)
+
+    for budget in budgets:
+        company_id = budget["company_id"]
+        members = await db.users.find(
+            {"company_id": company_id, "permissions": "manage_budget"}, {"_id": 0, "password_hash": 0},
+        ).to_list(100)
+        if not members:
+            continue
+        everyone = [member["user_id"] for member in members]
+        alerted = set(budget.get("alert_sent_to") or (everyone if budget.get("alert_sent") else []))
+        exceeded = set(budget.get("exceeded_sent_to") or (everyone if budget.get("exceeded_sent") else []))
+        statuses: Dict[tuple, Optional[dict]] = {}
+        to_send: Dict[tuple, Dict[str, List[str]]] = {}
+        for member in members:
+            visibility = visibility_from_permissions(sanitize_user(member).get("permissions"))
+            key = (visibility["off_book_expenses"], visibility["payroll"])
+            if key not in statuses:
+                statuses[key] = await compute_budget_status(company_id, current_month, visibility)
+            status = statuses[key]
+            if not status:
+                continue
+            user_id = member["user_id"]
+            if status["is_exceeded"] and user_id not in exceeded:
+                to_send.setdefault(key, {"exceeded": [], "alert": []})["exceeded"].append(user_id)
+            elif status["is_alert"] and not status["is_exceeded"] and user_id not in alerted:
+                to_send.setdefault(key, {"exceeded": [], "alert": []})["alert"].append(user_id)
+
+        for key, groups in to_send.items():
+            status = statuses[key]
+            if not status:
+                continue
+            if groups["exceeded"]:
+                await push_service.send_to_users(
+                    db, groups["exceeded"],
+                    title="Бюджетът е надхвърлен",
+                    body=(
+                        f"Разходите за {current_month} вече са {fmt_eur(status['total_spent'])} - "
+                        f"над лимита от {fmt_eur(status['expense_limit'])}."
+                    ),
+                    data={"type": "budget", "month": current_month},
+                )
+                exceeded.update(groups["exceeded"])
+                alerted.update(groups["exceeded"])
+            if groups["alert"]:
+                await push_service.send_to_users(
+                    db, groups["alert"],
+                    title="Приближаваш бюджетния лимит",
+                    body=(
+                        f"Разходите за {current_month} достигнаха {status['percent_used']:.0f}% "
+                        f"от лимита от {fmt_eur(status['expense_limit'])}."
+                    ),
+                    data={"type": "budget", "month": current_month},
+                )
+                alerted.update(groups["alert"])
+        if to_send:
+            await db.budgets.update_one(
+                {"company_id": company_id, "month": current_month},
+                {"$set": {
+                    "alert_sent_to": sorted(alerted), "exceeded_sent_to": sorted(exceeded),
+                    # Sent to everyone who manages the budget now.
+                    "alert_sent": set(everyone) <= alerted, "exceeded_sent": set(everyone) <= exceeded,
+                }},
+            )
+
+async def _budget_alert_loop():
+    while True:
+        try:
+            await _budget_alert_tick()
+        except Exception as e:
+            logger.error(f"Budget alert loop error: {e}")
+        # Hourly is plenty for a monthly threshold - unlike a calendar
+        # reminder, there's no "exact minute" to hit.
+        await asyncio.sleep(3600)
+
+async def start_budget_alert_loop():
+    asyncio.create_task(_budget_alert_loop())
+
+
+async def _backup_email_loop():
+    while True:
+        try:
+            from routers.backup import send_monthly_backup_emails
+            await send_monthly_backup_emails()
+        except Exception as e:
+            logger.error(f"Backup email loop error: {e}")
+        await asyncio.sleep(3600)
+
+
+async def start_backup_email_loop():
+    """The owner's monthly copy of the data by email, for whoever asked
+    for it (routers/backup)."""
+    if EMAIL_FEATURES_ENABLED:
+        asyncio.create_task(_backup_email_loop())
+
+PERIODIC_REMINDER_FALLBACK = "Отвори Дневния преглед във Фактура+ и виж какво чака действие."
+
+
+PERIODIC_REMINDER_FALLBACK_EN = "Open the Daily briefing in Fakturaplus to see what waits for you."
+
+
+async def periodic_reminder_body(user_id: str) -> str:
+    """What waits for this user today - the top of Home's daily review -
+    instead of a reminder that only said today was one of the chosen days.
+    In the language the person's app shows."""
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user_doc:
+        return PERIODIC_REMINDER_FALLBACK
+    english = app_in_english(user_doc)
+    try:
+        signals = await get_proactive_signals(User(**sanitize_user(dict(user_doc))), english)
+    except Exception:
+        logger.exception(f"Periodic reminder: signals failed for {user_id}")
+        return PERIODIC_REMINDER_FALLBACK_EN if english else PERIODIC_REMINDER_FALLBACK
+    return review_summary_text(signals, english)
+
+
+async def _scan_credit_depletion_tick():
+    """Module 5 audit finding: the scan-credit ledger can already predict
+    a depletion date (ScanCreditService.get_depletion_forecast), but
+    nothing used it to warn anyone before the balance actually hit zero.
+    One pass over every balance not yet alerted this cycle; pushes once
+    when 3 days or fewer remain at the current pace, then stays quiet
+    until a purchase or the next monthly reset clears the flag (see
+    get_or_create_balance/credit_purchase)."""
+    DEPLETION_ALERT_THRESHOLD_DAYS = 3
+    balances = await scan_credit_service.list_balances_needing_depletion_check()
+
+    for balance in balances:
+        scope = balance["_id"]
+        company_id = balance.get("company_id")
+        # A company-scoped balance ignores the user_id argument entirely
+        # (see ScanCreditService.scope_id) - only a solo ("user:<id>")
+        # scope actually needs it, parsed back out of the scope string.
+        probe_user_id = scope.split("user:", 1)[1] if scope.startswith("user:") else "_"
+
+        forecast = await scan_credit_service.get_depletion_forecast(company_id, probe_user_id)
+        if forecast["insufficient_data"] or forecast["days_remaining"] is None:
+            continue
+        if forecast["days_remaining"] > DEPLETION_ALERT_THRESHOLD_DAYS:
+            continue
+
+        if company_id:
+            recipients = await db.users.find(
+                {"company_id": company_id, "permissions": "manage_invoices"}, {"_id": 0, "user_id": 1}
+            ).to_list(100)
+            recipient_ids = [r["user_id"] for r in recipients]
+        else:
+            recipient_ids = [probe_user_id]
+        if not recipient_ids:
+            continue
+
+        days = forecast["days_remaining"]
+        body = (
+            "Кредитите ти за сканиране вече са на привършване."
+            if days <= 0 else
+            f"При текущия темп кредитите ти за сканиране ще свършат за около {days} {'ден' if days == 1 else 'дни'}."
+        )
+        await push_service.send_to_users(
+            db, recipient_ids, title="Кредитите ти свършват", body=body,
+            data={"type": "scan_credit_depletion", "days_remaining": days},
+        )
+        await scan_credit_service.mark_depletion_alert_sent(scope)
+
+async def _scan_credit_depletion_loop():
+    while True:
+        try:
+            await _scan_credit_depletion_tick()
+        except Exception as e:
+            logger.error(f"Scan credit depletion loop error: {e}")
+        await asyncio.sleep(3600)
+
+async def start_scan_credit_depletion_loop():
+    asyncio.create_task(_scan_credit_depletion_loop())
 
 # ===================== BULK IMPORT (CSV/EXCEL) =====================
 # Each entity's commit step calls the EXISTING create_* route function per
@@ -8075,137 +6918,14 @@ _IMPORT_PERMISSIONS = {
 class ImportCommitRequest(BaseModel):
     rows: List[dict]
 
-@api_router.get("/import/template/{entity}")
-async def get_import_template(entity: str, current_user: User = Depends(get_current_user)):
-    if entity not in import_service.ENTITY_TEMPLATES:
-        raise HTTPException(status_code=404, detail="Непознат тип за импорт")
-    require_permission(current_user, _IMPORT_PERMISSIONS[entity])
-    try:
-        data = import_service.build_template(entity)
-    except import_service.ImportFileError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    filename = f"shablon_{entity}.xlsx"
-    return Response(
-        content=data,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
 
-@api_router.post("/import/{entity}/preview")
-@limiter.limit("20/minute")
-async def import_preview(entity: str, request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    if entity not in import_service.ENTITY_TEMPLATES:
-        raise HTTPException(status_code=404, detail="Непознат тип за импорт")
-    require_permission(current_user, _IMPORT_PERMISSIONS[entity])
 
-    content = await file.read()
-    try:
-        df = import_service.read_uploaded_table(content, file.filename or "")
-    except import_service.ImportFileError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    context: Dict[str, Any] = {}
-    if entity == "payroll":
-        _, scope = await get_company_scope(current_user)
-        employees = await db.employees.find(scope, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
-        context["employees_by_name"] = {e["name"].strip().lower(): e["id"] for e in employees}
-
-    try:
-        return import_service.preview_rows(entity, df, context)
-    except import_service.ImportFileError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@api_router.post("/import/{entity}/commit")
-@limiter.limit("10/minute")
-async def import_commit(entity: str, request: Request, payload: ImportCommitRequest, current_user: User = Depends(get_current_user)):
-    if entity not in import_service.ENTITY_TEMPLATES:
-        raise HTTPException(status_code=404, detail="Непознат тип за импорт")
-    require_permission(current_user, _IMPORT_PERMISSIONS[entity])
-
-    imported = 0
-    failed = []
-    bg_tasks = BackgroundTasks()
-
-    # Short Bulgarian reasons for the validation-error types a bad import
-    # row actually hits (missing/negative/wrong-type cells), so a failed
-    # row shows something a non-technical user can act on instead of a
-    # raw Python/Pydantic exception string.
-    VALIDATION_ERROR_REASONS = {
-        "missing": "липсва задължително поле",
-        "greater_than": "трябва да е положително число",
-        "greater_than_equal": "не може да е отрицателно число",
-        "less_than_equal": "стойността е твърде голяма",
-        "float_parsing": "не е валидно число",
-        "int_parsing": "не е валидно цяло число",
-    }
-
-    def describe_validation_error(e: ValidationError) -> str:
-        parts = []
-        for err in e.errors():
-            field = ".".join(str(p) for p in err.get("loc", []))
-            reason = VALIDATION_ERROR_REASONS.get(err.get("type"), "невалидна стойност")
-            parts.append(f"{field}: {reason}" if field else reason)
-        return "; ".join(parts) or "невалидни данни в реда"
-
-    for index, row_data in enumerate(payload.rows):
-        try:
-            if entity == "invoices":
-                await create_invoice(invoice=InvoiceCreate(**row_data), background_tasks=bg_tasks, current_user=current_user)
-            elif entity == "assets":
-                await create_asset(asset=FixedAssetCreate(**row_data), current_user=current_user)
-            elif entity == "budget":
-                await create_budget(budget=BudgetCreate(**row_data), current_user=current_user)
-            elif entity == "daily_revenue":
-                await create_daily_revenue(revenue=DailyRevenueCreate(**row_data), current_user=current_user)
-            elif entity == "expenses":
-                await create_expense(expense=NonInvoiceExpenseCreate(**row_data), current_user=current_user)
-            elif entity == "payroll":
-                await create_payroll_entry(entry=PayrollEntryCreate(**row_data), current_user=current_user)
-            imported += 1
-        except HTTPException as e:
-            failed.append({"index": index, "message": e.detail})
-        except ValidationError as e:
-            failed.append({"index": index, "message": describe_validation_error(e)})
-        except Exception:
-            failed.append({"index": index, "message": "Редът не можа да бъде обработен"})
-
-    if entity == "invoices":
-        # No HTTP response cycle will run these for us since create_invoice
-        # was called directly rather than as the request handler.
-        await bg_tasks()
-
-    return {"imported": imported, "failed": failed, "total": len(payload.rows)}
 
 # ===================== AUDIT LOG =====================
 
-@api_router.get("/audit-logs")
-async def get_audit_logs(
-    action: Optional[str] = None,
-    entity_type: Optional[str] = None,
-    search: Optional[str] = None,
-    limit: int = 50,
-    current_user: User = Depends(get_current_user)
-):
-    """Get audit logs (Owner/Accountant only - see ROLE_PERMISSIONS)"""
-    require_permission(current_user, "view_audit_log")
-    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "company_id": 1, "role": 1})
-    company_id = user_doc.get("company_id") if user_doc else None
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Нямате фирма")
-
-    logs = await audit_service.get_logs(
-        company_id=company_id,
-        action=action,
-        entity_type=entity_type,
-        search=search,
-        limit=limit
-    )
-
-    return {"logs": logs}
 
 # ===================== DATABASE INDEXES =====================
 
-@app.on_event("startup")
 async def create_indexes():
     """Create database indexes for performance"""
     try:
@@ -8225,7 +6945,53 @@ async def create_indexes():
         # Price history indexes
         await db.item_price_history.create_index([("company_id", 1), ("item_name", 1)])
         await db.item_price_history.create_index([("company_id", 1), ("supplier", 1)])
-        
+        # Edits/deletes of an invoice resync its rows by invoice_id
+        await db.item_price_history.create_index([("company_id", 1), ("invoice_id", 1)])
+        # The ordering plan reads the last year or so of purchases.
+        await db.item_price_history.create_index([("company_id", 1), ("invoice_date", -1)])
+        # "Поръчано": one mark per item, and the orders it learns from.
+        await db.reorder_marks.create_index([("company_id", 1), ("item_key", 1)])
+        await db.reorder_orders.create_index([("company_id", 1), ("ordered_at", -1)])
+        await db.price_alerts.create_index([("company_id", 1), ("invoice_id", 1)])
+
+        # Price alerts - read on every app open via GET /items/price-alerts
+        # (mounted in app/_layout.tsx), so this one matters more than its
+        # small row size suggests.
+        await db.price_alerts.create_index([("company_id", 1), ("status", 1), ("created_at", -1)])
+
+        # Customers & receivables
+        await db.customers.create_index([("company_id", 1), ("name", 1)])
+        await db.receivables.create_index([("company_id", 1), ("is_paid", 1), ("due_date", 1)])
+        await db.billing_documents.create_index([("company_id", 1), ("created_at", -1)])
+
+        # The morning push: one state doc per person (when it was last looked at)
+        await db.daily_push_state.create_index([("user_id", 1)], unique=True)
+        # What each viewer snoozed/dismissed on Home (read on every Home load)
+        await db.signal_states.create_index([("user_id", 1), ("until", 1)])
+        await db.signal_states.create_index([("user_id", 1), ("key", 1), ("fingerprint", 1)], unique=True)
+        await db.item_preferences.create_index([("company_id", 1), ("item_key", 1)], unique=True)
+        await db.item_pack_rules.create_index([("company_id", 1), ("item_key", 1), ("supplier_key", 1)], unique=True)
+        await db.item_distinctions.create_index([("company_id", 1), ("a", 1), ("b", 1)], unique=True)
+        await db.signal_seen.create_index([("user_id", 1), ("situation", 1)], unique=True)
+        await db.signal_seen.create_index("last_seen_at", expireAfterSeconds=90 * 24 * 3600)
+
+        # The money the business said it has, latest first.
+        await db.cash_positions.create_index([("company_id", 1), ("date", -1), ("created_at", -1)])
+        # Invoices that repeat, and the month's invoice each one issued.
+        await db.recurring_invoices.create_index([("company_id", 1)])
+        # The business's own selling prices, one per name.
+        await db.price_list.create_index([("company_id", 1), ("name_key", 1)])
+        # The owner's own deadlines.
+        await db.deadlines.create_index([("company_id", 1), ("due_date", 1)])
+        # The business's locations (shops, sites, branches).
+        await db.locations.create_index([("company_id", 1), ("created_at", 1)])
+        await db.billing_documents.create_index([("company_id", 1), ("recurring_invoice_id", 1), ("recurring_month", 1)])
+
+        # A login waiting for its second step: found by its token, gone
+        # once expired (the TTL monitor sweeps it; the code checks the time).
+        await db.login_challenges.create_index([("token", 1)], unique=True)
+        await db.login_challenges.create_index("expires_at", expireAfterSeconds=0)
+
         # Users indexes
         await db.users.create_index([("email", 1)], unique=True, sparse=True)
         await db.users.create_index([("company_id", 1)])
@@ -8247,6 +7013,7 @@ async def create_indexes():
         await db.push_subscriptions.create_index([("endpoint", 1)], unique=True)
         await db.feedback_submissions.create_index([("created_at", -1)])
         await db.push_subscriptions.create_index([("user_id", 1)])
+        await db.ai_usage_log.create_index([("company_id", 1), ("created_at", -1)])
 
         # Multi-owner removal-approval requests
         await db.owner_actions.create_index([("company_id", 1), ("status", 1)])
@@ -8257,6 +7024,13 @@ async def create_indexes():
         # Employee holiday-work / leave tracking
         await db.employee_holiday_work.create_index([("company_id", 1), ("date", 1)])
         await db.employee_leave.create_index([("company_id", 1), ("start_date", 1), ("end_date", 1)])
+        await db.employees.create_index([("company_id", 1), ("linked_user_id", 1)], sparse=True)
+
+        # Work schedule
+        await db.work_shifts.create_index([("company_id", 1), ("user_id", 1)])
+        await db.shift_adjustments.create_index([("shift_id", 1), ("date", 1)], unique=True)
+        await db.schedule_payments.create_index([("company_id", 1), ("user_id", 1), ("period_start", 1)])
+        await db.team_notes.create_index([("company_id", 1), ("user_id", 1), ("created_at", -1)])
 
         # Scan credits (balance doc is keyed by its own scope _id already;
         # auto_reload_subscription_id is looked up by the Stripe webhook)
@@ -8266,6 +7040,275 @@ async def create_indexes():
         logger.info("Database indexes created successfully")
     except Exception as e:
         logger.error(f"Error creating indexes: {e}")
+
+
+async def migrate_invoice_dates_to_business_days() -> dict:
+    """Invoice dates used to be kept as whatever moment the device sent: a
+    phone sends the picked day with the time of day it was picked at, the
+    web sends local midnight - the evening before, in UTC. Each module then
+    guessed the day its own way, and invoices from the first or last day of
+    a month went missing from one screen or moved to the previous month on
+    another. This puts every stored invoice date, due date and price-history
+    date onto its business day once (services/business_calendar: the day
+    the moment falls on in Bulgaria, which is the day that was picked
+    whichever device picked it). The original invoice values are kept in
+    data_migration_backups; price-history rows are derived from invoices
+    and need none."""
+    marker = "invoice_business_days_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    changed_invoices = 0
+    async for invoice in db.invoices.find({}, {"_id": 1, "date": 1, "payment_due_date": 1}):
+        update = {}
+        for field in ("date", "payment_due_date"):
+            value = invoice.get(field)
+            if value in (None, "") or is_stored_day(value):
+                continue
+            try:
+                update[field] = stored_day(value)
+            except (TypeError, ValueError):
+                logger.warning(f"Invoice {invoice['_id']}: unreadable {field} {value!r} left as it is")
+        if update:
+            await db.data_migration_backups.insert_one({
+                "migration": marker, "collection": "invoices", "doc_id": invoice["_id"],
+                "original": {field: invoice.get(field) for field in update},
+            })
+            await db.invoices.update_one({"_id": invoice["_id"]}, {"$set": update})
+            changed_invoices += 1
+    changed_rows = 0
+    async for row in db.item_price_history.find({}, {"_id": 1, "invoice_date": 1}):
+        value = row.get("invoice_date")
+        if isinstance(value, datetime) and not is_stored_day(value):
+            await db.item_price_history.update_one({"_id": row["_id"]}, {"$set": {"invoice_date": stored_day(value)}})
+            changed_rows += 1
+    result = {"invoices": changed_invoices, "price_rows": changed_rows}
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), **result})
+    return result
+
+
+REVENUE_AMOUNT_FIELDS = ("fiscal_revenue", "pocket_money", "card_revenue")
+
+
+def _row_stamp(row: dict) -> datetime:
+    value = row.get("updated_at") or row.get("created_at")
+    return _as_utc(value) if isinstance(value, datetime) else datetime.min.replace(tzinfo=timezone.utc)
+
+
+def merge_revenue_duplicates(rows: List[dict]) -> dict:
+    """One day's revenue from several records of the same day. A figure
+    only one of them holds (or all hold alike) is that figure - copies made
+    by a restore, or the till total in one and pocket money in another; a
+    figure they disagree on is the one entered last. Before, every summary
+    added them all up and the day counted twice."""
+    ordered = sorted(rows, key=_row_stamp)
+    latest = ordered[-1]
+    merged: Dict[str, Any] = {}
+    for f in REVENUE_AMOUNT_FIELDS:
+        values = {round(float(r.get(f) or 0), 2) for r in rows} - {0.0}
+        merged[f] = values.pop() if len(values) == 1 else round(float(latest.get(f) or 0), 2)
+    merged["vat_rate_percent"] = latest.get("vat_rate_percent", 20.0)
+    return merged
+
+
+async def dedupe_revenue_days_and_payroll() -> dict:
+    """One record per business day of revenue and per employee-month of
+    payroll, then unique indexes so it stays that way (a double tap, two
+    devices, a restore or an import used to be able to add a second one,
+    and every total counted both). A member's own record from before
+    joining (no company) that collides with the company's day is merged
+    into it. Every removed record is kept in data_migration_backups."""
+    marker = "dedupe_revenue_payroll_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    merged_days = 0
+    removed_rows = 0
+    member_company = {
+        u["user_id"]: u["company_id"]
+        for u in await db.users.find({"company_id": {"$ne": None}}, {"_id": 0, "user_id": 1, "company_id": 1}).to_list(ALL_ROWS)
+    }
+    groups: Dict[tuple, List[dict]] = {}
+    async for row in db.daily_revenue.find({}, {"_id": 1, "id": 1, "company_id": 1, "user_id": 1, "date": 1,
+                                                 "created_at": 1, "updated_at": 1, "vat_rate_percent": 1,
+                                                 **{f: 1 for f in REVENUE_AMOUNT_FIELDS}}):
+        company = row.get("company_id") or member_company.get(row.get("user_id"))
+        owner = ("company", company) if company else ("user", row.get("user_id"))
+        groups.setdefault((owner, str(row.get("date") or "")[:10]), []).append(row)
+    for (owner, _day), rows in groups.items():
+        if len(rows) < 2:
+            continue
+        # The company's own record survives (else the newest), with the merged figures.
+        keep = max(rows, key=lambda r: (r.get("company_id") is not None, _row_stamp(r)))
+        update = merge_revenue_duplicates(rows)
+        if owner[0] == "company":
+            update["company_id"] = owner[1]
+        for row in rows:
+            if row["_id"] == keep["_id"]:
+                continue
+            await db.data_migration_backups.insert_one({
+                "migration": marker, "collection": "daily_revenue", "doc_id": row["_id"],
+                "original": {k: v for k, v in row.items() if k != "_id"}, "merged_into": keep.get("id"),
+            })
+            await db.daily_revenue.delete_one({"_id": row["_id"]})
+            removed_rows += 1
+        await db.daily_revenue.update_one({"_id": keep["_id"]}, {"$set": update})
+        merged_days += 1
+
+    removed_payroll = 0
+    payroll_groups: Dict[tuple, List[dict]] = {}
+    async for entry in db.payroll_entries.find({"employee_id": {"$type": "string"}},
+                                               {"_id": 1, "company_id": 1, "employee_id": 1, "period_year": 1, "period_month": 1, "created_at": 1}):
+        key = (entry.get("company_id"), entry["employee_id"], entry.get("period_year"), entry.get("period_month"))
+        payroll_groups.setdefault(key, []).append(entry)
+    for entries in payroll_groups.values():
+        if len(entries) < 2:
+            continue
+        ordered = sorted(entries, key=_row_stamp)
+        for entry in ordered[:-1]:
+            full: Dict[str, Any] = dict(await db.payroll_entries.find_one({"_id": entry["_id"]}) or {})
+            full.pop("_id", None)
+            await db.data_migration_backups.insert_one({
+                "migration": marker, "collection": "payroll_entries", "doc_id": entry["_id"], "original": full,
+            })
+            await db.payroll_entries.delete_one({"_id": entry["_id"]})
+            removed_payroll += 1
+
+    result = {"revenue_days_merged": merged_days, "revenue_rows_removed": removed_rows, "payroll_removed": removed_payroll}
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), **result})
+    return result
+
+
+async def mark_schedule_wages() -> dict:
+    """Expenses that schedule payments created before wages were their own
+    kind: marked as wages (counted with payroll, not as off-book expenses)
+    and tied to their payment."""
+    marker = "schedule_wages_kind_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    marked = 0
+    async for payment in db.schedule_payments.find({}, {"_id": 0, "id": 1, "expense_id": 1}):
+        if not payment.get("expense_id"):
+            continue
+        result = await db.expenses.update_one(
+            {"id": payment["expense_id"], "kind": {"$ne": SCHEDULE_WAGES}},
+            {"$set": {"kind": SCHEDULE_WAGES, "schedule_payment_id": payment["id"]}},
+        )
+        marked += result.modified_count
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), "marked": marked})
+    return {"marked": marked}
+
+
+async def mark_till_paid_invoices() -> dict:
+    """Invoices issued in cash or by card before the till was taken into
+    account: for a business that enters its till's daily revenue they went
+    through the till (fiscal receipts) - marked so, and no longer counted a
+    second time as income and VAT."""
+    marker = "issued_invoices_in_till_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    unmarked = {"doc_type": "invoice", "payment_method": {"$in": ["cash", "card"]}, "in_till": {"$exists": False}}
+    marked = 0
+    for company_id in await db.billing_documents.distinct("company_id", unmarked):
+        if not company_id or not await db.daily_revenue.find_one({"company_id": company_id, "fiscal_revenue": {"$gt": 0}}, {"_id": 1}):
+            continue
+        result = await db.billing_documents.update_many({"company_id": company_id, **unmarked}, {"$set": {"in_till": True}})
+        marked += result.modified_count
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), "marked": marked})
+    return {"marked": marked}
+
+
+async def start_legacy_recurring_expenses() -> dict:
+    """Recurring expenses saved before they did anything: they start with
+    this month (no questions about months long gone) and ask before
+    recording - nothing is recorded for them by itself."""
+    marker = "recurring_expenses_kinds_v1"
+    if await db.data_migrations.find_one({"_id": marker}):
+        return {"skipped": True}
+    this_month = today_local().strftime("%Y-%m")
+    result = await db.recurring_expenses.update_many(
+        {"start_month": {"$exists": False}},
+        {"$set": {"start_month": this_month, "kind": "no_invoice", "auto_record": False}},
+    )
+    await db.data_migrations.insert_one({"_id": marker, "done_at": datetime.now(timezone.utc), "started": result.modified_count})
+    return {"started": result.modified_count}
+
+
+async def ensure_unique_records():
+    """After dedupe_revenue_days_and_payroll: one revenue record per company
+    and day, one payroll record per employee and month."""
+    try:
+        await db.daily_revenue.create_index(
+            [("company_id", 1), ("date", 1)], unique=True, name="one_revenue_day_per_company",
+            partialFilterExpression={"company_id": {"$type": "string"}},
+        )
+    except Exception:
+        logger.exception("Unique revenue-day index could not be created")
+    try:
+        await db.payroll_entries.create_index(
+            [("company_id", 1), ("employee_id", 1), ("period_year", 1), ("period_month", 1)],
+            unique=True, name="one_payroll_per_employee_month",
+            partialFilterExpression={"employee_id": {"$type": "string"}},
+        )
+    except Exception:
+        logger.exception("Unique payroll index could not be created")
+    try:
+        await db.billing_documents.create_index(
+            [("company_id", 1), ("invoice_number", 1)], unique=True, name="one_invoice_number_per_company",
+            partialFilterExpression={"invoice_number": {"$type": "string"}},
+        )
+    except Exception:
+        logger.exception("Unique issued-invoice number index could not be created")
+    try:
+        await db.expenses.create_index(
+            [("recurring_id", 1), ("recurring_month", 1)], unique=True, name="one_record_per_recurring_month",
+            partialFilterExpression={"recurring_id": {"$type": "string"}},
+        )
+    except Exception:
+        logger.exception("Unique recurring-month index could not be created")
+
+
+async def run_data_migrations():
+    """One-time data repairs, each guarded by its own marker in
+    `data_migrations` so a restart never re-runs them. A failure is logged
+    and swallowed - a broken migration must never keep the API from
+    starting."""
+    from routers.price_tracking import cleanup_orphan_price_data
+    try:
+        result = await cleanup_orphan_price_data()
+        if result:
+            logger.info(f"Price data cleanup: {result}")
+    except Exception:
+        logger.exception("Price data cleanup failed")
+    try:
+        result = await migrate_invoice_dates_to_business_days()
+        if result and not result.get("skipped"):
+            logger.info(f"Invoice dates moved onto business days: {result}")
+    except Exception:
+        logger.exception("Invoice business-day migration failed")
+    try:
+        result = await dedupe_revenue_days_and_payroll()
+        if result and not result.get("skipped"):
+            logger.info(f"Duplicate revenue days / payroll merged: {result}")
+    except Exception:
+        logger.exception("Revenue/payroll dedupe failed")
+    await ensure_unique_records()
+    try:
+        result = await mark_schedule_wages()
+        if result and not result.get("skipped"):
+            logger.info(f"Schedule payments' expenses marked as wages: {result}")
+    except Exception:
+        logger.exception("Schedule wages migration failed")
+    try:
+        result = await mark_till_paid_invoices()
+        if result and not result.get("skipped"):
+            logger.info(f"Issued invoices paid at the till marked: {result}")
+    except Exception:
+        logger.exception("Till-paid invoices migration failed")
+    try:
+        result = await start_legacy_recurring_expenses()
+        if result and not result.get("skipped"):
+            logger.info(f"Recurring expenses from before kinds started this month: {result}")
+    except Exception:
+        logger.exception("Recurring expenses migration failed")
 
 # ===================== HEALTH CHECK =====================
 
@@ -8279,6 +7322,105 @@ async def health():
 
 # Include the router
 app.include_router(api_router)
+
+from routers import collaboration
+app.include_router(collaboration.router)
+from routers import import_data
+app.include_router(import_data.router)
+from routers import audit
+app.include_router(audit.router)
+
+from routers import budget
+app.include_router(budget.router)
+from routers import payroll
+app.include_router(payroll.router)
+from routers import schedule
+app.include_router(schedule.router)
+from routers import pay_run
+app.include_router(pay_run.router)
+from routers import assets
+app.include_router(assets.router)
+from routers import team_profile
+app.include_router(team_profile.router)
+
+# Cross-router dependencies for code that stays in server.py itself (the
+# proactive-engine signal builders) or hasn't been extracted yet (the bulk
+# import commit handler) but calls another domain's route-handler function
+# directly, the same reuse pattern already used elsewhere in this codebase
+# (see import_service's own module docstring). These two are genuinely
+# cross-domain, not duplication: _signal_receivables/_signal_reorder reuse
+# receivables/price_tracking's own logic instead of re-querying the same
+# data a second way.
+from routers.receivables import get_receivables_summary
+from routers.price_tracking import reorder_overview
+from routers.invoices import create_invoice
+from routers.revenue_expenses import create_daily_revenue, create_expense
+from routers.budget import create_budget
+from routers.assets import create_asset
+from routers.payroll import create_payroll_entry
+from routers.recurring import recurring_expense_signals, start_recurring_expense_loop
+
+from routers import recurring
+app.include_router(recurring.router)
+from routers import scan_credits
+app.include_router(scan_credits.router)
+from routers import price_tracking
+app.include_router(price_tracking.router)
+from routers import forecast
+app.include_router(forecast.router)
+from routers import ai_insights
+app.include_router(ai_insights.router)
+from routers import statistics as statistics_router
+app.include_router(statistics_router.router)
+
+from routers import invoices
+app.include_router(invoices.router)
+from routers import revenue_expenses
+app.include_router(revenue_expenses.router)
+from routers import receivables
+app.include_router(receivables.router)
+from routers import roi_wallet
+app.include_router(roi_wallet.router)
+from routers import cash_flow as cash_flow_router
+app.include_router(cash_flow_router.router)
+from routers import accountant_pack
+app.include_router(accountant_pack.router)
+from routers import z_report
+app.include_router(z_report.router)
+from routers import bank_statement as bank_statement_router
+app.include_router(bank_statement_router.router)
+from routers import payment_reminders as payment_reminders_router
+app.include_router(payment_reminders_router.router)
+from routers import recurring_invoices as recurring_invoices_router
+app.include_router(recurring_invoices_router.router)
+from routers import price_list as price_list_router
+app.include_router(price_list_router.router)
+from routers import deadlines as deadlines_router
+app.include_router(deadlines_router.router)
+from routers import locations as locations_router
+app.include_router(locations_router.router)
+
+from routers import auth
+app.include_router(auth.router)
+from routers import company
+app.include_router(company.router)
+from routers import backup
+app.include_router(backup.router)
+from routers import exports
+app.include_router(exports.router)
+
+from routers import admin
+app.include_router(admin.router)
+
+# Home in one request (Л14) - built from the handlers above.
+from routers import margins as margins_router
+app.include_router(margins_router.router)
+from routers import home as home_router
+app.include_router(home_router.router)
+from routers import day_card as day_card_router
+app.include_router(day_card_router.router)
+from routers import team_moments as team_moments_router
+app.include_router(team_moments_router.router)
 
 _cors_origins_env = os.environ.get("CORS_ORIGINS", "")
 if _cors_origins_env:
@@ -8300,8 +7442,61 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The invoice list's whole-filter count and sums travel in headers; a
+    # browser on another origin may only read them when they are exposed.
+    expose_headers=["X-Total-Count", "X-Total-Amount", "X-Total-Vat"],
 )
 
-@app.on_event("shutdown")
+@app.middleware("http")
+async def csrf_protection_middleware(request: Request, call_next):
+    """Double-submit CSRF check for cookie-authenticated, state-changing
+    requests. samesite="none" on the session cookie (required because the
+    frontend and backend sit on different origins) gives up the browser's
+    own default CSRF protection, so this fills that gap explicitly.
+
+    Only applies when a session_token COOKIE is present - the mobile
+    client's Authorization-header path isn't vulnerable the way a
+    browser-attached cookie is (a browser never auto-attaches a custom
+    header cross-site), so it's untouched by this check.
+
+    Also skipped whenever a (non-empty) Authorization header is present,
+    on either platform: every client - the native app via its stored
+    token, and the web app too, since it calls api.setToken() right after
+    login the same way - already sends one on every authenticated
+    request, and an attacker's forged cross-site request can never
+    include a legitimate-looking one (reading it to forge the header
+    would require reading something only same-origin JS can read, exactly
+    like the csrf_token cookie below; and setting a custom Authorization
+    header cross-origin forces the same CORS-preflight-against-the-
+    allowlist rejection as a custom CSRF header would). This keeps the
+    check from ever firing on normal traffic while still closing the real
+    gap: a request authenticated purely by an auto-attached cookie, with
+    no Authorization header at all - which is exactly what an attacker's
+    forged request looks like, and also exactly the one path this
+    double-submit check exists to cover.
+
+    Rollout note: for the requests this does apply to, a header is
+    required outright (blocks both a plain cross-site form, which cannot
+    set custom headers at all, and a cross-origin fetch(), which the
+    existing CORS allowlist already turns away at the preflight before
+    any custom header matters) but a MISSING csrf_token cookie does not
+    itself fail the request - only a cookie that's present and doesn't
+    match the header does. This grandfathers in sessions created before
+    this check existed (no csrf_token cookie yet) instead of locking out
+    every already-logged-in browser tab the moment this deploys; they get
+    the real cookie-matched check on their next login, same as everyone
+    else."""
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        session_cookie = request.cookies.get("session_token")
+        auth_header = request.headers.get("Authorization")
+        if session_cookie and not auth_header:
+            csrf_header = request.headers.get(CSRF_HEADER_NAME)
+            if not csrf_header:
+                return JSONResponse(status_code=403, content={"detail": "Невалиден CSRF токен"})
+            csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
+            if csrf_cookie and csrf_header != csrf_cookie:
+                return JSONResponse(status_code=403, content={"detail": "Невалиден CSRF токен"})
+    return await call_next(request)
+
 async def shutdown_db_client():
     client.close()

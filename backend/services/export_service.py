@@ -2,8 +2,12 @@
 import io
 import os
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import json
+from xml.sax.saxutils import escape as _xml_escape
+
+from services.revenue_vat import vat_parts
+from services.money_text import fmt_amount, fmt_eur
 
 try:
     import openpyxl
@@ -47,6 +51,19 @@ except ImportError:
 # from user input (supplier names, notes, employee names, etc.) before it
 # is written to a cell.
 _FORMULA_TRIGGER_CHARS = ('=', '+', '-', '@', '\t', '\r')
+
+
+def _document_number(inv: dict) -> str:
+    """The document's number as a list shows it - a credit note marked as
+    one, so its minus amounts read as what they are."""
+    number = str(inv.get("invoice_number", "") or "")
+    return f"КИ {number}" if inv.get("document_type") == "credit_note" else number
+
+
+def _money_or_hidden(value: Any) -> str:
+    """An amount as the report prints it, or "скрито" where the reader's
+    access hides it (None) - never a crash on a hidden field."""
+    return "скрито" if value is None else f"{fmt_eur(float(value))}"
 
 
 def _excel_safe(value):
@@ -97,9 +114,9 @@ class ExportService:
             cell.border = thin_border
         
         # Data
-        total_without_vat = 0
-        total_vat = 0
-        total_amount = 0
+        total_without_vat = 0.0
+        total_vat = 0.0
+        total_amount = 0.0
         
         for row, inv in enumerate(invoices, 5):
             date_val = inv.get('date', '')
@@ -119,7 +136,7 @@ class ExportService:
             data = [
                 date_str,
                 _excel_safe(inv.get('supplier', '')),
-                _excel_safe(inv.get('invoice_number', '')),
+                _excel_safe(_document_number(inv)),
                 amount_without_vat,
                 vat_amount,
                 total,
@@ -201,7 +218,7 @@ class ExportService:
                 _excel_safe(tx.get('description', '')),
                 type_labels.get(tx.get('type', ''), tx.get('type', '')),
                 tx.get('delta', 0),
-                f"{price_eur:.2f} €" if price_eur is not None else '',
+                f"{fmt_eur(price_eur)}" if price_eur is not None else '',
             ]
 
             for col, value in enumerate(data, 1):
@@ -249,9 +266,9 @@ class ExportService:
         # Table data
         data = [["Дата", "Доставчик", "No Фактура", "Без ДДС", "ДДС", "Общо"]]
         
-        total_without_vat = 0
-        total_vat = 0
-        total_amount = 0
+        total_without_vat = 0.0
+        total_vat = 0.0
+        total_amount = 0.0
         
         for inv in invoices:
             date_val = inv.get('date', '')
@@ -273,7 +290,7 @@ class ExportService:
             data.append([
                 date_str,
                 supplier,
-                inv.get('invoice_number', ''),
+                _document_number(inv),
                 f"{amount_without_vat:.2f}",
                 f"{vat_amount:.2f}",
                 f"{total:.2f}"
@@ -307,6 +324,273 @@ class ExportService:
         return buffer.getvalue()
     
     @staticmethod
+    def generate_billing_document_pdf(document: dict, company_name: str = "") -> bytes:
+        """Generate a non-fiscal "bill"/quote PDF - Module 7 audit
+        decision: a simple document a craftsman or service business can
+        hand a customer for a job, explicitly NOT a sequentially-numbered
+        VAT invoice (no fiscal metadata, no NAP-declaration implications -
+        see the Master Direction boundary this was built against). The
+        disclaimer line is deliberate and must stay, so this is never
+        mistaken for a real tax invoice."""
+        if not PDF_AVAILABLE:
+            raise ImportError("reportlab is not installed")
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=20 * mm, bottomMargin=20 * mm)
+
+        elements = []
+        styles = getSampleStyleSheet()
+
+        title_style = ParagraphStyle(
+            'CustomTitle', parent=styles['Heading1'], fontName=PDF_FONT_BOLD, fontSize=18, spaceAfter=6, alignment=1,
+        )
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle', parent=styles['Normal'], fontName=PDF_FONT, fontSize=9,
+            textColor=colors.HexColor('#64748B'), alignment=1, spaceAfter=10,
+        )
+        normal_style = ParagraphStyle('CustomNormal', parent=styles['Normal'], fontName=PDF_FONT, fontSize=10, spaceAfter=4)
+        bold_style = ParagraphStyle('CustomBold', parent=styles['Normal'], fontName=PDF_FONT_BOLD, fontSize=10, spaceAfter=4)
+
+        doc_type = document.get('doc_type', 'bill')
+        doc_label = "ОФЕРТА" if doc_type == "quote" else "СМЕТКА ЗА ДЪЛЖИМА СУМА"
+        title = f"{doc_label} - {company_name}" if company_name else doc_label
+        elements.append(Paragraph(title, title_style))
+        elements.append(Paragraph(
+            "Този документ е неформален и не представлява данъчна фактура по смисъла на ЗДДС.",
+            subtitle_style,
+        ))
+
+        issue_date = document.get('issue_date', '')
+        elements.append(Paragraph(f"<b>Клиент:</b> {_xml_escape(str(document.get('customer_name', '')))}", bold_style))
+        elements.append(Paragraph(f"<b>Дата:</b> {issue_date}", normal_style))
+        if doc_type == "quote" and document.get("valid_until"):
+            elements.append(Paragraph(f"<b>Валидна до:</b> {_xml_escape(str(document['valid_until']))}", normal_style))
+        elements.append(Spacer(1, 6 * mm))
+
+        data = [["Артикул/услуга", "Кол-во", "Ед.", "Ед. цена", "Общо"]]
+        total_amount = 0.0
+        for item in document.get('items', []):
+            quantity = float(item.get('quantity', 1))
+            unit_price = float(item.get('unit_price', 0))
+            line_total = quantity * unit_price
+            total_amount += line_total
+            data.append([
+                str(item.get('name', ''))[:40],
+                f"{quantity:g}",
+                str(item.get('unit', 'бр.')),
+                f"{unit_price:.2f}",
+                f"{line_total:.2f}",
+            ])
+        data.append(["", "", "", "ОБЩО:", f"{fmt_eur(total_amount)}"])
+
+        table = Table(data, colWidths=[180, 45, 35, 60, 60])
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#8B5CF6')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (-1, 0), PDF_FONT_BOLD),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('BACKGROUND', (0, 1), (-1, -2), colors.HexColor('#F8FAFC')),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E2E8F0')),
+            ('FONTNAME', (0, -1), (-1, -1), PDF_FONT_BOLD),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CBD5E1')),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ]))
+        elements.append(table)
+
+        if document.get('notes'):
+            elements.append(Spacer(1, 6 * mm))
+            elements.append(Paragraph(f"<b>Бележки:</b> {_xml_escape(str(document['notes']))}", normal_style))
+
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    @staticmethod
+    def generate_issued_invoice_pdf(document: dict, company: dict) -> bytes:
+        """An invoice issued to a customer, laid out as a Bulgarian invoice
+        is: number and date (the date of the tax event), the supplier - the
+        company, from its profile - and the recipient, the lines, the base
+        and the VAT of each rate, the amount due, how and by when it is paid.
+        A cancelled invoice says so across its title."""
+        if not PDF_AVAILABLE:
+            raise ImportError("reportlab is not installed")
+
+        def text(value: Any) -> str:
+            return _xml_escape(str(value or ""))
+
+        def day_text(value: Any) -> str:
+            try:
+                return datetime.strptime(str(value)[:10], "%Y-%m-%d").strftime("%d.%m.%Y")
+            except ValueError:
+                return text(value)
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=16 * mm, bottomMargin=16 * mm)
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('InvTitle', parent=styles['Heading1'], fontName=PDF_FONT_BOLD, fontSize=20, alignment=1, spaceAfter=2)
+        center_style = ParagraphStyle('InvCenter', parent=styles['Normal'], fontName=PDF_FONT, fontSize=10, alignment=1, spaceAfter=2)
+        warn_style = ParagraphStyle('InvWarn', parent=styles['Normal'], fontName=PDF_FONT_BOLD, fontSize=12, alignment=1,
+                                    textColor=colors.HexColor('#DC2626'), spaceAfter=4)
+        cell_style = ParagraphStyle('InvCell', parent=styles['Normal'], fontName=PDF_FONT, fontSize=9, leading=12)
+        normal_style = ParagraphStyle('InvNormal', parent=styles['Normal'], fontName=PDF_FONT, fontSize=10, spaceAfter=3)
+
+        credit_note = document.get("doc_type") == "credit_note"
+        elements: List[Any] = [
+            Paragraph("КРЕДИТНО ИЗВЕСТИЕ" if credit_note else "ФАКТУРА", title_style),
+            Paragraph(f"№ {text(document.get('invoice_number'))} / {day_text(document.get('issue_date'))}", center_style),
+        ]
+        if credit_note:
+            # The invoice it changes, as the law asks a credit note to name it.
+            elements.append(Paragraph(
+                f"към фактура № {text(document.get('credited_invoice_number'))} / {day_text(document.get('credited_issue_date'))}",
+                center_style,
+            ))
+        elements.append(Paragraph("ОРИГИНАЛ", center_style))
+        if document.get("cancelled"):
+            elements.append(Paragraph("АНУЛИРАНО" if credit_note else "АНУЛИРАНА", warn_style))
+        elements.append(Spacer(1, 5 * mm))
+
+        city_address = ", ".join(part for part in (company.get("city"), company.get("address")) if part)
+        supplier_lines = [
+            f"<b>Доставчик</b>", f"<b>{text(company.get('name'))}</b>",
+            f"ЕИК: {text(company.get('eik'))}",
+        ]
+        if company.get("vat_number"):
+            supplier_lines.append(f"ДДС №: {text(company.get('vat_number'))}")
+        if city_address:
+            supplier_lines.append(f"Адрес: {text(city_address)}")
+        if company.get("mol"):
+            supplier_lines.append(f"МОЛ: {text(company.get('mol'))}")
+        recipient_lines = [f"<b>Получател</b>", f"<b>{text(document.get('customer_name'))}</b>"]
+        if document.get("customer_eik"):
+            recipient_lines.append(f"ЕИК: {text(document.get('customer_eik'))}")
+        if document.get("customer_address"):
+            recipient_lines.append(f"Адрес: {text(document.get('customer_address'))}")
+        parties = Table(
+            [[Paragraph("<br/>".join(supplier_lines), cell_style), Paragraph("<br/>".join(recipient_lines), cell_style)]],
+            colWidths=[90 * mm, 90 * mm],
+        )
+        parties.setStyle(TableStyle([
+            ('BOX', (0, 0), (0, 0), 0.8, colors.HexColor('#CBD5E1')),
+            ('BOX', (1, 0), (1, 0), 0.8, colors.HexColor('#CBD5E1')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6), ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        elements += [parties, Spacer(1, 5 * mm)]
+
+        data: List[List[Any]] = [["№", "Артикул/услуга", "Кол-во", "Мярка", "Ед. цена", "ДДС", "Стойност"]]
+        for index, item in enumerate(document.get("items") or [], 1):
+            quantity = float(item.get("quantity", 1))
+            unit_price = float(item.get("unit_price", 0))
+            data.append([
+                str(index), Paragraph(text(item.get("name")), cell_style), f"{quantity:g}", text(item.get("unit", "бр.")),
+                f"{unit_price:.2f}", f"{float(item.get('vat_rate', 20)):g}%", f"{quantity * unit_price:.2f}",
+            ])
+        lines = Table(data, colWidths=[9 * mm, 71 * mm, 18 * mm, 16 * mm, 22 * mm, 14 * mm, 25 * mm], repeatRows=1)
+        lines.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
+            ('FONTNAME', (0, 0), (-1, 0), PDF_FONT_BOLD),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#8B5CF6')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        elements += [lines, Spacer(1, 4 * mm)]
+
+        # A credit note's amounts are kept below zero; the document states
+        # them as the amounts it credits.
+        totals: List[List[str]] = []
+        for row in document.get("vat_by_rate") or []:
+            rate = f"{float(row.get('rate', 0)):g}%"
+            totals.append([f"Данъчна основа {rate}:", f"{fmt_eur(abs(float(row.get('base', 0))))}"])
+            totals.append([f"ДДС {rate}:", f"{fmt_eur(abs(float(row.get('vat', 0))))}"])
+        totals.append(["Сума на известието:" if credit_note else "Сума за плащане:",
+                       f"{fmt_eur(abs(float(document.get('total_amount', 0))))}"])
+        totals_table = Table(totals, colWidths=[50 * mm, 30 * mm], hAlign='RIGHT')
+        totals_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), PDF_FONT),
+            ('FONTNAME', (0, -1), (-1, -1), PDF_FONT_BOLD),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+            ('LINEABOVE', (0, -1), (-1, -1), 0.8, colors.HexColor('#334155')),
+        ]))
+        elements += [totals_table, Spacer(1, 5 * mm)]
+
+        method = document.get("payment_method")
+        method_text = {"cash": "В брой", "card": "С карта", "bank_transfer": "По банков път"}.get(method or "", "По банков път")
+        elements.append(Paragraph(f"Дата на данъчното събитие: {day_text(document.get('issue_date'))}", normal_style))
+        if document.get("vat_exempt_basis"):
+            elements.append(Paragraph(f"Основание за неначисляване на ДДС: {text(document.get('vat_exempt_basis'))}", normal_style))
+        if credit_note:
+            elements.append(Paragraph(f"Основание за издаване: {text(document.get('notes'))}", normal_style))
+        else:
+            elements.append(Paragraph(f"Начин на плащане: {method_text}", normal_style))
+        if method not in ("cash", "card") and not credit_note:
+            if company.get("bank_iban"):
+                bank = f" ({text(company.get('bank_name'))})" if company.get("bank_name") else ""
+                elements.append(Paragraph(f"IBAN: {text(company.get('bank_iban'))}{bank}", normal_style))
+            if document.get("due_date"):
+                elements.append(Paragraph(f"Срок за плащане: {day_text(document.get('due_date'))}", normal_style))
+        if document.get("notes") and not credit_note:
+            elements.append(Paragraph(f"Бележки: {text(document.get('notes'))}", normal_style))
+        elements.append(Spacer(1, 14 * mm))
+        signatures = Table([["Съставил: ..............................", "Получил: .............................."]], colWidths=[90 * mm, 90 * mm])
+        signatures.setStyle(TableStyle([('FONTNAME', (0, 0), (-1, -1), PDF_FONT), ('FONTSIZE', (0, 0), (-1, -1), 10)]))
+        elements.append(signatures)
+
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    @staticmethod
+    def generate_payroll_excel(entries: List[dict], company_name: str = "", period_label: str = "") -> bytes:
+        """The month's payroll for the accountant: each person's gross, the
+        contributions on both sides, the tax, the net and the whole cost."""
+        if not EXCEL_AVAILABLE:
+            raise ImportError("openpyxl is not installed")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Заплати"
+        ws["A1"] = f"Заплати - {company_name}" if company_name else "Заплати"
+        ws["A1"].font = Font(bold=True, size=14)
+        ws["A2"] = period_label
+        headers = ["Служител", "Бруто", "Осигуровки служител", "Данък", "Нето", "Осигуровки работодател",
+                   "Ваучери", "ДДЗО", "Общо разход"]
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="10B981", end_color="10B981", fill_type="solid")
+        for col, title in enumerate(headers, 1):
+            cell = ws.cell(row=4, column=col, value=title)
+            cell.font = header_font
+            cell.fill = header_fill
+        keys = ["gross_amount", "employee_contributions", "income_tax", "net_amount", "employer_contributions",
+                "food_vouchers", "additional_insurance", "total_employer_cost"]
+        row = 5
+        for entry in entries:
+            ws.cell(row=row, column=1, value=_excel_safe(entry.get("employee_name") or ""))
+            for col, key in enumerate(keys, 2):
+                cell = ws.cell(row=row, column=col, value=round(float(entry.get(key) or 0), 2))
+                cell.number_format = '#,##0.00'
+            row += 1
+        ws.cell(row=row, column=1, value="Общо").font = Font(bold=True)
+        for col, key in enumerate(keys, 2):
+            cell = ws.cell(row=row, column=col, value=round(sum(float(e.get(key) or 0) for e in entries), 2))
+            cell.number_format = '#,##0.00'
+            cell.font = Font(bold=True)
+        ws.column_dimensions["A"].width = 28
+        for col in range(2, len(headers) + 1):
+            ws.column_dimensions[get_column_letter(col)].width = 16
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
+
+    @staticmethod
     def generate_statistics_excel(stats: dict, company_name: str = "") -> bytes:
         """Generate Excel statistics report"""
         if not EXCEL_AVAILABLE:
@@ -337,7 +621,8 @@ class ExportService:
             ("Общо приходи", stats.get('total_income', 0)),
             ("Общо разходи", stats.get('total_expense', 0)),
             ("Печалба", stats.get('profit', 0)),
-            ("ДДС за плащане", stats.get('vat_to_pay', 0)),
+            # A business outside VAT registration has no VAT to pay.
+            *([] if stats.get('vat_registered') is False else [("ДДС за плащане", stats.get('vat_to_pay', 0))]),
             ("Брой фактури", stats.get('invoice_count', 0)),
         ]
         
@@ -360,7 +645,8 @@ class ExportService:
         purchases: List[dict],
         sales: List[dict],
         company_name: str = "",
-        period_label: str = ""
+        period_label: str = "",
+        issued_invoices: Optional[List[dict]] = None,
     ) -> bytes:
         """Generate a working ДДС purchases/sales ledger (Дневник на
         покупки/продажби), grouped by the same VAT-rate categories NRA's
@@ -433,16 +719,18 @@ class ExportService:
             values[9] = inv.get("total_amount", base + vat)
 
             date_val = inv.get("date")
-            is_datetime = isinstance(date_val, datetime)
-            date_str = date_val.strftime("%d.%m.%Y") if is_datetime else str(date_val)[:10]
-            doc_type = "Протокол чл.117" if treatment == "reverse_charge" else "Фактура"
+            date_str = date_val.strftime("%d.%m.%Y") if isinstance(date_val, datetime) else str(date_val)[:10]
+            if inv.get("document_type") == "credit_note":
+                doc_type = "Кредитно известие"
+            else:
+                doc_type = "Протокол чл.117" if treatment == "reverse_charge" else "Фактура"
 
             protocol_number = ""
             deadline_str = ""
             deadline_overdue = False
             if treatment == "reverse_charge":
                 protocol_number = inv.get("protocol_number") or ""
-                if is_datetime:
+                if isinstance(date_val, datetime):
                     deadline = date_val + timedelta(days=15)
                     deadline_str = deadline.strftime("%d.%m.%Y")
                     deadline_overdue = deadline < today
@@ -479,49 +767,112 @@ class ExportService:
         # Split by the actual VAT rate of each entry (20%/9%/0%), not a
         # blanket 20% assumption - matters for restaurants/hotels/bakeries
         # and anyone else on the reduced or zero rate.
-        sales_headers = ["№", "Дата", "Вид документ", "ДО 20%", "ДДС 20%", "ДО 9%", "ДДС 9%", "ДО нулева ставка", "Необлагаема част (джобни)", "Общо"]
+        # The till's daily reports and the invoices issued to customers, day
+        # by day: each invoice its own row with its number, customer and the
+        # base and VAT of each of its rates; a cancelled one keeps its number
+        # in the list at zero.
+        sales_headers = [
+            "№", "Дата", "Вид документ", "№ документ", "Клиент", "ЕИК",
+            "ДО 20%", "ДДС 20%", "ДО 9%", "ДДС 9%", "ДО нулева ставка", "Необлагаема част (джобни)", "Общо",
+        ]
+        first_amount_col = 7
         for col, header in enumerate(sales_headers, 1):
             cell = ws2.cell(row=header_row, column=col, value=header)
             cell.font = header_font
             cell.fill = header_fill
 
-        sales_totals = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        row2 = header_row
-        for idx, rev in enumerate(sales, 1):
-            row2 = header_row + idx
+        def _rate_parts(doc: dict) -> tuple:
+            """(base 20%, VAT 20%, base 9%, VAT 9%, base 0%) of an issued invoice."""
+            base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
+            for part in doc.get("vat_by_rate") or []:
+                rate = float(part.get("rate", 0) or 0)
+                base, vat = float(part.get("base", 0) or 0), float(part.get("vat", 0) or 0)
+                if abs(rate - 20.0) < 0.01:
+                    base_20, vat_20 = base_20 + base, vat_20 + vat
+                elif abs(rate - 9.0) < 0.01:
+                    base_9, vat_9 = base_9 + base, vat_9 + vat
+                else:
+                    base_0 += base
+            return base_20, vat_20, base_9, vat_9, base_0
+
+        # Invoices issued for sales rung up at the till (fiscal receipts): the
+        # day's till report holds them already, so its row is the till's
+        # sales less those invoices - each sale and its VAT listed once.
+        invoiced_at_till: Dict[str, List[float]] = {}
+        for doc in issued_invoices or []:
+            if doc.get("in_till") and not doc.get("cancelled"):
+                day_parts = invoiced_at_till.setdefault(str(doc.get("issue_date", ""))[:10], [0.0] * 6)
+                for i, value in enumerate(_rate_parts(doc)):
+                    day_parts[i] += value
+                day_parts[5] += float(doc.get("total_amount", 0) or 0)
+
+        def _till_row(rev: dict) -> tuple:
             fiscal_revenue = rev.get("fiscal_revenue", 0) or 0
             pocket_money = rev.get("pocket_money", 0) or 0
-            rate = rev.get("vat_rate_percent", 20.0) or 0.0
-            total = fiscal_revenue + pocket_money
-
+            # Each VAT group of the day's till report at its own rate (or
+            # the whole day at its one rate).
             base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
-            if rate and abs(rate - 20.0) < 0.01:
-                base_20 = round(fiscal_revenue * 100 / (100 + rate), 2)
-                vat_20 = round(fiscal_revenue - base_20, 2)
-            elif rate and abs(rate - 9.0) < 0.01:
-                base_9 = round(fiscal_revenue * 100 / (100 + rate), 2)
-                vat_9 = round(fiscal_revenue - base_9, 2)
-            else:
-                base_0 = fiscal_revenue
+            for rate, amount in vat_parts(rev):
+                base = round(amount * 100 / (100 + rate), 2)
+                if rate and abs(rate - 20.0) < 0.01:
+                    base_20, vat_20 = base_20 + base, vat_20 + round(amount - base, 2)
+                elif rate and abs(rate - 9.0) < 0.01:
+                    base_9, vat_9 = base_9 + base, vat_9 + round(amount - base, 2)
+                else:
+                    base_0 += amount
+            day = str(rev.get("date", ""))[:10]
+            kind = "Отчет за извършени продажби (81)"
+            invoiced = invoiced_at_till.pop(day, None)
+            if invoiced:
+                base_20, vat_20, base_9, vat_9, base_0 = (
+                    round(value - invoiced[i], 2) for i, value in enumerate((base_20, vat_20, base_9, vat_9, base_0))
+                )
+                fiscal_revenue = round(fiscal_revenue - invoiced[5], 2)
+                kind += " - без фактурираното"
+            return (
+                day, 0, kind, "", "", "",
+                [base_20, vat_20, base_9, vat_9, base_0, pocket_money, fiscal_revenue + pocket_money],
+            )
 
-            values = [base_20, vat_20, base_9, vat_9, base_0]
-            row_values = [idx, rev.get("date", ""), "Отчет за извършени продажби (81)", *values, pocket_money, total]
+        def _invoice_row(doc: dict) -> tuple:
+            base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
+            cancelled = bool(doc.get("cancelled"))
+            if not cancelled:
+                base_20, vat_20, base_9, vat_9, base_0 = _rate_parts(doc)
+            total = 0.0 if cancelled else float(doc.get("total_amount", 0) or 0)
+            # A credit note (its amounts below zero) is code 03 of the ledger.
+            kind = "Кредитно известие (03)" if doc.get("doc_type") == "credit_note" else "Фактура (01)"
+            if cancelled:
+                kind += " - анулирано" if doc.get("doc_type") == "credit_note" else " - анулирана"
+            return (
+                str(doc.get("issue_date", ""))[:10], 1, kind, _excel_safe(doc.get("invoice_number") or ""),
+                _excel_safe(doc.get("customer_name") or ""), _excel_safe(doc.get("customer_eik") or ""),
+                [round(base_20, 2), round(vat_20, 2), round(base_9, 2), round(vat_9, 2), round(base_0, 2), 0.0, round(total, 2)],
+            )
+
+        sale_rows = [_till_row(rev) for rev in sales] + [_invoice_row(doc) for doc in (issued_invoices or [])]
+        sale_rows.sort(key=lambda r: (r[0], r[1], r[3]))
+        sales_totals = [0.0] * 7
+        row2 = header_row
+        for idx, (day, _order, kind, number, customer, eik, values) in enumerate(sale_rows, 1):
+            row2 = header_row + idx
+            row_values = [idx, day, kind, number, customer, eik, *values]
             for col, value in enumerate(row_values, 1):
                 cell = ws2.cell(row=row2, column=col, value=value)
-                if col >= 4:
+                if col >= first_amount_col:
                     cell.number_format = money_format
-            for i, v in enumerate(values + [pocket_money, total]):
+            for i, v in enumerate(values):
                 sales_totals[i] += v
 
         total_row2 = row2 + 1
-        ws2.cell(row=total_row2, column=3, value="ОБЩО:").font = total_font
+        ws2.cell(row=total_row2, column=first_amount_col - 1, value="ОБЩО:").font = total_font
         for i, t in enumerate(sales_totals):
-            cell = ws2.cell(row=total_row2, column=4 + i, value=round(t, 2))
+            cell = ws2.cell(row=total_row2, column=first_amount_col + i, value=round(t, 2))
             cell.font = total_font
             cell.fill = total_fill
             cell.number_format = money_format
 
-        for col, width in zip(range(1, len(sales_headers) + 1), [5, 12, 28, 11, 10, 11, 10, 13, 22, 13]):
+        for col, width in zip(range(1, len(sales_headers) + 1), [5, 12, 28, 13, 24, 13, 11, 10, 11, 10, 13, 22, 13]):
             ws2.column_dimensions[get_column_letter(col)].width = width
 
         output = io.BytesIO()
@@ -537,8 +888,9 @@ class ExportService:
         period_label: str = ""
     ) -> bytes:
         """A list of which employees worked on an official holiday (extra-
-        pay entitlement under Чл. 262 КТ) and which took leave, for an
-        accountant to attach to the required company/personnel documents."""
+        pay entitlement under Чл. 262 КТ), which took leave and which were
+        on sick leave, for an accountant to attach to the required
+        company/personnel documents."""
         if not EXCEL_AVAILABLE:
             raise ImportError("openpyxl is not installed")
 
@@ -555,6 +907,33 @@ class ExportService:
             ws['A2'] = period_label or f"Генерирано: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
 
         LEAVE_TYPE_LABELS = {"paid": "Платена", "unpaid": "Неплатена", "sick": "Болнична"}
+        SICK_REASON_LABELS = {
+            "illness": "Общо заболяване", "work_accident": "Трудова злополука",
+            "occupational": "Професионална болест", "family_care": "Гледане на болен член от семейството",
+            "maternity": "Бременност и раждане", "other": "Друго",
+        }
+
+        def leave_days(entry: dict) -> Tuple[str, str, Any]:
+            """The period as written in Bulgaria and its calendar days."""
+            start_str = str(entry.get("start_date", ""))[:10]
+            end_str = str(entry.get("end_date", ""))[:10]
+            try:
+                start_d = datetime.strptime(start_str, "%Y-%m-%d")
+                end_d = datetime.strptime(end_str, "%Y-%m-%d")
+            except ValueError:
+                return start_str, end_str, ""
+            return start_d.strftime("%d.%m.%Y"), end_d.strftime("%d.%m.%Y"), (end_d - start_d).days + 1
+
+        def write_sheet(sheet, headers: List[str], rows: List[list], widths: List[int]) -> None:
+            for col, header in enumerate(headers, 1):
+                cell = sheet.cell(row=header_row, column=col, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+            for idx, row_values in enumerate(rows, 1):
+                for col, value in enumerate(row_values, 1):
+                    sheet.cell(row=header_row + idx, column=col, value=value)
+            for col, width in zip(range(1, len(headers) + 1), widths):
+                sheet.column_dimensions[get_column_letter(col)].width = width
 
         # ===== Работа на официални празници =====
         ws = wb.active
@@ -581,36 +960,42 @@ class ExportService:
         for col, width in zip(range(1, len(holiday_headers) + 1), [5, 26, 13, 40, 30]):
             ws.column_dimensions[get_column_letter(col)].width = width
 
-        # ===== Отпуски =====
+        # ===== Отпуски (платени и неплатени) =====
         ws2 = wb.create_sheet("Отпуски")
         write_title(ws2, "Отпуски")
+        leave_rows: List[list] = []
+        for entry in (e for e in leave if e.get("leave_type") != "sick"):
+            start_str, end_str, calendar_days = leave_days(entry)
+            leave_type_label = LEAVE_TYPE_LABELS.get(entry.get("leave_type") or "", entry.get("leave_type", ""))
+            leave_rows.append([
+                len(leave_rows) + 1, _excel_safe(entry.get("employee_name", "")), leave_type_label, start_str, end_str,
+                calendar_days, entry.get("working_days") if entry.get("working_days") is not None else "",
+                _excel_safe(entry.get("note") or ""),
+            ])
+        write_sheet(
+            ws2, ["№", "Служител", "Вид отпуск", "От дата", "До дата", "Календарни дни", "Работни дни", "Бележка"],
+            leave_rows, [5, 26, 14, 13, 13, 15, 13, 30],
+        )
 
-        leave_headers = ["№", "Служител", "Вид отсъствие", "От дата", "До дата", "Брой дни", "Бележка"]
-        for col, header in enumerate(leave_headers, 1):
-            cell = ws2.cell(row=header_row, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-
-        for idx, entry in enumerate(leave, 1):
-            row = header_row + idx
-            start_str = str(entry.get("start_date", ""))[:10]
-            end_str = str(entry.get("end_date", ""))[:10]
-            days_count = ""
-            try:
-                start_d = datetime.strptime(start_str, "%Y-%m-%d")
-                end_d = datetime.strptime(end_str, "%Y-%m-%d")
-                days_count = (end_d - start_d).days + 1
-                start_str = start_d.strftime("%d.%m.%Y")
-                end_str = end_d.strftime("%d.%m.%Y")
-            except ValueError:
-                pass
-            leave_type_label = LEAVE_TYPE_LABELS.get(entry.get("leave_type"), entry.get("leave_type", ""))
-            row_values = [idx, _excel_safe(entry.get("employee_name", "")), leave_type_label, start_str, end_str, days_count, _excel_safe(entry.get("note") or "")]
-            for col, value in enumerate(row_values, 1):
-                ws2.cell(row=row, column=col, value=value)
-
-        for col, width in zip(range(1, len(leave_headers) + 1), [5, 26, 14, 13, 13, 10, 30]):
-            ws2.column_dimensions[get_column_letter(col)].width = width
+        # ===== Болнични =====
+        # The sheet's own details, as the employer gets them - no diagnosis.
+        ws3 = wb.create_sheet("Болнични")
+        write_title(ws3, "Болнични")
+        sick_rows: List[list] = []
+        for entry in (e for e in leave if e.get("leave_type") == "sick"):
+            start_str, end_str, calendar_days = leave_days(entry)
+            sick_rows.append([
+                len(sick_rows) + 1, _excel_safe(entry.get("employee_name", "")), _excel_safe(entry.get("sheet_number") or ""),
+                "Продължение" if entry.get("is_continuation") else "Първичен",
+                SICK_REASON_LABELS.get(entry.get("sick_reason") or "", ""), start_str, end_str,
+                calendar_days, entry.get("working_days") if entry.get("working_days") is not None else "",
+                _excel_safe(entry.get("note") or ""),
+            ])
+        write_sheet(
+            ws3, ["№", "Служител", "№ на болничния лист", "Първичен / продължение", "Причина", "От дата", "До дата",
+                  "Календарни дни", "Работни дни", "Бележка"],
+            sick_rows, [5, 26, 22, 22, 30, 13, 13, 15, 13, 30],
+        )
 
         output = io.BytesIO()
         wb.save(output)
@@ -623,7 +1008,8 @@ class ExportService:
         top_suppliers: Optional[List[dict]] = None,
         top_items: Optional[List[dict]] = None,
         company_name: str = "",
-        period_label: str = ""
+        period_label: str = "",
+        visibility_note: Optional[str] = None,
     ) -> bytes:
         """Generate a one-page PDF financial report - summary + top suppliers/items"""
         if not PDF_AVAILABLE:
@@ -648,11 +1034,12 @@ class ExportService:
         elements.append(Paragraph("Обобщение", section_style))
         summary_rows = [
             ["Показател", "Стойност"],
-            ["Общо приходи", f"{stats.get('total_income', 0):.2f} €"],
-            ["Общо разходи", f"{stats.get('total_expense', 0):.2f} €"],
-            ["Печалба", f"{stats.get('profit', 0):.2f} €"],
-            ["ДДС за плащане", f"{stats.get('vat_to_pay', 0):.2f} €"],
-            ["Брой фактури", str(stats.get('invoice_count', 0))],
+            ["Общо приходи", _money_or_hidden(stats.get('total_income'))],
+            ["Общо разходи", _money_or_hidden(stats.get('total_expense'))],
+            ["Печалба", _money_or_hidden(stats.get('profit'))],
+            # A business outside VAT registration has no VAT to pay.
+            *([] if stats.get('vat_registered') is False else [["ДДС за плащане", _money_or_hidden(stats.get('vat_to_pay'))]]),
+            ["Брой фактури", "скрито" if stats.get('invoice_count') is None else str(stats.get('invoice_count'))],
         ]
         summary_table = Table(summary_rows, colWidths=[90*mm, 60*mm])
         summary_table.setStyle(TableStyle([
@@ -667,6 +1054,11 @@ class ExportService:
             ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8FAFC')),
         ]))
         elements.append(summary_table)
+        if visibility_note:
+            # The same note as on screen: which totals - and so which profit
+            # - this reader's access leaves out.
+            elements.append(Spacer(1, 3*mm))
+            elements.append(Paragraph(_xml_escape(visibility_note), subtitle_style))
 
         if top_suppliers:
             elements.append(Paragraph("Топ доставчици", section_style))
@@ -674,7 +1066,7 @@ class ExportService:
             for s in top_suppliers[:10]:
                 rows.append([
                     str(s.get('supplier', ''))[:30],
-                    f"{s.get('total_amount', 0):.2f} €",
+                    f"{fmt_eur(s.get('total_amount', 0))}",
                     str(s.get('invoice_count', 0)),
                 ])
             supplier_table = Table(rows, colWidths=[90*mm, 40*mm, 25*mm])
@@ -696,7 +1088,7 @@ class ExportService:
             for i in top_items[:10]:
                 rows.append([
                     str(i.get('item_name', ''))[:30],
-                    f"{i.get('total_value', 0):.2f} €",
+                    f"{fmt_eur(i.get('total_value', 0))}",
                     str(i.get('frequency', 0)),
                 ])
             items_table = Table(rows, colWidths=[90*mm, 40*mm, 25*mm])

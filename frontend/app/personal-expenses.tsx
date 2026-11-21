@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { api } from '../src/services/api';
@@ -22,6 +22,8 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, ChipTabs, CountUp, SkeletonRow } from '../src/components';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { COLORS } from '../src/theme/colors';
+import { toApiDate } from '../src/utils/periodRange';
+import { formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -104,7 +106,9 @@ export default function PersonalExpensesHistoryScreen() {
   const canAddWallet = hasPermission('add_personal_wallet_entries');
   const canManageWallet = hasPermission('manage_personal_wallet');
 
-  const [activeMainTab, setActiveMainTab] = useState<MainTab>('investments');
+  // Opened from Home's "personal use" line: straight to the notebook.
+  const { tab, add } = useLocalSearchParams<{ tab?: string; add?: string }>();
+  const [activeMainTab, setActiveMainTab] = useState<MainTab>(tab === 'wallet' ? 'wallet' : 'investments');
 
   // ===================== Investments (business ROI) - unchanged =====================
   const [loading, setLoading] = useState(true);
@@ -297,6 +301,16 @@ export default function PersonalExpensesHistoryScreen() {
     setWalletDescriptionError(false);
   };
 
+  // Opened from Home's notebook card with "add": straight to a new entry.
+  useEffect(() => {
+    if (add !== '1' || !canAddWallet) return;
+    resetWalletForm();
+    setWalletModalVisible(true);
+    const clearParamsTimeout = setTimeout(() => router.setParams({ add: undefined }), 0);
+    return () => clearTimeout(clearParamsTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [add, canAddWallet]);
+
   const openEditWalletEntry = (entry: PersonalWalletEntry) => {
     setEditingEntryId(entry.id);
     setWalletCategory(entry.category);
@@ -326,11 +340,11 @@ export default function PersonalExpensesHistoryScreen() {
         category: walletCategory,
         description: walletDescription.trim(),
         amount: parsedAmount,
-        date: walletDate.toISOString().slice(0, 10),
+        date: toApiDate(walletDate),
         is_recurring: walletIsRecurring,
-        next_due_date: walletIsRecurring ? walletNextDueDate.toISOString().slice(0, 10) : undefined,
+        next_due_date: walletIsRecurring ? toApiDate(walletNextDueDate) : undefined,
         recurring_until: walletIsRecurring && walletHasRecurringUntil
-          ? walletRecurringUntil.toISOString().slice(0, 10)
+          ? toApiDate(walletRecurringUntil)
           : null,
         notes: walletNotes.trim() || undefined,
       };
@@ -514,7 +528,7 @@ export default function PersonalExpensesHistoryScreen() {
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>{t('roi.totalInvestment')}:</Text>
-              <Text style={[styles.summaryValue, { color: COLORS.danger }]}>{total.toFixed(2)} €</Text>
+              <Text style={[styles.summaryValue, { color: COLORS.danger }]}>{formatMoney(total)}</Text>
             </View>
           </View>
 
@@ -540,7 +554,7 @@ export default function PersonalExpensesHistoryScreen() {
                         {monthNames[parseInt(monthStr, 10) - 1]} {yearStr}
                       </Text>
                       <Text style={styles.monthHeaderStats}>
-                        {monthExpenses.length} · {monthTotal.toFixed(2)} €
+                        {monthExpenses.length} · {formatMoney(monthTotal)}
                       </Text>
                     </View>
                     {monthExpenses.map((expense) => (
@@ -548,7 +562,7 @@ export default function PersonalExpensesHistoryScreen() {
                         <View style={styles.expenseRowTop}>
                           <Text style={styles.expenseDescription} numberOfLines={1}>{expense.description}</Text>
                           <Text style={[styles.expenseAmount, { color: TYPE_COLORS[expense.expense_type] }]}>
-                            {expense.amount.toFixed(2)} €
+                            {formatMoney(expense.amount)}
                           </Text>
                         </View>
                         <View style={styles.expenseRowBottom}>
@@ -603,12 +617,18 @@ export default function PersonalExpensesHistoryScreen() {
                       </Text>
                     </View>
                   </View>
-                  <CountUp
-                    value={walletSummary.safe_to_spend}
-                    formatter={(n) => `${n.toFixed(2)} €`}
-                    style={[styles.safeCardValue, { color: WALLET_STATUS_COLORS[walletSummary.status] }]}
-                  />
-                  <Text style={styles.safeCardHint}>{t('wallet.safeToSpendHint')}</Text>
+                  {walletSummary.safe_to_spend === null ? (
+                    <Text style={[styles.safeCardValue, { color: COLORS.textMuted }]}>—</Text>
+                  ) : (
+                    <CountUp
+                      value={walletSummary.safe_to_spend}
+                      formatter={(n) => `${formatMoney(n)}`}
+                      style={[styles.safeCardValue, { color: WALLET_STATUS_COLORS[walletSummary.status] }]}
+                    />
+                  )}
+                  <Text style={styles.safeCardHint}>
+                    {walletSummary.safe_to_spend === null ? t('wallet.profitHidden') : t('wallet.safeToSpendHint')}
+                  </Text>
                   {walletSummary.spent_percent_of_profit !== null && (
                     <View style={styles.progressTrack}>
                       <View
@@ -624,7 +644,7 @@ export default function PersonalExpensesHistoryScreen() {
                   )}
                   <View style={styles.safeCardFooter}>
                     <Text style={styles.safeCardFooterText}>
-                      {t('wallet.spentThisMonth')}: {walletSummary.total_spent.toFixed(2)} €
+                      {t('wallet.spentThisMonth')}: {formatMoney(walletSummary.total_spent)}
                     </Text>
                     {walletSummary.spent_percent_of_profit !== null && (
                       <Text style={styles.safeCardFooterText}>
@@ -641,11 +661,11 @@ export default function PersonalExpensesHistoryScreen() {
                     <View style={styles.needsWantsRow}>
                       <View style={styles.needsWantsItem}>
                         <Text style={styles.needsWantsLabel}>{t('wallet.needs')}</Text>
-                        <Text style={[styles.needsWantsValue, { color: COLORS.danger }]}>{walletSummary.needs_total.toFixed(2)} €</Text>
+                        <Text style={[styles.needsWantsValue, { color: COLORS.danger }]}>{formatMoney(walletSummary.needs_total)}</Text>
                       </View>
                       <View style={styles.needsWantsItem}>
                         <Text style={styles.needsWantsLabel}>{t('wallet.wants')}</Text>
-                        <Text style={[styles.needsWantsValue, { color: COLORS.warning }]}>{walletSummary.wants_total.toFixed(2)} €</Text>
+                        <Text style={[styles.needsWantsValue, { color: COLORS.warning }]}>{formatMoney(walletSummary.wants_total)}</Text>
                       </View>
                     </View>
                   </View>
@@ -663,7 +683,7 @@ export default function PersonalExpensesHistoryScreen() {
                             <Ionicons name={WALLET_CATEGORY_ICONS[cat]} size={16} color={WALLET_CATEGORY_COLORS[cat]} />
                           </View>
                           <Text style={styles.categoryRowLabel}>{t(WALLET_CATEGORY_KEYS[cat])}</Text>
-                          <Text style={styles.categoryRowValue}>{amt.toFixed(2)} €</Text>
+                          <Text style={styles.categoryRowValue}>{formatMoney(amt)}</Text>
                         </View>
                       ))}
                   </View>
@@ -678,7 +698,7 @@ export default function PersonalExpensesHistoryScreen() {
                         <Ionicons name="calendar-outline" size={16} color={COLORS.textMuted} />
                         <Text style={styles.upcomingText} numberOfLines={1}>{u.description}</Text>
                         <Text style={styles.upcomingDate}>{u.next_due_date}</Text>
-                        <Text style={styles.upcomingAmount}>{u.amount.toFixed(2)} €</Text>
+                        <Text style={styles.upcomingAmount}>{formatMoney(u.amount)}</Text>
                       </View>
                     ))}
                   </View>
@@ -748,7 +768,7 @@ export default function PersonalExpensesHistoryScreen() {
                             {monthNames[parseInt(monthStr, 10) - 1]} {yearStr}
                           </Text>
                           <Text style={styles.monthHeaderStats}>
-                            {monthEntries.length} · {monthTotal.toFixed(2)} €
+                            {monthEntries.length} · {formatMoney(monthTotal)}
                           </Text>
                         </View>
                         {monthEntries.map((entry) => (
@@ -764,7 +784,7 @@ export default function PersonalExpensesHistoryScreen() {
                                 <Text style={styles.expenseDescription} numberOfLines={1}>{entry.description}</Text>
                               </View>
                               <Text style={[styles.expenseAmount, { color: WALLET_CATEGORY_COLORS[entry.category] }]}>
-                                {entry.amount.toFixed(2)} €
+                                {formatMoney(entry.amount)}
                               </Text>
                             </View>
                             <View style={styles.expenseRowBottom}>
@@ -858,13 +878,13 @@ export default function PersonalExpensesHistoryScreen() {
                     ))}
                   </View>
 
-                  <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
-                    {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
-                    <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                  </TouchableOpacity>
                 </ScrollView>
+                <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
+                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
               </View>
           </BottomSheet>
 
@@ -913,7 +933,7 @@ export default function PersonalExpensesHistoryScreen() {
 
                   <Text style={styles.inputLabel}>{t('personal.period')}</Text>
                   <TouchableOpacity style={styles.input} onPress={() => setShowWalletDatePicker(true)}>
-                    <Text style={{ color: 'white' }}>{walletDate.toISOString().slice(0, 10)}</Text>
+                    <Text style={{ color: 'white' }}>{toApiDate(walletDate)}</Text>
                   </TouchableOpacity>
                   <DateTimePickerModal
                     isVisible={showWalletDatePicker}
@@ -940,7 +960,7 @@ export default function PersonalExpensesHistoryScreen() {
                     <View>
                       <Text style={styles.inputLabel}>{t('wallet.nextDueDate')}</Text>
                       <TouchableOpacity style={styles.input} onPress={() => setShowWalletDueDatePicker(true)}>
-                        <Text style={{ color: 'white' }}>{walletNextDueDate.toISOString().slice(0, 10)}</Text>
+                        <Text style={{ color: 'white' }}>{toApiDate(walletNextDueDate)}</Text>
                       </TouchableOpacity>
                       <DateTimePickerModal
                         isVisible={showWalletDueDatePicker}
@@ -968,7 +988,7 @@ export default function PersonalExpensesHistoryScreen() {
                         <View>
                           <Text style={styles.inputLabel}>{t('wallet.recurringUntil')}</Text>
                           <TouchableOpacity style={styles.input} onPress={() => setShowWalletRecurringUntilPicker(true)}>
-                            <Text style={{ color: 'white' }}>{walletRecurringUntil.toISOString().slice(0, 10)}</Text>
+                            <Text style={{ color: 'white' }}>{toApiDate(walletRecurringUntil)}</Text>
                           </TouchableOpacity>
                           <DateTimePickerModal
                             isVisible={showWalletRecurringUntilPicker}
@@ -993,13 +1013,13 @@ export default function PersonalExpensesHistoryScreen() {
                     placeholderTextColor={COLORS.textMuted}
                   />
 
-                  <TouchableOpacity style={[styles.saveButton, walletSaving && { opacity: 0.6 }]} onPress={handleSaveWalletEntry} disabled={walletSaving}>
-                    {walletSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setWalletModalVisible(false)}>
-                    <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                  </TouchableOpacity>
                 </ScrollView>
+                <TouchableOpacity style={[styles.saveButton, walletSaving && { opacity: 0.6 }]} onPress={handleSaveWalletEntry} disabled={walletSaving}>
+                  {walletSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setWalletModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
               </View>
           </BottomSheet>
         </SafeAreaView>
@@ -1101,6 +1121,7 @@ const styles = StyleSheet.create({
   expenseMeta: { fontSize: 12, color: COLORS.textMuted, marginTop: 8 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'flex-end' },
   modalContent: {
+    flexShrink: 1,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

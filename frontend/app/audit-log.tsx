@@ -18,8 +18,9 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { Alert } from '../src/utils/alert';
 import { Toast } from '../src/utils/toast';
 import { Haptics } from '../src/utils/haptics';
-import { AccessDenied, ScreenEnter, AnimatedEmptyIcon } from '../src/components';
+import { AccessDenied, ScreenEnter, AnimatedEmptyIcon, Avatar } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import { formatMoney } from '../src/utils/money';
 
 type ActionFilter = 'all' | 'create' | 'update' | 'delete' | 'export';
 
@@ -52,6 +53,9 @@ export default function AuditLogScreen() {
   const [actionFilter, setActionFilter] = useState<ActionFilter>('all');
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // Log entries only ever stored user_name (a snapshot) - resolved from
+  // the company directory instead, same approach as message-thread.tsx.
+  const [pictureByUserId, setPictureByUserId] = useState<Record<string, string | null>>({});
 
   // Takes an optional override so the "clear" button can search with an
   // empty string immediately, instead of racing the setSearchQuery('')
@@ -82,6 +86,12 @@ export default function AuditLogScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionFilter]);
 
+  useEffect(() => {
+    api.getCompanyDirectory()
+      .then((dir) => setPictureByUserId(Object.fromEntries(dir.map((d) => [d.user_id, d.picture]))))
+      .catch(() => {});
+  }, []);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadLogs();
@@ -101,12 +111,31 @@ export default function AuditLogScreen() {
     if (entry.entity_type === 'invoice') {
       const supplierBit = d.supplier ? ` – ${d.supplier}` : '';
       const numberBit = d.invoice_number ? ` №${d.invoice_number}` : '';
-      const amountBit = typeof d.total_amount === 'number' ? ` (${d.total_amount.toFixed(2)} €)` : '';
+      const amountBit = typeof d.total_amount === 'number' ? ` (${formatMoney(d.total_amount)})` : '';
       if (entry.action === 'update') {
         const fields = Object.keys(d).join(', ');
         return `${t('auditLog.entityInvoice')}${numberBit}${fields ? `: ${fields}` : ''}`;
       }
       return `${t('auditLog.entityInvoice')}${numberBit}${supplierBit}${amountBit}`;
+    }
+    if (entry.entity_type === 'issued_invoice' || entry.entity_type === 'issued_credit_note') {
+      // An invoice (or a credit note) issued to a customer; an earlier one is
+      // cancelled, not deleted. A deleted one carries its whole copy.
+      const customer = d.customer_name || d.snapshot?.customer_name;
+      const total = typeof d.total_amount === 'number' ? d.total_amount : d.snapshot?.total_amount;
+      const customerBit = customer ? ` – ${customer}` : '';
+      const amountBit = typeof total === 'number' ? ` (${formatMoney(total)})` : '';
+      const cancelledBit = d.cancelled ? ` – ${t('billingDocuments.cancelled')}` : '';
+      const label = entry.entity_type === 'issued_credit_note' ? t('auditLog.entityIssuedCreditNote') : t('auditLog.entityIssuedInvoice');
+      return `${label} №${d.invoice_number || ''}${customerBit}${amountBit}${cancelledBit}`;
+    }
+    if (entry.entity_type === 'expense') {
+      const amountBit = typeof d.amount === 'number' ? ` (${formatMoney(d.amount)})` : '';
+      return `${t('auditLog.entityExpense')}${d.description ? ` – ${d.description}` : ''}${d.date ? `, ${d.date}` : ''}${amountBit}`;
+    }
+    if (entry.entity_type === 'payroll') {
+      const amountBit = typeof d.total_employer_cost === 'number' ? ` (${formatMoney(d.total_employer_cost)})` : '';
+      return `${t('auditLog.entityPayroll')}${d.employee ? ` – ${d.employee}` : ''}${d.period ? `, ${d.period}` : ''}${amountBit}`;
     }
     if (entry.action === 'export') {
       const formatLabel = d.format ? d.format.toUpperCase() : '';
@@ -121,10 +150,12 @@ export default function AuditLogScreen() {
   // gated on its own permission since undoing someone else's delete,
   // possibly days later, is a sensitive admin action, not routine invoice
   // work (see restore_deleted_data in ROLE_PERMISSIONS).
+  const RESTORABLE = ['invoice', 'expense', 'payroll', 'issued_invoice', 'issued_credit_note'];
   const canRestore = (entry: AuditLogEntry) =>
     hasPermission('restore_deleted_data') &&
     entry.action === 'delete' &&
-    entry.entity_type === 'invoice' &&
+    RESTORABLE.includes(entry.entity_type) &&
+    !!(entry.details?.invoice_snapshot || entry.details?.snapshot) &&
     !entry.details?.restored;
 
   const handleRestore = (entry: AuditLogEntry) => {
@@ -234,9 +265,12 @@ export default function AuditLogScreen() {
                   <Ionicons name={icon.name} size={18} color={icon.color} />
                 </View>
                 <View style={styles.logContent}>
-                  <Text style={styles.logSummary}>
-                    <Text style={styles.logUser}>{entry.user_name}</Text> · {describeEntry(entry)}
-                  </Text>
+                  <View style={styles.logSummaryRow}>
+                    <Avatar uri={pictureByUserId[entry.user_id]} name={entry.user_name} size={16} />
+                    <Text style={styles.logSummary}>
+                      <Text style={styles.logUser}>{entry.user_name}</Text> · {describeEntry(entry)}
+                    </Text>
+                  </View>
                   <Text style={styles.logTimestamp}>{formatTimestamp(entry.created_at)}</Text>
                   {canRestore(entry) && (
                     <TouchableOpacity
@@ -250,7 +284,7 @@ export default function AuditLogScreen() {
                       </Text>
                     </TouchableOpacity>
                   )}
-                  {entry.action === 'delete' && entry.entity_type === 'invoice' && entry.details?.restored && (
+                  {entry.action === 'delete' && RESTORABLE.includes(entry.entity_type) && entry.details?.restored && (
                     <Text style={styles.restoredBadge}>{t('auditLog.restored')}</Text>
                   )}
                 </View>
@@ -367,7 +401,13 @@ const styles = StyleSheet.create({
   logContent: {
     flex: 1,
   },
+  logSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
   logSummary: {
+    flex: 1,
     fontSize: 14,
     color: COLORS.textLight,
     lineHeight: 20,

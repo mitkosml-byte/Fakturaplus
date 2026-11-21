@@ -18,7 +18,7 @@ import { api } from '../src/services/api';
 import { ConversationSummary, CollabMember } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter } from '../src/components';
+import { AccessDenied, ScreenEnter, Avatar } from '../src/components';
 import { getPushStatus } from '../src/utils/pushNotifications';
 import { COLORS } from '../src/theme/colors';
 
@@ -131,9 +131,13 @@ export default function MessagesScreen() {
               contentContainerStyle={{ padding: 16 }}
               renderItem={({ item }) => (
                 <TouchableOpacity style={styles.conversationRow} onPress={() => openThread(item)}>
-                  <View style={styles.avatar}>
-                    <Ionicons name={item.conversation_id.startsWith('team:') ? 'people' : 'person'} size={22} color={COLORS.primary} />
-                  </View>
+                  {item.conversation_id.startsWith('team:') ? (
+                    <View style={styles.avatar}>
+                      <Ionicons name="people" size={22} color={COLORS.primary} />
+                    </View>
+                  ) : (
+                    <Avatar uri={item.picture} name={item.name} size={44} />
+                  )}
                   <View style={styles.conversationInfo}>
                     <View style={styles.conversationTopRow}>
                       <Text style={styles.conversationName} numberOfLines={1}>{item.name}</Text>
@@ -176,9 +180,7 @@ export default function MessagesScreen() {
                     style={{ maxHeight: 320 }}
                     renderItem={({ item }) => (
                       <TouchableOpacity style={styles.memberRow} onPress={() => startDm(item)}>
-                        <View style={styles.avatar}>
-                          <Ionicons name="person" size={18} color={COLORS.primary} />
-                        </View>
+                        <Avatar uri={item.picture} name={item.name} size={36} />
                         <Text style={styles.memberName}>{item.name}</Text>
                       </TouchableOpacity>
                     )}

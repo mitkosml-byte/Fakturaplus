@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Share,
   Platform,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,7 +38,23 @@ export default function BackupScreen() {
     last_backup_date: string | null;
     file_name?: string;
     statistics?: { invoices: number; revenues: number; expenses: number };
+    monthly_email?: boolean;
+    email_available?: boolean;
   } | null>(null);
+  const [savingMonthly, setSavingMonthly] = useState(false);
+
+  // A copy of the data by email every month (gzip-ed, the same as a hand-made one).
+  const toggleMonthlyEmail = async (value: boolean) => {
+    setSavingMonthly(true);
+    try {
+      await api.setMonthlyBackupEmail(value);
+      setBackupStatus((prev) => (prev ? { ...prev, monthly_email: value } : prev));
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setSavingMonthly(false);
+    }
+  };
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
 
@@ -61,6 +78,17 @@ export default function BackupScreen() {
     await loadBackupStatus();
     setRefreshing(false);
   }, [loadBackupStatus]);
+
+  // What a backup holds: the three main sections, then everything else
+  // (team, payroll, schedule, assets, receivables, settings...) as one line.
+  const backupSummary = (stats: {
+    invoice_count: number; revenue_count: number; expense_count: number; total_records?: number;
+  }) => {
+    const main = stats.invoice_count + stats.revenue_count + stats.expense_count;
+    const other = Math.max((stats.total_records ?? main) - main, 0);
+    return `📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${stats.invoice_count}\n• ${t('backup.revenues')}: ${stats.revenue_count}\n• ${t('backup.expenses')}: ${stats.expense_count}`
+      + (other > 0 ? `\n• ${t('backup.otherRecords')}: ${other}` : '');
+  };
 
   const handleCreateBackup = async () => {
     setIsCreatingBackup(true);
@@ -86,10 +114,7 @@ export default function BackupScreen() {
         document.body.removeChild(link);
         URL.revokeObjectURL(objectUrl);
 
-        Alert.alert(
-          t('backup.successTitle'),
-          `${t('backup.backupCreated')}\n\n📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${backupData.statistics.invoice_count}\n• ${t('backup.revenues')}: ${backupData.statistics.revenue_count}\n• ${t('backup.expenses')}: ${backupData.statistics.expense_count}`
-        );
+        Alert.alert(t('backup.successTitle'), `${t('backup.backupCreated')}\n\n${backupSummary(backupData.statistics)}`);
       } else {
         // The top-level "expo-file-system" export is SDK 54's new
         // File/Directory API, which no longer includes documentDirectory/
@@ -112,7 +137,7 @@ export default function BackupScreen() {
 
           Alert.alert(
             t('backup.successTitle'),
-            `${t('backup.backupCreated')}\n\n📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${backupData.statistics.invoice_count}\n• ${t('backup.revenues')}: ${backupData.statistics.revenue_count}\n• ${t('backup.expenses')}: ${backupData.statistics.expense_count}\n\n${t('backup.saveFile')}`
+            `${t('backup.backupCreated')}\n\n${backupSummary(backupData.statistics)}\n\n${t('backup.saveFile')}`
           );
         } else {
           Alert.alert(
@@ -172,13 +197,18 @@ export default function BackupScreen() {
                 const restoreResult = await api.restoreBackup(backupData);
 
                 const skippedTotal = restoreResult.skipped
-                  ? restoreResult.skipped.invoices + restoreResult.skipped.revenues + restoreResult.skipped.expenses
+                  ? restoreResult.skipped.total ?? (restoreResult.skipped.invoices + restoreResult.skipped.revenues + restoreResult.skipped.expenses)
                   : 0;
-                const skippedNote = skippedTotal > 0 ? `\n\n⚠️ ${t('backup.skippedRecords')}: ${skippedTotal}` : '';
+                const notes = [
+                  restoreResult.already_present ? `ℹ️ ${t('backup.alreadyPresent')}: ${restoreResult.already_present}` : '',
+                  restoreResult.not_in_team ? `ℹ️ ${t('backup.notInTeam')}: ${restoreResult.not_in_team}` : '',
+                  skippedTotal > 0 ? `⚠️ ${t('backup.skippedRecords')}: ${skippedTotal}` : '',
+                ].filter(Boolean).join('\n');
+                const other = restoreResult.restored.other ?? 0;
 
                 Alert.alert(
                   t('backup.successTitle'),
-                  `${t('backup.restored')}\n\n📊 ${t('backup.restoredRecords')}:\n• ${t('backup.invoices')}: ${restoreResult.restored.invoices}\n• ${t('backup.revenues')}: ${restoreResult.restored.revenues}\n• ${t('backup.expenses')}: ${restoreResult.restored.expenses}${skippedNote}`
+                  `${t('backup.restored')}\n\n📊 ${t('backup.restoredRecords')}:\n• ${t('backup.invoices')}: ${restoreResult.restored.invoices}\n• ${t('backup.revenues')}: ${restoreResult.restored.revenues}\n• ${t('backup.expenses')}: ${restoreResult.restored.expenses}${other > 0 ? `\n• ${t('backup.otherRecords')}: ${other}` : ''}${notes ? `\n\n${notes}` : ''}`
                 );
                 
                 await loadBackupStatus();
@@ -295,6 +325,21 @@ export default function BackupScreen() {
                   <Text style={styles.statusText}>{t('backup.noBackup')}</Text>
                 </View>
               )}
+              {backupStatus?.email_available && (
+                <View style={[styles.statusRow, { marginTop: 12 }]}>
+                  <Ionicons name="mail-outline" size={20} color={COLORS.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.statusText}>{t('backup.monthlyEmail')}</Text>
+                    <Text style={styles.monthlyHint}>{t('backup.monthlyEmailHint')}</Text>
+                  </View>
+                  <Switch
+                    value={!!backupStatus.monthly_email}
+                    onValueChange={toggleMonthlyEmail}
+                    disabled={savingMonthly}
+                    accessibilityLabel={t('backup.monthlyEmail')}
+                  />
+                </View>
+              )}
             </View>
 
             {/* Actions */}
@@ -371,6 +416,7 @@ export default function BackupScreen() {
 }
 
 const styles = StyleSheet.create({
+  monthlyHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   backgroundImage: {
     flex: 1,
   },
