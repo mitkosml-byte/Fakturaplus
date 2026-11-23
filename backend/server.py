@@ -3127,6 +3127,19 @@ def round_to_cents_keeping_total(values: List[float]) -> List[float]:
     return [round(cents / 100, 2) for cents in floors]
 
 
+def vat_due_of(totals: Dict[str, Any]) -> float:
+    """The VAT a period owes the state: the VAT of its sales - the till's
+    and the invoices issued to customers - less the VAT of its purchase
+    invoices (a fixed asset's too; a credit note takes its own off). Below
+    zero it is VAT to reclaim. The one formula Home, the statistics, the
+    cash flow and the assistant all read - neither pocket money nor the
+    expenses without invoice carry VAT, so it is the same for every viewer."""
+    return (
+        float(totals.get("fiscal_vat") or 0) + float(totals.get("issued_invoice_vat") or 0)
+        - float(totals.get("invoice_vat") or 0)
+    )
+
+
 def period_income_expense(totals: Dict[str, Any], visibility: Optional[dict] = None) -> tuple:
     """(income, expense) of period_totals through _profit_formula - with a
     viewer's visibility, hidden pocket money, off-book expenses and payroll
@@ -3446,7 +3459,7 @@ async def _business_digest_vat_due(
     no extra permission gate beyond the whole endpoint's own
     view_statistics."""
     totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
-    return round(totals["fiscal_vat"] - totals["invoice_vat"], 2)
+    return round(vat_due_of(totals), 2)
 
 async def _business_digest_roi(company_id: Optional[str], scope: dict, user_id: str, visibility: dict) -> dict:
     """The current month's ROI snapshot for the chat digest: personal money
@@ -4206,7 +4219,7 @@ async def cash_flow_projection(company_id: Optional[str], scope: dict, current_u
                 continue
             prev_year, prev_month = (year, month - 1) if month > 1 else (year - 1, 12)
             totals = await period_totals(company_id, scope, current_user.user_id, counted_period(Period.month(prev_year, prev_month)))
-            vat = round(float(totals.get("fiscal_vat") or 0) - float(totals.get("invoice_vat") or 0), 2)
+            vat = round(vat_due_of(totals), 2)
             if vat > 0:
                 so_far = " (досега)" if Period.month(prev_year, prev_month).contains(today) else ""
                 events.append(cash_flow_service.CashEvent(day, -vat, cash_flow_service.VAT, f"ДДС за {_MONTHS_BG_GENITIVE[prev_month - 1]}{so_far}"))
@@ -7415,6 +7428,8 @@ app.include_router(admin.router)
 # Home in one request (Л14) - built from the handlers above.
 from routers import margins as margins_router
 app.include_router(margins_router.router)
+from routers import vat as vat_router
+app.include_router(vat_router.router)
 from routers import home as home_router
 app.include_router(home_router.router)
 from routers import day_card as day_card_router

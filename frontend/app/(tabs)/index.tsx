@@ -38,6 +38,7 @@ import { GettingStartedCard } from '../../src/components/home/GettingStartedCard
 import { DayCard } from '../../src/components/home/DayCard';
 import { PersonalWalletCard } from '../../src/components/home/PersonalWalletCard';
 import { MarginsCard } from '../../src/components/home/MarginsCard';
+import { VatCard } from '../../src/components/home/VatCard';
 import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
 import { useOnboardingStore } from '../../src/stores/onboardingStore';
@@ -616,6 +617,10 @@ export default function HomeScreen() {
                 <Text style={styles.restrictedNoteText}>{restrictedNote}</Text>
               </View>
             )}
+
+            {/* The VAT to pay, when, and where the month is heading - for a
+                business registered for VAT. */}
+            <VatCard vat={home?.vat} />
 
             {/* The period's gross, operating and net margin - for whoever
                 sees the profit. */}

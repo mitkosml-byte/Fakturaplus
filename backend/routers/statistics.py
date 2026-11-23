@@ -124,8 +124,9 @@ async def get_summary(
     issued_total = totals["issued_invoice_total"]
     fiscal_vat = totals["fiscal_vat"] + totals["issued_invoice_vat"]
 
-    # Общ ДДС за плащане = ДДС от продажби - ДДС от покупки (фактури)
-    vat_to_pay = fiscal_vat - total_invoice_vat
+    # Общ ДДС за плащане = ДДС от продажби - ДДС от покупки (фактури) -
+    # единствената формула (server.vat_due_of).
+    vat_to_pay = vat_due_of(totals)
 
     # Общ приход/разход - единствената формула (_profit_formula), през
     # period_income_expense с видимостта на този зрител.

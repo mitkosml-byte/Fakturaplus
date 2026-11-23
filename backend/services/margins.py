@@ -28,12 +28,14 @@ _SOLE_TRADER = re.compile(r"(?<!\w)(ЕТ|ET)(?!\w)")
 @dataclass(frozen=True)
 class Figures:
     """A period's figures, in euro - without VAT for a business that
-    deducts it."""
+    deducts it. The payroll includes what is expected of it and not
+    entered yet (payroll_expected)."""
     sales: float
     goods: float
     payroll: float
     recurring: float
     depreciation: float
+    payroll_expected: float = 0.0
 
 
 def profit_tax_percent(company: Optional[dict]) -> float:
@@ -65,6 +67,7 @@ def margins_of(figures: Figures, tax_percent: float) -> Optional[Dict[str, Any]]
         "costs": {
             "goods": round(figures.goods, 2),
             "payroll": round(figures.payroll, 2),
+            "payroll_expected": round(figures.payroll_expected, 2),
             "recurring": round(figures.recurring, 2),
             "depreciation": round(figures.depreciation, 2),
             "profit_tax": round(tax, 2),

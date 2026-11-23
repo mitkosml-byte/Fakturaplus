@@ -12,9 +12,11 @@ What counts as what, the same for every business:
 - sales: the till, the pocket money and the invoices issued to customers;
 - goods and materials: the purchase invoices (not a fixed asset's) and the
   expenses without invoice that are not a recurring cost;
-- running the business: the payroll (and the wages paid by the schedule),
-  the recurring costs - rent, utilities, subscriptions... by the days of
-  their month, like the payroll - and the depreciation;
+- running the business: the payroll (and the wages paid by the schedule)
+  - for this month and the month before, the salaries in Екип of whoever
+  has no payroll entered for it yet, as the break-even counts them - the
+  recurring costs - rent, utilities, subscriptions... by the days of their
+  month, like the payroll - and the depreciation;
 - the profit tax: the business's rate (services/margins.profit_tax_percent)
   on a profit, nothing on a loss.
 
@@ -28,6 +30,7 @@ from server import *
 import server
 from services import margins as margins_service
 from services import recurring_service
+from services.business_calendar import add_months
 
 router = APIRouter(prefix="/api")
 
@@ -41,15 +44,31 @@ def sees_margins(current_user: User) -> bool:
     return bool(visibility.get("statistics") and visibility.get("profit"))
 
 
+async def _expected_payroll(company_id: Optional[str], scope: dict, period: Period, today: date) -> float:
+    """The payroll not entered yet, by the salaries in Екип: for this month
+    and the month before - whose payroll is made after it ends - each
+    employee without an entry for it (month_payroll), by the period's share
+    of the month. An older month is as it was entered."""
+    pending = {(today.year, today.month), add_months(today.year, today.month, -1)}
+    expected = 0.0
+    for year, month in period.months():
+        share = period.month_share(year, month)
+        if (year, month) in pending and share:
+            expected += (await month_payroll(company_id, scope, year, month, expect=True))["expected"] * share
+    return expected
+
+
 async def _figures(
     company_id: Optional[str], scope: dict, user_id: str, period: Period, visibility: dict, vat_registered: bool,
+    expect_payroll: bool, today: date,
 ) -> Tuple[margins_service.Figures, int]:
     """A period's figures for this viewer, and how many recurring costs the
     business follows."""
     off_book_visible = bool(visibility["off_book_expenses"])
-    totals, recurring = await asyncio.gather(
+    totals, recurring, expected_payroll = await asyncio.gather(
         period_totals(company_id, scope, user_id, period),
         recurring_service.period_costs(server.db, company_id, scope, period, off_book_visible, vat_registered),
+        _expected_payroll(company_id, scope, period, today) if expect_payroll else _zero(),
     )
     pocket = totals["pocket_money"] if visibility["pocket_money"] else 0.0
     if vat_registered:
@@ -59,14 +78,20 @@ async def _figures(
         sales = totals["fiscal_revenue"] + totals["issued_invoice_total"] + pocket
         purchases = totals["invoice_total"]
     goods = purchases + (totals["off_book_expenses"] if off_book_visible else 0.0) - recurring["paid"]
+    sees_payroll = bool(visibility.get("payroll", True))
     figures = margins_service.Figures(
         sales=sales,
         goods=max(goods, 0.0),
-        payroll=totals["payroll_cost"] if visibility.get("payroll", True) else 0.0,
+        payroll=(totals["payroll_cost"] + expected_payroll) if sees_payroll else 0.0,
         recurring=recurring["accrued"],
         depreciation=totals["depreciation_cost"],
+        payroll_expected=expected_payroll if sees_payroll else 0.0,
     )
     return figures, int(recurring["items"])
+
+
+async def _zero() -> float:
+    return 0.0
 
 
 async def period_margins(
@@ -86,10 +111,15 @@ async def period_margins(
     visibility = get_financial_visibility(current_user)
     vat_registered = company_vat_registered(company)
     tax_percent = margins_service.profit_tax_percent(company)
+    # Salaries not entered yet are expected - for whoever sees the payroll
+    # of a business that keeps it.
+    expect_payroll = bool(visibility.get("payroll", True)) and company_modules(company)["payroll"]
+    today = server.today_local()
     before = margins_service.previous_period(period, counted)
     (figures, recurring_items), previous = await asyncio.gather(
-        _figures(company_id, scope, current_user.user_id, counted, visibility, vat_registered),
-        _figures(company_id, scope, current_user.user_id, before, visibility, vat_registered) if before else _nothing(),
+        _figures(company_id, scope, current_user.user_id, counted, visibility, vat_registered, expect_payroll, today),
+        _figures(company_id, scope, current_user.user_id, before, visibility, vat_registered, expect_payroll, today)
+        if before else _nothing(),
     )
     answer: Dict[str, Any] = {
         "period": {"start_date": counted.start_text, "end_date": counted.end_text},

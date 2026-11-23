@@ -34,12 +34,15 @@ export function MarginsCard({ margins, canManageBudget }: Props) {
   const range = (period: { start_date: string; end_date: string }) =>
     period.start_date === period.end_date ? day(period.start_date) : `${day(period.start_date)} – ${day(period.end_date)}`;
 
+  const costs = margins.costs;
+  // Without payroll, rent or depreciation in the period the operating
+  // margin is the gross one: shown once, with a word on why.
+  const runningCosts = costs.payroll + costs.recurring + costs.depreciation > 0;
   const columns: { key: string; label: string; margin: Margin; color: string; approx?: boolean }[] = [
     { key: 'gross', label: t('margins.gross'), margin: margins.gross, color: COLORS.primary },
-    { key: 'operating', label: t('margins.operating'), margin: margins.operating, color: COLORS.info },
+    ...(runningCosts ? [{ key: 'operating', label: t('margins.operating'), margin: margins.operating, color: COLORS.info }] : []),
     { key: 'net', label: t('margins.net'), margin: margins.net, color: COLORS.success, approx: true },
   ];
-  const costs = margins.costs;
   const tax = String(margins.profit_tax_percent).replace('.', english ? '.' : ',');
   const sales = margins.sales || 0;
   const ofSales = (margins.vat_excluded ? t('margins.ofSalesNoVat') : t('margins.ofSales')).replace('{amount}', formatMoney(sales));
@@ -52,7 +55,7 @@ export function MarginsCard({ margins, canManageBudget }: Props) {
     ...(costs.payroll > 0 ? [{ key: 'payroll', label: t('margins.payroll'), amount: -costs.payroll }] : []),
     ...(costs.recurring > 0 ? [{ key: 'recurring', label: t('margins.recurring'), amount: -costs.recurring }] : []),
     ...(costs.depreciation > 0 ? [{ key: 'depreciation', label: t('margins.depreciation'), amount: -costs.depreciation }] : []),
-    { key: 'operating', label: t('margins.operatingProfit'), amount: margins.operating.profit, total: true },
+    ...(runningCosts ? [{ key: 'operating', label: t('margins.operatingProfit'), amount: margins.operating.profit, total: true }] : []),
     ...(costs.profit_tax > 0 ? [{ key: 'tax', label: t('margins.tax').replace('{rate}', tax), amount: -costs.profit_tax }] : []),
     { key: 'net', label: t('margins.netProfit'), amount: margins.net.profit, total: true },
   ];
@@ -110,6 +113,7 @@ export function MarginsCard({ margins, canManageBudget }: Props) {
           ? ` · ${t('margins.versus').replace('{range}', range(margins.previous_period))}`
           : ''}
       </Text>
+      {!runningCosts && <Text style={styles.line}>{t('margins.noRunningCosts')}</Text>}
 
       {open && (
         <View style={styles.details}>
@@ -122,10 +126,13 @@ export function MarginsCard({ margins, canManageBudget }: Props) {
             </View>
           ))}
           <Text style={styles.note}>{t('margins.grossHint')}</Text>
-          <Text style={styles.note}>{t('margins.operatingHint')}</Text>
+          {runningCosts && <Text style={styles.note}>{t('margins.operatingHint')}</Text>}
           <Text style={styles.note}>{t('margins.netHint').replace('{rate}', tax)}</Text>
           {margins.vat_excluded && <Text style={styles.note}>{t('margins.vatNote')}</Text>}
           {costs.recurring > 0 && <Text style={styles.note}>{t('margins.recurringNote')}</Text>}
+          {(costs.payroll_expected || 0) > 0 && (
+            <Text style={styles.note}>{t('margins.payrollExpected').replace('{amount}', formatMoney(costs.payroll_expected))}</Text>
+          )}
           {margins.payroll_left_out && <Text style={styles.note}>{t('breakEven.payrollHidden')}</Text>}
           {margins.no_recurring_costs && (
             <TouchableOpacity

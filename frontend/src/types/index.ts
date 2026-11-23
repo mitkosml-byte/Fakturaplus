@@ -1959,9 +1959,31 @@ export interface HomeData {
   day_card?: DayCardData | null;
   // The personal notebook's month - null for whoever may not see it.
   personal_wallet?: PersonalWalletSummary | null;
+  // The VAT to pay, when, and where the month is heading - null for whoever
+  // does not see the totals.
+  vat?: VatOutlook | null;
   // The period's gross, operating and net margin - null for whoever may
   // not see the profit.
   margins?: PeriodMargins | null;
+}
+
+// The VAT a business owes (backend routers/vat.py): only `registered` for a
+// business not registered for VAT.
+export interface VatOutlook {
+  registered: boolean;
+  period?: { start_date: string; end_date: string };
+  sales_vat?: number;
+  purchase_vat?: number;
+  // Below zero: VAT to reclaim.
+  due?: number;
+  // "YYYY-MM" when the period is one calendar month.
+  month?: string | null;
+  running?: boolean;
+  pay_by?: string | null;
+  // The whole month at its pace so far - a running month only.
+  expected_due?: number | null;
+  // Last month's VAT, while its 14th has not passed.
+  previous?: { month: string; due: number; pay_by: string } | null;
 }
 
 // One margin: its percent of the sales, the profit it leaves and its
@@ -1983,7 +2005,8 @@ export interface PeriodMargins {
   payroll_left_out: boolean;
   no_recurring_costs: boolean;
   sales?: number;
-  costs?: { goods: number; payroll: number; recurring: number; depreciation: number; profit_tax: number };
+  // payroll_expected: the part of the payroll not entered yet, counted by the salaries in Екип.
+  costs?: { goods: number; payroll: number; payroll_expected?: number; recurring: number; depreciation: number; profit_tax: number };
   gross?: Margin;
   operating?: Margin;
   net?: Margin;

@@ -202,3 +202,28 @@ def test_no_sales_and_no_recurring_costs(client, monkeypatch):
     assert first["available"] is True and first["gross"]["percent"] == 100.0
     # No October to compare with.
     assert first["gross"]["change"] is None
+
+
+def test_salaries_not_entered_yet_are_expected(client, monkeypatch):
+    # The payroll for a month is made after it ends: until it is entered,
+    # this month's and last month's salaries in Екип count - an older month
+    # is as it was entered.
+    _fake_today(monkeypatch)
+    company_id, _, owner = _company()
+    for month in (9, 10, 11):
+        client.post("/api/daily-revenue", headers=owner, json={"date": f"2026-{month:02d}-02", "fiscal_revenue": 12000, "vat_rate_percent": 20})
+    client.post("/api/employees", headers=owner, json={"name": "Пробна Служителка", "base_salary": 1000, "hire_date": "2024-02-01"})
+    cost = server.calculate_payroll(1000, "gross", asyncio.run(server.get_payroll_rates_dict(company_id, 2026, 11)))["total_employer_cost"]
+
+    november = client.get("/api/statistics/margins", headers=owner, params=NOVEMBER).json()
+    assert november["costs"]["payroll"] == november["costs"]["payroll_expected"] == round(cost * 21 / 30, 2)
+    assert november["operating"]["percent"] == round((10000 - cost * 21 / 30) / 100, 1)
+    september = client.get("/api/statistics/margins", headers=owner,
+                           params={"start_date": "2026-09-01", "end_date": "2026-09-30"}).json()
+    assert september["costs"]["payroll"] == 0
+
+    # November's payroll entered: it counts, and nothing is expected any more.
+    [employee] = client.get("/api/employees", headers=owner).json()
+    client.post("/api/payroll", headers=owner, json={"employee_id": employee["id"], "period_month": 11, "period_year": 2026, "gross_amount": 1000})
+    entered = client.get("/api/statistics/margins", headers=owner, params=NOVEMBER).json()
+    assert entered["costs"]["payroll_expected"] == 0 and entered["costs"]["payroll"] == round(cost * 21 / 30, 2)

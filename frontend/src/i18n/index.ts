@@ -5845,6 +5845,29 @@ export const translations: Translations = {
     en: 'Add payroll and recurring expenses (rent, subscriptions) to see the daily target for breaking even.',
   },
 
+  // The VAT to pay on Home (backend routers/vat.py)
+  'vat.title': { bg: 'ДДС за внасяне', en: 'VAT to pay' },
+  'vat.reclaimTitle': { bg: 'ДДС за възстановяване', en: 'VAT to reclaim' },
+  'vat.monthSoFar': { bg: 'За {month} досега', en: 'For {month} so far' },
+  'vat.forMonth': { bg: 'За {month}', en: 'For {month}' },
+  'vat.forPeriod': { bg: 'За периода', en: 'For the period' },
+  'vat.payBy': { bg: 'плащане до {date}', en: 'pay by {date}' },
+  'vat.expected': { bg: 'Очаквано за целия месец', en: 'Expected for the whole month' },
+  'vat.expectedHint': { bg: 'прогнозата е по темпото досега', en: 'the forecast follows the pace so far' },
+  'vat.toReclaim': { bg: 'за възстановяване', en: 'to reclaim' },
+  'vat.parts': {
+    bg: 'ДДС от продажби {sales} − за приспадане {purchases}',
+    en: 'VAT on sales {sales} − deductible {purchases}',
+  },
+  'vat.previous': {
+    bg: 'ДДС за {month}: {amount} – плащане до {date}',
+    en: 'VAT for {month}: {amount} – pay by {date}',
+  },
+  'vat.previousReclaim': {
+    bg: 'ДДС за {month}: {amount} за възстановяване – декларация до {date}',
+    en: 'VAT for {month}: {amount} to reclaim – return by {date}',
+  },
+
   // The period's margins on Home (backend routers/margins.py)
   'margins.title': { bg: 'Маржове', en: 'Margins' },
   'margins.gross': { bg: 'Брутен', en: 'Gross' },
@@ -5883,6 +5906,14 @@ export const translations: Translations = {
   'margins.recurringNote': {
     bg: 'Периодичните разходи се броят по дни от месеца, като заплатите – маржът не пада в деня, в който е платен наемът.',
     en: 'Recurring costs count by the days of their month, like payroll – the margin does not drop on the day the rent is paid.',
+  },
+  'margins.noRunningCosts': {
+    bg: 'Оперативният марж се показва, щом има въведени заплати, наем или други постоянни разходи – без тях е колкото брутния.',
+    en: 'The operating margin shows once payroll, rent or other running costs are entered – without them it equals the gross margin.',
+  },
+  'margins.payrollExpected': {
+    bg: 'Заплатите, които още не са въведени, се броят по заплатите в Екип: {amount}.',
+    en: 'Salaries not entered yet count by the salaries in Team: {amount}.',
   },
   'margins.noRecurring': {
     bg: 'Добавете наема, тока и абонаментите като периодични разходи – дотогава се броят към стоката и брутният марж излиза по-нисък.',
