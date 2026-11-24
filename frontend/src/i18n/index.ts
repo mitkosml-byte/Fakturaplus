@@ -1282,6 +1282,7 @@ export const translations: Translations = {
   },
   // The day's total beside the quick fills of the revenue form.
   'home.dayTotal': { bg: 'Общо за деня', en: 'Day total' },
+  'home.dayTotalWithoutPocket': { bg: 'Общо без джобче', en: 'Total without pocket' },
   'home.withoutPocket': { bg: 'без джобче', en: 'without pocket' },
   'home.sameAsYesterday': {
     bg: 'Както вчера',

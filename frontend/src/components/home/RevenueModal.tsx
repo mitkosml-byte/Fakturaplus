@@ -51,20 +51,28 @@ function DayTotal({ till, pocket, showPocket }: { till: number; pocket: number; 
   const text = formatMoney(till + (showPocket && !withoutPocket ? pocket : 0));
   // Bigger sums in a smaller size, so the bubble never cuts them.
   const fontSize = text.length <= 9 ? 20 : text.length <= 11 ? 17 : 15;
+  // The bubble says what its sum holds; the button under it only switches.
+  const label = showPocket && withoutPocket ? t('home.dayTotalWithoutPocket') : t('home.dayTotal');
   return (
-    <View style={styles.totalBubble} accessibilityLabel={`${t('home.dayTotal')}: ${text}`}>
-      <Text style={styles.totalLabel} numberOfLines={1}>{t('home.dayTotal')}</Text>
-      <Text style={[styles.totalValue, { fontSize }]} numberOfLines={1}>{text}</Text>
+    <View style={styles.totalColumn}>
+      <View style={styles.totalBubble} accessibilityLabel={`${label}: ${text}`}>
+        <Text style={styles.totalLabel} numberOfLines={1}>{label}</Text>
+        <Text style={[styles.totalValue, { fontSize }]} numberOfLines={1}>{text}</Text>
+      </View>
       {showPocket && (
         <TouchableOpacity
-          style={[styles.totalTag, withoutPocket && styles.totalTagActive]}
+          style={[styles.totalToggle, withoutPocket && styles.totalToggleActive]}
           onPress={toggle}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: withoutPocket }}
           hitSlop={6}
         >
-          {withoutPocket && <Ionicons name="checkmark" size={12} color={COLORS.background} />}
-          <Text style={[styles.totalTagText, withoutPocket && styles.totalTagTextActive]} numberOfLines={1}>
+          <Ionicons
+            name={withoutPocket ? 'checkbox' : 'square-outline'}
+            size={15}
+            color={withoutPocket ? COLORS.background : COLORS.warning}
+          />
+          <Text style={[styles.totalToggleText, withoutPocket && styles.totalToggleTextActive]} numberOfLines={1}>
             {t('home.withoutPocket')}
           </Text>
         </TouchableOpacity>
@@ -426,14 +434,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.primaryLight,
   },
-  totalBubble: {
+  // The total and, under it, the button that takes the pocket money out.
+  totalColumn: {
     flexGrow: 1,
     flexShrink: 0,
     flexBasis: 120,
     maxWidth: 220,
+    justifyContent: 'center',
+    gap: 8,
+  },
+  totalBubble: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 2,
     paddingHorizontal: 10,
     paddingVertical: 10,
     borderRadius: 16,
@@ -450,26 +463,28 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
-  totalTag: {
+  totalToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.6)',
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
   },
-  totalTagActive: {
+  totalToggleActive: {
     backgroundColor: COLORS.warning,
     borderColor: COLORS.warning,
   },
-  totalTagText: {
-    fontSize: 11,
+  totalToggleText: {
+    fontSize: 12,
     fontWeight: '600',
     color: COLORS.warning,
   },
-  totalTagTextActive: {
+  totalToggleTextActive: {
     color: COLORS.background,
   },
   vatRateRow: {
