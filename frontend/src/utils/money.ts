@@ -24,3 +24,20 @@ export function formatAmount(value: number | null | undefined, decimals: 0 | 2 |
 export function formatMoney(value: number | null | undefined, decimals: 0 | 2 = 2): string {
   return `${formatAmount(value, decimals)}${NBSP}€`;
 }
+
+// An amount as typed into a field: "1234,56", "1234.56", "1 234,56" or
+// "1.234,56" - a decimal comma or point, spaces and a thousands mark
+// allowed. Nothing readable is 0.
+export function parseAmount(text: string | null | undefined): number {
+  let value = String(text ?? '').replace(/[\s\u00A0]/g, '');
+  const comma = value.lastIndexOf(',');
+  const point = value.lastIndexOf('.');
+  if (comma > -1 && point > -1) {
+    // Both: the last one marks the decimals, the other groups thousands.
+    value = comma > point ? value.replace(/\./g, '').replace(',', '.') : value.replace(/,/g, '');
+  } else {
+    value = value.replace(',', '.');
+  }
+  const amount = parseFloat(value);
+  return Number.isFinite(amount) ? amount : 0;
+}

@@ -1,13 +1,15 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { format, addDays, subDays } from 'date-fns';
 import { Locale } from 'date-fns';
 import DateTimePickerModal from '../AppDateTimePicker';
 import { useTranslation } from '../../i18n';
+import { useAuth } from '../../contexts/AuthContext';
 import { COLORS } from '../../theme/colors';
 import { BottomSheet, PressableScale } from '..';
-import { formatAmount } from '../../utils/money';
+import { formatAmount, formatMoney, parseAmount } from '../../utils/money';
 
 // Extracted from index.tsx (Module 1 audit finding #4). Edit-in-place form
 // for a single day's revenue (fiscal, card-paid portion, VAT rate, pocket money).
@@ -21,7 +23,54 @@ export function ratesShown(rateAmounts: Record<number, string>): number[] {
 
 // The day's till total from its amounts by rate.
 export function rateAmountsTotal(rateAmounts: Record<number, string>): number {
-  return Object.values(rateAmounts).reduce((sum, value) => sum + (Math.round((parseFloat(value) || 0) * 100) / 100), 0);
+  return Object.values(rateAmounts).reduce((sum, value) => sum + (Math.round(parseAmount(value) * 100) / 100), 0);
+}
+
+// The day's total as the form holds it, as it is typed: the till (its card
+// part is in it) and the pocket money - or, with "без джобче", the till
+// alone. The choice is remembered on the device, per person.
+function DayTotal({ till, pocket, showPocket }: { till: number; pocket: number; showPocket: boolean }) {
+  const { t } = useTranslation();
+  const { user } = useAuth();
+  const key = user?.user_id ? `revenue_total_without_pocket:${user.user_id}` : null;
+  const [withoutPocket, setWithoutPocket] = useState(false);
+  useEffect(() => {
+    if (!key) return;
+    let alive = true;
+    AsyncStorage.getItem(key)
+      .then((stored) => { if (alive) setWithoutPocket(stored === '1'); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [key]);
+  const toggle = () => {
+    const next = !withoutPocket;
+    setWithoutPocket(next);
+    if (key) AsyncStorage.setItem(key, next ? '1' : '0').catch(() => undefined);
+  };
+
+  const text = formatMoney(till + (showPocket && !withoutPocket ? pocket : 0));
+  // Bigger sums in a smaller size, so the bubble never cuts them.
+  const fontSize = text.length <= 9 ? 20 : text.length <= 11 ? 17 : 15;
+  return (
+    <View style={styles.totalBubble} accessibilityLabel={`${t('home.dayTotal')}: ${text}`}>
+      <Text style={styles.totalLabel} numberOfLines={1}>{t('home.dayTotal')}</Text>
+      <Text style={[styles.totalValue, { fontSize }]} numberOfLines={1}>{text}</Text>
+      {showPocket && (
+        <TouchableOpacity
+          style={[styles.totalTag, withoutPocket && styles.totalTagActive]}
+          onPress={toggle}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: withoutPocket }}
+          hitSlop={6}
+        >
+          {withoutPocket && <Ionicons name="checkmark" size={12} color={COLORS.background} />}
+          <Text style={[styles.totalTagText, withoutPocket && styles.totalTagTextActive]} numberOfLines={1}>
+            {t('home.withoutPocket')}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 }
 
 type Props = {
@@ -72,6 +121,7 @@ export function RevenueModal({
   onCopyYesterday, copyingYesterday, onScanReport, scanningReport, locationSlot, onImportHistory,
 }: Props) {
   const { t } = useTranslation();
+  const till = splitByRate ? rateAmountsTotal(rateAmounts) : parseAmount(fiscalRevenue);
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
@@ -123,25 +173,31 @@ export function RevenueModal({
             <Text style={styles.editNoticeText}>{t('home.editInPlaceNotice')}</Text>
           </View>
 
-          <TouchableOpacity style={styles.copyYesterdayButton} onPress={onCopyYesterday} disabled={copyingYesterday}>
-            {copyingYesterday ? (
-              <ActivityIndicator size="small" color={COLORS.primary} />
-            ) : (
-              <Ionicons name="copy-outline" size={16} color={COLORS.primary} />
-            )}
-            <Text style={styles.copyYesterdayText}>{t('home.sameAsYesterday')}</Text>
-          </TouchableOpacity>
+          {/* The day's quick fills on the left; beside them, the day's total. */}
+          <View style={styles.quickRow}>
+            <View style={styles.quickActions}>
+              <TouchableOpacity style={styles.quickButton} onPress={onCopyYesterday} disabled={copyingYesterday}>
+                {copyingYesterday ? (
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                ) : (
+                  <Ionicons name="copy-outline" size={16} color={COLORS.primary} />
+                )}
+                <Text style={styles.quickButtonText}>{t('home.sameAsYesterday')}</Text>
+              </TouchableOpacity>
 
-          {onScanReport && (
-            <TouchableOpacity style={styles.copyYesterdayButton} onPress={onScanReport} disabled={scanningReport}>
-              {scanningReport ? (
-                <ActivityIndicator size="small" color={COLORS.primary} />
-              ) : (
-                <Ionicons name="camera-outline" size={16} color={COLORS.primary} />
+              {onScanReport && (
+                <TouchableOpacity style={styles.quickButton} onPress={onScanReport} disabled={scanningReport}>
+                  {scanningReport ? (
+                    <ActivityIndicator size="small" color={COLORS.primary} />
+                  ) : (
+                    <Ionicons name="camera-outline" size={16} color={COLORS.primary} />
+                  )}
+                  <Text style={styles.quickButtonText}>{t('home.scanReport')}</Text>
+                </TouchableOpacity>
               )}
-              <Text style={styles.copyYesterdayText}>{t('home.scanReport')}</Text>
-            </TouchableOpacity>
-          )}
+            </View>
+            <DayTotal till={till} pocket={parseAmount(pocketMoney)} showPocket={showPocketMoney} />
+          </View>
 
           {ocrAdditionNote && (
             <View style={[styles.editNoticeBanner, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
@@ -341,7 +397,20 @@ const styles = StyleSheet.create({
     color: COLORS.primaryLight,
     lineHeight: 16,
   },
-  copyYesterdayButton: {
+  quickRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 16,
+  },
+  // The buttons give way (their labels wrap) before the total does.
+  quickActions: {
+    flexShrink: 1,
+    justifyContent: 'center',
+    gap: 10,
+  },
+  quickButton: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
@@ -350,12 +419,58 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 10,
     backgroundColor: 'rgba(139, 92, 246, 0.12)',
-    marginBottom: 16,
   },
-  copyYesterdayText: {
+  quickButtonText: {
+    flexShrink: 1,
     fontSize: 13,
     fontWeight: '600',
     color: COLORS.primaryLight,
+  },
+  totalBubble: {
+    flexGrow: 1,
+    flexShrink: 0,
+    flexBasis: 120,
+    maxWidth: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.45)',
+    backgroundColor: 'rgba(16, 185, 129, 0.14)',
+  },
+  totalLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.successLight,
+  },
+  totalValue: {
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  totalTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.6)',
+  },
+  totalTagActive: {
+    backgroundColor: COLORS.warning,
+    borderColor: COLORS.warning,
+  },
+  totalTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.warning,
+  },
+  totalTagTextActive: {
+    color: COLORS.background,
   },
   vatRateRow: {
     flexDirection: 'row',

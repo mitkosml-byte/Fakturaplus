@@ -1280,6 +1280,9 @@ export const translations: Translations = {
     bg: 'Полетата по-долу показват вече записаното за тази дата. Промяна на стойност я замества с новата — не се добавя към старата.',
     en: "These fields show what's already logged for this date. Changing a value replaces it — it doesn't add to the old one.",
   },
+  // The day's total beside the quick fills of the revenue form.
+  'home.dayTotal': { bg: 'Общо за деня', en: 'Day total' },
+  'home.withoutPocket': { bg: 'без джобче', en: 'without pocket' },
   'home.sameAsYesterday': {
     bg: 'Както вчера',
     en: 'Same as yesterday',

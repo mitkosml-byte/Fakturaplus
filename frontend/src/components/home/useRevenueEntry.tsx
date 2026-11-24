@@ -11,7 +11,7 @@ import { useLocationChoice, useLocationsStore } from '../../stores/locationsStor
 import { RevenueModal, rateAmountsTotal } from './RevenueModal';
 import type { VatGroupAmount, ZReportResult } from '../../types';
 import { pickScanImage } from '../../utils/scanImage';
-import { formatAmount } from '../../utils/money';
+import { formatAmount, parseAmount } from '../../utils/money';
 
 type Options = {
   // The day the form opens on when none is given (Home: inside the period
@@ -92,7 +92,7 @@ export function useRevenueEntry({ defaultDate, onSaved, onImportHistory }: Optio
   // total at the rate of most of it.
   const toggleRevenueSplitByRate = () => {
     if (revenueSplitByRate) {
-      const amounts = Object.entries(revenueRateAmounts).map(([rate, value]) => [Number(rate), parseFloat(value) || 0] as const);
+      const amounts = Object.entries(revenueRateAmounts).map(([rate, value]) => [Number(rate), parseAmount(value)] as const);
       const total = rateAmountsTotal(revenueRateAmounts);
       const largest = amounts.reduce((best, item) => (item[1] > best[1] ? item : best), [revenueVatRate, 0] as const);
       setFiscalRevenue(total > 0 ? total.toFixed(2) : '');
@@ -259,8 +259,8 @@ export function useRevenueEntry({ defaultDate, onSaved, onImportHistory }: Optio
   };
 
   const handleAddRevenue = async () => {
-    const fiscalTotal = revenueSplitByRate ? rateAmountsTotal(revenueRateAmounts) : parseFloat(fiscalRevenue) || 0;
-    if (!fiscalTotal && !pocketMoney) {
+    const fiscalTotal = revenueSplitByRate ? rateAmountsTotal(revenueRateAmounts) : parseAmount(fiscalRevenue);
+    if (!fiscalTotal && !parseAmount(pocketMoney)) {
       Alert.alert(t('common.error'), t('msg.enterAtLeastOne'));
       return;
     }
@@ -269,7 +269,7 @@ export function useRevenueEntry({ defaultDate, onSaved, onImportHistory }: Optio
     // By rate, the till total is the sum of the rates (the server adds them
     // up); else one total at one rate.
     const vatGroups = Object.entries(revenueRateAmounts)
-      .map(([rate, value]) => ({ rate_percent: Number(rate), amount: Math.round((parseFloat(value) || 0) * 100) / 100 }))
+      .map(([rate, value]) => ({ rate_percent: Number(rate), amount: Math.round(parseAmount(value) * 100) / 100 }))
       .filter((group) => group.amount > 0);
     setIsSubmitting(true);
     try {
@@ -280,8 +280,8 @@ export function useRevenueEntry({ defaultDate, onSaved, onImportHistory }: Optio
           : { fiscal_revenue: fiscalTotal, vat_rate_percent: revenueVatRate, vat_groups: [] }),
         // Only someone who sees pocket money sets it - for anyone else the
         // field is hidden and the day keeps what it holds.
-        ...(canSeePocketMoney ? { pocket_money: parseFloat(pocketMoney) || 0 } : {}),
-        card_revenue: parseFloat(cardRevenue) || 0,
+        ...(canSeePocketMoney ? { pocket_money: parseAmount(pocketMoney) } : {}),
+        card_revenue: parseAmount(cardRevenue),
         location_id: revenueLocation,
       });
       if (revenueLocation) rememberLocation(revenueLocation);
