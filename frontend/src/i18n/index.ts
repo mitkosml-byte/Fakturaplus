@@ -4570,8 +4570,8 @@ export const translations: Translations = {
     en: "This month's profit less the VAT to pay, the expected salaries, what's already withdrawn and upcoming obligations",
   },
   'billingDocuments.companyDetailsMissing': {
-    bg: 'Преди първата фактура: попълнете {fields} на фирмата - без тях фактурата не е валидна.',
-    en: "Before the first invoice: fill in the business's {fields} - an invoice without them is not valid.",
+    bg: 'Преди първата фактура попълнете {fields} на фирмата - иначе фактурата не е валидна.',
+    en: "Before the first invoice, fill in the business's {fields} - otherwise the invoice is not valid.",
   },
   'billingDocuments.companyDetailsAskOwner': {
     bg: 'Собственикът трябва да попълни {fields} на фирмата, преди да се издават фактури.',
