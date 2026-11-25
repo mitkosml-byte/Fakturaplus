@@ -51,9 +51,11 @@ from slowapi.errors import RateLimitExceeded
 import services.scan_credit_service as scan_credit_service_module
 from services.scan_credit_service import ScanCreditService
 from services.business_calendar import (
-    BUSINESS_TZ, OPEN_END, OPEN_START, Period, add_months, business_day, day_start_utc, days_in_month,
-    is_stored_day, now_local, stored_day, today_local,
+    BUSINESS_TZ, OPEN_END, OPEN_START, Period, business_day, day_start_utc, days_in_month, is_stored_day,
+    now_local, stored_day, today_local,
 )
+# Private: the routers that `from server import *` keep their own add_months.
+from services.business_calendar import add_months as _add_months
 from services import revenue_vat
 from services.money_text import fmt_amount, fmt_eur
 
@@ -4025,7 +4027,7 @@ async def expected_payroll(company_id: Optional[str], scope: dict, period: Perio
     employee without an entry for it (month_payroll), by the period's share
     of the month. An older month is as it was entered. The margins and the
     notebook's safe-to-withdraw both count it."""
-    pending = {(today.year, today.month), add_months(today.year, today.month, -1)}
+    pending = {(today.year, today.month), _add_months(today.year, today.month, -1)}
     expected = 0.0
     for year, month in period.months():
         share = period.month_share(year, month)

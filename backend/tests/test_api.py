@@ -863,7 +863,7 @@ def test_roles_invitations_permissions(client):
     # The VAT-ledger Excel export holds declared sales only: no pocket
     # money for anyone, the owner included - it goes to the accountant.
     from io import BytesIO
-    from openpyxl import load_workbook
+    from openpyxl import load_workbook  # type: ignore[import-untyped]
     for viewer in (owner, staff):
         r = client.get("/api/export/vat-ledger/excel?start_date=2026-09-01&end_date=2026-09-30", headers=viewer)
         assert r.status_code == 200
