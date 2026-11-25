@@ -22,6 +22,7 @@ from pymongo.errors import DuplicateKeyError
 
 from server import *
 import server
+from services.month_names import MONTHS_BG
 from services import day_card as dc
 
 router = APIRouter(prefix="/api")
@@ -29,8 +30,7 @@ router = APIRouter(prefix="/api")
 GREETING_HOUR = 8
 REMINDER_HOUR = 10
 APP_SENDER = {"user_id": "system", "name": "Фактура+"}
-MONTHS_BG = ["януари", "февруари", "март", "април", "май", "юни", "юли", "август",
-             "септември", "октомври", "ноември", "декември"]
+# MONTHS_BG: services/month_names.
 
 
 class BirthdayIn(BaseModel):

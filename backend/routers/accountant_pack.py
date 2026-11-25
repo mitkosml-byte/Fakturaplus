@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from server import *
 from server import _count_bg
 import server
+from services.month_names import MONTHS_BG_TITLE
 
 from services.translit import to_latin
 
@@ -165,8 +166,7 @@ async def _pack_summary(company_id: Optional[str], scope: dict, period: Period) 
     }
 
 
-_MONTHS_BG = ["Януари", "Февруари", "Март", "Април", "Май", "Юни",
-              "Юли", "Август", "Септември", "Октомври", "Ноември", "Декември"]
+_MONTHS_BG = MONTHS_BG_TITLE
 
 
 async def build_accountant_pack(company_id: Optional[str], scope: dict, current_user: User, period: Period) -> Tuple[bytes, dict]:

@@ -301,7 +301,7 @@ def test_installments_through_the_screen(client, today):
     """The owner adds an insurance paid every 3 months, four installments
     from December: the list says when the next one is and how many are
     left; November expects nothing from it; a month without a payment and
-    a first payment in a month already gone are refused."""
+    a first payment more than a year back are refused."""
     company_id, _, owner = _company()
     item_id = _create(client, owner, description="Застраховка", amount=150, day_of_month=10, kind="no_invoice",
                       interval_months=3, start_month="2026-12", payments_count=4)
@@ -313,9 +313,9 @@ def test_installments_through_the_screen(client, today):
     assert body["outlook"]["month_total"] == 0
 
     assert client.post(f"/api/recurring-expenses/{item_id}/months/2027-01/record", headers=owner).status_code == 400
-    assert client.put(f"/api/recurring-expenses/{item_id}", headers=owner, json={"start_month": "2026-10"}).status_code == 400
+    assert client.put(f"/api/recurring-expenses/{item_id}", headers=owner, json={"start_month": "2025-10"}).status_code == 400
     assert client.post("/api/recurring-expenses", headers=owner, json={
-        "description": "Лиценз", "amount": 90, "day_of_month": 1, "interval_months": 12, "start_month": "2026-09",
+        "description": "Лиценз", "amount": 90, "day_of_month": 1, "interval_months": 12, "start_month": "2025-09",
     }).status_code == 400
     assert client.post("/api/recurring-expenses", headers=owner, json={
         "description": "Лиценз", "amount": 90, "day_of_month": 1, "interval_months": 0,
@@ -357,3 +357,16 @@ def test_the_last_installment_paid_the_expense_is_over(client, today, monkeypatc
     assert items[item_id]["current"] is None and items[item_id]["next_payment"] is None
     assert [item["id"] for item in body["recurring_expenses"]] == [rent, item_id]
     assert body["outlook"]["month_total"] == 800
+
+
+def test_an_expense_the_business_had_before_may_start_up_to_a_year_back(client, today):
+    """Rent paid since spring, entered in November: its first payment in
+    May; the invoices from then are its payments, not goods. Further back
+    than a year is refused."""
+    _, _, owner = _company()
+    item_id = _create(client, owner, start_month="2026-05", supplier_name="Наемодател Проба")
+    items, _ = _listing(client, owner)
+    assert items[item_id]["start_month"] == "2026-05"
+    too_far = client.post("/api/recurring-expenses", headers=owner,
+                          json={"description": "Наем", "amount": 800, "day_of_month": 5, "start_month": "2025-10"})
+    assert too_far.status_code == 400 and "12 месеца" in too_far.json()["detail"]

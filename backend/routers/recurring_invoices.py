@@ -17,6 +17,7 @@ import calendar
 from fastapi import APIRouter
 from server import *
 import server
+from services.month_names import MONTHS_BG
 from routers.locations import require_location
 
 from routers.receivables import _create_issued_invoice
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/api")
 
 # A claim on a month whose invoice was never made (a crash mid-issue) is freed after this long.
 CLAIM_MINUTES = 5
-_MONTHS = ["януари", "февруари", "март", "април", "май", "юни", "юли", "август", "септември", "октомври", "ноември", "декември"]
+_MONTHS = MONTHS_BG
 _MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
 # The month's invoices of each template that stand: (template id, month) -> document.

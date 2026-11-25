@@ -536,6 +536,10 @@ export const translations: Translations = {
   'recurring.everyPrefix': { bg: 'На всеки', en: 'Every' },
   'recurring.monthsSuffix': { bg: 'месеца', en: 'months' },
   'recurring.firstPayment': { bg: 'Първо плащане', en: 'First payment' },
+  'recurring.pastStartHint': {
+    bg: 'От минал месец: фактурите от тогава се разпознават по доставчика, а разходът се брои в маржовете за тези месеци. Нищо не се записва само.',
+    en: "From a past month: invoices from then are recognized by the supplier and the expense counts in those months' margins. Nothing is recorded by itself.",
+  },
   'recurring.paymentsCount': { bg: 'Брой плащания', en: 'Payments' },
   'recurring.noEnd': { bg: 'без край', en: 'no end' },
   'recurring.earlierMonth': { bg: 'По-ранен месец', en: 'Earlier month' },
@@ -4581,6 +4585,10 @@ export const translations: Translations = {
   'billingDocuments.fieldEik': { bg: 'ЕИК', en: 'EIK' },
   'billingDocuments.fieldAddress': { bg: 'адрес', en: 'address' },
   'billingDocuments.fieldsAnd': { bg: ' и ', en: ' and ' },
+  'margins.shortPeriod': {
+    bg: 'Периодът е кратък: покупките се броят в деня на фактурата, затова маржът зависи от това кога е дошла голямата доставка.',
+    en: 'The period is short: purchases count on their invoice day, so the margin depends on when the big delivery came.',
+  },
   'wallet.setAside': {
     bg: 'Задържано: {parts}',
     en: 'Kept back: {parts}',

@@ -30,6 +30,10 @@ const MAX_INTERVAL_MONTHS = 36;
 const MAX_PAYMENTS = 600;
 // How far ahead the first payment can be put.
 const START_MONTHS_AHEAD = 36;
+// An expense the business had before it came to the app may start up to a
+// year back (the server's START_MONTHS_BACK): its invoices from then are
+// recognized and its months count in the margins.
+const START_MONTHS_BACK = 12;
 
 const shiftMonth = (key: string, months: number) => format(addMonths(parseISO(`${key}-01`), months), 'yyyy-MM');
 
@@ -88,12 +92,12 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalVisible, editing, startTouched, day, thisMonth]);
 
-  // The first payment: this month or later - or, for one already saved,
-  // where it already is.
+  // The first payment: up to a year back or later - or, for one already
+  // saved, where it already is.
   const startOptions = useMemo(() => {
     const options: string[] = [];
-    if (editing && editing.start_month < thisMonth) options.push(editing.start_month);
-    for (let ahead = 0; ahead <= START_MONTHS_AHEAD; ahead += 1) options.push(shiftMonth(thisMonth, ahead));
+    if (editing && editing.start_month < shiftMonth(thisMonth, -START_MONTHS_BACK)) options.push(editing.start_month);
+    for (let ahead = -START_MONTHS_BACK; ahead <= START_MONTHS_AHEAD; ahead += 1) options.push(shiftMonth(thisMonth, ahead));
     if (startMonth && !options.includes(startMonth)) options.push(startMonth);
     return options.sort();
   }, [editing, thisMonth, startMonth]);
@@ -567,6 +571,9 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
                   />
                 </View>
               </View>
+              {startMonth && startMonth < thisMonth && (
+                <Text style={[styles.kindHint, styles.scheduleHint]}>{t('recurring.pastStartHint')}</Text>
+              )}
               {lastPayment && (
                 <Text style={[styles.kindHint, styles.scheduleHint, lastPayment < thisMonth && { color: COLORS.warning }]}>
                   {(lastPayment < thisMonth ? t('recurring.paymentsAlreadyOver') : t('recurring.lastPaymentHint'))

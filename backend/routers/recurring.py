@@ -23,6 +23,7 @@ from pymongo.errors import DuplicateKeyError
 
 from server import *
 import server
+from services.month_names import MONTHS_BG
 from services import recurring_service as rs
 
 router = APIRouter(prefix="/api")
@@ -31,10 +32,7 @@ router = APIRouter(prefix="/api")
 APP_ACTOR = {"user_id": "system", "user_name": "Фактура+"}
 # How long the notice about a record replaced by an invoice stays.
 REPLACED_NOTICE_DAYS = 14
-MONTH_NAMES = [
-    "януари", "февруари", "март", "април", "май", "юни",
-    "юли", "август", "септември", "октомври", "ноември", "декември",
-]
+MONTH_NAMES = MONTHS_BG
 
 
 MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
@@ -287,11 +285,18 @@ def _public(item: dict) -> dict:
     }
 
 
+# How far back a first payment may be set: an expense the business had
+# before it came to the app - its months count in the margins (rent from
+# then, not goods) and their invoices are recognized by the supplier.
+# Nothing is recorded for them by itself (auto_record_since is today).
+START_MONTHS_BACK = 12
+
+
 def _check_start(month_key: str, unchanged: Optional[str] = None) -> None:
-    """A first payment from this month on - a month already gone was paid
-    (or not) before the app followed it. One already set may stay."""
-    if month_key != unchanged and month_key < _this_month():
-        raise HTTPException(status_code=400, detail="Първото плащане не може да е в минал месец")
+    """A first payment up to START_MONTHS_BACK months ago, or later. One
+    already set may stay."""
+    if month_key != unchanged and month_key < rs.shift_month(_this_month(), -START_MONTHS_BACK):
+        raise HTTPException(status_code=400, detail=f"Първото плащане може да е най-много {START_MONTHS_BACK} месеца назад")
 
 
 @router.get("/recurring-expenses")

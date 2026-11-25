@@ -58,6 +58,7 @@ from services.business_calendar import (
 from services.business_calendar import add_months as _add_months
 from services import revenue_vat
 from services.money_text import fmt_amount, fmt_eur
+from services.month_names import MONTHS_BG as _MONTHS_BG_GENITIVE
 
 ROOT_DIR = Path(__file__).parent
 
@@ -4925,10 +4926,7 @@ async def _signal_staffing_mismatch(company_id, scope, current_user, visibility)
         "route": STATS_ITEMS_ROUTE,
     }
 
-_MONTHS_BG_GENITIVE = [
-    "януари", "февруари", "март", "април", "май", "юни",
-    "юли", "август", "септември", "октомври", "ноември", "декември",
-]
+# The month names: services/month_names (imported above as _MONTHS_BG_GENITIVE).
 
 def _bg_day_list(dates: List[str]) -> str:
     """'2026-11-02', '2026-11-05', '2026-11-09' -> '2, 5 и 9 ноември'

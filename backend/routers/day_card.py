@@ -23,15 +23,13 @@ from pydantic import BaseModel, Field
 
 from server import *
 import server
+from services.month_names import MONTHS_BG, MONTHS_EN
 from services import day_card as dc
 from services.money_text import fmt_eur
 
 router = APIRouter(prefix="/api")
 
-MONTHS_BG = ["януари", "февруари", "март", "април", "май", "юни", "юли", "август",
-             "септември", "октомври", "ноември", "декември"]
-MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August",
-             "September", "October", "November", "December"]
+# MONTHS_BG and MONTHS_EN: services/month_names.
 WEEKDAYS_BG = ["понеделник", "вторник", "сряда", "четвъртък", "петък", "събота", "неделя"]
 WEEKDAYS_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 USUAL_BG = ["обичайния понеделник", "обичайния вторник", "обичайната сряда", "обичайния четвъртък",

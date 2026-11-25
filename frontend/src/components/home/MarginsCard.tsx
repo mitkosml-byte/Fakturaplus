@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { format, parseISO } from 'date-fns';
+import { differenceInCalendarDays, format, parseISO } from 'date-fns';
 import { useTranslation } from '../../i18n';
 import type { Margin, PeriodMargins } from '../../types';
 import { COLORS } from '../../theme/colors';
@@ -44,6 +44,10 @@ export function MarginsCard({ margins, canManageBudget }: Props) {
     { key: 'net', label: t('margins.net'), margin: margins.net, color: COLORS.success, approx: true },
   ];
   const tax = String(margins.profit_tax_percent).replace('.', english ? '.' : ',');
+  // Over a short stretch the goods are whatever deliveries fell in it (no
+  // stock is kept): a week's margin moves with the day the big delivery came.
+  const shortPeriod = !!margins.period
+    && differenceInCalendarDays(parseISO(margins.period.end_date), parseISO(margins.period.start_date)) + 1 < 14;
   const sales = margins.sales || 0;
   const ofSales = (margins.vat_excluded ? t('margins.ofSalesNoVat') : t('margins.ofSales')).replace('{amount}', formatMoney(sales));
 
@@ -114,6 +118,7 @@ export function MarginsCard({ margins, canManageBudget }: Props) {
           : ''}
       </Text>
       {!runningCosts && <Text style={styles.line}>{t('margins.noRunningCosts')}</Text>}
+      {shortPeriod && <Text style={styles.line}>{t('margins.shortPeriod')}</Text>}
 
       {open && (
         <View style={styles.details}>
