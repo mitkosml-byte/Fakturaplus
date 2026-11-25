@@ -115,8 +115,11 @@ mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 # from this call and silently falls back to treating every
 # db.<collection>.find_one/find/etc. result as None - the single
 # largest source of noise in this file's type-check output.
-client: "AsyncIOMotorClient[Dict[str, Any]]" = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
-db = client[os.environ.get('DB_NAME', 'test_database')]
+# The motor wheel itself ships no motor_asyncio.pyi (a clean install, as
+# in CI): there AsyncIOMotorClient is a runtime-made class mypy cannot use
+# as a type - the ignores below are for that case only.
+client: "AsyncIOMotorClient[Dict[str, Any]]" = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)  # type: ignore[valid-type,unused-ignore]
+db = client[os.environ.get('DB_NAME', 'test_database')]  # type: ignore[index,unused-ignore]
 
 # AI features (OCR scanning, AI item merge, AI ROI insights) run on the
 # Anthropic API directly. Disabled automatically when no key is configured

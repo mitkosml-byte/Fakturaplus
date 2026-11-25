@@ -65,7 +65,7 @@ async def approve_owner_action(action_id: str, current_user: User = Depends(get_
 
     approved_by = sorted(set(action.get("approved_by", [])) | {current_user.user_id})
     all_approved = set(action["required_approver_ids"]).issubset(set(approved_by))
-    update = {"approved_by": approved_by}
+    update: Dict[str, Any] = {"approved_by": approved_by}
     if all_approved:
         await execute_owner_action(action, executed_by=current_user)
         update["status"] = "executed"

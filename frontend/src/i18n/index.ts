@@ -19,10 +19,6 @@ export const translations: Translations = {
     bg: 'Управление на фактури',
     en: 'Invoice Management',
   },
-  'login.subtitle': {
-    bg: 'Влезте, за да продължите',
-    en: 'Sign in to continue',
-  },
   'login.selectLanguage': {
     bg: 'Изберете език',
     en: 'Select language',
@@ -909,10 +905,6 @@ export const translations: Translations = {
     bg: 'Попитай за числата си',
     en: 'Ask about your numbers',
   },
-  'askMyNumbers.subtitle': {
-    bg: 'Прост въпрос, отговор само по твоите данни',
-    en: 'A plain question, answered only from your own data',
-  },
   'askMyNumbers.disclaimer': {
     bg: 'Отговаря само по въведените данни на фирмата.',
     en: 'Answers only from the company\'s own data.',
@@ -1084,18 +1076,6 @@ export const translations: Translations = {
     bg: 'Ден преди официален празник в екипния чат пише дали почивате или работите по график.',
     en: 'The day before a public holiday the team chat says whether you are closed or open as scheduled.',
   },
-  'home.welcome': {
-    bg: 'Добре дошли!',
-    en: 'Welcome!',
-  },
-  'home.switchLanguage': {
-    bg: 'Смяна на езика',
-    en: 'Switch language',
-  },
-  'home.currentMonth': {
-    bg: 'Текущ месец',
-    en: 'Current month',
-  },
   'home.totalIncome': {
     bg: 'Общо приходи',
     en: 'Total Income',
@@ -1103,10 +1083,6 @@ export const translations: Translations = {
   'home.totalExpenses': {
     bg: 'Общо разходи',
     en: 'Total Expenses',
-  },
-  'home.vatToPay': {
-    bg: 'ДДС за плащане',
-    en: 'VAT to pay',
   },
   'home.profit': {
     bg: 'Печалба',
@@ -1171,14 +1147,6 @@ export const translations: Translations = {
   'home.dailyRevenue': {
     bg: 'Дневен оборот',
     en: 'Daily Revenue',
-  },
-  'home.avgDailyTurnover': {
-    bg: 'Среден оборот на ден',
-    en: 'Average Daily Turnover',
-  },
-  'home.avgDailyTurnoverSubtitle': {
-    bg: 'средно за {days} дни с въведен оборот',
-    en: 'average over {days} days with revenue entered',
   },
   'home.expectedPeriodEnd': {
     bg: 'Очакван край на периода: {amount}',
@@ -1255,10 +1223,6 @@ export const translations: Translations = {
     bg: 'В канала',
     en: 'Expenses',
   },
-  'home.fiscal': {
-    bg: 'Фискален',
-    en: 'Fiscal',
-  },
   'historyHub.title': {
     bg: 'История и справки',
     en: 'History & records',
@@ -1323,18 +1287,6 @@ export const translations: Translations = {
     bg: 'Приход с карта',
     en: 'Card income',
   },
-  'home.unpaidInvoices': {
-    bg: 'Неплатени фактури',
-    en: 'Unpaid Invoices',
-  },
-  'home.unpaidInvoicesCount': {
-    bg: 'неплатени',
-    en: 'unpaid',
-  },
-  'home.overdueInvoicesCount': {
-    bg: 'просрочени',
-    en: 'overdue',
-  },
   'home.editInPlaceNotice': {
     bg: 'Полетата по-долу показват вече записаното за тази дата. Промяна на стойност я замества с новата — не се добавя към старата.',
     en: "These fields show what's already logged for this date. Changing a value replaces it — it doesn't add to the old one.",
@@ -1358,10 +1310,6 @@ export const translations: Translations = {
   'home.includesVAT': {
     bg: 'Влиза в ДДС',
     en: 'Includes VAT',
-  },
-  'home.excludesVAT': {
-    bg: 'НЕ влиза в ДДС',
-    en: 'Excludes VAT',
   },
   'home.vatRate': {
     bg: 'ДДС ставка на оборота',
@@ -1623,10 +1571,6 @@ export const translations: Translations = {
   'receivables.logAsRevenueTitle': {
     bg: 'Добави ли го и в дневния оборот?',
     en: 'Log it as revenue too?',
-  },
-  'receivables.logAsRevenueHint': {
-    bg: '{amount} € от {name} - да ги добавим ли към джобните пари за днес?',
-    en: '{amount} € from {name} - add it to today\'s pocket money revenue?',
   },
   'receivables.logAsRevenueSkip': {
     bg: 'Не сега',
@@ -1914,10 +1858,6 @@ export const translations: Translations = {
     bg: 'Контролната цифра не съвпада - проверете номера',
     en: "Check digit doesn't match - please verify the number",
   },
-  'scan.eikValid': {
-    bg: 'Коректен ЕИК',
-    en: 'Valid EIK',
-  },
   'scan.vatTreatment': {
     bg: 'Вид ДДС',
     en: 'VAT type',
@@ -2095,10 +2035,6 @@ export const translations: Translations = {
     bg: 'вкл. {count} закупени · никога не изтичат',
     en: 'incl. {count} purchased · never expire',
   },
-  'scanCredits.freeOfQuota': {
-    bg: '{used}/{quota} безплатни',
-    en: '{used}/{quota} free',
-  },
   'scanCredits.freeLabel': {
     bg: 'безплатни',
     en: 'free',
@@ -2119,10 +2055,6 @@ export const translations: Translations = {
     bg: 'Последни транзакции',
     en: 'Recent transactions',
   },
-  'scanCredits.viewAll': {
-    bg: 'Виж всички',
-    en: 'View all',
-  },
   'scanCredits.downloadHistory': {
     bg: 'Изтегли история (Excel)',
     en: 'Download history (Excel)',
@@ -2130,14 +2062,6 @@ export const translations: Translations = {
   'scanCredits.noTransactionsYet': {
     bg: 'Все още няма транзакции',
     en: 'No transactions yet',
-  },
-  'scanCredits.transactionScanUsed': {
-    bg: 'Сканиране на фактура',
-    en: 'Invoice scan',
-  },
-  'scanCredits.transactionPurchase': {
-    bg: 'Покупка',
-    en: 'Purchase',
   },
   'scanCredits.reloadButton': {
     bg: 'Презареди кредити за сканиране',
@@ -2219,10 +2143,6 @@ export const translations: Translations = {
     bg: 'Безплатните се подновяват на 1-во число. Купи пакет сега, за да продължиш да сканираш днес.',
     en: 'The free quota renews on the 1st. Buy a package now to keep scanning today.',
   },
-  'scanCredits.outOfScansBanner': {
-    bg: 'Свършиха безплатните сканирания за този месец — купи пакет, за да продължиш.',
-    en: 'You’re out of free scans this month — buy a package to continue.',
-  },
   'scanCredits.goToPackages': {
     bg: 'Виж пакети',
     en: 'View packages',
@@ -2234,10 +2154,6 @@ export const translations: Translations = {
   'scanCredits.loadError': {
     bg: 'Грешка при зареждане на баланса',
     en: 'Error loading your balance',
-  },
-  'scanCredits.openingCheckout': {
-    bg: 'Отваряне на плащане...',
-    en: 'Opening checkout...',
   },
 
   'invoices.protocolDeadline': {
@@ -2320,35 +2236,15 @@ export const translations: Translations = {
     bg: 'Добави страница',
     en: 'Add Page',
   },
-  'scan.tapToFocus': {
-    bg: 'Докоснете екрана за фокусиране',
-    en: 'Tap screen to focus',
-  },
-  'scan.positionInvoice': {
-    bg: 'Позиционирайте фактурата в рамката',
-    en: 'Position invoice in frame',
-  },
   
   // Invoices Screen
   'invoices.title': {
     bg: 'Фактури',
     en: 'Invoices',
   },
-  'invoices.search': {
-    bg: 'Търсене по доставчик...',
-    en: 'Search by supplier...',
-  },
-  'invoices.export': {
-    bg: 'Експорт',
-    en: 'Export',
-  },
   'invoices.noInvoices': {
     bg: 'Няма фактури',
     en: 'No invoices',
-  },
-  'invoices.delete': {
-    bg: 'Изтриване',
-    en: 'Delete',
   },
   'invoices.deleteConfirm': {
     bg: 'Сигурни ли сте, че искате да изтриете тази фактура?',
@@ -2383,18 +2279,6 @@ export const translations: Translations = {
   'stats.chartNavNext': {
     bg: 'Следващи 7 дни',
     en: 'Next 7 days',
-  },
-  'stats.week': {
-    bg: 'Седмица',
-    en: 'Week',
-  },
-  'stats.month': {
-    bg: 'Месец',
-    en: 'Month',
-  },
-  'stats.year': {
-    bg: 'Година',
-    en: 'Year',
   },
 
   // Shared period navigator (Home dashboard + Stats overview cards)
@@ -2434,10 +2318,6 @@ export const translations: Translations = {
     bg: 'Избери период от календар',
     en: 'Pick a period from the calendar',
   },
-  'periodNav.vsPrevious': {
-    bg: 'спрямо предходния период',
-    en: 'vs. the previous period',
-  },
   'stats.income': {
     bg: 'Приходи',
     en: 'Income',
@@ -2453,10 +2333,6 @@ export const translations: Translations = {
   'stats.vatCredit': {
     bg: 'ДДС за възстановяване',
     en: 'VAT credit',
-  },
-  'stats.currentMonthTotal': {
-    bg: 'Общо за текущия месец',
-    en: 'Total for current month',
   },
   'stats.totalAmount': {
     bg: 'Обща сума',
@@ -2496,10 +2372,6 @@ export const translations: Translations = {
   'profile.title': {
     bg: 'Акаунт',
     en: 'Account',
-  },
-  'profile.settings': {
-    bg: 'Настройки',
-    en: 'Settings',
   },
   'profile.category.company': {
     bg: 'Фирма и екип',
@@ -2604,10 +2476,6 @@ export const translations: Translations = {
   'profile.languageEnglish': {
     bg: '🇬🇧 English',
     en: '🇬🇧 English',
-  },
-  'profile.info': {
-    bg: 'Информация',
-    en: 'Information',
   },
   'profile.help': {
     bg: 'Помощ',
@@ -2795,10 +2663,6 @@ export const translations: Translations = {
     bg: '{failed} реда не бяха импортирани (напр. вече съществуват) - виж детайлите по-горе.',
     en: '{failed} rows were not imported (e.g. already exist) - see details above.',
   },
-  'common.success': {
-    bg: 'Успех',
-    en: 'Success',
-  },
   'common.error': {
     bg: 'Грешка',
     en: 'Error',
@@ -2829,10 +2693,6 @@ export const translations: Translations = {
     bg: 'Попълнете задължителните полета',
     en: 'Fill in required fields',
   },
-  'msg.duplicateInvoice': {
-    bg: 'Тази фактура вече съществува',
-    en: 'This invoice already exists',
-  },
   'msg.deleteConfirmExpense': {
     bg: 'Сигурни ли сте, че искате да изтриете този разход?',
     en: 'Are you sure you want to delete this expense?',
@@ -2840,10 +2700,6 @@ export const translations: Translations = {
   'msg.enterAtLeastOne': {
     bg: 'Въведете поне една стойност',
     en: 'Enter at least one value',
-  },
-  'msg.fillAllFields': {
-    bg: 'Попълнете всички полета',
-    en: 'Fill in all fields',
   },
   
   // Invoice details
@@ -3026,10 +2882,6 @@ export const translations: Translations = {
     bg: 'Срок за плащане',
     en: 'Payment due date',
   },
-  'invoices.markAsPaid': {
-    bg: 'Маркирай като платена',
-    en: 'Mark as paid',
-  },
   'invoices.paidOn': {
     bg: 'Платена на',
     en: 'Paid on',
@@ -3067,10 +2919,6 @@ export const translations: Translations = {
   'invoices.paidAmountExceedsTotal': {
     bg: 'Платената сума не може да надвишава общата сума на фактурата',
     en: 'The paid amount cannot exceed the invoice total',
-  },
-  'invoices.fullyPaid': {
-    bg: 'Напълно платена',
-    en: 'Fully paid',
   },
   'invoices.downloadError': {
     bg: 'Не можах да изтегля файла',
@@ -3375,10 +3223,6 @@ export const translations: Translations = {
     bg: 'Неуспешно възстановяване',
     en: 'Failed to restore',
   },
-  'backup.fileSelectError': {
-    bg: 'Неуспешен избор на файл',
-    en: 'Failed to select file',
-  },
   
   // Help Screen
   'help.title': {
@@ -3396,46 +3240,6 @@ export const translations: Translations = {
   'help.version': {
     bg: 'Версия',
     en: 'Version',
-  },
-  'help.about': {
-    bg: 'За приложението',
-    en: 'About the App',
-  },
-  'help.aboutText1': {
-    bg: 'Това приложение е създадено за управление на входящи фактури и финансова отчетност за малки и средни бизнеси в България.',
-    en: 'This app is designed for managing incoming invoices and financial reporting for small and medium businesses in Bulgaria.',
-  },
-  'help.aboutText2': {
-    bg: 'Помага за проследяване на приходи, разходи и автоматично изчисляване на ДДС.',
-    en: 'It helps track income, expenses and automatically calculates VAT.',
-  },
-  'help.scanTitle': {
-    bg: 'Сканиране на фактури',
-    en: 'Scanning invoices',
-  },
-  'help.dailyRevenueTitle': {
-    bg: 'Дневен оборот',
-    en: 'Daily Revenue',
-  },
-  'help.expensesTitle': {
-    bg: 'В канала (разходи без фактура)',
-    en: 'Expenses (no invoice)',
-  },
-  'help.vatTitle': {
-    bg: 'ДДС изчисление',
-    en: 'VAT Calculation',
-  },
-  'help.statsTitle': {
-    bg: 'Статистики',
-    en: 'Statistics',
-  },
-  'help.companyTitle': {
-    bg: 'Фирмени данни',
-    en: 'Company Data',
-  },
-  'help.backupTitle': {
-    bg: 'Backup',
-    en: 'Backup',
   },
   'help.needHelp': {
     bg: 'Нужда от помощ?',
@@ -3471,10 +3275,6 @@ export const translations: Translations = {
     bg: 'Изпрати',
     en: 'Submit',
   },
-  'feedback.submitting': {
-    bg: 'Изпращане...',
-    en: 'Submitting...',
-  },
   'feedback.success': {
     bg: 'Благодарим! Съобщението е изпратено.',
     en: 'Thank you! Your message has been sent.',
@@ -3495,10 +3295,6 @@ export const translations: Translations = {
   },
 
   // Roles
-  'role.accountant': {
-    bg: 'Счетоводител',
-    en: 'Accountant',
-  },
   'role.user': {
     bg: 'Потребител',
     en: 'User',
@@ -3546,10 +3342,6 @@ export const translations: Translations = {
   'stats.forecastTitle': {
     bg: 'Прогноза за следващия месец',
     en: 'Forecast for next month',
-  },
-  'stats.forecastHint': {
-    bg: 'На база последните 6 месеца',
-    en: 'Based on the last 6 months',
   },
   'stats.forecastHint1m': {
     bg: 'На база последния 1 месец',
@@ -4013,10 +3805,6 @@ export const translations: Translations = {
     bg: 'Възобнови',
     en: 'Unmute',
   },
-  'stats.priceChange': {
-    bg: 'Промяна в цена',
-    en: 'Price Change',
-  },
   'stats.avgDailyTurnover': {
     bg: 'Среден оборот на ден',
     en: 'Average Daily Turnover',
@@ -4234,18 +4022,6 @@ export const translations: Translations = {
     bg: 'Няма достатъчно данни за избрания период (нужни са поне 2 покупки на артикул).',
     en: 'Not enough data for the selected period (at least 2 purchases per item are needed).',
   },
-  'stats.oldPrice': {
-    bg: 'Стара цена',
-    en: 'Old Price',
-  },
-  'stats.newPrice': {
-    bg: 'Нова цена',
-    en: 'New Price',
-  },
-  'stats.priceIncrease': {
-    bg: 'Повишение на цената',
-    en: 'Price Increase',
-  },
   'stats.topByQuantity': {
     bg: 'Топ по количество',
     en: 'Top by Quantity',
@@ -4269,10 +4045,6 @@ export const translations: Translations = {
   'stats.maxPrice': {
     bg: 'Макс. цена',
     en: 'Max Price',
-  },
-  'stats.priceVariance': {
-    bg: 'Вариация',
-    en: 'Variance',
   },
   'stats.supplierCompare': {
     bg: 'Сравнение по доставчици',
@@ -4350,10 +4122,6 @@ export const translations: Translations = {
     bg: 'Количеството се сравнява само в една мерна единица.',
     en: 'Quantities are only compared within one unit.',
   },
-  'stats.totalItems': {
-    bg: 'Общо артикули',
-    en: 'Total Items',
-  },
   'stats.uniqueItems': {
     bg: 'Уникални артикули',
     en: 'Unique Items',
@@ -4366,130 +4134,18 @@ export const translations: Translations = {
     bg: 'Артикулите покриват {percent}% от покупките за периода (без ДДС) - {count} фактури са без прочетени редове.',
     en: 'Items cover {percent}% of the period\'s purchases (excl. VAT) - {count} invoices have no read lines.',
   },
-  'stats.alertThreshold': {
-    bg: 'Праг за аларма',
-    en: 'Alert Threshold',
-  },
-  'stats.alertsEnabled': {
-    bg: 'Аларми активни',
-    en: 'Alerts Enabled',
-  },
-  'stats.noAlerts': {
-    bg: 'Няма ценови аларми',
-    en: 'No price alerts',
-  },
   'stats.noItems': {
     bg: 'Няма артикули',
     en: 'No items',
-  },
-  'stats.markAsRead': {
-    bg: 'Маркирай като прочетена',
-    en: 'Mark as read',
-  },
-  'stats.dismiss': {
-    bg: 'Отхвърли',
-    en: 'Dismiss',
   },
   'stats.priceHistory': {
     bg: 'История на цените',
     en: 'Price History',
   },
-  'stats.quantity': {
-    bg: 'Количество',
-    en: 'Quantity',
-  },
-  'stats.unit': {
-    bg: 'Единица',
-    en: 'Unit',
-  },
   
   // Scan screen items
-  'scan.addItem': {
-    bg: 'Добави артикул',
-    en: 'Add Item',
-  },
-  'scan.itemName': {
-    bg: 'Наименование',
-    en: 'Item Name',
-  },
-  'scan.quantity': {
-    bg: 'Количество',
-    en: 'Quantity',
-  },
-  'scan.unit': {
-    bg: 'Мерна единица',
-    en: 'Unit',
-  },
-  'scan.unitPrice': {
-    bg: 'Единична цена',
-    en: 'Unit Price',
-  },
-  'scan.items': {
-    bg: 'Артикули',
-    en: 'Items',
-  },
-  'scan.noItems': {
-    bg: 'Няма добавени артикули',
-    en: 'No items added',
-  },
-  'scan.priceAlert': {
-    bg: 'Внимание: Повишение на цена!',
-    en: 'Warning: Price Increase!',
-  },
   
   // AI Item Merging
-  'items.aiMerge': {
-    bg: 'AI Сливане',
-    en: 'AI Merge',
-  },
-  'items.aiMergeDescription': {
-    bg: 'Автоматично откриване на сходни продукти',
-    en: 'Auto-detect similar products',
-  },
-  'items.mergeGroups': {
-    bg: 'Групи сходни продукти',
-    en: 'Similar product groups',
-  },
-  'items.noMergeGroups': {
-    bg: 'Няма открити сходни продукти',
-    en: 'No similar products found',
-  },
-  'items.mergeApplied': {
-    bg: 'Сливането е приложено',
-    en: 'Merge applied',
-  },
-  'items.mergedItems': {
-    bg: 'Обединени артикули',
-    en: 'Merged items',
-  },
-  'items.variants': {
-    bg: 'Варианти',
-    en: 'Variants',
-  },
-  'items.runAiMerge': {
-    bg: 'Стартирай AI анализ',
-    en: 'Run AI analysis',
-  },
-  'items.analyzing': {
-    bg: 'Анализиране...',
-    en: 'Analyzing...',
-  },
-  'items.mergeSuccess': {
-    bg: 'Намерени {{count}} групи сходни продукти',
-    en: 'Found {{count}} groups of similar products',
-  },
-  'items.deleteMerge': {
-    bg: 'Премахни сливане',
-    en: 'Remove merge',
-  },
-  'items.deleteMergeConfirm': {
-    bg: 'Сигурни ли сте, че искате да премахнете това сливане?',
-    en: 'Are you sure you want to remove this merge?',
-  },
-  'items.viewMerged': {
-    bg: 'Обединена статистика',
-    en: 'Merged statistics',
-  },
   
   // Personal Investments & ROI (Owner only)
   'personal.title': {
@@ -4572,10 +4228,6 @@ export const translations: Translations = {
     bg: 'Период',
     en: 'Period',
   },
-  'personal.supplier': {
-    bg: 'Доставчик',
-    en: 'Supplier',
-  },
   'personal.project': {
     bg: 'Проект',
     en: 'Project',
@@ -4591,10 +4243,6 @@ export const translations: Translations = {
   'personal.created': {
     bg: 'Вложението е записано',
     en: 'Investment recorded',
-  },
-  'personal.deleted': {
-    bg: 'Вложението е изтрито',
-    en: 'Investment deleted',
   },
   'personal.deleteConfirm': {
     bg: 'Сигурни ли сте, че искате да изтриете това вложение?',
@@ -4615,10 +4263,6 @@ export const translations: Translations = {
   'wallet.title': {
     bg: 'Лично тефтерче',
     en: 'Personal wallet',
-  },
-  'wallet.subtitle': {
-    bg: 'Лични разходи от фирмените пари',
-    en: 'Personal spending out of company funds',
   },
   'wallet.safeToSpend': {
     bg: 'Безопасно за теглене',
@@ -4765,10 +4409,6 @@ export const translations: Translations = {
     bg: 'Желания (абонаменти, ежедневни)',
     en: 'Wants (subscriptions, daily)',
   },
-  'wallet.vsLastMonth': {
-    bg: 'спрямо миналия месец',
-    en: 'vs. last month',
-  },
   'wallet.upcoming': {
     bg: 'Предстоящи плащания',
     en: 'Upcoming payments',
@@ -4819,24 +4459,15 @@ export const translations: Translations = {
   },
   'wallet.rowTaken': { bg: 'Изтеглено {amount}', en: 'Taken {amount}' },
   'wallet.rowSafe': { bg: 'може още {amount}', en: 'still safe {amount}' },
-  'wallet.openShort': { bg: 'Отвори', en: 'Open' },
   'wallet.homeTeaserOpen': {
     bg: 'Отвори тефтерчето',
     en: 'Open wallet',
   },
 
   // ROI
-  'roi.title': {
-    bg: 'Възвръщаемост на вложеното',
-    en: 'Return on what you put in',
-  },
   'roi.totalInvestment': {
     bg: 'Лична инвестиция',
     en: 'Personal Investment',
-  },
-  'roi.totalRevenue': {
-    bg: 'Общ оборот',
-    en: 'Total Revenue',
   },
   'roi.totalProfit': {
     bg: 'Печалба',
@@ -4845,14 +4476,6 @@ export const translations: Translations = {
   'roi.roiPercent': {
     bg: 'Възвръщаемост',
     en: 'Return',
-  },
-  'roi.profitable': {
-    bg: 'Печеливш',
-    en: 'Profitable',
-  },
-  'roi.notProfitable': {
-    bg: 'Непечеливш',
-    en: 'Not Profitable',
   },
   'roi.investmentCovered': {
     bg: 'Инвестицията покрита',
@@ -4865,10 +4488,6 @@ export const translations: Translations = {
   'roi.aiInsights': {
     bg: 'AI Анализ',
     en: 'AI Insights',
-  },
-  'roi.trend': {
-    bg: 'Тренд',
-    en: 'Trend',
   },
   'roi.noData': {
     bg: 'Няма данни за анализ',
@@ -4900,22 +4519,6 @@ export const translations: Translations = {
   },
   
   // Units
-  'units.pieces': {
-    bg: 'ед.',
-    en: 'pcs',
-  },
-  'units.kg': {
-    bg: 'кг',
-    en: 'kg',
-  },
-  'units.liters': {
-    bg: 'л',
-    en: 'L',
-  },
-  'units.meters': {
-    bg: 'м',
-    en: 'm',
-  },
   
   // Supplier stats lowercase
   'stats.suppliersLower': {
@@ -5013,10 +4616,6 @@ export const translations: Translations = {
     bg: 'Добави периодичен разход',
     en: 'Add Recurring Expense',
   },
-  'budget.everyMonth': {
-    bg: 'Всеки месец на',
-    en: 'Every month on',
-  },
   'budget.noRecurring': {
     bg: 'Няма периодични разходи',
     en: 'No recurring expenses',
@@ -5024,10 +4623,6 @@ export const translations: Translations = {
   'budget.description': {
     bg: 'Описание',
     en: 'Description',
-  },
-  'budget.amount': {
-    bg: 'Сума (€)',
-    en: 'Amount (€)',
   },
   'budget.dayOfMonth': {
     bg: 'Ден от месеца',
@@ -5040,10 +4635,6 @@ export const translations: Translations = {
   'budget.recurringCreated': {
     bg: 'Периодичният разход е създаден',
     en: 'Recurring expense created',
-  },
-  'budget.deleteRecurringConfirm': {
-    bg: 'Сигурни ли сте, че искате да изтриете този периодичен разход?',
-    en: 'Are you sure you want to delete this recurring expense?',
   },
   'budget.deleteError': {
     bg: 'Грешка при изтриване',
@@ -5120,10 +4711,6 @@ export const translations: Translations = {
   'profile.budget': {
     bg: 'Бюджет',
     en: 'Budget',
-  },
-  'profile.budgetDesc': {
-    bg: 'Управление на месечен бюджет',
-    en: 'Manage monthly budget',
   },
   'profile.auditLog': {
     bg: 'Дневник на действията',
@@ -5213,37 +4800,9 @@ export const translations: Translations = {
   },
   
   // User Management
-  'users.title': {
-    bg: 'Управление на потребители',
-    en: 'User Management',
-  },
-  'users.invite': {
-    bg: 'Покани',
-    en: 'Invite',
-  },
-  'users.roleOwner': {
-    bg: 'Титуляр',
-    en: 'Owner',
-  },
-  'users.roleManager': {
-    bg: 'Мениджър',
-    en: 'Manager',
-  },
-  'users.roleStaff': {
-    bg: 'Служител',
-    en: 'Staff',
-  },
-  'users.changeRole': {
-    bg: 'Промени роля',
-    en: 'Change Role',
-  },
   'users.remove': {
     bg: 'Премахни',
     en: 'Remove',
-  },
-  'users.removeConfirm': {
-    bg: 'Сигурни ли сте, че искате да премахнете този потребител?',
-    en: 'Are you sure you want to remove this user?',
   },
   'users.headerTitle': {
     bg: 'Потребители',
@@ -5458,11 +5017,9 @@ export const translations: Translations = {
   'payroll.maxInsuranceIncome': { bg: 'Максимален осигурителен доход (€)', en: 'Maximum insurance income (€)' },
   'payroll.totalCostThisMonth': { bg: 'Общ разход за персонал този месец', en: 'Total staff cost this month' },
 
-  'profile.assetsDesc': { bg: 'Регистър на дълготрайните активи и амортизации', en: 'Fixed assets register and depreciation' },
   'profile.receivablesDesc': { bg: 'Кой колко ти дължи и от кога', en: 'Who owes you how much, and since when' },
   'profile.billingDocumentsDesc': { bg: 'Нефискални оферти и сметки за клиенти', en: 'Non-fiscal quotes and bills for customers' },
   'assets.title': { bg: 'Дълготрайни активи (ДМА)', en: 'Fixed assets' },
-  'assets.depreciationThisMonth': { bg: 'Амортизации за месеца', en: 'Depreciation this month' },
   'assets.netBookValue': { bg: 'Балансова стойност', en: 'Net book value' },
   'assets.acquisitionValue': { bg: 'Доставна стойност', en: 'Acquisition value' },
   'assets.accumulatedDepreciation': { bg: 'Начислена амортизация', en: 'Accumulated depreciation' },
@@ -5508,9 +5065,6 @@ export const translations: Translations = {
 
   'companySwitcher.switchCompany': { bg: 'Смяна на фирма', en: 'Switch company' },
   'companySwitcher.yourCompanies': { bg: 'Вашите фирми', en: 'Your companies' },
-  'companySwitcher.viewingAs': { bg: 'Преглеждате като', en: 'Viewing as' },
-  'companySwitcher.switched': { bg: 'Превключено', en: 'Switched' },
-  'companySwitcher.switchedTo': { bg: 'Вече преглеждате', en: 'You are now viewing' },
   'companySwitcher.addAnother': { bg: 'Добави нова фирма', en: 'Add another company' },
   'companySwitcher.newCompanyHint': {
     bg: 'Създава отделна нова фирма, на която ставате собственик - остава ви пълен достъп и до текущата, превключвайте между тях по всяко време.',
@@ -5518,7 +5072,6 @@ export const translations: Translations = {
   },
   'companySwitcher.newCompanyMissingFields': { bg: 'Въведете име и ЕИК на новата фирма', en: 'Enter the new company\'s name and EIK' },
   'companySwitcher.newCompanyCreated': { bg: 'Новата фирма е създадена', en: 'The new company was created' },
-  'invitations.roleAccountant': { bg: 'Счетоводител', en: 'Accountant' },
   'invitations.accountantHint': { bg: 'Достъп до статистики, фактури, ведомости и ДМА на тази фирма, без право да управлява потребители или данните на фирмата. Може да работи с няколко фирми клиенти от един акаунт.', en: "Access to this company's statistics, invoices, payroll and fixed assets, without managing users or company settings. Can work across several client companies from one account." },
   'invitations.permissionsTitle': { bg: 'Права на достъп', en: 'Access permissions' },
   'invitations.permissionsHint': { bg: 'Отметнати са правата по подразбиране за тази роля. Може да ги коригирате.', en: "The role's default permissions are pre-checked. You can adjust them." },
@@ -5641,7 +5194,6 @@ export const translations: Translations = {
   // days as columns, a colored block per shift.
   'schedule.viewList': { bg: 'Списък', en: 'List' },
   'schedule.viewGrid': { bg: 'Решетка', en: 'Grid' },
-  'schedule.thisWeek': { bg: 'Тази седмица', en: 'This week' },
   'schedule.gridEmptyTeam': { bg: 'Добавете служители в екипа, за да ги видите тук', en: 'Add team members to see them here' },
   'schedule.gridTapHint': {
     bg: 'Докоснете празна клетка за смяна, задръжте за отпуска',
@@ -5689,7 +5241,6 @@ export const translations: Translations = {
   'teamProfile.holidayWorkCount': { bg: 'Работа на празник (общо)', en: 'Holiday work (all time)' },
   'teamProfile.notesTitle': { bg: 'Бележки от мениджмънта', en: 'Management notes' },
   'teamProfile.notesHint': { bg: 'Видими само за мениджъри - служителят не ги вижда', en: 'Visible only to managers - the team member never sees these' },
-  'teamProfile.netScore': { bg: 'Нетен резултат', en: 'Net score' },
   'teamProfile.addPositive': { bg: 'Позитивна', en: 'Positive' },
   'teamProfile.addNegative': { bg: 'Негативна', en: 'Negative' },
   'teamProfile.notePlaceholder': { bg: 'Кратко описание за анализ...', en: 'A short note for later analysis...' },
@@ -5884,7 +5435,6 @@ export const translations: Translations = {
     bg: 'За да я изключите - паролата и код от приложението (или резервен код).',
     en: 'To turn it off - your password and a code from the app (or a recovery code).',
   },
-  'accountSecurity.twoFactorOn': { bg: 'Втората стъпка е включена', en: 'Two-step login is on' },
   'accountSecurity.twoFactorOff': { bg: 'Втората стъпка е изключена', en: 'Two-step login is off' },
   'accountSecurity.recoveryTitle': { bg: 'Резервни кодове', en: 'Recovery codes' },
   'accountSecurity.recoveryHint': {
@@ -6257,7 +5807,6 @@ export const translations: Translations = {
   'priceList.saved': { bg: 'Цената е запазена', en: 'Price saved' },
   'priceList.invalid': { bg: 'Въведете име и цена', en: 'Enter a name and a price' },
   'priceList.deleteConfirm': { bg: 'Цената излиза от ценоразписа. Издадените документи не се променят.', en: 'The price leaves the list. Documents issued stay as they are.' },
-  'priceList.fromList': { bg: 'от ценоразписа', en: 'from the price list' },
   'briefing.cta.margins': { bg: 'Виж цените', en: 'View the prices' },
 
   // Payment reminders to customers (Н6)
@@ -6284,7 +5833,6 @@ export const translations: Translations = {
   'reminders.message': { bg: 'Текст', en: 'Message' },
   'reminders.withPdf': { bg: 'Документът се прилага като PDF.', en: 'The document goes along as a PDF.' },
   'reminders.send': { bg: 'Изпрати', en: 'Send' },
-  'reminders.sendAgain': { bg: 'Изпрати напомняне', en: 'Send a reminder' },
   'reminders.share': { bg: 'Сподели текста', en: 'Share the text' },
   'reminders.markSent': { bg: 'Изпратих го по друг начин', en: 'I sent it another way' },
   'reminders.skip': { bg: 'Пропусни', en: 'Skip' },
@@ -6410,7 +5958,6 @@ export const translations: Translations = {
   'bankStatement.recordAnyway': { bg: 'Друго плащане е - отрази и него', en: 'It is another payment - record it too' },
   'bankStatement.orChoose': { bg: 'Или изберете:', en: 'Or choose:' },
   'bankStatement.payFor': { bg: 'Отрази като плащане по:', en: 'Record as a payment on:' },
-  'bankStatement.owes': { bg: 'остават {amount}', en: '{amount} left' },
   'bankStatement.balanceTitle': { bg: 'Наличност в банката', en: 'Money in the bank' },
   'bankStatement.balanceSet': {
     bg: 'Крайното салдо {amount} към {date} да стане наличността в банката (за паричния поток)',
