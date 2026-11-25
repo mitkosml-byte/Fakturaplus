@@ -455,10 +455,11 @@ class ExportService:
         elements.append(Spacer(1, 5 * mm))
 
         city_address = ", ".join(part for part in (company.get("city"), company.get("address")) if part)
-        supplier_lines = [
-            f"<b>Доставчик</b>", f"<b>{text(company.get('name'))}</b>",
-            f"ЕИК: {text(company.get('eik'))}",
-        ]
+        supplier_lines = [f"<b>Доставчик</b>", f"<b>{text(company.get('name'))}</b>"]
+        # Never the "AUTO…" stand-in a business has until its ЕИК is given.
+        eik = str(company.get("eik") or "").strip()
+        if eik and not eik.upper().startswith("AUTO"):
+            supplier_lines.append(f"ЕИК: {text(eik)}")
         if company.get("vat_number"):
             supplier_lines.append(f"ДДС №: {text(company.get('vat_number'))}")
         if city_address:

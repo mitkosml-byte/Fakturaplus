@@ -88,7 +88,12 @@ function formatApiErrorDetail(detail: unknown): string {
     });
     return messages.join('; ') || 'Грешка в заявката';
   }
-  if (detail && typeof detail === 'object') return JSON.stringify(detail);
+  if (detail && typeof detail === 'object') {
+    // A refusal with its own words and a code the screen acts on
+    // (e.g. company_details_missing: open the company's details).
+    const message = (detail as { message?: unknown }).message;
+    return typeof message === 'string' ? message : JSON.stringify(detail);
+  }
   return 'Грешка в заявката';
 }
 
@@ -155,11 +160,17 @@ class ApiService {
       // this fallback those fell through formatApiErrorDetail's `undefined`
       // branch to a generic "Грешка в заявката" instead of the specific,
       // actually useful message ("Rate limit exceeded: 5 per 1 minute").
-      const err = new Error(formatApiErrorDetail(error.detail ?? error.error)) as Error & { status?: number };
+      const err = new Error(formatApiErrorDetail(error.detail ?? error.error)) as Error & {
+        status?: number; code?: string; missing?: string[];
+      };
       // Attached so callers that need to branch on it (e.g. 402 = no scan
       // credits remaining, show the purchase screen instead of a plain
       // error alert) can do so without parsing the message text.
       err.status = response.status;
+      if (error.detail && typeof error.detail === 'object' && !Array.isArray(error.detail)) {
+        err.code = typeof error.detail.code === 'string' ? error.detail.code : undefined;
+        err.missing = Array.isArray(error.detail.missing) ? error.detail.missing : undefined;
+      }
       throw err;
     }
 
@@ -656,7 +667,7 @@ class ApiService {
 
   // Billing documents (non-fiscal bill/quote) - Module 7 Finding #3.
   // What the invoice form starts from (VAT registration, a till kept here).
-  async getInvoiceDefaults(): Promise<{ vat_registered: boolean; logs_till: boolean }> {
+  async getInvoiceDefaults(): Promise<{ vat_registered: boolean; logs_till: boolean; missing_company_details?: string[] }> {
     return this.fetch('/billing-documents/invoice-defaults');
   }
 

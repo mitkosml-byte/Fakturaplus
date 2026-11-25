@@ -390,6 +390,10 @@ async def _create_issued_invoice(
     # A business not registered for VAT issues invoices without VAT, and
     # the invoice says on what basis.
     company = await server.db.companies.find_one({"id": company_id}, {"_id": 0}) if company_id else None
+    # One issued here goes out on paper: the business's own details first.
+    # One issued in another program is only recorded.
+    if not payload.external:
+        require_company_for_invoices(company)
     vat_registered = company_vat_registered(company)
     if not vat_registered:
         payload.items = [item.model_copy(update={"vat_rate": 0}) for item in payload.items]
@@ -489,6 +493,10 @@ async def _create_credit_note(payload: BillingDocumentCreate, current_user: User
     company_id, scope = await get_company_scope(current_user)
     if not payload.credited_document_id:
         raise HTTPException(status_code=400, detail="Изберете фактурата, към която е известието")
+    if not payload.external:
+        require_company_for_invoices(
+            await server.db.companies.find_one({"id": company_id}, {"_id": 0, "eik": 1, "address": 1}) if company_id else None,
+        )
     invoice = await server.db.billing_documents.find_one(
         {"id": payload.credited_document_id, **scope, "doc_type": "invoice"}, {"_id": 0},
     )
@@ -632,9 +640,13 @@ async def get_invoice_defaults(current_user: User = Depends(get_current_user)):
     require_sales_access(current_user)
     company_id, scope = await get_company_scope(current_user)
     company = await server.db.companies.find_one(
-        {"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1},
+        {"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1, "eik": 1, "address": 1},
     ) if company_id else None
-    return {"vat_registered": company_vat_registered(company), "logs_till": await company_logs_till(scope, company_id)}
+    return {
+        "vat_registered": company_vat_registered(company), "logs_till": await company_logs_till(scope, company_id),
+        # What the business must fill in before its first invoice goes out.
+        "missing_company_details": company_document_gaps(company),
+    }
 
 
 @router.get("/billing-documents/overview")

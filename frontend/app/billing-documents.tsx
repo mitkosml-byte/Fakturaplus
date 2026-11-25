@@ -79,6 +79,10 @@ export default function BillingDocumentsScreen() {
   // A business not registered under the VAT Act issues invoices without
   // VAT (чл. 113, ал. 9 ЗДДС); the server applies it, the form mirrors it.
   const [vatRegistered, setVatRegistered] = useState(true);
+  // What the business must give before its first invoice: a real ЕИК (not
+  // the "AUTO…" one it starts with) and its address. The server refuses
+  // an invoice without them; the form says so first.
+  const [missingCompanyDetails, setMissingCompanyDetails] = useState<string[]>([]);
   // The business's own prices (Н8): the same line on an invoice, a bill or a quote.
   const [priceList, setPriceList] = useState<PriceListEntry[]>([]);
   // Does the business enter its till's daily revenue here? Then an invoice
@@ -115,6 +119,7 @@ export default function BillingDocumentsScreen() {
       setCustomers(knownCustomers);
       setVatRegistered(defaults?.vat_registered !== false);
       setLogsTill(!!defaults?.logs_till);
+      setMissingCompanyDetails(defaults?.missing_company_details || []);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message);
     } finally {
@@ -218,6 +223,11 @@ export default function BillingDocumentsScreen() {
   // A credit note is laid out as an invoice is: lines with their VAT rates.
   const isInvoice = docType === 'invoice' || docType === 'credit_note';
   const isCreditNote = docType === 'credit_note';
+  const canEditCompany = hasPermission('manage_company');
+  const companyFields = (missing: string[]) => missing
+    .map((field) => (field === 'eik' ? t('billingDocuments.fieldEik') : t('billingDocuments.fieldAddress')))
+    .join(t('billingDocuments.fieldsAnd'));
+  const invoiceBlocked = isInvoice && missingCompanyDetails.length > 0;
   const creditLeft = creditFor ? Math.max(creditFor.total_amount - (creditFor.credited_amount || 0), 0) : 0;
 
   // A quote made into a bill or an invoice: the form filled from it, to
@@ -385,6 +395,15 @@ export default function BillingDocumentsScreen() {
       resetForm();
       loadData();
     } catch (error: any) {
+      if (error?.code === 'company_details_missing') {
+        // The details went missing since the form opened: say which, and lead there.
+        setMissingCompanyDetails(error.missing || []);
+        Alert.alert(t('common.error'), error.message, canEditCompany ? [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('billingDocuments.companyDetailsOpen'), onPress: () => { setModalVisible(false); router.push('/company-settings'); } },
+        ] : undefined);
+        return;
+      }
       Alert.alert(t('common.error'), error.message);
     } finally {
       setSaving(false);
@@ -685,7 +704,27 @@ export default function BillingDocumentsScreen() {
                   ))}
                 </View>
                 )}
-                {isInvoice && !creditFor && <Text style={styles.invoiceHint}>{t('billingDocuments.invoiceHint')}</Text>}
+                {invoiceBlocked ? (
+                  <View style={styles.detailsNotice}>
+                    <Ionicons name="business-outline" size={18} color={COLORS.warning} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailsNoticeText}>
+                        {(canEditCompany ? t('billingDocuments.companyDetailsMissing') : t('billingDocuments.companyDetailsAskOwner'))
+                          .replace('{fields}', companyFields(missingCompanyDetails))}
+                      </Text>
+                      {canEditCompany && (
+                        <TouchableOpacity
+                          style={styles.detailsNoticeButton}
+                          onPress={() => { setModalVisible(false); router.push('/company-settings'); }}
+                          accessibilityRole="button"
+                        >
+                          <Text style={styles.detailsNoticeButtonText}>{t('billingDocuments.companyDetailsOpen')}</Text>
+                          <Ionicons name="chevron-forward" size={16} color={COLORS.primaryLight} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                ) : isInvoice && !creditFor && <Text style={styles.invoiceHint}>{t('billingDocuments.invoiceHint')}</Text>}
                 {!creditFor && (
                   <View style={{ marginTop: 10 }}>
                     <LocationPicker value={docLocation} onChange={setLocationPick} noneLabel={t('locations.noneWhole')} />
@@ -939,7 +978,11 @@ export default function BillingDocumentsScreen() {
                 />
 
               </ScrollView>
-              <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
+              <TouchableOpacity
+                style={[styles.saveButton, (saving || invoiceBlocked) && { opacity: 0.6 }]}
+                onPress={handleSave}
+                disabled={saving || invoiceBlocked}
+              >
                 {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
               </TouchableOpacity>
               <TouchableOpacity style={styles.cancelButton} onPress={() => { setModalVisible(false); resetForm(); }}>
@@ -1005,6 +1048,13 @@ const styles = StyleSheet.create({
   quoteActionOn: { color: COLORS.success },
   quoteDiffers: { fontSize: 12, color: COLORS.warning, marginTop: 6, lineHeight: 17 },
   invoiceHint: { fontSize: 12, color: COLORS.textSecondary, marginTop: 6, lineHeight: 17 },
+  detailsNotice: {
+    flexDirection: 'row', gap: 10, marginTop: 10, padding: 12, borderRadius: 12,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+  },
+  detailsNoticeText: { fontSize: 13, color: COLORS.warningLight, lineHeight: 18 },
+  detailsNoticeButton: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, alignSelf: 'flex-start' },
+  detailsNoticeButtonText: { fontSize: 14, fontWeight: '600', color: COLORS.primaryLight },
   subtotalPreview: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6, textAlign: 'right' },
   typeBadgeText: { fontSize: 11, fontWeight: '700', color: 'white' },
   amount: { fontSize: 15, fontWeight: 'bold', color: COLORS.warning },

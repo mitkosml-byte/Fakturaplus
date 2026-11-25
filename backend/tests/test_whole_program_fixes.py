@@ -31,7 +31,10 @@ def _user(company_id, role, permissions, name):
 
 def _company():
     company_id = f"company_{uuid.uuid4().hex[:12]}"
-    asyncio.run(server.db.companies.insert_one({"id": company_id, "name": "Проба ООД", "owner_id": "x", "closed_weekdays": []}))
+    asyncio.run(server.db.companies.insert_one({
+        "id": company_id, "name": "Проба ООД", "owner_id": "x", "closed_weekdays": [],
+        "eik": "200000002", "address": "гр. Проба, ул. Тестова 1",
+    }))
     owner_id, owner = _user(company_id, "owner", list(server.ROLE_PERMISSIONS["owner"]), "Собственик")
     asyncio.run(server.db.companies.update_one({"id": company_id}, {"$set": {"owner_id": owner_id}}))
     return company_id, owner_id, owner

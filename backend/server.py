@@ -1511,6 +1511,42 @@ def validate_eik(raw: str) -> dict:
     return {"valid": True, "normalized": normalized, "reason": None}
 
 
+
+def is_placeholder_eik(eik: Any) -> bool:
+    """A business made at sign-up holds an "AUTO…" stand-in until the owner
+    gives the real ЕИК (routers/auth.py) - never one to print."""
+    text = str(eik or "").strip().upper()
+    return not text or text.startswith("AUTO")
+
+
+COMPANY_DOCUMENT_FIELDS = {"eik": "ЕИК", "address": "адрес"}
+
+
+def company_document_gaps(company: Optional[dict]) -> List[str]:
+    """What an invoice needs of the business that issues it and is not there
+    yet: "eik" - a real one, not the sign-up stand-in - and "address". An
+    invoice without them is not a valid document."""
+    company = company or {}
+    gaps = []
+    if is_placeholder_eik(company.get("eik")):
+        gaps.append("eik")
+    if not str(company.get("address") or "").strip():
+        gaps.append("address")
+    return gaps
+
+
+def require_company_for_invoices(company: Optional[dict]) -> None:
+    """No invoice or credit note goes out before the business has said who
+    it is: a 409 the app answers by opening the company's details."""
+    gaps = company_document_gaps(company)
+    if gaps:
+        raise HTTPException(status_code=409, detail={
+            "code": "company_details_missing",
+            "missing": gaps,
+            "message": f"Попълнете {' и '.join(COMPANY_DOCUMENT_FIELDS[g] for g in gaps)} на фирмата, преди да издадете фактура",
+        })
+
+
 # ===================== EMAIL/PASSWORD AUTH =====================
 
 def validate_email(email: str) -> bool:

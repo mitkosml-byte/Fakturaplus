@@ -4569,6 +4569,18 @@ export const translations: Translations = {
     bg: 'Печалбата за месеца без ДДС за внасяне, очакваните заплати, вече изтегленото и предстоящите задължения',
     en: "This month's profit less the VAT to pay, the expected salaries, what's already withdrawn and upcoming obligations",
   },
+  'billingDocuments.companyDetailsMissing': {
+    bg: 'Преди първата фактура: попълнете {fields} на фирмата - без тях фактурата не е валидна.',
+    en: "Before the first invoice: fill in the business's {fields} - an invoice without them is not valid.",
+  },
+  'billingDocuments.companyDetailsAskOwner': {
+    bg: 'Собственикът трябва да попълни {fields} на фирмата, преди да се издават фактури.',
+    en: "The owner has to fill in the business's {fields} before invoices can be issued.",
+  },
+  'billingDocuments.companyDetailsOpen': { bg: 'Данни на фирмата', en: 'Business details' },
+  'billingDocuments.fieldEik': { bg: 'ЕИК', en: 'EIK' },
+  'billingDocuments.fieldAddress': { bg: 'адрес', en: 'address' },
+  'billingDocuments.fieldsAnd': { bg: ' и ', en: ' and ' },
   'wallet.setAside': {
     bg: 'Задържано: {parts}',
     en: 'Kept back: {parts}',
