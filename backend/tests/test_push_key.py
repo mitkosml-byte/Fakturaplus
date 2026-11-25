@@ -4,7 +4,7 @@ own keys needs no change in the app)."""
 import base64
 
 from cryptography.hazmat.primitives import serialization
-from py_vapid import Vapid
+from py_vapid import Vapid  # type: ignore[import-untyped]
 
 from services import push_service
 from tests.test_whole_program_fixes import _company

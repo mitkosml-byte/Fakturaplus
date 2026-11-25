@@ -41,7 +41,7 @@ def public_key() -> Optional[str]:
         try:
             import base64
             from cryptography.hazmat.primitives import serialization
-            from py_vapid import Vapid
+            from py_vapid import Vapid  # type: ignore[import-untyped]
             point = Vapid.from_string(private_key=VAPID_PRIVATE_KEY).public_key.public_bytes(
                 serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint,
             )
