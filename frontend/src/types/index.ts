@@ -2325,3 +2325,53 @@ export interface ScanPackage {
   price_eur: number;
   price_per_scan: number;
 }
+
+// The "Състояние" screen (GET /system/status): the server, the database,
+// the background jobs, the outside services switched on, and the errors of
+// the last day - the company's own for the owner, everyone's for the person
+// who runs the program (scope "all").
+export type SystemJobState = 'ok' | 'failing' | 'late' | 'waiting' | 'off';
+
+export interface SystemJob {
+  key: string;
+  every_minutes: number;
+  state: SystemJobState;
+  last_run_at: string | null;
+  last_ok_at: string | null;
+  last_error_at: string | null;
+  last_error: string | null;
+}
+
+export interface SystemError {
+  id: string;
+  source: 'server' | 'job' | 'app';
+  where: string;
+  kind: string;
+  message: string;
+  count: number;
+  day: string;
+  first_at: string;
+  last_at: string;
+  path?: string | null;
+  company_id?: string | null;
+  company_name?: string | null;
+  trace?: string | null;
+}
+
+export interface SystemStatus {
+  scope: 'all' | 'company';
+  checked_at: string;
+  server: { started_at: string; version: string | null };
+  database: { ok: boolean; ms: number | null };
+  features: { ai: boolean; email: boolean; payments: boolean; push: boolean };
+  jobs: SystemJob[];
+  errors: { count: number; items: SystemError[] };
+}
+
+export interface ClientErrorReport {
+  message: string;
+  stack?: string;
+  screen?: string;
+  kind: 'error' | 'promise' | 'render';
+  platform: 'web' | 'ios' | 'android';
+}

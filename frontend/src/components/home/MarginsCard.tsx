@@ -72,12 +72,22 @@ export function MarginsCard({ margins, canManageBudget }: Props) {
       accessibilityRole="button"
       accessibilityLabel={`${t('margins.title')}: ${columns.map((c) => `${c.label} ${percent(c.margin.percent)}`).join(', ')}`}
     >
-      <View style={styles.header}>
+      {/* One row on Home (P1-5): the margins in a line, the rest on a tap. */}
+      <View style={[styles.header, open && { marginBottom: 12 }]}>
         <Ionicons name="pie-chart-outline" size={20} color={COLORS.primaryLight} />
-        <Text style={styles.title} numberOfLines={1}>{t('margins.title')}</Text>
+        <View style={styles.headerText}>
+          <Text style={styles.title} numberOfLines={1}>{t('margins.title')}</Text>
+          {!open && (
+            <Text style={styles.summary} numberOfLines={2}>
+              {columns.map((c) => `${c.label} ${c.approx ? '≈' : ''}${percent(c.margin.percent)}`).join(' · ')}
+            </Text>
+          )}
+        </View>
         <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={COLORS.textMuted} />
       </View>
 
+      {open && (
+      <>
       <View style={styles.columns}>
         {columns.map((column) => {
           const value = column.margin.percent;
@@ -120,7 +130,6 @@ export function MarginsCard({ margins, canManageBudget }: Props) {
       {!runningCosts && <Text style={styles.line}>{t('margins.noRunningCosts')}</Text>}
       {shortPeriod && <Text style={styles.line}>{t('margins.shortPeriod')}</Text>}
 
-      {open && (
         <View style={styles.details}>
           {steps.map((step) => (
             <View key={step.key} style={[styles.row, step.total && step.key !== 'sales' && styles.rowTotal]}>
@@ -152,6 +161,7 @@ export function MarginsCard({ margins, canManageBudget }: Props) {
             </TouchableOpacity>
           )}
         </View>
+      </>
       )}
     </TouchableOpacity>
   );
@@ -164,8 +174,10 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
   },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  title: { flex: 1, fontSize: 16, fontWeight: '600', color: 'white' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerText: { flex: 1, minWidth: 0 },
+  title: { fontSize: 16, fontWeight: '600', color: 'white' },
+  summary: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
   columns: { flexDirection: 'row', gap: 12 },
   column: { flex: 1, minWidth: 0 },
   label: { fontSize: 12, color: COLORS.textSecondary },

@@ -284,7 +284,7 @@ async def list_feedback(current_user: User = Depends(get_current_user)):
     # is a stopgap so submitted feedback is actually reachable in the
     # meantime, restricted to the app's own developer rather than any
     # company's owner.
-    if current_user.email != ADMIN_EMAIL:
+    if not is_app_admin(current_user.email):
         raise HTTPException(status_code=403, detail="Няма достъп")
     items = await server.db.feedback_submissions.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return items

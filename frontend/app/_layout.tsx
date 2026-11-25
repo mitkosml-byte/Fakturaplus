@@ -20,6 +20,16 @@ import { useScanQueueStore } from '../src/stores/scanQueueStore';
 import NetInfo from '@react-native-community/netinfo';
 import { Toast } from '../src/utils/toast';
 import { COLORS } from '../src/theme/colors';
+import { installErrorReporter, setCurrentScreen } from '../src/utils/errorReporter';
+import { ScreenErrorFallback } from '../src/components/ScreenErrorFallback';
+
+// Errors anywhere in the app go to the program's error log (Състояние).
+installErrorReporter();
+
+// A screen that breaks while drawing shows a way back instead of nothing.
+export function ErrorBoundary(props: { error: Error; retry: () => Promise<void> }) {
+  return <ScreenErrorFallback {...props} />;
+}
 
 // Single source of truth for auth-based navigation. Screens (login.tsx,
 // the tabs layout) used to each run their own redirect effect; two
@@ -48,6 +58,11 @@ function useProtectedRoute() {
   const { isAuthenticated, isLoading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+
+  // Which screen an error came from, as its route.
+  useEffect(() => {
+    setCurrentScreen(segments);
+  }, [segments]);
 
   useEffect(() => {
     if (isLoading) return;

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -26,12 +26,14 @@ type Props = {
   canAdd: boolean;
 };
 
-// The personal notebook on Home, under the main numbers: what was taken
-// this month, what is still safe to take, and one tap to write a new entry
-// or open the notebook. Only for whoever may see the notebook.
+// The personal notebook on Home, at the end of the numbers: one row - what
+// was taken this month and what is still safe to take - and on a tap the
+// figures, a new entry or the notebook itself (P1-5). Only for whoever may
+// see the notebook.
 export function PersonalWalletCard({ summary, canAdd }: Props) {
   const { t } = useTranslation();
   const router = useRouter();
+  const [expanded, setExpanded] = useState(false);
   const color = STATUS_COLORS[summary.status] || COLORS.textSecondary;
   const open = () => router.push({ pathname: '/personal-expenses', params: { tab: 'wallet' } });
   const add = () => router.push({ pathname: '/personal-expenses', params: { tab: 'wallet', add: '1' } });
@@ -39,15 +41,31 @@ export function PersonalWalletCard({ summary, canAdd }: Props) {
 
   return (
     <View style={styles.card}>
-      <TouchableOpacity style={styles.header} onPress={open} accessibilityRole="button">
+      <TouchableOpacity
+        style={styles.header}
+        onPress={() => setExpanded(!expanded)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+      >
         <View style={styles.icon}>
           <Ionicons name="book" size={18} color={COLORS.warning} />
         </View>
-        <Text style={styles.title}>{t('wallet.title')}</Text>
-        <Text style={styles.open}>{t('wallet.openShort')}</Text>
-        <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+        <View style={styles.headerText}>
+          <Text style={styles.title} numberOfLines={1}>{t('wallet.title')}</Text>
+          {!expanded && (
+            <Text style={styles.summary} numberOfLines={2}>
+              {t('wallet.rowTaken').replace('{amount}', formatMoney(summary.total_spent))}
+              {summary.safe_to_spend !== null && (
+                <Text style={{ color }}>{` · ${t('wallet.rowSafe').replace('{amount}', formatMoney(summary.safe_to_spend))}`}</Text>
+              )}
+            </Text>
+          )}
+        </View>
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={COLORS.textMuted} />
       </TouchableOpacity>
 
+      {expanded && (
+      <>
       <View style={styles.figures}>
         <View style={styles.figure}>
           <Text style={styles.label}>{t('wallet.spentThisMonth')}</Text>
@@ -71,6 +89,12 @@ export function PersonalWalletCard({ summary, canAdd }: Props) {
           <Text style={styles.addText}>{t('wallet.addEntry')}</Text>
         </TouchableOpacity>
       )}
+      <TouchableOpacity style={styles.openRow} onPress={open} accessibilityRole="button">
+        <Text style={styles.open}>{t('wallet.homeTeaserOpen')}</Text>
+        <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+      </TouchableOpacity>
+      </>
+      )}
     </View>
   );
 }
@@ -93,7 +117,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: { flex: 1, minWidth: 0, fontSize: 16, fontWeight: '700', color: 'white' },
+  headerText: { flex: 1, minWidth: 0 },
+  title: { fontSize: 16, fontWeight: '700', color: 'white' },
+  summary: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
+  openRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: 12 },
   open: { fontSize: 13, fontWeight: '600', color: COLORS.primary },
   figures: { flexDirection: 'row', gap: 12, marginTop: 14 },
   figure: { flex: 1, minWidth: 0 },

@@ -8,6 +8,12 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { AnimatedTabIcon } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
+import { ScreenErrorFallback } from '../../src/components/ScreenErrorFallback';
+
+// A tab that breaks while drawing: a way back, inside the app's frame.
+export function ErrorBoundary(props: { error: Error; retry: () => Promise<void> }) {
+  return <ScreenErrorFallback {...props} />;
+}
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();

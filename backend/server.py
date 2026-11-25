@@ -59,6 +59,7 @@ from services.business_calendar import add_months as _add_months
 from services import revenue_vat
 from services.money_text import fmt_amount, fmt_eur
 from services.month_names import MONTHS_BG as _MONTHS_BG_GENITIVE
+from services import error_log
 
 ROOT_DIR = Path(__file__).parent
 
@@ -132,10 +133,27 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL', 'Фактура+ <onboarding@resend.dev>')
 EMAIL_FEATURES_ENABLED = bool(RESEND_API_KEY)
 
-# Developer/product-owner account - not a per-company role, this is who can
-# read the in-app feedback inbox (see /feedback below) before the app has
-# its own support domain/inbox to forward it to instead.
-ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'mitkosml@gmail.com')
+# The person who runs the program (not a role in any company): reads the
+# feedback inbox and sees every company's errors on the status screen.
+# Nobody when it is not set.
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', '').strip().lower()
+
+
+def is_app_admin(email: Optional[str]) -> bool:
+    return bool(ADMIN_EMAIL) and (email or '').strip().lower() == ADMIN_EMAIL
+
+
+# The background jobs and how often each runs (seconds), in the order the
+# status screen lists them.
+JOB_INTERVALS: Dict[str, int] = {
+    "morning_push": 600,
+    "calendar_reminders": 180,
+    "recurring_expenses": 3600,
+    "team_moments": 3600,
+    "budget_alerts": 3600,
+    "scan_credits": 3600,
+    "backup_email": 3600,
+}
 
 # Stripe (scan-credit purchases, see SCAN CREDITS below). Same
 # disabled-until-configured pattern as the AI/email features above - the
@@ -215,6 +233,33 @@ app = FastAPI(
 # Add rate limiter
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]  # slowapi's documented handler; Starlette's stub wants Callable[[Request, Exception], ...]
+
+
+async def _unexpected_error(request: Request, error: Exception) -> JSONResponse:
+    """A request the server could not answer: written to the error log -
+    with the company, when the person is signed in - and answered with a
+    plain 500 the app can show."""
+    user = await get_current_user_optional(request)
+    route = request.scope.get("route")
+    await error_log.record_exception(
+        db, error, source="server",
+        where=f"{request.method} {getattr(route, 'path', None) or request.url.path}",
+        company_id=user.company_id if user else None,
+        user_id=user.user_id if user else None,
+        path=request.url.path,
+    )
+    response = JSONResponse(status_code=500, content={"detail": "Нещо се обърка на сървъра. Опитайте отново."})
+    # This answer is sent from outside the CORS layer: without these the
+    # browser hides it and the app only sees "no connection".
+    origin = request.headers.get("origin")
+    if origin and origin in _cors_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+    return response
+
+
+app.add_exception_handler(Exception, _unexpected_error)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -5333,14 +5378,9 @@ async def _morning_push_tick(now: Optional[datetime] = None):
         )
 
 async def _morning_push_loop():
-    while True:
-        try:
-            await _morning_push_tick()
-        except Exception as e:
-            logger.error(f"Morning push loop error: {e}")
-        # Every 10 minutes: a push is due within minutes of the chosen
-        # hour, and a person already looked at today costs one lookup.
-        await asyncio.sleep(600)
+    # Every 10 minutes: a push is due within minutes of the chosen hour,
+    # and a person already looked at today costs one lookup.
+    await error_log.run_job(db, "morning_push", _morning_push_tick, JOB_INTERVALS["morning_push"])
 
 async def start_morning_push_loop():
     asyncio.create_task(_morning_push_loop())
@@ -6821,12 +6861,7 @@ async def _calendar_reminder_tick(now: Optional[datetime] = None):
             await db.calendar_events.update_one({"id": ev["id"]}, {"$set": {"reminder_sent": True}})
 
 async def _calendar_reminder_loop():
-    while True:
-        try:
-            await _calendar_reminder_tick()
-        except Exception as e:
-            logger.error(f"Calendar reminder loop error: {e}")
-        await asyncio.sleep(180)
+    await error_log.run_job(db, "calendar_reminders", _calendar_reminder_tick, JOB_INTERVALS["calendar_reminders"])
 
 async def start_calendar_reminder_loop():
     # In-process only - if this dyno is asleep (free-tier idle scale-down) a
@@ -6920,27 +6955,21 @@ async def _budget_alert_tick():
             )
 
 async def _budget_alert_loop():
-    while True:
-        try:
-            await _budget_alert_tick()
-        except Exception as e:
-            logger.error(f"Budget alert loop error: {e}")
-        # Hourly is plenty for a monthly threshold - unlike a calendar
-        # reminder, there's no "exact minute" to hit.
-        await asyncio.sleep(3600)
+    # Hourly is plenty for a monthly threshold - unlike a calendar
+    # reminder, there's no "exact minute" to hit.
+    await error_log.run_job(db, "budget_alerts", _budget_alert_tick, JOB_INTERVALS["budget_alerts"])
 
 async def start_budget_alert_loop():
     asyncio.create_task(_budget_alert_loop())
 
 
+async def _backup_email_tick():
+    from routers.backup import send_monthly_backup_emails
+    await send_monthly_backup_emails()
+
+
 async def _backup_email_loop():
-    while True:
-        try:
-            from routers.backup import send_monthly_backup_emails
-            await send_monthly_backup_emails()
-        except Exception as e:
-            logger.error(f"Backup email loop error: {e}")
-        await asyncio.sleep(3600)
+    await error_log.run_job(db, "backup_email", _backup_email_tick, JOB_INTERVALS["backup_email"])
 
 
 async def start_backup_email_loop():
@@ -7019,12 +7048,7 @@ async def _scan_credit_depletion_tick():
         await scan_credit_service.mark_depletion_alert_sent(scope)
 
 async def _scan_credit_depletion_loop():
-    while True:
-        try:
-            await _scan_credit_depletion_tick()
-        except Exception as e:
-            logger.error(f"Scan credit depletion loop error: {e}")
-        await asyncio.sleep(3600)
+    await error_log.run_job(db, "scan_credits", _scan_credit_depletion_tick, JOB_INTERVALS["scan_credits"])
 
 async def start_scan_credit_depletion_loop():
     asyncio.create_task(_scan_credit_depletion_loop())
@@ -7115,6 +7139,15 @@ async def create_indexes():
         # The business's locations (shops, sites, branches).
         await db.locations.create_index([("company_id", 1), ("created_at", 1)])
         await db.billing_documents.create_index([("company_id", 1), ("recurring_invoice_id", 1), ("recurring_month", 1)])
+
+        # The program's error log (services/error_log): one record per
+        # error, day and company, gone after its days; the background jobs'
+        # last runs, one per job.
+        await db.error_log.create_index([("fingerprint", 1), ("day", 1), ("company_id", 1)], unique=True)
+        await db.error_log.create_index([("company_id", 1), ("last_at", -1)])
+        await db.error_log.create_index([("last_at", -1)])
+        await db.error_log.create_index("expires_at", expireAfterSeconds=0)
+        await db.job_status.create_index([("key", 1)], unique=True)
 
         # A login waiting for its second step: found by its token, gone
         # once expired (the TTL monitor sweeps it; the code checks the time).
@@ -7556,6 +7589,8 @@ from routers import day_card as day_card_router
 app.include_router(day_card_router.router)
 from routers import team_moments as team_moments_router
 app.include_router(team_moments_router.router)
+from routers import system_status as system_status_router
+app.include_router(system_status_router.router)
 
 _cors_origins_env = os.environ.get("CORS_ORIGINS", "")
 if _cors_origins_env:

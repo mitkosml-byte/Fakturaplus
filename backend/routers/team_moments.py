@@ -184,12 +184,7 @@ async def team_moments_tick(now: Optional[datetime] = None) -> Dict[str, int]:
 
 
 async def _team_moments_loop():
-    while True:
-        try:
-            await team_moments_tick()
-        except Exception as error:
-            logger.error(f"Team moments loop error: {error}")
-        await asyncio.sleep(3600)
+    await error_log.run_job(server.db, "team_moments", team_moments_tick, JOB_INTERVALS["team_moments"])
 
 
 async def start_team_moments_loop():

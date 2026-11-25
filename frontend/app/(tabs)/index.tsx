@@ -464,10 +464,11 @@ export default function HomeScreen() {
             style={styles.scrollView}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           >
-            {/* Home (Л3, Л4): what to do today, the main numbers, what needs
-                attention. VAT, the average, payment kinds, the break-even and
-                personal investments are in Statistics; the language and the
-                days off in Account. */}
+            {/* Home (Л3, Л4, P1-5): what needs attention, what to do today,
+                the main numbers and VAT, then the analysis folded to a row.
+                The average, payment kinds, the break-even and personal
+                investments are in Statistics; the language and the days off
+                in Account. */}
             {/* The day card instead of "Welcome!": a personal greeting, the
                 weather where the business is, one line for the day and what
                 the day holds for this person. */}
@@ -489,8 +490,12 @@ export default function HomeScreen() {
               )}
             />
 
-            {/* The day's actions first - each only for who may do it (a
-                button whose only outcome is a refusal is not shown). */}
+            {/* What needs attention today comes first (P1-5): up to two, the
+                rest behind "show more". */}
+            <MorningBriefingCard signals={home ? home.signals ?? [] : null} />
+
+            {/* The day's actions - each only for who may do it (a button
+                whose only outcome is a refusal is not shown). */}
             {homeActions.length > 0 && (
               <View style={styles.actionsContainer}>
                 {homeActions.map((action) => (
@@ -622,13 +627,24 @@ export default function HomeScreen() {
                 business registered for VAT. */}
             <VatCard vat={home?.vat} />
 
-            {/* The period's gross, operating and net margin - for whoever
-                sees the profit. */}
+            {/* A business that invoices: issued in the period, owed now,
+                overdue (У2) - its "Фактура" is the action above. */}
+            {showBilling && (
+              <BillingOverviewCard
+                startDate={toApiDate(getPeriodBounds(periodState).start)}
+                endDate={toApiDate(getPeriodBounds(periodState).end)}
+                canIssue={false}
+                overview={home ? home.billing_overview : null}
+              />
+            )}
+
+            {/* The analysis, one row each until tapped (P1-5): the period's
+                gross, operating and net margin - for whoever sees the profit. */}
             <MarginsCard margins={home?.margins} canManageBudget={hasPermission('manage_budget')} />
             </>
             )}
 
-            {/* The personal notebook, right under the main numbers - for
+            {/* The personal notebook, one row under the margins - for
                 whoever may see it. */}
             {uses('wallet') && hasPermission('view_personal_wallet') && home?.personal_wallet && (
               <PersonalWalletCard
@@ -655,20 +671,6 @@ export default function HomeScreen() {
                   <Ionicons name="arrow-forward-circle" size={26} color={COLORS.primary} />
                 </TouchableOpacity>
               </View>
-            )}
-
-            {/* What needs attention: up to two, the rest behind "show more". */}
-            <MorningBriefingCard signals={home ? home.signals ?? [] : null} />
-
-            {/* A business that invoices: issued in the period, owed now,
-                overdue (У2) - its "Фактура" is the action above. */}
-            {showBilling && !nothingYet && (
-              <BillingOverviewCard
-                startDate={toApiDate(getPeriodBounds(periodState).start)}
-                endDate={toApiDate(getPeriodBounds(periodState).end)}
-                canIssue={false}
-                overview={home ? home.billing_overview : null}
-              />
             )}
 
             {/* "Лично тефтерче" is not on Home (Л4): it is in История и

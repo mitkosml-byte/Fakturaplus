@@ -493,6 +493,19 @@ export default function ProfileScreen() {
           iconColor: COLORS.warning,
           onPress: () => router.push('/terms-of-service'),
         },
+        // Whether the program works and the errors it met (the owner's own
+        // company's) - the "Състояние" screen.
+        ...(isOwner
+          ? [{
+              key: 'systemStatus',
+              title: t('status.menuTitle'),
+              subtitle: t('status.menuDesc'),
+              icon: 'pulse' as const,
+              iconBg: 'rgba(16, 185, 129, 0.15)',
+              iconColor: COLORS.success,
+              onPress: () => router.push('/system-status'),
+            }]
+          : []),
       ],
     },
   ];

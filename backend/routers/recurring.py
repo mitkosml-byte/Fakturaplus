@@ -256,12 +256,7 @@ async def _recurring_tick() -> None:
 
 
 async def _recurring_loop():
-    while True:
-        try:
-            await _recurring_tick()
-        except Exception as error:
-            logger.error(f"Recurring expenses loop error: {error}")
-        await asyncio.sleep(3600)
+    await error_log.run_job(server.db, "recurring_expenses", _recurring_tick, JOB_INTERVALS["recurring_expenses"])
 
 
 async def start_recurring_expense_loop():
