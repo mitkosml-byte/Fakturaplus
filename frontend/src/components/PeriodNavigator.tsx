@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
   },
   modeChipText: {
     color: COLORS.textMuted,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
   },
   modeChipTextActive: {

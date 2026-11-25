@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
   },
   locateText: { flex: 1, minWidth: 0 },
   locateTitle: { fontSize: 14, fontWeight: '700', color: 'white' },
-  locateHint: { fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
+  locateHint: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
   line: { fontSize: 15, lineHeight: 21, color: 'white', marginTop: 12, fontStyle: 'italic' },
   items: { gap: 8, marginTop: 14 },
   item: {
@@ -221,6 +221,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12,
   },
   itemText: { flex: 1, minWidth: 0, fontSize: 13, color: 'white' },
-  attribution: { fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 10, textAlign: 'right' },
+  attribution: { fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 10, textAlign: 'right' },
 });
 

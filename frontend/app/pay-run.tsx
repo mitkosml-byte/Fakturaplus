@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   resultLabel: { flex: 1, fontSize: 13, color: 'white' },
   resultAmount: { fontSize: 13, color: COLORS.success, fontWeight: '600' },
-  resultError: { fontSize: 11, color: COLORS.danger, flexShrink: 1, textAlign: 'right' },
+  resultError: { fontSize: 12, color: COLORS.danger, flexShrink: 1, textAlign: 'right' },
   footer: { padding: 16, borderTopWidth: 1, borderTopColor: COLORS.surface },
   processButton: {
     backgroundColor: COLORS.primary,

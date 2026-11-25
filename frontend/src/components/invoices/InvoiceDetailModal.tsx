@@ -812,7 +812,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   editItemsHint: {
-    fontSize: 11.5,
+    fontSize: 12.5,
     color: COLORS.textMuted,
     marginBottom: 10,
     lineHeight: 16,
@@ -832,7 +832,7 @@ const styles = StyleSheet.create({
     width: 76,
   },
   editItemFieldLabel: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginBottom: 4,
   },
@@ -1126,7 +1126,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   itemsTableHeaderText: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     fontWeight: '600',
   },
@@ -1162,7 +1162,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   itemPriceAlertText: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.danger,
     fontWeight: '600',
   },
@@ -1193,7 +1193,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   itemsMismatchText: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.warning,
     flex: 1,
   },

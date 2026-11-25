@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   alertSupplier: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   alertChangeText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 'bold',
     color: COLORS.danger,
   },

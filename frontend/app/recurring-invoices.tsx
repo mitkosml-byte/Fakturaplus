@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
   sub: { color: COLORS.textSecondary, fontSize: 12, marginTop: 3 },
   stateRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   stateText: { fontSize: 13, fontWeight: '600' },
-  history: { color: COLORS.textMuted, fontSize: 11, marginTop: 8 },
+  history: { color: COLORS.textMuted, fontSize: 12, marginTop: 8 },
   primaryButton: { backgroundColor: COLORS.primary, borderRadius: 12, padding: 12, alignItems: 'center', marginTop: 10 },
   primaryButtonText: { color: 'white', fontSize: 14, fontWeight: '600' },
   secondaryButton: { borderRadius: 12, padding: 11, alignItems: 'center', borderWidth: 1, borderColor: COLORS.primary, marginTop: 10 },
@@ -466,7 +466,7 @@ const styles = StyleSheet.create({
   },
   line: { marginBottom: 10 },
   addLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
-  hint: { color: COLORS.textMuted, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  hint: { color: COLORS.textMuted, fontSize: 12, lineHeight: 16, marginTop: 4 },
   deleteButton: { alignItems: 'center', padding: 12, marginTop: 6 },
   deleteText: { color: COLORS.danger, fontWeight: '600' },
 });

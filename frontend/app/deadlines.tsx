@@ -379,7 +379,7 @@ const styles = StyleSheet.create({
   name: { color: 'white', fontSize: 15, fontWeight: '600' },
   sub: { color: COLORS.textSecondary, fontSize: 12, marginTop: 3 },
   notes: { color: COLORS.textMuted, fontSize: 12, marginTop: 4 },
-  next: { color: COLORS.textMuted, fontSize: 11, marginTop: 8, marginLeft: 30 },
+  next: { color: COLORS.textMuted, fontSize: 12, marginTop: 8, marginLeft: 30 },
   doneButton: { backgroundColor: COLORS.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
   doneText: { color: 'white', fontSize: 13, fontWeight: '600' },
   sheet: { padding: 16, flexShrink: 1 },

@@ -643,7 +643,7 @@ export default function StatsScreen() {
     label: barLabel(item),
     frontColor: item.is_closed ? COLORS.borderLight : COLORS.success,
     topLabelComponent: () => (
-      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.success, fontSize: 10 }}>
+      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.success, fontSize: 12 }}>
         {item.income > 0 ? item.income.toFixed(0) : ''}
       </Text>
     ),
@@ -659,7 +659,7 @@ export default function StatsScreen() {
     label: barLabel(item),
     frontColor: item.is_closed ? COLORS.borderLight : COLORS.danger,
     topLabelComponent: () => (
-      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.danger, fontSize: 10 }}>
+      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.danger, fontSize: 12 }}>
         {barExpense(item) > 0 ? barExpense(item).toFixed(0) : ''}
       </Text>
     ),
@@ -2624,7 +2624,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   chartNote: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 8,
   },
@@ -2632,7 +2632,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   activityNote: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     textAlign: 'center',
     marginTop: -6,
@@ -2662,7 +2662,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary + '55',
   },
   seriesNote: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 6,
   },
@@ -2674,7 +2674,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   restrictedNoteText: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
     flexShrink: 1,
   },
@@ -2727,7 +2727,7 @@ const styles = StyleSheet.create({
   },
   chartTotal: { marginLeft: 'auto', alignItems: 'flex-end' },
   chartTotalValue: { fontSize: 16, fontWeight: 'bold' },
-  chartSubNote: { fontSize: 11, color: COLORS.textSecondary, marginTop: -6, marginBottom: 8, textAlign: 'right' },
+  chartSubNote: { fontSize: 12, color: COLORS.textSecondary, marginTop: -6, marginBottom: 8, textAlign: 'right' },
   chartTitle: {
     fontSize: 16,
     fontWeight: '600',
@@ -2766,7 +2766,7 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   vatLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginBottom: 4,
   },
@@ -3058,7 +3058,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   pieCenterLabel: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
   legendContainer: {
@@ -3176,7 +3176,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   supplierMeta: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -3197,7 +3197,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   dependencyText: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.primary,
     fontWeight: 'bold',
   },
@@ -3237,7 +3237,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   inactiveMeta: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -3250,7 +3250,7 @@ const styles = StyleSheet.create({
     color: COLORS.danger,
   },
   inactiveDaysLabel: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
   
@@ -3362,7 +3362,7 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   detailLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 4,
   },
@@ -3420,7 +3420,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   anomalyDate: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
   anomalyAmount: {
@@ -3432,7 +3432,7 @@ const styles = StyleSheet.create({
     color: COLORS.warning,
   },
   anomalyDeviation: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.danger,
     fontWeight: 'bold',
   },
@@ -3468,7 +3468,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   recentInvoiceDate: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
   recentInvoiceAmount: {
@@ -3511,11 +3511,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   itemTrendText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 'bold',
   },
   itemAvgPrice: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -3540,7 +3540,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   recommendationSavings: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.success,
     marginTop: 4,
   },
@@ -3573,7 +3573,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   supplierCompareMeta: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -3586,7 +3586,7 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   supplierComparePriceLabel: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
 
@@ -3639,7 +3639,7 @@ const styles = StyleSheet.create({
   },
   unitChipsHint: {
     width: '100%',
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
 

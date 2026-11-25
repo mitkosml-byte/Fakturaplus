@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   rowMeta: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
   amountsRow: {

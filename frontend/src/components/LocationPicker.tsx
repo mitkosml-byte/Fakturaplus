@@ -80,5 +80,5 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   chipText: { color: COLORS.textSecondary, fontSize: 13 },
   chipTextActive: { color: 'white', fontWeight: '600' },
-  hint: { color: COLORS.textMuted, fontSize: 11, marginTop: 6, lineHeight: 15 },
+  hint: { color: COLORS.textMuted, fontSize: 12, marginTop: 6, lineHeight: 15 },
 });

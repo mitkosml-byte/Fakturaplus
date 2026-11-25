@@ -3924,6 +3924,49 @@ async def _signal_two_factor(company_id, scope, current_user, visibility) -> Opt
     }
 
 
+# An invoice's amount without VAT and its VAT may differ from its total by
+# rounding - by more, something was typed wrong.
+INVOICE_SUMS_TOLERANCE = 0.05
+
+
+async def _signal_invoice_sums(company_id, scope, current_user, visibility) -> Optional[dict]:
+    """Invoices of the last year whose amount without VAT and VAT do not
+    add up to their total: a typo - or an amount typed with a decimal
+    comma that was saved without its cents (before 25.11.2026 most forms
+    read "12,50" as 12). For whoever may correct invoices; a reverse-charge
+    invoice keeps its own VAT apart and is left out."""
+    if "manage_invoices" not in set(current_user.permissions or []):
+        return None
+    rows = await db.invoices.find(
+        {**scope, "date": {"$gte": day_start_utc(today_local() - timedelta(days=365))},
+         "vat_treatment": {"$ne": "reverse_charge"}},
+        {"_id": 0, "id": 1, "supplier": 1, "invoice_number": 1, "date": 1,
+         "amount_without_vat": 1, "vat_amount": 1, "total_amount": 1},
+    ).to_list(ALL_ROWS)
+    off = [
+        row for row in rows
+        if abs(float(row.get("amount_without_vat") or 0) + float(row.get("vat_amount") or 0)
+               - float(row.get("total_amount") or 0)) > INVOICE_SUMS_TOLERANCE
+    ]
+    if not off:
+        return None
+    latest = max(off, key=lambda row: (str(row.get("date") or ""), str(row.get("id"))))
+    which = f"{latest.get('supplier') or ''} № {latest.get('invoice_number') or ''}".strip()
+    count = len(off)
+    return {
+        "key": "invoice_sums", "severity": "warning", "priority": 52,
+        "title": tr("Фактури с несходни суми", "Invoices whose amounts do not add up"),
+        "detail": tr(
+            f"{count} {'фактура, в която' if count == 1 else 'фактури, в които'} сумата без ДДС и ДДС не дават общата сума"
+            f" - например {which}. Може сума да е записана без стотинките.",
+            f"{count} {'invoice' if count == 1 else 'invoices'} whose amount without VAT and VAT do not add up to the total"
+            f" - for one, {which}. An amount may have been saved without its cents.",
+        ),
+        "route": f"/(tabs)/invoices?invoiceId={latest['id']}",
+        "fingerprint": "invoice_sums|" + ",".join(sorted(str(row["id"]) for row in off)),
+    }
+
+
 def payment_week(today: date) -> Tuple[date, date, bool]:
     """The days whose payments a week's notice covers: the rest of this
     week through Sunday - or, at the weekend, the week ahead."""
@@ -5034,7 +5077,7 @@ _PROACTIVE_SIGNAL_BUILDERS = [
     _signal_vat_registration, _signal_recurring_expenses, _signal_payroll_rates_year,
     _signal_payments_this_week, _signal_backup, _signal_two_factor, _signal_cash_flow,
     _signal_accountant_pack, _signal_payment_reminders, _signal_recurring_invoices, _signal_margins,
-    _signal_deadlines,
+    _signal_deadlines, _signal_invoice_sums,
 ]
 
 # Signals about money at risk can only be put off for a few days, never

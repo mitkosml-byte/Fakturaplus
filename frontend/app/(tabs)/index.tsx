@@ -858,7 +858,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   restrictedNoteText: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
     flexShrink: 1,
   },
@@ -885,7 +885,7 @@ const styles = StyleSheet.create({
   },
   actionButtonHint: {
     color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 11,
+    fontSize: 12,
     textAlign: 'center',
   },
 });

@@ -1218,7 +1218,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 14, fontWeight: '700', color: 'white', marginBottom: 10 },
   needsWantsRow: { flexDirection: 'row', gap: 12 },
   needsWantsItem: { flex: 1, backgroundColor: COLORS.background, borderRadius: 10, padding: 12, alignItems: 'center' },
-  needsWantsLabel: { fontSize: 11, color: COLORS.textMuted, textAlign: 'center' },
+  needsWantsLabel: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center' },
   needsWantsValue: { fontSize: 16, fontWeight: 'bold', marginTop: 4 },
   categoryRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   categoryIconWrap: { width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },

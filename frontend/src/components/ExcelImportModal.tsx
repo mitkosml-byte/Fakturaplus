@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   summaryLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
     marginTop: 2,
   },

@@ -1947,7 +1947,7 @@ const styles = StyleSheet.create({
   summaryLabel: { color: COLORS.textSecondary, fontSize: 13 },
   summaryValue: { flexShrink: 1, color: 'white', fontSize: 14, fontWeight: '600', textAlign: 'right' },
   summaryTotal: { fontSize: 17 },
-  summarySub: { color: COLORS.textMuted, fontSize: 11, marginTop: 2, textAlign: 'right' },
+  summarySub: { color: COLORS.textMuted, fontSize: 12, marginTop: 2, textAlign: 'right' },
   summaryInputGroup: { paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border },
   summaryMissingLabel: { color: COLORS.warning },
   summaryWarning: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
@@ -2380,7 +2380,7 @@ const styles = StyleSheet.create({
   },
   confidenceText: {
     color: 'white',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: 'bold',
   },
   correctionItem: {
@@ -2439,7 +2439,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   itemPriceNote: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     marginTop: 6,
   },

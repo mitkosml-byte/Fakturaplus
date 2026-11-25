@@ -455,7 +455,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(16, 185, 129, 0.14)',
   },
   totalLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: COLORS.successLight,
   },

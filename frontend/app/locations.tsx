@@ -389,7 +389,7 @@ const styles = StyleSheet.create({
   figure: { color: COLORS.textSecondary, fontSize: 12 },
   figureValue: { color: 'white', fontWeight: '600' },
   parts: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6, lineHeight: 17 },
-  hint: { color: COLORS.textMuted, fontSize: 11, marginTop: 6, lineHeight: 15 },
+  hint: { color: COLORS.textMuted, fontSize: 12, marginTop: 6, lineHeight: 15 },
   closedBadge: {
     color: COLORS.textMuted,
     fontSize: 11,

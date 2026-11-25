@@ -212,9 +212,9 @@ const styles = StyleSheet.create({
   },
   bubbleMine: { backgroundColor: COLORS.primary, borderBottomRightRadius: 4 },
   bubbleTheirs: { backgroundColor: COLORS.surface, borderBottomLeftRadius: 4 },
-  bubbleSender: { fontSize: 11, fontWeight: '700', color: COLORS.primaryLight, marginBottom: 2 },
+  bubbleSender: { fontSize: 12, fontWeight: '700', color: COLORS.primaryLight, marginBottom: 2 },
   bubbleText: { fontSize: 15, color: 'white' },
-  bubbleTime: { fontSize: 10, color: 'rgba(255,255,255,0.6)', marginTop: 4, alignSelf: 'flex-end' },
+  bubbleTime: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 4, alignSelf: 'flex-end' },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',

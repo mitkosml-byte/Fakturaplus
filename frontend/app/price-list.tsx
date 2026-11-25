@@ -445,7 +445,7 @@ const styles = StyleSheet.create({
   name: { flex: 1, color: 'white', fontSize: 15, fontWeight: '600' },
   price: { color: 'white', fontSize: 15, fontWeight: '700' },
   sub: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
-  hint: { color: COLORS.textMuted, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  hint: { color: COLORS.textMuted, fontSize: 12, lineHeight: 16, marginTop: 4 },
   marginRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
   marginBadge: { fontSize: 13, fontWeight: '700' },
   dropBox: {

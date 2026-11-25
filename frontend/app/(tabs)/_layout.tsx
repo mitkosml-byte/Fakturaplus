@@ -143,6 +143,8 @@ export default function TabsLayout() {
           },
           tabBarActiveTintColor: COLORS.primary,
           tabBarInactiveTintColor: COLORS.textMuted,
+          // 11 px, the one text under 12: six labels under icons share a
+          // 360 px phone, and at 12 "Фактури" and "Сканирай" are cut.
           tabBarLabelStyle: {
             fontSize: 11,
             fontWeight: '600',

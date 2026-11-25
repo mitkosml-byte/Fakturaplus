@@ -83,6 +83,7 @@ const CTA_LABEL: Record<string, string> = {
   recurring_invoices: 'briefing.cta.recurring_invoices',
   margins: 'briefing.cta.margins',
   deadlines: 'briefing.cta.deadlines',
+  invoice_sums: 'briefing.cta.invoice_sums',
 };
 
 // Answers that settle a recurring expense's month right here.
@@ -403,7 +404,7 @@ const styles = StyleSheet.create({
     backgroundColor: `${COLORS.primary}33`,
   },
   newPillText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '700',
     color: COLORS.primary,
   },
@@ -415,7 +416,7 @@ const styles = StyleSheet.create({
     backgroundColor: `${COLORS.primary}26`,
   },
   newCountText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: COLORS.primary,
   },
@@ -435,7 +436,7 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   actionText: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
   },
   actionTextStrong: {

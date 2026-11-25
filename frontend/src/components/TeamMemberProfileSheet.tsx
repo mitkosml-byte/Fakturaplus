@@ -285,10 +285,10 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', backgroundColor: COLORS.background, borderRadius: 12, padding: 12, justifyContent: 'space-around' },
   statItem: { alignItems: 'center' },
   statValue: { fontSize: 16, fontWeight: 'bold', color: 'white' },
-  statLabel: { fontSize: 10, color: COLORS.textMuted, marginTop: 2, textAlign: 'center' },
+  statLabel: { fontSize: 12, color: COLORS.textMuted, marginTop: 2, textAlign: 'center' },
   notesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 18, marginBottom: 0 },
   netScore: { fontSize: 20, fontWeight: 'bold' },
-  notesHint: { fontSize: 11, color: COLORS.textMuted, marginBottom: 10 },
+  notesHint: { fontSize: 12, color: COLORS.textMuted, marginBottom: 10 },
   noteTypeRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   noteTypeButton: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
   addNoteBox: { backgroundColor: COLORS.background, borderRadius: 12, padding: 12, marginBottom: 12 },
   noteInput: { color: 'white', fontSize: 14, minHeight: 60, textAlignVertical: 'top' },
   noteInputError: { borderWidth: 1, borderColor: COLORS.danger, borderRadius: 8, padding: 6 },
-  fieldErrorText: { fontSize: 11, color: COLORS.danger, marginTop: 4 },
+  fieldErrorText: { fontSize: 12, color: COLORS.danger, marginTop: 4 },
   addNoteActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 8 },
   cancelButton: { paddingVertical: 8, paddingHorizontal: 12 },
   cancelButtonText: { color: COLORS.textSecondary, fontSize: 13 },
@@ -307,5 +307,5 @@ const styles = StyleSheet.create({
   noNotesText: { fontSize: 13, color: COLORS.textMuted, textAlign: 'center', paddingVertical: 20 },
   noteCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: COLORS.background, borderRadius: 10, padding: 10, marginBottom: 8 },
   noteText: { fontSize: 13, color: 'white' },
-  noteMeta: { fontSize: 11, color: COLORS.textMuted, marginTop: 4 },
+  noteMeta: { fontSize: 12, color: COLORS.textMuted, marginTop: 4 },
 });

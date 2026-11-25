@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
   conversationInfo: { flex: 1 },
   conversationTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   conversationName: { fontSize: 15, fontWeight: '600', color: 'white', flex: 1, marginRight: 8 },
-  conversationTime: { fontSize: 11, color: COLORS.textMuted },
+  conversationTime: { fontSize: 12, color: COLORS.textMuted },
   conversationPreview: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
   unreadBadge: {
     minWidth: 22,

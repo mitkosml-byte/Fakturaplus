@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   alertSettingsHint: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -237,7 +237,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   alertSupplier: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },

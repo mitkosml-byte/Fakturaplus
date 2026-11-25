@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   alertSupplier: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   alertChangeText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 'bold',
     color: COLORS.danger,
   },
@@ -217,7 +217,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   alertBasisText: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 4,
   },
@@ -232,12 +232,12 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   alertRowLinkText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: COLORS.primary,
   },
   alertRowLinkTextMuted: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: COLORS.textMuted,
   },

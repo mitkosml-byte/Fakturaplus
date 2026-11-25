@@ -437,7 +437,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   legendText: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
   },
   modalOverlay: {

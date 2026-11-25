@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   forecastLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 6,
     textAlign: 'center',

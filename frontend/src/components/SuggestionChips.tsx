@@ -30,7 +30,7 @@ export function SuggestionChips({ suggestions, onPick, label }: Props) {
 
 const styles = StyleSheet.create({
   wrap: { marginBottom: 14 },
-  label: { fontSize: 11, color: COLORS.textMuted, marginBottom: 6 },
+  label: { fontSize: 12, color: COLORS.textMuted, marginBottom: 6 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingHorizontal: 12,

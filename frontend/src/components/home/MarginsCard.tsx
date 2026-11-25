@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
   track: { height: 6, borderRadius: 3, backgroundColor: COLORS.background, marginTop: 6, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3 },
   changeRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 6 },
-  change: { fontSize: 11, fontWeight: '600' },
+  change: { fontSize: 12, fontWeight: '600' },
   line: { fontSize: 12, color: COLORS.textMuted, marginTop: 12 },
   details: { marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: COLORS.border },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingVertical: 3 },

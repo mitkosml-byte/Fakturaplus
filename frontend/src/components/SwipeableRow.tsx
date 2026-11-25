@@ -87,5 +87,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
   },
-  actionText: { color: 'white', fontSize: 11, fontWeight: '700' },
+  actionText: { color: 'white', fontSize: 12, fontWeight: '700' },
 });

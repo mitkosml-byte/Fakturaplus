@@ -392,7 +392,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   roiPeriodLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     textTransform: 'capitalize',
     marginTop: 1,
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   roiStatLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
     marginBottom: 4,
   },
@@ -507,7 +507,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   roiNote: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     lineHeight: 16,
     marginTop: 4,

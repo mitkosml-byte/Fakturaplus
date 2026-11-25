@@ -352,7 +352,7 @@ const styles = StyleSheet.create({
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
   amountLabel: { color: COLORS.textSecondary, fontSize: 12 },
   amount: { flex: 1, color: 'white', fontSize: 18, fontWeight: '700' },
-  history: { color: COLORS.textMuted, fontSize: 11, marginTop: 4 },
+  history: { color: COLORS.textMuted, fontSize: 12, marginTop: 4 },
   editor: { marginTop: 12, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 12 },
   fieldLabel: { color: COLORS.textSecondary, fontSize: 12, marginBottom: 4, marginTop: 8 },
   input: {
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   message: { minHeight: 180 },
-  hint: { color: COLORS.textMuted, fontSize: 11, marginTop: 6 },
+  hint: { color: COLORS.textMuted, fontSize: 12, marginTop: 6 },
   primaryButton: { backgroundColor: COLORS.primary, borderRadius: 12, padding: 13, alignItems: 'center', marginTop: 12 },
   primaryButtonText: { color: 'white', fontSize: 15, fontWeight: '600' },
   buttonRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

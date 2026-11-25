@@ -268,6 +268,7 @@ export const translations: Translations = {
     bg: 'Издай фактурите',
     en: 'Issue the invoices',
   },
+  'briefing.cta.invoice_sums': { bg: 'Провери фактурата', en: 'Check the invoice' },
   'briefing.cta.two_factor': {
     bg: 'Включи',
     en: 'Turn it on',

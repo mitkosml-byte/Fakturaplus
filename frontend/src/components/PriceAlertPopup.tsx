@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   alertSupplier: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -271,7 +271,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   alertOldPrice: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     textDecorationLine: 'line-through',
   },
@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#22C55E20',
   },
   changeText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: 'bold',
     color: COLORS.danger,
   },
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
     color: COLORS.success,
   },
   alertBasisText: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 6,
   },
@@ -316,12 +316,12 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   alertRowActionText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: COLORS.primary,
   },
   alertRowActionTextMuted: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: COLORS.textMuted,
   },

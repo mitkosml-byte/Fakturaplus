@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
   stat: { flex: 1, backgroundColor: COLORS.background, borderRadius: 10, padding: 12 },
   statLabel: { color: COLORS.textMuted, fontSize: 12 },
   statValue: { color: 'white', fontSize: 17, fontWeight: 'bold', marginTop: 4 },
-  statHint: { color: COLORS.textMuted, fontSize: 11, marginTop: 2 },
+  statHint: { color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
   sectionTitle: { color: 'white', fontSize: 14, fontWeight: '700', marginTop: 16, marginBottom: 6 },
   line: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   lineText: { color: COLORS.textSecondary, fontSize: 13 },

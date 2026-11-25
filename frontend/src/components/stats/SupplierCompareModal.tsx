@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   compareStatLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginBottom: 2,
   },
