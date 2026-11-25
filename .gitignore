@@ -96,3 +96,6 @@ android-sdk/
 # Environment files
 *.env
 *.env.*
+
+# The example settings are part of the code: they list what an install needs.
+!.env.example

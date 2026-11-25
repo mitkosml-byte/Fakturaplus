@@ -1,1 +1,80 @@
-# Here are your Instructions
+# ФАКТУРА+
+
+Програма за малък български бизнес: фактури (и сканирането им с AI), дневен
+оборот, разходи, ДДС, печалба и маржове, екип и заплати, поръчки, вземания и
+пакет за счетоводителя. Ползва се като уебсайт на телефона; кодът е готов и за
+приложение за Android и iOS.
+
+## Как е устроена
+
+| Част | С какво | Къде |
+|---|---|---|
+| Сървър | Python 3.11, FastAPI | `backend/` (`server.py`, `routers/`, `services/`) |
+| База | MongoDB (напр. MongoDB Atlas) | връзката е в `MONGO_URL` |
+| Приложение | Expo / React Native, уеб версия | `frontend/` (`app/` екраните, `src/` общото) |
+| Външни услуги | Anthropic (AI), Resend (имейли), Stripe (плащания), Web Push (известия), MET Norway (времето) | всяка се включва със своя ключ |
+
+Сървърът има и фонови задачи (сутрешно известие, напомняния, бюджет, архив по
+имейл, кредити за сканиране). Затова трябва да работи постоянно: безплатният план
+на Render заспива след 15 минути без посетители и задачите спират с него.
+
+## Пускане на компютър
+
+Сървър:
+
+```bash
+cd backend
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env        # попълнете поне MONGO_URL
+uvicorn server:app --reload --port 8000
+```
+
+Приложение (Node 20, виж `frontend/.nvmrc`):
+
+```bash
+cd frontend
+npm ci
+EXPO_PUBLIC_BACKEND_URL=http://localhost:8000 npx expo start --web
+```
+
+## Настройки
+
+Всички настройки на сървъра са описани в [`backend/.env.example`](backend/.env.example).
+Задължителна е само `MONGO_URL` (на живо и `FRONTEND_URL`). Без останалите
+съответната част просто е изключена:
+
+| Без | Не работи |
+|---|---|
+| `ANTHROPIC_API_KEY` | сканирането на фактури и асистентът |
+| `RESEND_API_KEY` | имейлите: забравена парола, пакет за счетоводителя, архив |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | плащането за сканиране (тогава е безплатно) |
+| `VAPID_PRIVATE_KEY` | известията на телефона |
+| `ADMIN_EMAIL` | страницата с отзивите за администратора |
+
+Приложението има една настройка: `EXPO_PUBLIC_BACKEND_URL`, адресът на сървъра
+([`frontend/.env.example`](frontend/.env.example)).
+
+## Публикуване в Render
+
+1. Render → New → Blueprint → това хранилище. [`render.yaml`](render.yaml) създава
+   сървъра (`fakturaplus-backend`) и сайта (`fakturaplus-frontend`).
+2. Въведете стойностите, които Render поиска (тези с `sync: false`).
+3. В сайта `EXPO_PUBLIC_BACKEND_URL` е адресът на сървъра, а в сървъра
+   `FRONTEND_URL` е адресът на сайта.
+4. Сървърът е на най-малкия платен план (около 7 $ на месец), за да не заспива.
+
+Всяко качване в клона, от който Render публикува, отива веднага при
+потребителите. В Render → Settings → Build & Deploy може да се избере
+публикуване само след успешни проверки.
+
+## Проверки
+
+```bash
+cd backend && python -m pytest tests/ -q          # тестовете на сървъра
+cd backend && python -m mypy server.py routers/ --ignore-missing-imports
+cd frontend && npx tsc --noEmit -p .              # типовете на приложението
+```
+
+Тестовете ползват измислени данни и база в паметта (mongomock) - не им трябва
+истинска MongoDB.

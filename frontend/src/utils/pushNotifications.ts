@@ -1,10 +1,16 @@
 import { Platform } from 'react-native';
 import { api } from '../services/api';
 
-// Public VAPID key - not secret, safe to ship in client code (it's only
-// usable to SUBSCRIBE a browser to push from this app's own backend, never
-// to send push or to read anything).
-const VAPID_PUBLIC_KEY = 'BG5n5W382MNqBPUBfGWEOg-u8tYLKabgYMgRg_SOvdH0SdC18IIgcoRjlxUQejEViK1cZ9dvYmvZtfwOMcVhr7M';
+// Public VAPID key - not secret (it's only usable to SUBSCRIBE a browser to
+// push from this app's own backend). The server gives the one of its own
+// key pair (GET /push/public-key), so a new install with its own keys works
+// unchanged; this one, the first install's, is the fallback.
+const FALLBACK_VAPID_PUBLIC_KEY = 'BG5n5W382MNqBPUBfGWEOg-u8tYLKabgYMgRg_SOvdH0SdC18IIgcoRjlxUQejEViK1cZ9dvYmvZtfwOMcVhr7M';
+
+async function vapidPublicKey(): Promise<string> {
+  const served = await api.getPushPublicKey().catch(() => null);
+  return served?.public_key || FALLBACK_VAPID_PUBLIC_KEY;
+}
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -59,7 +65,7 @@ export async function enablePushNotifications(): Promise<{ ok: boolean; error?: 
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        applicationServerKey: urlBase64ToUint8Array(await vapidPublicKey()),
       });
     }
 

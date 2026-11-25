@@ -1,3 +1,6 @@
+# ФАКТУРА+ в Render: сървърът (Python) и сайтът (статичен). Нова инсталация:
+# Render -> New -> Blueprint -> това хранилище. Стойностите със sync: false
+# се въвеждат в Render (тайните не стоят в кода); вижте backend/.env.example.
 services:
   - type: web
     name: fakturaplus-backend
@@ -9,10 +12,55 @@ services:
     plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: ENVIRONMENT
         value: production
       - key: MONGO_URL
         sync: false
       - key: DB_NAME
         value: fakturaplus
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: SCAN_CREDITS_ENFORCED
+        value: "true"
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: BUSINESS_TIMEZONE
+        value: Europe/Sofia
+
+  - type: web
+    name: fakturaplus-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npx expo export -p web --output-dir dist
+    staticPublishPath: dist
+    envVars:
+      - key: NODE_VERSION
+        value: 20.19.0
+      # The server's address, built into the app (https://...onrender.com).
+      - key: EXPO_PUBLIC_BACKEND_URL
+        sync: false
+    routes:
+      # A page that is not a file (a link opened straight) gets the app.
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -230,6 +230,13 @@ async def mark_conversation_read(conversation_id: str, current_user: User = Depe
     )
     return {"message": "OK"}
 
+@router.get("/push/public-key")
+async def push_public_key(current_user: User = Depends(get_current_user)):
+    """The key a browser subscribes to this server's pushes with - from the
+    server's own VAPID key pair, so each install works with its own."""
+    return {"public_key": push_service.public_key()}
+
+
 @router.post("/push/subscribe")
 async def push_subscribe(payload: PushSubscriptionIn, current_user: User = Depends(get_current_user)):
     await server.db.push_subscriptions.update_one(

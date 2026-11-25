@@ -1937,6 +1937,10 @@ class ApiService {
   }
 
   // Web Push
+  async getPushPublicKey(): Promise<{ public_key: string | null }> {
+    return this.fetch('/push/public-key');
+  }
+
   async subscribePush(subscription: { endpoint: string; keys: { p256dh: string; auth: string } }): Promise<void> {
     await this.fetch('/push/subscribe', { method: 'POST', body: JSON.stringify(subscription) });
   }
