@@ -23,6 +23,7 @@ import statistics
 import json
 import difflib
 import hashlib
+import ipaddress
 from passlib.context import CryptContext
 import certifi
 from anthropic import AsyncAnthropic
@@ -70,8 +71,29 @@ IS_PRODUCTION = os.environ.get('ENVIRONMENT', 'development') == 'production'
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+def client_address(request: Request) -> str:
+    """The address of the person behind a request, for the rate limits.
+
+    The app runs behind the host's proxies, so the connection itself comes
+    from a proxy every visitor shares - one limit for everybody. Each proxy
+    appends the address it saw to X-Forwarded-For, and a visitor can write
+    anything at the left of that list, so it is read from the right: the
+    first public address there is the one the host's edge saw, the
+    visitor's own. Private and loopback addresses are proxies inside the
+    host's network. Without one (a direct request, a test), the connection's."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    for part in reversed(forwarded.split(",")):
+        try:
+            address = ipaddress.ip_address(part.strip())
+        except ValueError:
+            continue
+        if address.is_global:
+            return str(address)
+    return get_remote_address(request)
+
+
 # Rate limiter
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_address)
 
 # MongoDB connection. serverSelectionTimeoutMS caps how long any single
 # operation waits to find a usable server - without it, the driver's
