@@ -18,7 +18,7 @@ import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { NotificationSettings } from '../src/types';
 import { useTranslation } from '../src/i18n';
-import { getPushStatus, enablePushNotifications, disablePushNotifications } from '../src/utils/pushNotifications';
+import { getPushStatus, enablePushNotifications, disablePushNotifications, needsHomeScreenForPush } from '../src/utils/pushNotifications';
 import { ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
@@ -146,6 +146,19 @@ export default function NotificationsSettingsScreen() {
           </View>
 
           <ScrollView style={styles.content}>
+            {!pushSupported && needsHomeScreenForPush() && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <View style={[styles.sectionIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                    <Ionicons name="phone-portrait-outline" size={22} color={COLORS.success} />
+                  </View>
+                  <View style={styles.sectionTitleContainer}>
+                    <Text style={styles.sectionTitle}>{t('notifications.iosTitle')}</Text>
+                    <Text style={styles.sectionSubtitle}>{t('notifications.iosSteps')}</Text>
+                  </View>
+                </View>
+              </View>
+            )}
             {pushSupported && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>

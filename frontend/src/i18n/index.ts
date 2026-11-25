@@ -268,6 +268,11 @@ export const translations: Translations = {
     bg: 'Издай фактурите',
     en: 'Issue the invoices',
   },
+  'notifications.iosTitle': { bg: 'Известия на iPhone', en: 'Notifications on an iPhone' },
+  'notifications.iosSteps': {
+    bg: 'На iPhone известията идват само от приложение на началния екран: в Safari натиснете „Сподели“, после „Добави към началния екран“, и отворете Фактура+ оттам.',
+    en: 'On an iPhone notifications come only from an app on the home screen: in Safari tap Share, then "Add to Home Screen", and open Fakturaplus from there.',
+  },
   'briefing.cta.invoice_sums': { bg: 'Провери фактурата', en: 'Check the invoice' },
   'briefing.cta.two_factor': {
     bg: 'Включи',

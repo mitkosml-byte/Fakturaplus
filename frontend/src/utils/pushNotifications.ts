@@ -33,6 +33,18 @@ export function isPushSupported(): boolean {
   );
 }
 
+// An iPhone or iPad sends a site's notifications only once the site is
+// added to the home screen and opened from there (iOS 16.4 on) - in Safari
+// itself push is simply missing. Then the app says how to add it.
+export function needsHomeScreenForPush(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined' || typeof window === 'undefined') return false;
+  const agent = navigator.userAgent || '';
+  const apple = /iPad|iPhone|iPod/.test(agent) || (agent.includes('Macintosh') && typeof document !== 'undefined' && 'ontouchend' in document);
+  const installed = (navigator as unknown as { standalone?: boolean }).standalone === true
+    || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+  return apple && !installed;
+}
+
 export type PushStatus = 'unsupported' | 'default' | 'granted' | 'denied';
 
 export async function getPushStatus(): Promise<PushStatus> {
