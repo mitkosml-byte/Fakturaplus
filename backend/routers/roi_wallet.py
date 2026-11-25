@@ -4,6 +4,7 @@ Shares server.py's db/models/helpers/services via `from server import *`;
 after module load, so this file always accesses them as `server.db` /
 `server.AI_FEATURES_ENABLED` (qualified), never via the star-import, to
 stay correct when server.py's test fixture monkeypatches them."""
+import asyncio
 from collections import defaultdict
 from datetime import date as date_type
 
@@ -18,7 +19,6 @@ from server import (
     _scan_packages_catalogue,
     _require_billing_enabled,
     _month_bounds,
-    _compute_month_profit,
     _business_digest_period,
     _business_digest_top_expenses,
     _signal_unpaid_invoices,
@@ -795,7 +795,21 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
     wants_total = sum(v for k, v in category_totals.items() if k in {c.value for c in WALLET_WANTS_CATEGORIES})
 
     visibility = get_financial_visibility(current_user)
-    profit_this_month = await _compute_month_profit(company_id, scope, current_user.user_id, start_date, end_date, visibility)
+    month = counted_period(Period.parse(start_date, end_date))
+    totals, company = await asyncio.gather(
+        period_totals(company_id, scope, current_user.user_id, month),
+        server.db.companies.find_one({"id": company_id}, {"_id": 0, "vat_registered": 1}),
+    )
+    income, expense = period_income_expense(totals, visibility)
+    profit_this_month = income - expense
+    # What the month's profit still owes before any of it is the owner's:
+    # the VAT to pay for the month (in the profit with the sales; a refund
+    # is not counted on) and the salaries not entered yet, by the days gone
+    # - the same expected payroll the margins count.
+    vat_to_pay = max(vat_due_of(totals), 0.0) if company_vat_registered(company) else 0.0
+    salaries_expected = (
+        await expected_payroll(company_id, scope, month, now.date()) if visibility.get("payroll", True) else 0.0
+    )
 
     today_str = now.strftime("%Y-%m-%d")
     two_weeks_str = (now + timedelta(days=14)).strftime("%Y-%m-%d")
@@ -820,7 +834,10 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
     # Everything measured against the profit is for whoever sees the
     # profit: anyone else gets the notebook's own records and sums.
     sees_profit = bool(visibility["profit"])
-    safe_to_spend: Optional[float] = round(profit_this_month - total_spent - upcoming_due_total, 2) if sees_profit else None
+    safe_to_spend: Optional[float] = (
+        round(profit_this_month - vat_to_pay - salaries_expected - total_spent - upcoming_due_total, 2)
+        if sees_profit else None
+    )
     spent_percent_of_profit = round(total_spent / profit_this_month * 100, 1) if sees_profit and profit_this_month > 0 else None
 
     status = "ok"
@@ -849,6 +866,10 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
         "wants_total": round(wants_total, 2),
         "profit_this_month": round(profit_this_month, 2) if sees_profit else None,
         "safe_to_spend": safe_to_spend,
+        # What safe_to_spend keeps back, for whoever sees the profit.
+        "set_aside": {
+            "vat": round(vat_to_pay, 2), "salaries": round(salaries_expected, 2), "upcoming": round(upcoming_due_total, 2),
+        } if sees_profit else None,
         "threshold_percent": threshold_percent,
         "spent_percent_of_profit": spent_percent_of_profit,
         "status": status,

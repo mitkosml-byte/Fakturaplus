@@ -2283,6 +2283,9 @@ export interface PersonalWalletSummary {
   // Measured against the profit: null for a viewer who does not see the profit.
   profit_this_month: number | null;
   safe_to_spend: number | null;
+  // What safe_to_spend keeps back: the month's VAT to pay, the salaries not
+  // entered yet (by the days gone) and what falls due within a week.
+  set_aside?: { vat: number; salaries: number; upcoming: number } | null;
   threshold_percent: number;
   spent_percent_of_profit: number | null;
   status: 'ok' | 'warning' | 'danger';

@@ -30,7 +30,6 @@ from server import *
 import server
 from services import margins as margins_service
 from services import recurring_service
-from services.business_calendar import add_months
 
 router = APIRouter(prefix="/api")
 
@@ -44,20 +43,6 @@ def sees_margins(current_user: User) -> bool:
     return bool(visibility.get("statistics") and visibility.get("profit"))
 
 
-async def _expected_payroll(company_id: Optional[str], scope: dict, period: Period, today: date) -> float:
-    """The payroll not entered yet, by the salaries in Екип: for this month
-    and the month before - whose payroll is made after it ends - each
-    employee without an entry for it (month_payroll), by the period's share
-    of the month. An older month is as it was entered."""
-    pending = {(today.year, today.month), add_months(today.year, today.month, -1)}
-    expected = 0.0
-    for year, month in period.months():
-        share = period.month_share(year, month)
-        if (year, month) in pending and share:
-            expected += (await month_payroll(company_id, scope, year, month, expect=True))["expected"] * share
-    return expected
-
-
 async def _figures(
     company_id: Optional[str], scope: dict, user_id: str, period: Period, visibility: dict, vat_registered: bool,
     expect_payroll: bool, today: date,
@@ -65,10 +50,10 @@ async def _figures(
     """A period's figures for this viewer, and how many recurring costs the
     business follows."""
     off_book_visible = bool(visibility["off_book_expenses"])
-    totals, recurring, expected_payroll = await asyncio.gather(
+    totals, recurring, payroll_to_come = await asyncio.gather(
         period_totals(company_id, scope, user_id, period),
         recurring_service.period_costs(server.db, company_id, scope, period, off_book_visible, vat_registered),
-        _expected_payroll(company_id, scope, period, today) if expect_payroll else _zero(),
+        expected_payroll(company_id, scope, period, today) if expect_payroll else _zero(),
     )
     pocket = totals["pocket_money"] if visibility["pocket_money"] else 0.0
     if vat_registered:
@@ -82,10 +67,10 @@ async def _figures(
     figures = margins_service.Figures(
         sales=sales,
         goods=max(goods, 0.0),
-        payroll=(totals["payroll_cost"] + expected_payroll) if sees_payroll else 0.0,
+        payroll=(totals["payroll_cost"] + payroll_to_come) if sees_payroll else 0.0,
         recurring=recurring["accrued"],
         depreciation=totals["depreciation_cost"],
-        payroll_expected=expected_payroll if sees_payroll else 0.0,
+        payroll_expected=payroll_to_come if sees_payroll else 0.0,
     )
     return figures, int(recurring["items"])
 

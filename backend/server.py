@@ -50,8 +50,8 @@ from slowapi.errors import RateLimitExceeded
 import services.scan_credit_service as scan_credit_service_module
 from services.scan_credit_service import ScanCreditService
 from services.business_calendar import (
-    BUSINESS_TZ, OPEN_END, OPEN_START, Period, business_day, day_start_utc, days_in_month, is_stored_day,
-    now_local, stored_day, today_local,
+    BUSINESS_TZ, OPEN_END, OPEN_START, Period, add_months, business_day, day_start_utc, days_in_month,
+    is_stored_day, now_local, stored_day, today_local,
 )
 from services import revenue_vat
 from services.money_text import fmt_amount, fmt_eur
@@ -3959,6 +3959,21 @@ async def month_payroll(company_id: Optional[str], scope: dict, year: int, month
                 for e in pending
             )
     return {"recorded": round(recorded, 2), "expected": round(expected, 2)}
+
+
+async def expected_payroll(company_id: Optional[str], scope: dict, period: Period, today: date) -> float:
+    """The payroll not entered yet, by the salaries in Екип: for this month
+    and the month before - whose payroll is made after it ends - each
+    employee without an entry for it (month_payroll), by the period's share
+    of the month. An older month is as it was entered. The margins and the
+    notebook's safe-to-withdraw both count it."""
+    pending = {(today.year, today.month), add_months(today.year, today.month, -1)}
+    expected = 0.0
+    for year, month in period.months():
+        share = period.month_share(year, month)
+        if (year, month) in pending and share:
+            expected += (await month_payroll(company_id, scope, year, month, expect=True))["expected"] * share
+    return expected
 
 
 # The usual margin is read off this many full months before the current one.

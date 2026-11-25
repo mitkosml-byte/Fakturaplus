@@ -629,6 +629,19 @@ export default function PersonalExpensesHistoryScreen() {
                   <Text style={styles.safeCardHint}>
                     {walletSummary.safe_to_spend === null ? t('wallet.profitHidden') : t('wallet.safeToSpendHint')}
                   </Text>
+                  {(() => {
+                    // What the number keeps back, so the owner sees why it is lower than the profit.
+                    const kept = walletSummary.set_aside;
+                    if (walletSummary.safe_to_spend === null || !kept) return null;
+                    const parts = [
+                      kept.vat > 0 ? t('wallet.setAsideVat').replace('{amount}', formatMoney(kept.vat)) : null,
+                      kept.salaries > 0 ? t('wallet.setAsideSalaries').replace('{amount}', formatMoney(kept.salaries)) : null,
+                      kept.upcoming > 0 ? t('wallet.setAsideUpcoming').replace('{amount}', formatMoney(kept.upcoming)) : null,
+                    ].filter(Boolean);
+                    return parts.length > 0 ? (
+                      <Text style={styles.safeCardHint}>{t('wallet.setAside').replace('{parts}', parts.join(' · '))}</Text>
+                    ) : null;
+                  })()}
                   {walletSummary.spent_percent_of_profit !== null && (
                     <View style={styles.progressTrack}>
                       <View

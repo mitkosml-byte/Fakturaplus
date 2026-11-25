@@ -4566,9 +4566,16 @@ export const translations: Translations = {
     en: 'Safe to spend',
   },
   'wallet.safeToSpendHint': {
-    bg: 'Печалба за месеца минус вече изтегленото минус предстоящи задължения',
-    en: "This month's profit minus what's already withdrawn minus upcoming obligations",
+    bg: 'Печалбата за месеца без ДДС за внасяне, очакваните заплати, вече изтегленото и предстоящите задължения',
+    en: "This month's profit less the VAT to pay, the expected salaries, what's already withdrawn and upcoming obligations",
   },
+  'wallet.setAside': {
+    bg: 'Задържано: {parts}',
+    en: 'Kept back: {parts}',
+  },
+  'wallet.setAsideVat': { bg: 'ДДС {amount}', en: 'VAT {amount}' },
+  'wallet.setAsideSalaries': { bg: 'заплати {amount}', en: 'salaries {amount}' },
+  'wallet.setAsideUpcoming': { bg: 'предстоящи {amount}', en: 'upcoming {amount}' },
   'wallet.profitHidden': {
     bg: 'Печалбата е скрита за вашия достъп – тук са само записите и сумите им.',
     en: 'The profit is hidden for your access level – only the entries and their sums are here.',
