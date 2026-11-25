@@ -7402,7 +7402,11 @@ async def run_data_migrations():
 async def root():
     return {"message": "Invoice Manager API", "status": "running"}
 
-@api_router.get("/health")
+# GET and HEAD: an outside timer that keeps the free server awake (so its
+# background jobs - the morning push, reminders, alerts, the monthly
+# backup - keep running) often checks with HEAD, and a 405 would read to
+# it as the site being down.
+@api_router.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "healthy"}
 
