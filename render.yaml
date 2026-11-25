@@ -3,7 +3,10 @@ services:
     name: fakturaplus-backend
     runtime: python
     rootDir: backend
-    plan: free
+    # Always on: the free plan sleeps after 15 minutes without visitors and
+    # the background jobs (morning push, reminders, alerts, monthly backup)
+    # sleep with it. The smallest paid plan keeps them running.
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     envVars:
