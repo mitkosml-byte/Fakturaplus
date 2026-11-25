@@ -860,21 +860,17 @@ def test_roles_invitations_permissions(client):
     assert no_profit_sept["profit"] is None
     assert no_profit_sept["roi_percent"] is None
 
-    # The raw VAT-ledger Excel export must redact pocket_money too (same
-    # right as the other views above), not just the aggregated endpoints.
+    # The VAT-ledger Excel export holds declared sales only: no pocket
+    # money for anyone, the owner included - it goes to the accountant.
     from io import BytesIO
     from openpyxl import load_workbook
-    r = client.get("/api/export/vat-ledger/excel?start_date=2026-09-01&end_date=2026-09-30", headers=owner)
-    assert r.status_code == 200
-    owner_ws = load_workbook(BytesIO(r.content))["Дневник продажби"]
-    assert owner_ws.cell(row=5, column=12).value == 15  # pocket_money, visible to the owner
-    assert owner_ws.cell(row=5, column=13).value == 115  # total = fiscal_revenue + pocket_money
-
-    r = client.get("/api/export/vat-ledger/excel?start_date=2026-09-01&end_date=2026-09-30", headers=staff)
-    assert r.status_code == 200
-    staff_ws = load_workbook(BytesIO(r.content))["Дневник продажби"]
-    assert staff_ws.cell(row=5, column=12).value == 0  # no view_pocket_money -> redacted, not just blanked
-    assert staff_ws.cell(row=5, column=13).value == 100
+    for viewer in (owner, staff):
+        r = client.get("/api/export/vat-ledger/excel?start_date=2026-09-01&end_date=2026-09-30", headers=viewer)
+        assert r.status_code == 200
+        ws = load_workbook(BytesIO(r.content))["Дневник продажби"]
+        headers = [c.value for c in ws[4]]
+        assert headers[-1] == "Общо" and not any("джоб" in str(h).lower() for h in headers)
+        assert ws.cell(row=5, column=len(headers)).value == 100  # the till's declared sales only
 
     # Off-book expense (30) must not leak into the expense-forecast
     # aggregate for a viewer without view_off_book_expenses either.

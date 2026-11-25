@@ -179,10 +179,9 @@ async def build_accountant_pack(company_id: Optional[str], scope: dict, current_
     company = dict(company or {})
     company_name = company.get("name", "")
     month = summary["month"]
-    sales = records["sales"]
-    if not get_financial_visibility(current_user)["pocket_money"]:
-        for row in sales:
-            row["pocket_money"] = 0
+    # The sales ledger lists declared sales only: no pocket money, whoever
+    # sends the pack (services/export_service.generate_vat_ledger_excel).
+    sales = [{k: v for k, v in row.items() if k != "pocket_money"} for row in records["sales"]]
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as pack:

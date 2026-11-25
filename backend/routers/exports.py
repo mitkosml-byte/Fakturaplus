@@ -145,13 +145,10 @@ async def export_vat_ledger_excel(
     rev_query["date"] = period.text_filter()
     sales = await server.db.daily_revenue.find(rev_query, {"_id": 0}).sort("date", 1).to_list(ALL_ROWS)
 
-    # Same redaction get_summary/get_chart_data apply to pocket_money - a
-    # raw export must never show a viewer a field the aggregated views
-    # already hide from them (e.g. an accountant with export_data but
-    # without view_pocket_money).
-    if not get_financial_visibility(current_user)["pocket_money"]:
-        for rev in sales:
-            rev["pocket_money"] = 0
+    # The ledger holds declared sales only - the pocket money is not read
+    # into it at all, for anyone (it goes to the accountant).
+    for rev in sales:
+        rev.pop("pocket_money", None)
 
     company_name = ""
     if company_id:

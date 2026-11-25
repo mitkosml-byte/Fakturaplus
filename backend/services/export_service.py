@@ -771,9 +771,11 @@ class ExportService:
         # by day: each invoice its own row with its number, customer and the
         # base and VAT of each of its rates; a cancelled one keeps its number
         # in the list at zero.
+        # Only declared sales: the pocket money is never in it, whoever
+        # makes it - the ledger goes to the accountant and the tax return.
         sales_headers = [
             "№", "Дата", "Вид документ", "№ документ", "Клиент", "ЕИК",
-            "ДО 20%", "ДДС 20%", "ДО 9%", "ДДС 9%", "ДО нулева ставка", "Необлагаема част (джобни)", "Общо",
+            "ДО 20%", "ДДС 20%", "ДО 9%", "ДДС 9%", "ДО нулева ставка", "Общо",
         ]
         first_amount_col = 7
         for col, header in enumerate(sales_headers, 1):
@@ -808,7 +810,6 @@ class ExportService:
 
         def _till_row(rev: dict) -> tuple:
             fiscal_revenue = rev.get("fiscal_revenue", 0) or 0
-            pocket_money = rev.get("pocket_money", 0) or 0
             # Each VAT group of the day's till report at its own rate (or
             # the whole day at its one rate).
             base_20 = vat_20 = base_9 = vat_9 = base_0 = 0.0
@@ -831,7 +832,7 @@ class ExportService:
                 kind += " - без фактурираното"
             return (
                 day, 0, kind, "", "", "",
-                [base_20, vat_20, base_9, vat_9, base_0, pocket_money, fiscal_revenue + pocket_money],
+                [base_20, vat_20, base_9, vat_9, base_0, fiscal_revenue],
             )
 
         def _invoice_row(doc: dict) -> tuple:
@@ -847,12 +848,12 @@ class ExportService:
             return (
                 str(doc.get("issue_date", ""))[:10], 1, kind, _excel_safe(doc.get("invoice_number") or ""),
                 _excel_safe(doc.get("customer_name") or ""), _excel_safe(doc.get("customer_eik") or ""),
-                [round(base_20, 2), round(vat_20, 2), round(base_9, 2), round(vat_9, 2), round(base_0, 2), 0.0, round(total, 2)],
+                [round(base_20, 2), round(vat_20, 2), round(base_9, 2), round(vat_9, 2), round(base_0, 2), round(total, 2)],
             )
 
         sale_rows = [_till_row(rev) for rev in sales] + [_invoice_row(doc) for doc in (issued_invoices or [])]
         sale_rows.sort(key=lambda r: (r[0], r[1], r[3]))
-        sales_totals = [0.0] * 7
+        sales_totals = [0.0] * 6
         row2 = header_row
         for idx, (day, _order, kind, number, customer, eik, values) in enumerate(sale_rows, 1):
             row2 = header_row + idx
@@ -872,7 +873,7 @@ class ExportService:
             cell.fill = total_fill
             cell.number_format = money_format
 
-        for col, width in zip(range(1, len(sales_headers) + 1), [5, 12, 28, 13, 24, 13, 11, 10, 11, 10, 13, 22, 13]):
+        for col, width in zip(range(1, len(sales_headers) + 1), [5, 12, 28, 13, 24, 13, 11, 10, 11, 10, 13, 13]):
             ws2.column_dimensions[get_column_letter(col)].width = width
 
         output = io.BytesIO()

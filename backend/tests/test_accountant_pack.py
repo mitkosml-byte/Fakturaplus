@@ -96,3 +96,20 @@ def test_n4_sent_to_the_accountant_and_reminded_until_then(client, monkeypatch):
     monkeypatch.setattr(accountant_pack, "today_local", lambda: date(2026, 11, 20))   # after the 15th: none
     asyncio.run(server.db.accountant_packs.delete_many({"company_id": company_id}))
     assert signal() is None
+
+
+def test_p0_the_pack_never_carries_the_pocket_money(client):
+    """The owner sees the pocket money, but the ledger in the pack goes to
+    the accountant: declared sales only, no pocket column, no pocket in the
+    total."""
+    import openpyxl  # type: ignore[import-untyped]
+    _, _, owner = _company()
+    client.post("/api/daily-revenue", headers=owner, json={"date": "2026-10-03", "fiscal_revenue": 100, "pocket_money": 40})
+    archive = client.get("/api/accountant-pack/zip?month=2026-10", headers=owner)
+    assert archive.status_code == 200
+    ledger = zipfile.ZipFile(io.BytesIO(archive.content)).read("dnevnik_pokupki_prodajbi_2026-10.xlsx")
+    sheet = openpyxl.load_workbook(io.BytesIO(ledger))["Дневник продажби"]
+    cells = [str(c.value) for row in sheet.iter_rows() for c in row if c.value is not None]
+    assert not any("джоб" in text.lower() for text in cells)
+    [row] = [[c.value for c in r] for r in sheet.iter_rows() if isinstance(r[0].value, int)]
+    assert row[-1] == 100 and 40 not in row and 140 not in row
