@@ -15,7 +15,7 @@ import { PressableScale } from './PressableScale';
 import type {
   RecurringExpense, RecurringKind, RecurringOccurrence, RecurringOverview, RecurringRecord,
 } from '../types';
-import { formatMoney } from '../utils/money';
+import { formatMoney, readAmount } from '../utils/money';
 
 type Props = {
   overview: RecurringOverview | null;
@@ -131,7 +131,7 @@ export function RecurringExpensesSection({ overview, onChanged }: Props) {
   };
 
   const save = async () => {
-    const value = parseFloat(amount.replace(',', '.'));
+    const value = readAmount(amount);
     const dayNumber = parseInt(day, 10);
     if (!description.trim() || !(value > 0)) {
       Alert.alert(t('common.error'), t('budget.invalidData'));

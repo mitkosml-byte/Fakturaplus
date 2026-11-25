@@ -35,7 +35,7 @@ import { InvoiceDetailModal } from '../../src/components/invoices/InvoiceDetailM
 import { COLORS } from '../../src/theme/colors';
 import Animated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, interpolate, Extrapolation } from 'react-native-reanimated';
 import { toApiDate } from '../../src/utils/periodRange';
-import { formatAmount, formatMoney } from '../../src/utils/money';
+import { formatAmount, formatMoney, readAmount } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -347,16 +347,16 @@ export default function InvoicesScreen() {
     if (!selectedInvoice) return;
     const supplier = editSupplier.trim();
     const invoiceNumber = editInvoiceNumber.trim();
-    const withoutVat = parseFloat(editAmountWithoutVat.replace(',', '.'));
-    const vat = parseFloat(editVatAmount.replace(',', '.'));
+    const withoutVat = readAmount(editAmountWithoutVat);
+    const vat = readAmount(editVatAmount);
     if (!supplier || !invoiceNumber || isNaN(withoutVat) || isNaN(vat)) {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;
     }
     const parsedItems = editItems.map((it) => ({
       id: it.id,
-      quantity: parseFloat(it.quantity.replace(',', '.')),
-      unit_price: parseFloat(it.unit_price.replace(',', '.')),
+      quantity: readAmount(it.quantity),
+      unit_price: readAmount(it.unit_price),
     }));
     if (parsedItems.some((it) => isNaN(it.quantity) || it.quantity <= 0 || isNaN(it.unit_price))) {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
@@ -464,7 +464,7 @@ export default function InvoicesScreen() {
   // A payment on its own day, added to the invoice's payment history.
   const handleSavePayment = async () => {
     if (!selectedInvoice) return;
-    const amount = parseFloat(paymentAmountInput.replace(',', '.'));
+    const amount = readAmount(paymentAmountInput);
     if (isNaN(amount) || amount <= 0) {
       Alert.alert(t('common.error'), t('budget.invalidAmount'));
       return;

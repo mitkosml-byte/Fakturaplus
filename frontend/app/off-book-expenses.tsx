@@ -26,7 +26,7 @@ import { useLocationChoice } from '../src/stores/locationsStore';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { getDescriptionSuggestions } from '../src/utils/expenseSuggestions';
 import { COLORS } from '../src/theme/colors';
-import { formatMoney } from '../src/utils/money';
+import { formatMoney, readAmount } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -155,7 +155,7 @@ export default function OffBookExpensesHistoryScreen() {
 
   const handleSave = async () => {
     const missingDescription = !formDescription.trim();
-    const parsedAmount = parseFloat(formAmount);
+    const parsedAmount = readAmount(formAmount);
     const invalidAmount = isNaN(parsedAmount) || parsedAmount <= 0;
     setDescriptionError(missingDescription);
     setAmountError(invalidAmount);

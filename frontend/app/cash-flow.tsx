@@ -23,7 +23,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
-import { formatMoney } from '../src/utils/money';
+import { formatMoney, readAmount } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -93,8 +93,8 @@ export default function CashFlowScreen() {
   };
 
   const savePosition = async () => {
-    const cashValue = parseFloat(cash.replace(',', '.') || '0');
-    const bankValue = parseFloat(bank.replace(',', '.') || '0');
+    const cashValue = cash.trim() ? readAmount(cash) : 0;
+    const bankValue = bank.trim() ? readAmount(bank) : 0;
     if (!Number.isFinite(cashValue) || !Number.isFinite(bankValue)) {
       Alert.alert(t('common.error'), t('cashFlow.enterAmounts'));
       return;

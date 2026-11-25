@@ -24,7 +24,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, SkeletonRow, SwipeableRow } from '../src/components';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { COLORS } from '../src/theme/colors';
-import { formatAmount, formatMoney } from '../src/utils/money';
+import { formatAmount, formatMoney, readAmount } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -121,7 +121,7 @@ export default function ReceivablesScreen() {
 
   const handleSave = async () => {
     const missingName = !formCustomerName.trim();
-    const parsedAmount = parseFloat(formAmount);
+    const parsedAmount = readAmount(formAmount);
     const invalidAmount = isNaN(parsedAmount) || parsedAmount <= 0;
     setCustomerNameError(missingName);
     setAmountError(invalidAmount);
@@ -187,7 +187,7 @@ export default function ReceivablesScreen() {
   const handleSavePayment = async () => {
     const r = payingReceivable;
     if (!r) return;
-    const amount = parseFloat(payAmount.replace(',', '.'));
+    const amount = readAmount(payAmount);
     if (isNaN(amount) || amount <= 0) {
       Alert.alert(t('common.error'), t('msg.fillRequired'));
       return;

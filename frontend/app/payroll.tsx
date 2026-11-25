@@ -26,7 +26,7 @@ import { AccessDenied, ScreenEnter, LocationPicker } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import PayrollPdfImportModal from '../src/components/PayrollPdfImportModal';
 import { COLORS } from '../src/theme/colors';
-import { formatAmount, formatMoney } from '../src/utils/money';
+import { formatAmount, formatMoney, parseAmount, readAmount } from '../src/utils/money';
 
 const emptyEmployeeForm = () => ({
   name: '',
@@ -159,10 +159,10 @@ export default function PayrollScreen() {
     const payload = {
       name: employeeForm.name.trim(),
       position: employeeForm.position.trim() || undefined,
-      base_salary: parseFloat(employeeForm.base_salary) || 0,
+      base_salary: parseAmount(employeeForm.base_salary),
       agreement_type: employeeForm.agreement_type,
-      food_vouchers: parseFloat(employeeForm.food_vouchers) || 0,
-      additional_insurance: parseFloat(employeeForm.additional_insurance) || 0,
+      food_vouchers: parseAmount(employeeForm.food_vouchers),
+      additional_insurance: parseAmount(employeeForm.additional_insurance),
       linked_user_id: employeeForm.linked_user_id,
     };
     try {
@@ -217,12 +217,12 @@ export default function PayrollScreen() {
     if (!payrollEmployee) return;
     setPreviewLoading(true);
     try {
-      const amount = parseFloat(overrideAmount) || payrollEmployee.base_salary;
+      const amount = parseAmount(overrideAmount) || payrollEmployee.base_salary;
       const params: any = {
         employee_id: payrollEmployee.id,
         period_month: periodMonth,
         period_year: periodYear,
-        bonus_amount: parseFloat(bonusAmount) || 0,
+        bonus_amount: parseAmount(bonusAmount),
       };
       if (payrollEmployee.agreement_type === 'net') {
         params.net_target = amount;
@@ -260,12 +260,12 @@ export default function PayrollScreen() {
     if (!payrollEmployee) return;
     setSaving(true);
     try {
-      const amount = parseFloat(overrideAmount) || payrollEmployee.base_salary;
+      const amount = parseAmount(overrideAmount) || payrollEmployee.base_salary;
       const params: any = {
         employee_id: payrollEmployee.id,
         period_month: periodMonth,
         period_year: periodYear,
-        bonus_amount: parseFloat(bonusAmount) || 0,
+        bonus_amount: parseAmount(bonusAmount),
         notes: payrollNotes || undefined,
         image_base64: payrollImage || undefined,
         confirm_double_pay: confirmDoublePay,
@@ -352,11 +352,11 @@ export default function PayrollScreen() {
       }
       const updated = await api.updatePayrollRates({
         effective_from: ratesFrom.trim(),
-        employee_rate_percent: parseFloat(ratesForm.employee_rate_percent),
-        employer_rate_percent: parseFloat(ratesForm.employer_rate_percent),
-        income_tax_percent: parseFloat(ratesForm.income_tax_percent),
-        min_insurance_income: parseFloat(ratesForm.min_insurance_income),
-        max_insurance_income: parseFloat(ratesForm.max_insurance_income),
+        employee_rate_percent: readAmount(ratesForm.employee_rate_percent),
+        employer_rate_percent: readAmount(ratesForm.employer_rate_percent),
+        income_tax_percent: readAmount(ratesForm.income_tax_percent),
+        min_insurance_income: readAmount(ratesForm.min_insurance_income),
+        max_insurance_income: readAmount(ratesForm.max_insurance_income),
       });
       setRates(updated);
       setRatesModalVisible(false);

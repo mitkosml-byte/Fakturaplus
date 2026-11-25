@@ -43,7 +43,7 @@ import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
 import { useOnboardingStore } from '../../src/stores/onboardingStore';
 import { getDescriptionSuggestions } from '../../src/utils/expenseSuggestions';
-import { formatMoney } from '../../src/utils/money';
+import { formatMoney, parseAmount, readAmount } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -244,7 +244,7 @@ export default function HomeScreen() {
   // could silently overwrite the day's other sales.
   useEffect(() => {
     if (!ocrParams.ocrDate || !ocrParams.ocrFiscalRevenue) return;
-    const amount = parseFloat(ocrParams.ocrFiscalRevenue) || 0;
+    const amount = parseAmount(ocrParams.ocrFiscalRevenue);
     const vatRateNum = parseInt(ocrParams.ocrVatRate || '20', 10);
     const vatRate: 20 | 9 | 0 = vatRateNum === 9 ? 9 : vatRateNum === 0 ? 0 : 20;
     revenueEntry.openWithSale(new Date(`${ocrParams.ocrDate}T00:00:00`), { amount, vatRate });
@@ -340,7 +340,7 @@ export default function HomeScreen() {
     try {
       await api.createExpense({
         description: expenseDescription,
-        amount: parseFloat(expenseAmount),
+        amount: readAmount(expenseAmount),
         date: format(expenseDate, 'yyyy-MM-dd'),
         location_id: expenseLocation,
       });
@@ -361,7 +361,7 @@ export default function HomeScreen() {
 
   const handleAddExpense = () => {
     const missingDescription = !expenseDescription;
-    const missingAmount = !expenseAmount;
+    const missingAmount = !(readAmount(expenseAmount) > 0);
     setExpenseDescriptionError(missingDescription);
     setExpenseAmountError(missingAmount);
     if (missingDescription || missingAmount) return;

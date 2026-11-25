@@ -23,7 +23,7 @@ import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, 
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { COLORS } from '../src/theme/colors';
 import { toApiDate } from '../src/utils/periodRange';
-import { formatMoney } from '../src/utils/money';
+import { formatMoney, readAmount } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -241,7 +241,7 @@ export default function PersonalExpensesHistoryScreen() {
   };
 
   const handleSave = async () => {
-    const parsedAmount = parseFloat(amount);
+    const parsedAmount = readAmount(amount);
     const invalidAmount = isNaN(parsedAmount) || parsedAmount <= 0;
     const missingDescription = !description.trim();
     setAmountError(invalidAmount);
@@ -328,7 +328,7 @@ export default function PersonalExpensesHistoryScreen() {
   };
 
   const handleSaveWalletEntry = async () => {
-    const parsedAmount = parseFloat(walletAmount);
+    const parsedAmount = readAmount(walletAmount);
     const invalidAmount = isNaN(parsedAmount) || parsedAmount <= 0;
     const missingDescription = !walletDescription.trim();
     setWalletAmountError(invalidAmount);
@@ -384,7 +384,7 @@ export default function PersonalExpensesHistoryScreen() {
   };
 
   const handleSaveThreshold = async () => {
-    const parsed = parseFloat(thresholdInput);
+    const parsed = readAmount(thresholdInput);
     if (isNaN(parsed) || parsed <= 0) return;
     setThresholdSaving(true);
     try {

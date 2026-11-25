@@ -27,7 +27,7 @@ import { AccessDenied, ScreenEnter, BottomSheet, Expandable, AnimatedEmptyIcon, 
 import { useLocationChoice, useLocationsStore } from '../src/stores/locationsStore';
 import { COLORS } from '../src/theme/colors';
 import { useModules } from '../src/stores/modulesStore';
-import { formatAmount, formatMoney } from '../src/utils/money';
+import { formatAmount, formatMoney, parseAmount, readAmount } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -306,8 +306,8 @@ export default function BillingDocumentsScreen() {
   // The first invoice issued here may continue the business's own numbering.
   const hasIssuedInvoices = documents.some((doc) => doc.doc_type === 'invoice');
   const formNet = formItems.reduce((sum, it) => {
-    const qty = parseFloat(it.quantity) || 0;
-    const price = parseFloat(it.unit_price) || 0;
+    const qty = parseAmount(it.quantity);
+    const price = parseAmount(it.unit_price);
     return sum + qty * price;
   }, 0);
   // Without VAT: an invoice of a business not registered for it, or a credit
@@ -316,21 +316,21 @@ export default function BillingDocumentsScreen() {
   // VAT on each rate's whole base, as the invoice prints it.
   const formVat = isInvoice && !vatExempt
     ? Object.entries(formItems.reduce<Record<string, number>>((acc, it) => {
-        const base = (parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0);
+        const base = parseAmount(it.quantity) * parseAmount(it.unit_price);
         const rate = it.vat_rate.trim() === '' ? '20' : it.vat_rate.trim();
         acc[rate] = (acc[rate] || 0) + base;
         return acc;
-      }, {})).reduce((sum, [rate, base]) => sum + Math.round(base * (parseFloat(rate) || 0)) / 100, 0)
+      }, {})).reduce((sum, [rate, base]) => sum + Math.round(base * parseAmount(rate)) / 100, 0)
     : 0;
   const formTotal = formNet + formVat;
 
   const handleSave = async () => {
     const missingName = !formCustomerName.trim();
     const validItems: BillingDocumentItem[] = formItems
-      .filter((it) => it.name.trim() && parseFloat(it.unit_price) >= 0 && parseFloat(it.quantity) > 0)
+      .filter((it) => it.name.trim() && readAmount(it.unit_price) >= 0 && readAmount(it.quantity) > 0)
       .map((it) => ({
-        name: it.name.trim(), quantity: parseFloat(it.quantity), unit: it.unit || 'бр.', unit_price: parseFloat(it.unit_price),
-        ...(isInvoice ? { vat_rate: vatExempt ? 0 : Math.min(100, Math.max(0, parseFloat(it.vat_rate) || 0)) } : {}),
+        name: it.name.trim(), quantity: readAmount(it.quantity), unit: it.unit || 'бр.', unit_price: readAmount(it.unit_price),
+        ...(isInvoice ? { vat_rate: vatExempt ? 0 : Math.min(100, Math.max(0, parseAmount(it.vat_rate))) } : {}),
       }));
     setCustomerNameError(missingName);
     setItemsError(validItems.length === 0);

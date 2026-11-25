@@ -23,7 +23,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet, Avatar, TeamMemberProfileSheet } from '../src/components';
 import { COLORS, CHART_PALETTE } from '../src/theme/colors';
-import { formatAmount, formatMoney } from '../src/utils/money';
+import { formatAmount, formatMoney, readAmount } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -278,7 +278,7 @@ export default function WorkScheduleScreen() {
         end_time: toTimeStr(endTime),
         repeat_pattern: repeatPattern,
         repeat_until: repeatPattern !== 'none' ? toDateStr(repeatUntil) : undefined,
-        hourly_rate: hourlyRate.trim() ? parseFloat(hourlyRate) : undefined,
+        hourly_rate: hourlyRate.trim() ? readAmount(hourlyRate) : undefined,
         note: note.trim() || undefined,
       };
       if (editingId) {
@@ -324,7 +324,7 @@ export default function WorkScheduleScreen() {
 
   const handleSaveAdjustment = async () => {
     if (!adjustingOcc) return;
-    const hours = parseFloat(adjustHours);
+    const hours = readAmount(adjustHours);
     if (!hours || hours <= 0) {
       Alert.alert(t('common.error'), t('schedule.adjustHoursError'));
       return;
@@ -337,7 +337,7 @@ export default function WorkScheduleScreen() {
     try {
       await api.adjustShiftOccurrence(adjustingOcc.shift_id, adjustingOcc.date, {
         actual_hours: hours,
-        actual_hourly_rate: adjustRate.trim() ? parseFloat(adjustRate) : undefined,
+        actual_hourly_rate: adjustRate.trim() ? readAmount(adjustRate) : undefined,
         reason: adjustReason.trim(),
       });
       setAdjustModalVisible(false);

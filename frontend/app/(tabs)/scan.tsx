@@ -37,7 +37,7 @@ import { format, parse } from 'date-fns';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
 import { toApiDate } from '../../src/utils/periodRange';
-import { formatAmount, formatMoney } from '../../src/utils/money';
+import { formatAmount, formatMoney, parseAmount, readAmount } from '../../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -58,11 +58,8 @@ interface EditableItem {
 
 const emptyItem = (): EditableItem => ({ name: '', quantity: '1', unit: 'бр.', unit_price: '' });
 
-// A typed amount as a number ("12,50" or "12.50"); 0 when empty.
-const toNumber = (value: string | number | null | undefined): number => {
-  const n = parseFloat(String(value ?? '').replace(',', '.'));
-  return Number.isFinite(n) ? n : 0;
-};
+// A typed amount as a number ("12,50", "12.50", "1 234,50"); 0 when empty.
+const toNumber = (value: string | number | null | undefined): number => parseAmount(String(value ?? ''));
 
 // How long after the last edit the amounts are checked again.
 const DRAFT_CHECK_DELAY_MS = 500;
@@ -195,8 +192,8 @@ export default function ScanScreen() {
   // has actually chosen one themselves.
   useEffect(() => {
     if (vatTreatment) return;
-    const base = parseFloat(amountWithoutVat);
-    const vat = parseFloat(vatAmount);
+    const base = toNumber(amountWithoutVat);
+    const vat = toNumber(vatAmount);
     if (!base) return;
     const ratio = vat / base;
     if (Math.abs(ratio - 0.20) < 0.01) setVatTreatment('standard_20');
@@ -206,8 +203,8 @@ export default function ScanScreen() {
   // Same auto-detection, but snapped to the fixed 20/9/0% chips the daily
   // revenue form uses, for sales mode.
   useEffect(() => {
-    const base = parseFloat(amountWithoutVat);
-    const vat = parseFloat(vatAmount);
+    const base = toNumber(amountWithoutVat);
+    const vat = toNumber(vatAmount);
     if (!base) return;
     const ratio = vat / base;
     if (Math.abs(ratio - 0.09) < 0.01) setSalesVatRate(9);
@@ -385,7 +382,7 @@ export default function ScanScreen() {
         setItems((prev) => prev.map((item, i) => {
           const k = learned[i];
           if (!k || !item.ocr) return item;
-          if (parseFloat(item.quantity) !== item.ocr.quantity || parseFloat(item.unit_price) !== item.ocr.unit_price) {
+          if (toNumber(item.quantity) !== item.ocr.quantity || toNumber(item.unit_price) !== item.ocr.unit_price) {
             return item;
           }
           return {
@@ -409,8 +406,8 @@ export default function ScanScreen() {
     const item = items[index];
     if (!hint || hint.kind !== 'pack_suspect' || !hint.pack_multiple || !item) return null;
     const k = hint.pack_multiple;
-    const qty = parseFloat(item.quantity.replace(',', '.')) || 1;
-    const price = parseFloat(item.unit_price.replace(',', '.'));
+    const qty = toNumber(item.quantity) || 1;
+    const price = toNumber(item.unit_price);
     if (!price) return null;
     const split = hint.direction !== 'decrease';
     return {
@@ -424,8 +421,8 @@ export default function ScanScreen() {
   const packRuleActive = (item: EditableItem): boolean => {
     if (!item.packRule || item.packRule.undone || !item.ocr) return false;
     const k = item.packRule.multiple;
-    return parseFloat(item.quantity) === Math.round(item.ocr.quantity * k * 1000) / 1000
-      && parseFloat(item.unit_price) === Math.round((item.ocr.unit_price / k) * 10000) / 10000;
+    return toNumber(item.quantity) === Math.round(item.ocr.quantity * k * 1000) / 1000
+      && toNumber(item.unit_price) === Math.round((item.ocr.unit_price / k) * 10000) / 10000;
   };
 
   // Puts a line the app converted with a remembered pack size back the way
@@ -653,11 +650,11 @@ export default function ScanScreen() {
     const itemsPayload: InvoiceItemCreate[] = items
       .filter(item => item.name.trim() && item.unit_price)
       .map(item => {
-        const quantity = parseFloat(item.quantity) || 1;
+        const quantity = toNumber(item.quantity) || 1;
         // A negative unit_price is kept as-is, not clamped to 0 - a
         // discount/rebate line ("отстъпка") printed as its own row on the
         // invoice is a real, common pattern the backend accepts on purpose.
-        const unitPrice = parseFloat(item.unit_price) || 0;
+        const unitPrice = toNumber(item.unit_price);
         // A pack re-read as pieces (by the fix button, by hand or by a
         // remembered pack size) is learned for this supplier and item; a
         // remembered pack size put back to the recognized line is forgotten.
@@ -684,9 +681,9 @@ export default function ScanScreen() {
         invoice_number: invoiceNumber,
         document_type: documentType,
         credited_invoice_number: isCreditNote ? creditedInvoiceNumber.trim() || undefined : undefined,
-        amount_without_vat: parseFloat(amountWithoutVat) || 0,
-        vat_amount: parseFloat(vatAmount) || 0,
-        total_amount: parseFloat(totalAmount) || 0,
+        amount_without_vat: toNumber(amountWithoutVat),
+        vat_amount: toNumber(vatAmount),
+        total_amount: toNumber(totalAmount),
         vat_treatment: vatTreatment || undefined,
         date: toApiDate(invoiceDate),
         image_base64s: capturedImages.length > 0 ? capturedImages : undefined,
@@ -717,7 +714,7 @@ export default function ScanScreen() {
   // its own number - never added to the till's revenue, where a sale paid
   // through the till already is (then it is marked so, not counted twice).
   const handleSaveSalesInvoice = async () => {
-    const total = parseFloat(totalAmount.replace(',', '.'));
+    const total = toNumber(totalAmount);
     const number = invoiceNumber.replace(/\D/g, '');
     if (!total || !salesCustomer.trim() || !number) {
       Alert.alert(t('common.error'), t('scan.salesRequired'));
@@ -1314,12 +1311,12 @@ export default function ScanScreen() {
                       // for what was not read (Л6).
                       const missingSupplier = !supplier.trim();
                       const missingNumber = !invoiceNumber.trim();
-                      const missingTotal = !totalAmount.trim() || isNaN(parseFloat(totalAmount));
+                      const missingTotal = Number.isNaN(readAmount(totalAmount));
                       const missingPayment = !isCreditNote && !paymentMethod;
                       const problems = draftProblems();
                       const pricesUp = Object.values(itemPriceHints).filter((hint) => hint && hint.kind === 'price_change' && hint.change_percent != null && hint.change_percent > 0).length;
-                      const net = parseFloat(amountWithoutVat) || 0;
-                      const vat = parseFloat(vatAmount) || 0;
+                      const net = toNumber(amountWithoutVat);
+                      const vat = toNumber(vatAmount);
                       return (
                         <View style={styles.summaryCard}>
                           <View style={styles.summaryHeader}>
@@ -1376,7 +1373,7 @@ export default function ScanScreen() {
                             <View style={styles.summaryRow}>
                               <Text style={styles.summaryLabel}>{t('scan.totalAmount')}</Text>
                               <View style={{ flexShrink: 1, alignItems: 'flex-end' }}>
-                                <Text style={[styles.summaryValue, styles.summaryTotal]}>{formatMoney((parseFloat(totalAmount) || 0))}</Text>
+                                <Text style={[styles.summaryValue, styles.summaryTotal]}>{formatMoney(toNumber(totalAmount))}</Text>
                                 <Text style={styles.summarySub}>
                                   {t('scanSummary.amounts').replace('{net}', formatAmount(net)).replace('{vat}', formatAmount(vat))}
                                 </Text>

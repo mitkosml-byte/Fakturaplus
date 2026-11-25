@@ -24,7 +24,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet } from '../src/components';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { COLORS } from '../src/theme/colors';
-import { formatMoney } from '../src/utils/money';
+import { formatMoney, readAmount } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -148,7 +148,7 @@ export default function DeadlinesScreen() {
       Alert.alert(t('common.error'), t('deadlines.invalid'));
       return;
     }
-    const amount = draft.amount.trim() ? parseFloat(draft.amount.replace(',', '.')) : null;
+    const amount = draft.amount.trim() ? readAmount(draft.amount) : null;
     const body = {
       title: draft.title.trim(), category: draft.category, due_date: iso(draft.date), repeat: draft.repeat,
       remind_days_before: Math.max(0, Math.min(365, parseInt(draft.remind, 10) || 0)),

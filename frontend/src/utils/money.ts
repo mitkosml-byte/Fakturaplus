@@ -25,19 +25,32 @@ export function formatMoney(value: number | null | undefined, decimals: 0 | 2 = 
   return `${formatAmount(value, decimals)}${NBSP}€`;
 }
 
-// An amount as typed into a field: "1234,56", "1234.56", "1 234,56" or
-// "1.234,56" - a decimal comma or point, spaces and a thousands mark
-// allowed. Nothing readable is 0.
-export function parseAmount(text: string | null | undefined): number {
+// An amount as typed into a field: "1234,56", "1234.56", "1 234,56",
+// "1.234,56" or "1,234.56" - a decimal comma or point, spaces and a
+// thousands mark allowed. Every field that takes an amount, a quantity, a
+// rate or hours reads it here, so "12,50" is never saved as 12.
+//
+// NaN when nothing in it reads as a number (an empty field), for the forms
+// that tell an empty field from a zero; parseAmount gives 0 instead.
+export function readAmount(text: string | null | undefined): number {
   let value = String(text ?? '').replace(/[\s\u00A0]/g, '');
   const comma = value.lastIndexOf(',');
   const point = value.lastIndexOf('.');
   if (comma > -1 && point > -1) {
     // Both: the last one marks the decimals, the other groups thousands.
     value = comma > point ? value.replace(/\./g, '').replace(',', '.') : value.replace(/,/g, '');
-  } else {
-    value = value.replace(',', '.');
+  } else if (comma > -1) {
+    // One comma marks the decimals; several group thousands ("1,234,567").
+    value = value.indexOf(',') === comma ? value.replace(',', '.') : value.replace(/,/g, '');
+  } else if (point > -1 && value.indexOf('.') !== point) {
+    value = value.replace(/\./g, '');
   }
   const amount = parseFloat(value);
-  return Number.isFinite(amount) ? amount : 0;
+  return Number.isFinite(amount) ? amount : NaN;
+}
+
+// The same, with 0 for a field that holds no number.
+export function parseAmount(text: string | null | undefined): number {
+  const amount = readAmount(text);
+  return Number.isNaN(amount) ? 0 : amount;
 }

@@ -24,7 +24,7 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, BottomSheet } from '../src/components';
 import { COLORS } from '../src/theme/colors';
-import { formatMoney } from '../src/utils/money';
+import { formatMoney, readAmount } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -41,7 +41,7 @@ const toLine = (item: BillingDocumentItem): LineDraft => ({
   unit_price: String(item.unit_price),
   vat_rate: String(item.vat_rate ?? 20),
 });
-const num = (text: string) => parseFloat(text.replace(',', '.'));
+const num = (text: string) => readAmount(text);
 
 // Invoices that repeat (Н7): a subscription, a rent, a monthly service. On
 // its day the month's invoice is ready - looked at and issued with one tap,

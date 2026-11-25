@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, Switch, TextInput, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 import { PriceAlertSettings, PriceAlertMute } from '../../types';
 import { COLORS } from '../../theme/colors';
+import { parseAmount } from '../../utils/money';
 
 // Extracted from stats.tsx's renderAlertSettingsModal (Module 1 audit
 // finding #4). Data loading/mutation (loadAlertSettings, saveAlertSettings,
@@ -19,6 +20,27 @@ type Props = {
   onSave: () => void;
   onUnmute: (muteId: string) => void;
 };
+
+// A number setting typed as text: the field keeps what is typed ("2," on
+// the way to "2,5", or an emptied field) and hands on the amount it reads.
+// Bound to the number itself, the comma would vanish as it is typed.
+function NumberSetting({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const [text, setText] = useState(() => String(value));
+  // A value set from outside (the settings loaded again) shows; the one
+  // this field just handed on leaves what is being typed as it is.
+  useEffect(() => {
+    setText((current) => (parseAmount(current) === value ? current : String(value)));
+  }, [value]);
+  return (
+    <TextInput
+      style={styles.alertSettingsInput}
+      value={text}
+      onChangeText={(v) => { setText(v); onChange(parseAmount(v)); }}
+      keyboardType="decimal-pad"
+      placeholderTextColor={COLORS.textMuted}
+    />
+  );
+}
 
 export function AlertSettingsModal({
   visible, onClose, alertSettings, onChangeSettings, alertMutes, savingAlertSettings, onSave, onUnmute,
@@ -70,24 +92,18 @@ export function AlertSettingsModal({
             <View style={styles.alertSettingsField}>
               <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.threshold')}</Text>
               <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.thresholdHint')}</Text>
-              <TextInput
-                style={styles.alertSettingsInput}
-                value={String(alertSettings.threshold_percent)}
-                onChangeText={(v) => onChangeSettings({ ...alertSettings, threshold_percent: parseFloat(v) || 0 })}
-                keyboardType="decimal-pad"
-                placeholderTextColor={COLORS.textMuted}
+              <NumberSetting
+                value={alertSettings.threshold_percent}
+                onChange={(n) => onChangeSettings({ ...alertSettings, threshold_percent: n })}
               />
             </View>
 
             <View style={styles.alertSettingsField}>
               <Text style={styles.alertSettingsLabel}>{t('priceAlertSettings.minMonthlyImpact')}</Text>
               <Text style={styles.alertSettingsHint}>{t('priceAlertSettings.minMonthlyImpactHint')}</Text>
-              <TextInput
-                style={styles.alertSettingsInput}
-                value={String(alertSettings.min_monthly_impact ?? 10)}
-                onChangeText={(v) => onChangeSettings({ ...alertSettings, min_monthly_impact: parseFloat(v) || 0 })}
-                keyboardType="decimal-pad"
-                placeholderTextColor={COLORS.textMuted}
+              <NumberSetting
+                value={alertSettings.min_monthly_impact ?? 10}
+                onChange={(n) => onChangeSettings({ ...alertSettings, min_monthly_impact: n })}
               />
             </View>
 

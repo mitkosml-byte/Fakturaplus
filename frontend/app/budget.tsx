@@ -26,7 +26,7 @@ import type { RecurringOverview } from '../src/types';
 import { COLORS } from '../src/theme/colors';
 import { toApiMonth } from '../src/utils/periodRange';
 import { format, parseISO } from 'date-fns';
-import { formatAmount, formatMoney } from '../src/utils/money';
+import { formatAmount, formatMoney, readAmount } from '../src/utils/money';
 
 export default function BudgetScreen() {
   const { t, dateLocale } = useTranslation();
@@ -86,7 +86,7 @@ export default function BudgetScreen() {
   };
 
   const saveBudget = async () => {
-    if (!budgetLimit || parseFloat(budgetLimit) <= 0) {
+    if (!(readAmount(budgetLimit) > 0)) {
       Alert.alert(t('common.error'), t('budget.invalidAmount'));
       return;
     }
@@ -96,8 +96,8 @@ export default function BudgetScreen() {
       const currentMonth = toApiMonth(new Date());
       await api.createBudget({
         month: currentMonth,
-        expense_limit: parseFloat(budgetLimit),
-        alert_threshold: parseFloat(alertThreshold)
+        expense_limit: readAmount(budgetLimit),
+        alert_threshold: readAmount(alertThreshold)
       });
       Haptics.success();
       Toast.success(t('budget.saved'));

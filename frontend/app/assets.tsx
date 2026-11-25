@@ -26,7 +26,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
-import { formatMoney } from '../src/utils/money';
+import { formatMoney, parseAmount, readAmount } from '../src/utils/money';
 
 const CATEGORY_SHORT_LABELS: Record<AssetCategory, string> = {
   cat_i: 'I · Сгради',
@@ -232,9 +232,9 @@ export default function AssetsScreen() {
       category: assetForm.category,
       acquisition_date: format(acquisitionDate, 'yyyy-MM-dd'),
       in_service_date: format(inServiceDate, 'yyyy-MM-dd'),
-      acquisition_value: parseFloat(assetForm.acquisition_value) || 0,
+      acquisition_value: parseAmount(assetForm.acquisition_value),
       annual_depreciation_rate_percent: assetForm.annual_depreciation_rate_percent
-        ? parseFloat(assetForm.annual_depreciation_rate_percent)
+        ? readAmount(assetForm.annual_depreciation_rate_percent)
         : undefined,
       responsible_person: assetForm.responsible_person.trim() || undefined,
       notes: assetForm.notes.trim() || undefined,

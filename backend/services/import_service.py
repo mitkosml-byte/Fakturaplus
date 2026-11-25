@@ -19,6 +19,8 @@ import io
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from services.bank_statement import parse_amount as read_amount
+
 try:
     import openpyxl
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -143,16 +145,14 @@ def _parse_date(value: Any) -> Optional[str]:
 
 
 def _parse_float(value: Any) -> Optional[float]:
+    # A sum as a spreadsheet holds it, read like a bank statement's:
+    # "1 234,56" (a non-breaking space too), "1.234,56", "1,234.56",
+    # "12,50 лв." - a cell it cannot read is empty, never a smaller number.
     if _is_blank(value):
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    s = str(value).strip().replace("€", "").replace("лв.", "").replace("лв", "")
-    s = s.replace(" ", "").replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return None
+    return read_amount(value)
 
 
 def _parse_int(value: Any) -> Optional[int]:

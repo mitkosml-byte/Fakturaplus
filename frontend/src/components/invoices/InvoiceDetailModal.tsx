@@ -15,7 +15,7 @@ import { COLORS } from '../../theme/colors';
 import { useAuth } from '../../contexts/AuthContext';
 import { useModules } from '../../stores/modulesStore';
 import { isPackSuspect, priceAlertMeaning } from '../../utils/priceAlert';
-import { formatAmount, formatMoney } from '../../utils/money';
+import { formatAmount, formatMoney, parseAmount } from '../../utils/money';
 
 // Extracted from invoices.tsx (Module 1 audit finding #4). The single
 // largest remaining modal on this screen - view/edit for one invoice,
@@ -261,7 +261,7 @@ export function InvoiceDetailModal({
               <View style={styles.totalSection}>
                 <Text style={styles.totalSectionLabel}>{t('invoices.totalAmount')}</Text>
                 <Text style={styles.totalSectionValue}>
-                  {formatMoney(((parseFloat(editAmountWithoutVat.replace(',', '.')) || 0) + (parseFloat(editVatAmount.replace(',', '.')) || 0)))}
+                  {formatMoney(parseAmount(editAmountWithoutVat) + parseAmount(editVatAmount))}
                 </Text>
               </View>
 

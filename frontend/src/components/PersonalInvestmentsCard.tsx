@@ -15,7 +15,7 @@ import { getDescriptionSuggestions } from '../utils/expenseSuggestions';
 import { COLORS } from '../theme/colors';
 import { InfoButton } from './InfoButton';
 import { PersonalExpenseModal } from './home/PersonalExpenseModal';
-import { formatMoney } from '../utils/money';
+import { formatMoney, readAmount } from '../utils/money';
 
 type Props = { periodState: PeriodState };
 
@@ -111,7 +111,7 @@ export function PersonalInvestmentsCard({ periodState }: Props) {
   // Filed under the month of the period shown, so the card you are looking
   // at is the one that changes.
   const handleCreatePersonalExpense = async () => {
-    const amount = parseFloat(personalAmount);
+    const amount = readAmount(personalAmount);
     const invalidAmount = isNaN(amount) || amount <= 0;
     const missingDescription = !personalDescription.trim();
     setPersonalAmountError(invalidAmount);
