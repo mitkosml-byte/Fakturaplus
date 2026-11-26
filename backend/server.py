@@ -60,7 +60,10 @@ from services import revenue_vat
 from services.money_text import fmt_amount, fmt_eur
 from services.month_names import MONTHS_BG as _MONTHS_BG_GENITIVE
 from services import error_log
+from services import error_text
 from services import object_storage
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exception_handlers import http_exception_handler as fastapi_http_exception_handler
 
 ROOT_DIR = Path(__file__).parent
 
@@ -298,7 +301,10 @@ async def _unexpected_error(request: Request, error: Exception) -> JSONResponse:
         user_id=user.user_id if user else None,
         path=request.url.path,
     )
-    response = JSONResponse(status_code=500, content={"detail": "Нещо се обърка на сървъра. Опитайте отново."})
+    message = "Нещо се обърка на сървъра. Опитайте отново."
+    if error_text.wants_english(request.headers.get("x-app-language")):
+        message = error_text.to_english(message)
+    response = JSONResponse(status_code=500, content={"detail": message})
     # This answer is sent from outside the CORS layer: without these the
     # browser hides it and the app only sees "no connection".
     origin = request.headers.get("origin")
@@ -310,6 +316,21 @@ async def _unexpected_error(request: Request, error: Exception) -> JSONResponse:
 
 
 app.add_exception_handler(Exception, _unexpected_error)
+
+
+async def _refusal_in_app_language(request: Request, exc: Exception) -> Response:
+    """A refusal in the app's language: the app says which with the
+    X-App-Language header; in English the message is given in English
+    (services/error_text), in Bulgarian as it is written."""
+    assert isinstance(exc, StarletteHTTPException)
+    if error_text.wants_english(request.headers.get("x-app-language")):
+        exc = StarletteHTTPException(
+            status_code=exc.status_code, detail=error_text.localize(exc.detail), headers=getattr(exc, "headers", None),
+        )
+    return await fastapi_http_exception_handler(request, exc)
+
+
+app.add_exception_handler(StarletteHTTPException, _refusal_in_app_language)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")

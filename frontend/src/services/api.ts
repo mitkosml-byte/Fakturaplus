@@ -48,6 +48,15 @@ const FIELD_LABELS: Record<string, string> = {
   amount: 'сума', name: 'име', date: 'дата', supplier: 'доставчик',
   invoice_number: 'номер на фактура', description: 'описание',
 };
+const FIELD_LABELS_EN: Record<string, string> = {
+  quantity: 'quantity', unit_price: 'unit price', total_price: 'total price',
+  vat_amount: 'VAT', amount_without_vat: 'amount without VAT', total_amount: 'total amount',
+  amount: 'amount', name: 'name', date: 'date', supplier: 'supplier',
+  invoice_number: 'invoice number', description: 'description',
+};
+
+const inEnglish = () => useLanguageStore.getState().language === 'en';
+const requestFailed = () => (inEnglish() ? 'The request failed' : 'Грешка в заявката');
 
 // Pydantic's error `type` is a stable machine-readable code, independent of
 // the (English) `msg` text - map the couple of constraint kinds that
@@ -55,9 +64,10 @@ const FIELD_LABELS: Record<string, string> = {
 // gt=0 or ge=0) to a short Bulgarian phrase instead of passing through
 // "Input should be greater than or equal to 0".
 function friendlyReason(type: unknown, msg: string): string {
-  if (type === 'greater_than') return 'трябва да е по-голямо от 0';
-  if (type === 'greater_than_equal') return 'не може да бъде отрицателно число';
-  if (type === 'missing') return 'е задължително поле';
+  const en = inEnglish();
+  if (type === 'greater_than') return en ? 'must be more than 0' : 'трябва да е по-голямо от 0';
+  if (type === 'greater_than_equal') return en ? 'cannot be a negative number' : 'не може да бъде отрицателно число';
+  if (type === 'missing') return en ? 'is required' : 'е задължително поле';
   return msg;
 }
 
@@ -76,18 +86,19 @@ function formatApiErrorDetail(detail: unknown): string {
         const field = loc[loc.length - 1];
         const reason = friendlyReason((item as any).type, (item as any).msg);
         if (typeof field !== 'string') return reason;
-        const label = FIELD_LABELS[field] || field;
+        const label = (inEnglish() ? FIELD_LABELS_EN : FIELD_LABELS)[field] || field;
         // A validation error nested inside an item list (loc includes a
         // numeric index, e.g. ["body","items",0,"unit_price"]) names which
         // item row it's about, not just the field - "артикул 1" (1-based,
         // matching what the UI shows) rather than a bare field name that
         // could mean any of several rows.
         const itemIndex = loc.length >= 2 && typeof loc[loc.length - 2] === 'number' ? loc[loc.length - 2] + 1 : null;
-        return itemIndex !== null ? `артикул ${itemIndex} - ${label}: ${reason}` : `${label}: ${reason}`;
+        const row = inEnglish() ? 'item' : 'артикул';
+        return itemIndex !== null ? `${row} ${itemIndex} - ${label}: ${reason}` : `${label}: ${reason}`;
       }
       return typeof item === 'string' ? item : JSON.stringify(item);
     });
-    return messages.join('; ') || 'Грешка в заявката';
+    return messages.join('; ') || requestFailed();
   }
   if (detail && typeof detail === 'object') {
     // A refusal with its own words and a code the screen acts on
@@ -95,7 +106,7 @@ function formatApiErrorDetail(detail: unknown): string {
     const message = (detail as { message?: unknown }).message;
     return typeof message === 'string' ? message : JSON.stringify(detail);
   }
-  return 'Грешка в заявката';
+  return requestFailed();
 }
 
 export interface BackupRestoreResult {
@@ -124,6 +135,8 @@ class ApiService {
   private async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
+      // The server answers refusals in the app's language.
+      'X-App-Language': useLanguageStore.getState().language,
       ...(options.headers || {}),
     };
 
@@ -167,7 +180,7 @@ class ApiService {
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
+      const error = await response.json().catch(() => ({ detail: requestFailed() }));
       // Most error responses carry `detail` (FastAPI's own shape); a few
       // (e.g. slowapi's rate-limit handler) carry `error` instead - without
       // this fallback those fell through formatApiErrorDetail's `undefined`
@@ -449,8 +462,12 @@ class ApiService {
       formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || fallbackType } as any);
     }
 
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { 'X-App-Language': useLanguageStore.getState().language };
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    // With the session only in the cookie, a change needs the CSRF header
+    // here too (as every other request sends it).
+    const csrfToken = readCsrfTokenCookie();
+    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
 
     const response = await fetch(`${API_URL}/api${path}`, {
       method: 'POST',
@@ -459,7 +476,7 @@ class ApiService {
       credentials: 'include',
     });
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
+      const error = await response.json().catch(() => ({ detail: requestFailed() }));
       throw new Error(formatApiErrorDetail(error.detail));
     }
     return response.json();
@@ -529,7 +546,7 @@ class ApiService {
       credentials: 'include',
     });
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Грешка в заявката' }));
+      const error = await response.json().catch(() => ({ detail: requestFailed() }));
       const err = new Error(formatApiErrorDetail(error.detail)) as Error & { status?: number };
       err.status = response.status;
       throw err;
