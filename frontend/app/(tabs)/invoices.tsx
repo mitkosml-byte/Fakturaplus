@@ -23,7 +23,7 @@ import { Haptics } from '../../src/utils/haptics';
 import { api } from '../../src/services/api';
 import { Invoice, PaymentMethod, VatTreatment, InvoiceDocumentType } from '../../src/types';
 import { validateEikFormat } from '../../src/utils/eik';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import ExcelImportModal from '../../src/components/ExcelImportModal';

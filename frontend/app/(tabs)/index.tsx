@@ -19,7 +19,7 @@ import { api } from '../../src/services/api';
 import { Summary, NonInvoiceExpense, GettingStarted, HomeData } from '../../src/types';
 import { queryClient } from '../../src/queries/queryClient';
 import { scanBalanceQueryKey } from '../../src/queries/useScanBalance';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
 import ExcelImportModal from '../../src/components/ExcelImportModal';

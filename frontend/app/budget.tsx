@@ -25,7 +25,8 @@ import { RecurringExpensesSection } from '../src/components/RecurringExpensesSec
 import type { RecurringOverview } from '../src/types';
 import { COLORS } from '../src/theme/colors';
 import { toApiMonth } from '../src/utils/periodRange';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns/format';
+import { parseISO } from 'date-fns/parseISO';
 import { formatAmount, formatMoney, readAmount } from '../src/utils/money';
 
 export default function BudgetScreen() {

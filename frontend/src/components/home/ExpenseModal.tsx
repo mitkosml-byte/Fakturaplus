@@ -1,8 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { format, addDays, subDays } from 'date-fns';
-import { Locale } from 'date-fns';
+import { format } from 'date-fns/format';
+import { addDays } from 'date-fns/addDays';
+import { subDays } from 'date-fns/subDays';
+import type { Locale } from 'date-fns';
 import DateTimePickerModal from '../AppDateTimePicker';
 import { useTranslation } from '../../i18n';
 import { COLORS } from '../../theme/colors';

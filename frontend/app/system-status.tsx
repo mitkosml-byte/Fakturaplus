@@ -13,7 +13,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { format, formatDistanceToNow, isToday, parseISO } from 'date-fns';
+import { format } from 'date-fns/format';
+import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
+import { isToday } from 'date-fns/isToday';
+import { parseISO } from 'date-fns/parseISO';
 import { api } from '../src/services/api';
 import type { SystemError, SystemJob, SystemJobState, SystemStatus } from '../src/types';
 import { useTranslation } from '../src/i18n';

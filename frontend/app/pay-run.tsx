@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { Alert } from '../src/utils/alert';
 import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';

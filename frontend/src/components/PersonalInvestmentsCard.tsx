@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { Alert } from '../utils/alert';
 import { Toast } from '../utils/toast';
 import { Haptics } from '../utils/haptics';

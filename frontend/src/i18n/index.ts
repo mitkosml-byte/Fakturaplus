@@ -2,7 +2,8 @@
 import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { bg as dateFnsBg, enUS as dateFnsEnUS } from 'date-fns/locale';
+import { bg as dateFnsBg } from 'date-fns/locale/bg';
+import { enUS as dateFnsEnUS } from 'date-fns/locale/en-US';
 
 export type Language = 'bg' | 'en';
 

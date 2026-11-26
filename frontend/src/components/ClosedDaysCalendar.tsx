@@ -12,8 +12,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { Calendar, DateData } from 'react-native-calendars';
-import { format } from 'date-fns';
+import { Calendar, DateData, LocaleConfig } from 'react-native-calendars';
+import { format } from 'date-fns/format';
 import { Alert } from '../utils/alert';
 import { Toast } from '../utils/toast';
 import { Haptics } from '../utils/haptics';
@@ -22,6 +22,23 @@ import { ClosedDateException } from '../types';
 import { useTranslation } from '../i18n';
 import { COLORS } from '../theme/colors';
 import { PressableScale } from './PressableScale';
+
+// The calendar in the app's language - it showed English month and day
+// names in the Bulgarian app - and the week from Monday, as in Bulgaria.
+LocaleConfig.locales.bg = {
+  monthNames: ['Януари', 'Февруари', 'Март', 'Април', 'Май', 'Юни', 'Юли', 'Август', 'Септември', 'Октомври', 'Ноември', 'Декември'],
+  monthNamesShort: ['яну', 'фев', 'мар', 'апр', 'май', 'юни', 'юли', 'авг', 'сеп', 'окт', 'ное', 'дек'],
+  dayNames: ['Неделя', 'Понеделник', 'Вторник', 'Сряда', 'Четвъртък', 'Петък', 'Събота'],
+  dayNamesShort: ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'],
+  today: 'Днес',
+};
+LocaleConfig.locales.en = {
+  monthNames: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  monthNamesShort: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+  dayNames: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+  dayNamesShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+  today: 'Today',
+};
 
 // Python date.weekday() convention (0=Monday..6=Sunday) - matches the
 // backend's Company.closed_weekdays exactly, so this array can be sent
@@ -63,7 +80,8 @@ interface ClosedDaysCalendarProps {
 }
 
 export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  LocaleConfig.defaultLocale = language === 'en' ? 'en' : 'bg';
 
   const [expanded, setExpanded] = useState(!collapsible);
   const [loading, setLoading] = useState(true);
@@ -248,6 +266,8 @@ export function ClosedDaysCalendar({ collapsible = false }: ClosedDaysCalendarPr
               <Text style={styles.sectionHint}>{t('closedDays.exceptionsHint')}</Text>
               <View style={styles.calendarWrapper}>
                 <Calendar
+                  key={language}
+                  firstDay={1}
                   markingType="custom"
                   markedDates={markedDates}
                   onDayPress={(day: DateData) => openDayModal(day.dateString)}

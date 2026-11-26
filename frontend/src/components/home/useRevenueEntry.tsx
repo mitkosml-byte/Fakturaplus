@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { format, subDays } from 'date-fns';
+import { format } from 'date-fns/format';
+import { subDays } from 'date-fns/subDays';
 import { Alert } from '../../utils/alert';
 import { Toast } from '../../utils/toast';
 import { Haptics } from '../../utils/haptics';

@@ -1,19 +1,17 @@
-import {
-  format,
-  startOfWeek,
-  endOfWeek,
-  startOfMonth,
-  endOfMonth,
-  startOfYear,
-  endOfYear,
-  subDays,
-  subWeeks,
-  subMonths,
-  subYears,
-  differenceInCalendarDays,
-  addDays,
-  type Locale,
-} from 'date-fns';
+import type { Locale } from 'date-fns';
+import { format } from 'date-fns/format';
+import { startOfWeek } from 'date-fns/startOfWeek';
+import { endOfWeek } from 'date-fns/endOfWeek';
+import { startOfMonth } from 'date-fns/startOfMonth';
+import { endOfMonth } from 'date-fns/endOfMonth';
+import { startOfYear } from 'date-fns/startOfYear';
+import { endOfYear } from 'date-fns/endOfYear';
+import { subDays } from 'date-fns/subDays';
+import { subWeeks } from 'date-fns/subWeeks';
+import { subMonths } from 'date-fns/subMonths';
+import { subYears } from 'date-fns/subYears';
+import { differenceInCalendarDays } from 'date-fns/differenceInCalendarDays';
+import { addDays } from 'date-fns/addDays';
 
 // Shared period-navigation model for any screen that shows totals for "a
 // period" (Home's dashboard cards, Stats' overview cards) - lets a user step

@@ -3,7 +3,9 @@ import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, ActivityIndicator, Switch, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { addMonths, format, parseISO } from 'date-fns';
+import { addMonths } from 'date-fns/addMonths';
+import { format } from 'date-fns/format';
+import { parseISO } from 'date-fns/parseISO';
 import { api } from '../services/api';
 import { useTranslation } from '../i18n';
 import { useAuth } from '../contexts/AuthContext';

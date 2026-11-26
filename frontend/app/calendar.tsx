@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { CalendarEvent } from '../src/types';

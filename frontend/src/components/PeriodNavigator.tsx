@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  format,
-  parseISO,
-  startOfWeek,
-  differenceInCalendarDays,
-  differenceInCalendarWeeks,
-  differenceInCalendarMonths,
-  differenceInCalendarYears,
-} from 'date-fns';
+import { format } from 'date-fns/format';
+import { parseISO } from 'date-fns/parseISO';
+import { startOfWeek } from 'date-fns/startOfWeek';
+import { differenceInCalendarDays } from 'date-fns/differenceInCalendarDays';
+import { differenceInCalendarWeeks } from 'date-fns/differenceInCalendarWeeks';
+import { differenceInCalendarMonths } from 'date-fns/differenceInCalendarMonths';
+import { differenceInCalendarYears } from 'date-fns/differenceInCalendarYears';
 import DateTimePickerModal from './AppDateTimePicker';
 import { useTranslation } from '../i18n';
 import {

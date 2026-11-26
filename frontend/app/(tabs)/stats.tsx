@@ -32,7 +32,9 @@ import { PeriodNavigator, PeriodSoFarNote } from '../../src/components/PeriodNav
 import { ChipTabs, FadeIn, CountUp } from '../../src/components';
 import { getPeriodBounds, getComparablePrevious, toApiDate } from '../../src/utils/periodRange';
 import { useSharedPeriod } from '../../src/utils/sharedPeriod';
-import { differenceInCalendarDays, format, parseISO } from 'date-fns';
+import { differenceInCalendarDays } from 'date-fns/differenceInCalendarDays';
+import { format } from 'date-fns/format';
+import { parseISO } from 'date-fns/parseISO';
 import { PriceAlertsCard } from '../../src/components/stats/PriceAlertsCard';
 import { ReorderPlanCard } from '../../src/components/stats/ReorderPlanCard';
 import { WeekdayRevenueCard } from '../../src/components/stats/WeekdayRevenueCard';

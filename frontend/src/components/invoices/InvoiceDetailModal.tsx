@@ -3,7 +3,8 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Modal, ActivityIndicator, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { format, Locale } from 'date-fns';
+import type { Locale } from 'date-fns';
+import { format } from 'date-fns/format';
 import { useRouter } from 'expo-router';
 import DateTimePickerModal from '../AppDateTimePicker';
 import { PressableScale, LocationPicker } from '..';

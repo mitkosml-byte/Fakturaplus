@@ -19,7 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { Employee, PayrollAgreementType, PayrollRates, PayrollBreakdown, PayrollEntry } from '../src/types';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, LocationPicker } from '../src/components';

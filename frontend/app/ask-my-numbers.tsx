@@ -14,7 +14,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { parseISO, format } from 'date-fns';
+import { parseISO } from 'date-fns/parseISO';
+import { format } from 'date-fns/format';
 import { api } from '../src/services/api';
 import { BusinessChatDigest } from '../src/types';
 import { useTranslation, useLanguageStore } from '../src/i18n';
