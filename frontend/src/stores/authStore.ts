@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { User } from '../types';
 import { api } from '../services/api';
-import { getStoredToken, setStoredToken, removeStoredToken } from '../utils/tokenStorage';
+import { getStoredToken, setStoredToken, removeStoredToken, cookieOnlySession } from '../utils/tokenStorage';
 
 interface AuthState {
   user: User | null;
@@ -48,7 +48,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       set({ isLoading: true });
       const token = await getStoredToken();
-      if (token) {
+      // With the session only in the cookie there is no token to find:
+      // the server is asked whether the cookie still holds one.
+      if (token || cookieOnlySession()) {
         api.setToken(token);
         const user = await api.getMe();
         set({ user, token, isAuthenticated: true, isLoading: false });

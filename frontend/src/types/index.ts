@@ -14,6 +14,10 @@ export interface User {
   // used at registration waits for that.
   email_verified?: boolean;
   invite_pending?: boolean;
+  // A second step at login is required of the owner and the accountant: by
+  // this day (null when not required or already on), and whether it passed.
+  two_factor_due_at?: string | null;
+  two_factor_overdue?: boolean;
   created_at: string;
 }
 

@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { api } from '../services/api';
+import { cookieOnlySession } from './tokenStorage';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -16,14 +17,21 @@ export class DownloadFailedError extends Error {}
 // of the app uses everywhere else.
 export async function downloadAndShareFile(endpoint: string, filename: string): Promise<{ shared: boolean }> {
   const token = api.getToken();
-  if (!token) {
+  // With the session only in the cookie (same origin), the cookie goes with
+  // the request instead of a token.
+  const byCookie = cookieOnlySession();
+  if (!token && !byCookie) {
     throw new NotLoggedInError();
   }
 
   const response = await fetch(`${API_URL}${endpoint}`, {
     method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: byCookie ? 'include' : 'same-origin',
   });
+  if (response.status === 401) {
+    throw new NotLoggedInError();
+  }
 
   if (!response.ok) {
     throw new DownloadFailedError();

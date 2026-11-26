@@ -589,11 +589,15 @@ async def second_step_enable(request: Request, payload: SecondStepCode, current_
     elif not tf.matches_hash(payload.code, pending.get("code_hash")):
         raise HTTPException(status_code=400, detail="Грешен код")
     recovery = tf.new_recovery_codes()
+    turned_on: Dict[str, Any] = {"two_factor": {
+        "method": pending["method"], "secret": pending.get("secret"), "last_step": step,
+        "recovery_codes": [tf.hash_code(c) for c in recovery], "enabled_at": datetime.now(timezone.utc),
+    }}
+    if pending["method"] == "email":
+        # The code came to this inbox: the email is confirmed by it too.
+        turned_on["email_verified"] = True
     await server.db.users.update_one({"user_id": current_user.user_id}, {
-        "$set": {"two_factor": {
-            "method": pending["method"], "secret": pending.get("secret"), "last_step": step,
-            "recovery_codes": [tf.hash_code(c) for c in recovery], "enabled_at": datetime.now(timezone.utc),
-        }},
+        "$set": turned_on,
         "$unset": {"two_factor_pending": ""},
     })
     await audit_service.log_action(

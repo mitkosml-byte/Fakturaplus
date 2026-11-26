@@ -147,6 +147,38 @@ def is_app_admin(email: Optional[str]) -> bool:
     return bool(ADMIN_EMAIL) and (email or '').strip().lower() == ADMIN_EMAIL
 
 
+# A second step at login is required of whoever sees all of a business's
+# money and people - the owner and the accountant - after TWO_FACTOR_GRACE_DAYS
+# from the day this came in, or from the day the account was opened. Until
+# then Home asks for it; after, the app only opens the screen that turns it
+# on. TWO_FACTOR_REQUIRED=false lifts the requirement.
+TWO_FACTOR_REQUIRED = os.environ.get('TWO_FACTOR_REQUIRED', 'true').strip().lower() != 'false'
+TWO_FACTOR_REQUIRED_ROLES = ("owner", "accountant")
+TWO_FACTOR_GRACE_DAYS = 14
+TWO_FACTOR_REQUIRED_FROM = datetime(2026, 11, 26, tzinfo=timezone.utc)
+# What an account that is past its day may still reach: itself, turning the
+# second step on, its email, its password - and leaving.
+TWO_FACTOR_SETUP_PATHS = {
+    "/api/auth/me", "/api/auth/logout", "/api/auth/2fa", "/api/auth/2fa/setup", "/api/auth/2fa/enable",
+    "/api/auth/verify-email", "/api/auth/verify-email/resend", "/api/auth/change-password", "/api/client-errors",
+}
+
+
+def two_factor_due(user_doc: Dict[str, Any]) -> Optional[datetime]:
+    """By when this account must have the second step on - None when it
+    need not (its role, the setting, or it is on already)."""
+    if not TWO_FACTOR_REQUIRED or user_doc.get("role") not in TWO_FACTOR_REQUIRED_ROLES:
+        return None
+    if (user_doc.get("two_factor") or {}).get("method") or user_doc.get("two_factor_enabled"):
+        return None
+    opened = user_doc.get("created_at")
+    if isinstance(opened, datetime):
+        opened = opened if opened.tzinfo else opened.replace(tzinfo=timezone.utc)
+    else:
+        opened = TWO_FACTOR_REQUIRED_FROM
+    return max(opened, TWO_FACTOR_REQUIRED_FROM) + timedelta(days=TWO_FACTOR_GRACE_DAYS)
+
+
 def email_is_verified(user_doc: Dict[str, Any]) -> bool:
     """Whether the account's email was confirmed with the code sent to it.
     An account from before the check (no mark) counts as confirmed; so does
@@ -408,6 +440,10 @@ class User(BaseModel):
     # and how; its secret and codes never leave the server (sanitize_user).
     two_factor_enabled: bool = False
     two_factor_method: Optional[str] = None
+    # By when the second step must be on (owner, accountant), and whether
+    # that day has passed (two_factor_due).
+    two_factor_due_at: Optional[datetime] = None
+    two_factor_overdue: bool = False
     # Whether the email was confirmed with the code sent to it (see
     # email_is_verified); and whether an invitation waits for that.
     email_verified: bool = True
@@ -1033,8 +1069,10 @@ def set_session_cookies(response: Response, session_token: str) -> str:
     return csrf_token
 
 def clear_session_cookies(response: Response) -> None:
-    response.delete_cookie(key="session_token", path="/")
-    response.delete_cookie(key=CSRF_COOKIE_NAME, path="/")
+    # With the attributes they were set with: a browser keeps a
+    # SameSite=None; Secure cookie otherwise.
+    response.delete_cookie(key="session_token", path="/", secure=True, httponly=True, samesite="none")
+    response.delete_cookie(key=CSRF_COOKIE_NAME, path="/", secure=True, samesite="none")
 
 async def repair_invalid_role(user_doc: dict) -> dict:
     """Поправя легаси/невалидни стойности на role (напр. от стари версии на схемата).
@@ -1085,10 +1123,13 @@ def sanitize_user(user_doc: dict) -> dict:
     user_doc.pop("password_hash", None)
     # The second step's secret and codes stay on the server; only whether it
     # is on, and how, goes out.
+    due = two_factor_due(user_doc)
     two_factor = user_doc.pop("two_factor", None) or {}
     user_doc.pop("two_factor_pending", None)
     user_doc["two_factor_enabled"] = bool(two_factor.get("method"))
     user_doc["two_factor_method"] = two_factor.get("method")
+    user_doc["two_factor_due_at"] = due
+    user_doc["two_factor_overdue"] = bool(due and datetime.now(timezone.utc) >= due)
     user_doc["email_verified"] = email_is_verified(user_doc)
     user_doc["invite_pending"] = bool(user_doc.pop("pending_invitation_code", None))
     role = user_doc.get("role", "staff")
@@ -1521,6 +1562,12 @@ async def get_current_user(request: Request) -> User:
     if user_doc.get("role") not in VALID_ROLES:
         user_doc = await repair_invalid_role(user_doc)
     user_doc = sanitize_user(user_doc)
+    # Past the day for the second step: only turning it on is open.
+    if user_doc.get("two_factor_overdue") and request.url.path not in TWO_FACTOR_SETUP_PATHS:
+        raise HTTPException(status_code=403, detail={
+            "code": "two_factor_setup_required",
+            "message": "Включете втора стъпка при вход (Профил → Сигурност), за да продължите.",
+        })
 
     return User(**user_doc)
 
@@ -4088,6 +4135,8 @@ async def _signal_two_factor(company_id, scope, current_user, visibility) -> Opt
     does not come back."""
     if current_user.role not in ("owner", "manager") or current_user.two_factor_enabled:
         return None
+    if current_user.two_factor_due_at:
+        return None  # required of this role: Home asks for it with its day
     entered = await db.invoices.count_documents(scope) + await db.daily_revenue.count_documents(scope)
     if entered < 20:
         return None

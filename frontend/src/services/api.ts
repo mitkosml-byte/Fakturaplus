@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { cookieOnlySession } from '../utils/tokenStorage';
 import { BusinessLocation, ClientErrorReport, SystemStatus, LocationComparison, Deadline, DeadlineInput, PriceList, PriceListEntry, PriceEntryInput, PurchaseItem, SoldItem, PaymentReminders, ReminderStage, RecurringInvoice, RecurringInvoiceInput, BankStatementApply, BankStatementApplyResult, BankStatementPreview, PickedFile, BreakEven, ZReportResult, AccountantPack, BillingOverview, BusinessModules, CashFlow, LoginChallenge, LoginSession, TwoFactorMethod, TwoFactorSetup, TwoFactorStatus, Invoice, DailyRevenue, VatGroupAmount, NonInvoiceExpense, OCRResult, Summary, ChartDataPoint, User, NotificationSettings, Company, Invitation, Employee, EmployeeCreate, PayrollRates, PayrollRateValues, PayrollBreakdown, PayrollEntry, FixedAsset, FixedAssetCreate, AssetCategoriesResponse, AssetsSummary, CompanyMembership, ImportEntity, ImportPreviewResult, ImportCommitResult, CalendarEvent, CalendarEventInput, CollabMember, ConversationSummary, Message, OwnerAction, UserActionResult, PersonalExpense, PersonalWalletEntry, PersonalWalletSummary, PersonalWalletCategory, ClosedDateException, PublicHoliday, HolidayWorkEntry, LeaveEntry, LeaveEntryInput, LeaveBalance, GettingStarted, HomeData, DayCardData, ScanBalance, ScanTransaction, ScanPackage, Customer, Receivable, BillingDocument, BusinessChatResponse, BusinessChatHistoryTurn, ProactiveSignal, WorkShift, WorkShiftCreate, ShiftOccurrence, ScheduleSummary, ShiftAdjustmentCreate, SchedulePaymentCreate, SchedulePayment, BatchPayRequest, BatchPayResultItem, TeamMemberProfile, TeamNote, TeamNoteCreate, TeamNotesResponse, ScheduleLeaveEntry, ReorderPlan,
 WeekdayRevenueStat, WeakDaySuggestion, StaffingEfficiencyStat, StaffingRebalanceSuggestion, InvoiceItemUpdate, InvoiceItemCreate,
 PayrollImportPreviewResponse, PayrollImportCommitEntry, PayrollImportCommitResult, ItemPriceHint, ProactiveSignalAction, ItemOtherSize, RelatedItems, InvoiceDraftCheck, RoiAnalysisDetail, RoiAdviceResponse, LinkableInvoice, BillingDocumentType, RecurringOverview, RecurringExpense, RecurringExpenseInput, RecurringOccurrence, CustomerInput, CustomerCard } from '../types';
@@ -112,7 +113,8 @@ class ApiService {
   private token: string | null = null;
 
   setToken(token: string | null) {
-    this.token = token;
+    // With the session only in the cookie, no token is held or sent.
+    this.token = cookieOnlySession() ? null : token;
   }
 
   getToken(): string | null {

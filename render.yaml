@@ -56,6 +56,8 @@ services:
         value: auto
       - key: BACKUP_KEEP_DAYS
         value: "30"
+      - key: TWO_FACTOR_REQUIRED
+        value: "true"
       - key: BUSINESS_TIMEZONE
         value: Europe/Sofia
 

@@ -10,7 +10,7 @@ import { Alert } from '../src/utils/alert';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLanguageStore, useTranslation } from '../src/i18n';
 import { api } from '../src/services/api';
-import { setStoredToken } from '../src/utils/tokenStorage';
+import { setStoredToken, cookieOnlySession, keepTokenSession } from '../src/utils/tokenStorage';
 import { COLORS } from '../src/theme/colors';
 import type { LoginChallenge, LoginSession } from '../src/types';
 
@@ -100,6 +100,16 @@ export default function LoginScreen() {
   };
 
   const keepSession = async (session: LoginSession) => {
+    if (cookieOnlySession()) {
+      // The session should now be in the server's cookie; where it is not
+      // (something in between dropped the cookie), the token is used.
+      try {
+        await api.getMe();
+        return;
+      } catch {
+        keepTokenSession();
+      }
+    }
     api.setToken(session.session_token);
     // Persist the token so the session survives a reload/app restart -
     // checkAuth() on the next app boot reads it back to restore login.

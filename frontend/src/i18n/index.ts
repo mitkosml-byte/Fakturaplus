@@ -1088,6 +1088,17 @@ export const translations: Translations = {
     bg: 'Общо разходи',
     en: 'Total Expenses',
   },
+  'twoFactorDue.title': { bg: 'Защитете входа', en: 'Protect your sign-in' },
+  'twoFactorDue.text': {
+    bg: 'За собственик и счетоводител втората стъпка при вход е задължителна - включете я до {date}. Код по имейл е най-лесно.',
+    en: 'For an owner and an accountant a second step at sign-in is required - turn it on by {date}. A code by email is easiest.',
+  },
+  'twoFactorDue.button': { bg: 'Включи сега', en: 'Turn it on now' },
+  'twoFactorDue.overdue': {
+    bg: 'Втората стъпка при вход е задължителна за собственик и счетоводител. Включете я тук, за да продължите.',
+    en: 'A second step at sign-in is required for an owner and an accountant. Turn it on here to continue.',
+  },
+  'twoFactorDue.logout': { bg: 'Изход', en: 'Sign out' },
   'verifyEmail.title': { bg: 'Потвърдете имейла си', en: 'Confirm your email' },
   'verifyEmail.text': {
     bg: 'Изпратихме код от 6 цифри на {email}. Проверете и папката за нежелана поща.',

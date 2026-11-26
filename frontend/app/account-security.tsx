@@ -21,6 +21,7 @@ import { api } from '../src/services/api';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { ScreenEnter } from '../src/components';
+import { format } from 'date-fns/format';
 import { COLORS } from '../src/theme/colors';
 import type { TwoFactorMethod, TwoFactorSetup, TwoFactorStatus } from '../src/types';
 
@@ -28,7 +29,7 @@ const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c
 
 export default function AccountSecurityScreen() {
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { user, refreshUser, logout } = useAuth();
   const hasPassword = !!user?.has_password;
 
@@ -125,6 +126,26 @@ export default function AccountSecurityScreen() {
           </View>
 
           <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
+            {/* Required of the owner and the accountant: first on the
+                screen, and past its day the only way on. */}
+            {user?.two_factor_due_at && (
+              <>
+                <View style={styles.requiredNote}>
+                  <Ionicons name="shield-checkmark" size={20} color={COLORS.primary} />
+                  <Text style={styles.requiredText}>
+                    {user.two_factor_overdue
+                      ? t('twoFactorDue.overdue')
+                      : t('twoFactorDue.text').replace('{date}', format(new Date(user.two_factor_due_at), 'd MMMM', { locale: dateLocale }))}
+                  </Text>
+                  {user.two_factor_overdue && (
+                    <TouchableOpacity onPress={() => logout()} hitSlop={8} accessibilityRole="button">
+                      <Text style={styles.requiredLogout}>{t('twoFactorDue.logout')}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <TwoFactorSection hasPassword={hasPassword} onChanged={refreshUser} />
+              </>
+            )}
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <View style={[styles.sectionIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
@@ -203,7 +224,7 @@ export default function AccountSecurityScreen() {
               </Text>
             </View>
 
-            <TwoFactorSection hasPassword={hasPassword} onChanged={refreshUser} />
+            {!user?.two_factor_due_at && <TwoFactorSection hasPassword={hasPassword} onChanged={refreshUser} />}
 
             <View style={styles.dangerSection}>
               <View style={styles.sectionHeader}>
@@ -533,6 +554,12 @@ function TwoFactorSection({ hasPassword, onChanged }: { hasPassword: boolean; on
 }
 
 const styles = StyleSheet.create({
+  requiredNote: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    borderRadius: 14, borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.45)', padding: 14, marginBottom: 16,
+  },
+  requiredText: { flex: 1, color: 'white', fontSize: 14, lineHeight: 20 },
+  requiredLogout: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
   backgroundImage: { flex: 1 },
   overlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.85)' },
   container: { flex: 1 },

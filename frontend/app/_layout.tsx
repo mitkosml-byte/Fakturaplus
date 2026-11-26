@@ -55,7 +55,7 @@ export function ErrorBoundary(props: { error: Error; retry: () => Promise<void> 
 const PUBLIC_SCREENS = ['login', 'forgot-password', 'privacy-policy', 'terms-of-service'];
 
 function useProtectedRoute() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -68,12 +68,16 @@ function useProtectedRoute() {
     if (isLoading) return;
     const onLoginScreen = segments[0] === 'login';
     const onPublicScreen = PUBLIC_SCREENS.includes(segments[0] as string);
-    if (isAuthenticated && onLoginScreen) {
+    if (isAuthenticated && user?.two_factor_overdue) {
+      // Past the day for the second step (owner, accountant): only the
+      // screen that turns it on (the server refuses everything else).
+      if (segments[0] !== 'account-security') router.replace('/account-security');
+    } else if (isAuthenticated && onLoginScreen) {
       router.replace('/(tabs)');
     } else if (!isAuthenticated && !onPublicScreen) {
       router.replace('/login');
     }
-  }, [isAuthenticated, isLoading, segments]);
+  }, [isAuthenticated, isLoading, segments, user?.two_factor_overdue]);
 }
 
 function AppShell() {

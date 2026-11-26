@@ -40,6 +40,7 @@ import { PersonalWalletCard } from '../../src/components/home/PersonalWalletCard
 import { MarginsCard } from '../../src/components/home/MarginsCard';
 import { VatCard } from '../../src/components/home/VatCard';
 import { EmailVerifyCard } from '../../src/components/home/EmailVerifyCard';
+import { TwoFactorDueCard } from '../../src/components/home/TwoFactorDueCard';
 import { useModules } from '../../src/stores/modulesStore';
 import { useShowTeamTab } from '../../src/hooks/useTeamTab';
 import { useOnboardingStore } from '../../src/stores/onboardingStore';
@@ -504,6 +505,9 @@ export default function HomeScreen() {
 
             {/* A new account's email, until it is confirmed with its code. */}
             <EmailVerifyCard onJoined={loadData} />
+            {/* The second step at login, required of the owner and the
+                accountant - by its day. */}
+            <TwoFactorDueCard />
 
             {/* What needs attention today comes first (P1-5): up to two, the
                 rest behind "show more". */}
