@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { DEFAULT_PERIOD_STATE, PeriodState } from './periodRange';
 
 // One chosen period for every report screen - Home, Statistics, suppliers,
-// items, Джобче. Picking October on one screen shows October on the next,
+// items, the tips. Picking October on one screen shows October on the next,
 // instead of each screen silently answering a different period. Kept in
 // memory for the session (a plain module-level value with subscribers, so
 // no provider is needed around the tabs).

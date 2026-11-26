@@ -34,7 +34,7 @@ const MONTH_NAMES_EN = ['January', 'February', 'March', 'April', 'May', 'June', 
 // Home and Statistics show - or the whole history.
 type HistoryScope = 'period' | 'all';
 
-// Module 2 audit correction: "Джобче" keeps its exact existing behavior
+// Module 2 audit correction: the tips ("Бакшиш") keep their exact existing behavior
 // (the owner was explicit that it serves a different purpose than
 // originally assumed, and must stay simple and unchanged) - this screen
 // adds ONLY a read-only history/stats view, mirroring the pattern already
@@ -65,7 +65,7 @@ export default function PocketMoneyHistoryScreen() {
     }
     try {
       const data = await api.getDailyRevenues(scope === 'period' ? { start_date: startDate, end_date: endDate } : {});
-      // Only days with a non-zero Джобче entry - this history is about
+      // Only days with non-zero tips - this history is about
       // that one field, not a general daily-revenue ledger (which has
       // its own screens already).
       setRevenues(data.filter((r) => r.pocket_money > 0));

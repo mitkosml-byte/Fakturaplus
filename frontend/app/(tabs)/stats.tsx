@@ -164,7 +164,7 @@ export default function StatsScreen() {
   const [inflationExpanded, setInflationExpanded] = useState(false);
 
   // The period every report on this screen shows - the cards, the charts,
-  // the averages, suppliers and items - and the same one Home and Джобче
+  // the averages, suppliers and items - and the same one Home and the tips
   // show (one shared choice, see utils/sharedPeriod).
   const [summaryPeriodState, setSummaryPeriodState] = useSharedPeriod();
   const periodBounds = useMemo(() => getPeriodBounds(summaryPeriodState), [summaryPeriodState]);

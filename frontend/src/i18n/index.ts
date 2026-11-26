@@ -1169,8 +1169,8 @@ export const translations: Translations = {
     en: 'The company totals are hidden for your access level.',
   },
   'visibility.pocketMoney': {
-    bg: 'джобчето',
-    en: 'pocket money',
+    bg: 'бакшиша',
+    en: 'tips',
   },
   'visibility.offBookExpenses': {
     bg: 'разходите без фактура',
@@ -1212,9 +1212,9 @@ export const translations: Translations = {
     bg: 'Досега: {range}',
     en: 'So far: {range}',
   },
-  // The till's and Джобче's revenue added up, under the number boxes.
+  // The till's revenue and the tips added up, under the number boxes.
   'stats.paymentKinds': { bg: 'Приходи по вид плащане', en: 'Income by payment kind' },
-  'home.revenueSum': { bg: 'Оборот (фискален + джобче)', en: 'Revenue (fiscal + pocket)' },
+  'home.revenueSum': { bg: 'Оборот (фискален + бакшиш)', en: 'Revenue (fiscal + tips)' },
   // A scanned invoice confirmed in one tap (Л6).
   'scanSummary.title': { bg: 'Прочетено от снимката', en: 'Read from the photo' },
   'scanSummary.creditNote': { bg: 'Кредитно известие', en: 'Credit note' },
@@ -1231,7 +1231,7 @@ export const translations: Translations = {
   'start.question': { bg: 'С какво работите?', en: 'What do you work with?' },
   'start.subtitle': { bg: 'Отбележете каквото ползвате - програмата ще показва само него.', en: 'Tick what you use - the app will show just that.' },
   'start.till': { bg: 'Каса (касов апарат)', en: 'A till (cash register)' },
-  'start.tillHint': { bg: 'дневен оборот и джобче', en: 'daily revenue and pocket money' },
+  'start.tillHint': { bg: 'дневен оборот и бакшиш', en: 'daily revenue and tips' },
   'start.billing': { bg: 'Фактури към клиенти', en: 'Invoices to customers' },
   'start.billingHint': { bg: 'издаване, вземания, оферти', en: 'issuing, receivables, quotes' },
   'start.team': { bg: 'Служители', en: 'Employees' },
@@ -1269,7 +1269,7 @@ export const translations: Translations = {
   'stats.cashFlowSection': { bg: 'какво влиза и излиза в следващите седмици', en: 'what comes in and goes out in the weeks ahead' },
   'stats.accountantPackSection': { bg: 'всичко за счетоводителя за месеца', en: "everything for the accountant for the month" },
   // Home's actions, each with a word on what it records.
-  'home.actionRevenueHint': { bg: 'каса и джобче', en: 'till and pocket' },
+  'home.actionRevenueHint': { bg: 'каса и бакшиш', en: 'till and tips' },
   'home.actionExpenseHint': { bg: 'без фактура', en: 'no invoice' },
   'home.actionInvoice': { bg: 'Фактура', en: 'Invoice' },
   'home.actionInvoiceHint': { bg: 'към клиент', en: 'to a customer' },
@@ -1284,8 +1284,8 @@ export const translations: Translations = {
     en: 'History & records',
   },
   'historyHub.subtitle': {
-    bg: 'Всичко на едно място - кредити, разходи, джобче, клиенти',
-    en: 'Everything in one place - credits, expenses, pocket money, customers',
+    bg: 'Всичко на едно място - кредити, разходи, бакшиш, клиенти',
+    en: 'Everything in one place - credits, expenses, tips, customers',
   },
   'historyHub.scanCreditsDesc': {
     bg: 'Баланс и история на кредитите за сканиране',
@@ -1296,8 +1296,8 @@ export const translations: Translations = {
     en: 'Off-book expense history',
   },
   'historyHub.pocketMoneyDesc': {
-    bg: 'История на Джобчето по дни',
-    en: 'Day-by-day pocket-money history',
+    bg: 'История на бакшиша по дни',
+    en: 'Day-by-day tips history',
   },
   'historyHub.personalNotebook': {
     bg: 'Лично тефтерче и вложения',
@@ -1308,24 +1308,24 @@ export const translations: Translations = {
     en: 'What was taken from the business for personal needs, and what was put in',
   },
   'pocketMoney.historyTitle': {
-    bg: 'История на Джобчето',
-    en: 'Pocket money history',
+    bg: 'История на бакшиша',
+    en: 'Tips history',
   },
   'pocketMoney.empty': {
-    bg: 'Няма записи с Джобче за този период',
-    en: 'No pocket-money entries for this period',
+    bg: 'Няма записан бакшиш за този период',
+    en: 'No tips recorded for this period',
   },
   'home.pocket': {
-    bg: 'Джобче',
-    en: 'Pocket',
+    bg: 'Бакшиш',
+    en: 'Tips',
   },
   'home.fiscalRevenueLabel': {
     bg: 'Фискализиран оборот',
     en: 'Fiscal revenue',
   },
   'home.pocketLabel': {
-    bg: 'Джобче',
-    en: 'Pocket',
+    bg: 'Бакшиш',
+    en: 'Tips',
   },
   'home.cardRevenueLabel': {
     bg: 'От тях – платено с карта',
@@ -1349,8 +1349,10 @@ export const translations: Translations = {
   },
   // The day's total beside the quick fills of the revenue form.
   'home.dayTotal': { bg: 'Общо за деня', en: 'Day total' },
-  'home.dayTotalWithoutPocket': { bg: 'Общо без джобче', en: 'Total without pocket' },
-  'home.withoutPocket': { bg: 'без джобче', en: 'without pocket' },
+  'home.dayTotalWithoutPocket': { bg: 'Общо без бакшиш', en: 'Total without tips' },
+  'home.withoutPocket': { bg: 'без бакшиш', en: 'without tips' },
+  // Home: each part's share of the revenue (fiscal + tips), as a bar and a percentage.
+  'home.revenueShares': { bg: 'Дял от оборота', en: 'Share of revenue' },
   'home.sameAsYesterday': {
     bg: 'Както вчера',
     en: 'Same as yesterday',
@@ -1621,8 +1623,8 @@ export const translations: Translations = {
   'receivables.paidSoFar': { bg: 'Платени {paid} € · остават {left} €', en: '{paid} € paid · {left} € left' },
   'receivables.partPaid': { bg: 'Частичното плащане е записано', en: 'Part payment recorded' },
   'receivables.logAsRevenueHintDay': {
-    bg: '{name} плати {amount} € в брой. Да го добавя ли към джобчето за {date}?',
-    en: '{name} paid {amount} € in cash. Add it to the pocket money for {date}?',
+    bg: '{name} плати {amount} € в брой. Да го добавя ли към бакшиша за {date}?',
+    en: '{name} paid {amount} € in cash. Add it to the tips for {date}?',
   },
   'receivables.logAsRevenueTitle': {
     bg: 'Добави ли го и в дневния оборот?',
@@ -6081,8 +6083,8 @@ export const translations: Translations = {
     bg: 'Изключете това, което не ползвате - изчезва от менютата, Начало и напомнянията. Въведеното остава и се връща, щом го включите отново.',
     en: 'Turn off what you do not use - it leaves the menus, Home and the reminders. What was entered stays and comes back when you turn it on again.',
   },
-  'modules.till': { bg: 'Каса и джобче', en: 'Till and pocket money' },
-  'modules.tillHint': { bg: 'Дневен оборот от касата, в брой и с карта, джобче, средно на ден', en: 'Daily till revenue, cash and card, pocket money, average per day' },
+  'modules.till': { bg: 'Каса и бакшиш', en: 'Till and tips' },
+  'modules.tillHint': { bg: 'Дневен оборот от касата, в брой и с карта, бакшиш, средно на ден', en: 'Daily till revenue, cash and card, tips, average per day' },
   'modules.billing': { bg: 'Издадени фактури и клиенти', en: 'Issued invoices and customers' },
   'modules.billingHint': { bg: 'Фактури, кредитни известия, сметки и оферти към клиенти; вземания', en: 'Invoices, credit notes, bills and quotes to customers; receivables' },
   'modules.team': { bg: 'Екип и график', en: 'Team and schedule' },

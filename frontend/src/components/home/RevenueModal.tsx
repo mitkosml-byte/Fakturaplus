@@ -29,7 +29,7 @@ export function rateAmountsTotal(rateAmounts: Record<number, string>): number {
 }
 
 // The day's total as the form holds it, as it is typed: the till (its card
-// part is in it) and the pocket money - or, with "без джобче", the till
+// part is in it) and the tips - or, with "без бакшиш", the till
 // alone. The choice is remembered on the device, per person.
 function DayTotal({ till, pocket, showPocket }: { till: number; pocket: number; showPocket: boolean }) {
   const { t } = useTranslation();

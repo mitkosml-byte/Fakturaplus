@@ -816,7 +816,7 @@ class DailyRevenue(BaseModel):
     company_id: Optional[str] = None
     date: str
     fiscal_revenue: float = 0
-    pocket_money: float = 0  # "джобче" - не влиза в ДДС
+    pocket_money: float = 0  # "бакшиш" (бивше "джобче") - оборот извън касовия апарат, не влиза в ДДС
     card_revenue: float = 0  # Частта от fiscal_revenue, платена с карта (остатъкът се приема за в брой)
     vat_rate_percent: float = 20.0  # Ставката на фискализирания оборот (20% стандартна, 9% намалена, 0%)
     # The day's till revenue by VAT rate, as the fiscal device's daily
@@ -830,8 +830,8 @@ class DailyRevenue(BaseModel):
 
 class DailyRevenueCreate(BaseModel):
     """A day's revenue as entered. A field left out (None) keeps what the
-    day already holds - an Excel row with an empty "Джобче" cell, or a
-    teammate who may not see pocket money, never wipes it out. A new day
+    day already holds - an Excel row with an empty "Бакшиш" cell, or a
+    teammate who may not see the tips, never wipes it out. A new day
     starts from 0 (20% VAT)."""
     date: str
     fiscal_revenue: Optional[float] = Field(default=None, ge=0)
@@ -1409,7 +1409,7 @@ def restricted_data_note(visibility: dict) -> Optional[str]:
     if not visibility.get("statistics", True):
         return "Общите суми на фирмата са скрити за вашия достъп."
     left_out = [name for key, name in (
-        ("pocket_money", "джобчето"), ("off_book_expenses", "разходите без фактура"), ("payroll", "заплатите"),
+        ("pocket_money", "бакшиша"), ("off_book_expenses", "разходите без фактура"), ("payroll", "заплатите"),
     ) if not visibility.get(key, True)]
     items = ", ".join(left_out[:-1]) + " и " + left_out[-1] if len(left_out) > 1 else "".join(left_out)
     if not visibility.get("profit", True):

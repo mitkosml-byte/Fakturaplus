@@ -36,6 +36,7 @@ import { ExpenseModal } from '../../src/components/home/ExpenseModal';
 import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCard';
 import { GettingStartedCard } from '../../src/components/home/GettingStartedCard';
 import { DayCard } from '../../src/components/home/DayCard';
+import { RevenueSplit } from '../../src/components/home/RevenueSplit';
 import { PersonalWalletCard } from '../../src/components/home/PersonalWalletCard';
 import { MarginsCard } from '../../src/components/home/MarginsCard';
 import { VatCard } from '../../src/components/home/VatCard';
@@ -407,20 +408,27 @@ export default function HomeScreen() {
     }] : []),
   ];
   // Under the boxes: the period's revenue (with a till, the till and
-  // Джобче added up - for who sees both) and its expenses; for whoever sees
+  // the tips added up - for who sees both) and its expenses; for whoever sees
   // the personal notebook, the company money spent personally and what is
   // left in the business after it - never a business expense.
   // The one profit (P1-1): its income and expenses are without VAT for a
   // business registered for VAT - said beside them.
   const withoutVat = (label: string) => (summary?.vat_excluded ? `${label} ${t('profit.withoutVat')}` : label);
-  const ledgerRows: { key: string; label: string; value: number; tone?: string; onPress?: () => void }[] = [];
+  const ledgerRows: {
+    key: string; label: string; value: number; tone?: string; onPress?: () => void;
+    // Under the revenue: the fiscal part alone and the tips, with their shares.
+    split?: { fiscal: number; tips: number };
+  }[] = [];
   if (summary) {
     if (usesTill) {
       const tillSum = summary.total_fiscal_revenue !== null && summary.total_pocket_money !== null
         ? (summary.total_fiscal_revenue || 0) + (summary.total_pocket_money || 0)
         : null;
       if (tillSum !== null) {
-        ledgerRows.push({ key: 'till', label: t('home.revenueSum'), value: tillSum });
+        ledgerRows.push({
+          key: 'till', label: t('home.revenueSum'), value: tillSum,
+          split: { fiscal: summary.total_fiscal_revenue || 0, tips: summary.total_pocket_money || 0 },
+        });
       }
       // The till as rung up holds the VAT (and not the invoices issued):
       // the income the profit counts, right under it, so the rows add up.
@@ -548,7 +556,7 @@ export default function HomeScreen() {
             <PeriodSoFarNote summary={summary} />
 
             <Animated.View style={periodReveal.style}>
-              {/* The main numbers: invoices, the till, Джобче, the profit -
+              {/* The main numbers: invoices, the till, the tips, the profit -
                   and under them the period's revenue and expenses. */}
               <View style={styles.statsGrid}>
                 {!summary ? (
@@ -608,19 +616,21 @@ export default function HomeScreen() {
                     {ledgerRows.length > 0 && (
                       <View style={styles.ledger}>
                         {ledgerRows.map((row, index) => (
-                          <TouchableOpacity
-                            key={row.key}
-                            style={[styles.ledgerRow, index > 0 && styles.ledgerRowDivider]}
-                            onPress={row.onPress}
-                            disabled={!row.onPress}
-                            accessibilityRole={row.onPress ? 'button' : undefined}
-                          >
-                            <Text style={styles.ledgerLabel}>{row.label}</Text>
-                            <View style={styles.ledgerValueWrap}>
-                              <Text style={[styles.ledgerValue, row.tone ? { color: row.tone } : null]}>{formatMoney(row.value)}</Text>
-                              {row.onPress && <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />}
-                            </View>
-                          </TouchableOpacity>
+                          <React.Fragment key={row.key}>
+                            <TouchableOpacity
+                              style={[styles.ledgerRow, index > 0 && styles.ledgerRowDivider]}
+                              onPress={row.onPress}
+                              disabled={!row.onPress}
+                              accessibilityRole={row.onPress ? 'button' : undefined}
+                            >
+                              <Text style={styles.ledgerLabel}>{row.label}</Text>
+                              <View style={styles.ledgerValueWrap}>
+                                <Text style={[styles.ledgerValue, row.tone ? { color: row.tone } : null]}>{formatMoney(row.value)}</Text>
+                                {row.onPress && <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />}
+                              </View>
+                            </TouchableOpacity>
+                            {row.split && <RevenueSplit fiscal={row.split.fiscal} tips={row.split.tips} />}
+                          </React.Fragment>
                         ))}
                       </View>
                     )}

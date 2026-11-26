@@ -895,7 +895,7 @@ class ForecastService:
         include_pocket_money mirrors get_expense_forecast's
         include_off_book_expenses: total revenue everywhere else in this
         app (get_summary's total_income) is fiscal_revenue + pocket_money
-        ("Джобче" - non-fiscal cash revenue, not personal investment), so
+        ("Бакшиш", formerly "Джобче" - non-fiscal cash revenue, not personal investment), so
         omitting pocket_money here made this forecast silently undercount
         total revenue for any company that takes meaningful cash income
         outside the register - the forecast card could show a fraction of

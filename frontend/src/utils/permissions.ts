@@ -92,7 +92,7 @@ export const PERMISSION_LABELS: Record<Permission, { bg: string; en: string }> =
   add_revenue: { bg: 'Въвеждане на оборот, сметки и вземания', en: 'Enter revenue, bills and receivables' },
   issue_invoices: { bg: 'Издаване на фактури (анулира само собственик/управител)', en: 'Issue invoices (only owner/manager cancel)' },
   add_expenses: { bg: 'Въвеждане на разходи', en: 'Enter expenses' },
-  view_pocket_money: { bg: 'Вижда "джобче"', en: 'Sees pocket money' },
+  view_pocket_money: { bg: 'Вижда бакшиша', en: 'Sees tips' },
   view_off_book_expenses: { bg: 'Вижда разходи "в канала"', en: 'Sees off-book expenses' },
   view_profit: { bg: 'Вижда печалба', en: 'Sees profit' },
   view_personal_investments: { bg: 'Вижда лични инвестиции/ROI', en: 'Sees personal investments/ROI' },

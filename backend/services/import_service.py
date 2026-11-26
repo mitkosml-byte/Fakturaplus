@@ -350,11 +350,12 @@ def _parse_daily_revenue_row(row: List[Any], table: ParsedTable, _ctx: Dict[str,
         return None, errors, []
 
     # An empty cell leaves what the day already holds - a till export
-    # with no "Джобче" column never wipes out pocket money entered by hand.
+    # with no "Бакшиш" column never wipes out tips entered by hand. A file
+    # made before the rename, with its "Джобче" column, still reads.
     data: Dict[str, Any] = {"date": date_val}
     if fiscal_revenue is not None:
         data["fiscal_revenue"] = fiscal_revenue
-    pocket_money = _parse_float(_get(row, table, "Джобче"))
+    pocket_money = _parse_float(_get(row, table, "Бакшиш", "Джобче"))
     card_revenue = _parse_float(_get(row, table, "От тях - платено с карта", "Платено с карта"))
     vat_rate = _parse_float(_get(row, table, "ДДС ставка %", "ДДС ставка"))
     if pocket_money is not None:
@@ -518,7 +519,7 @@ ENTITY_TEMPLATES = {
     },
     "daily_revenue": {
         "label": "Дневен оборот (назад във времето)",
-        "headers": ["Дата*", "Фискализиран оборот*", "Джобче", "От тях - платено с карта", "ДДС ставка %",
+        "headers": ["Дата*", "Фискализиран оборот*", "Бакшиш", "От тях - платено с карта", "ДДС ставка %",
                     "Оборот 20%", "Оборот 9%", "Оборот 0%"],
         "example": ["01.09.2026", "450.00", "20.00", "150.00", "20", "", "", ""],
         "notes": "Ако вече има въведен оборот за дадена дата, попълнените клетки го ЗАМЕСТВАТ (не се сумират), а празните не го променят. Ден с продажби по различни ставки ДДС: попълнете „Оборот 20%“, „Оборот 9%“ и „Оборот 0%“ както са в дневния отчет на касата - сборът им е фискализираният оборот, а „ДДС ставка %“ не е нужна.",

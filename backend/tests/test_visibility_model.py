@@ -128,7 +128,7 @@ def test_every_total_holds_what_its_viewer_may_see(client):
     assert "заплатите" in server.restricted_data_note(manager_view)
     accountant_view = client.get(f"/api/statistics/summary?{period}", headers=viewers[ACCOUNTANT]).json()["financial_visibility"]
     assert server.restricted_data_note(accountant_view) == (
-        "Сумите и печалбата са без джобчето и разходите без фактура (скрити за вашия достъп) - "
+        "Сумите и печалбата са без бакшиша и разходите без фактура (скрити за вашия достъп) - "
         "това не е действителната печалба на фирмата."
     )
 

@@ -77,7 +77,7 @@ export default function HelpScreen() {
       content: [
         '💰 Въвеждайте дневния фискализиран оборот от касов апарат за избрана дата',
         '✏️ Записът за деня се ПОПРАВЯ, а не се добавя - ако запазите нова сума за дата, на която вече има въведена, тя ЗАМЕСТВА старата (не се сумират)',
-        '👛 "Джобче" е за суми които НЕ влизат в ДДС изчислението',
+        '👛 "Бакшиш" е за суми, които НЕ влизат в ДДС изчислението',
         '💳 Отделно поле за оборот с карта',
         '📅 Можете да изберете конкретна дата от календара',
       ],
@@ -245,7 +245,7 @@ export default function HelpScreen() {
       content: [
         '💰 Enter the daily fiscal revenue from the cash register for a chosen date',
         "✏️ The day's entry is CORRECTED, not added to - saving a new amount for a date that already has one REPLACES it (amounts are not summed)",
-        '👛 "Pocket money" is for amounts NOT included in the VAT calculation',
+        '👛 "Tips" are for amounts NOT included in the VAT calculation',
         '💳 A separate field for card revenue',
         '📅 You can pick a specific date from the calendar',
       ],
