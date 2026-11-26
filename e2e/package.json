@@ -1,0 +1,11 @@
+{
+  "name": "fakturaplus-browser-checks",
+  "private": true,
+  "description": "The main paths of the app in a real browser (Playwright), against serve.py.",
+  "scripts": {
+    "test": "playwright test --trace off"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

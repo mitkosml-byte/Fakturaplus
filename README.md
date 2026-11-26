@@ -99,5 +99,18 @@ cd backend && python -m mypy server.py routers/ --ignore-missing-imports
 cd frontend && npx tsc --noEmit -p .              # типовете на приложението
 ```
 
+Основните пътища в истински браузър (регистрация, оборот, разход, статистика,
+архив, изход и вход) - срещу сглобеното приложение и сървъра върху база в
+паметта, с измислени данни:
+
+```bash
+cd frontend && EXPO_PUBLIC_BACKEND_URL= npx expo export -p web --output-dir dist
+cd e2e && npm ci && npx playwright install chromium && npx playwright test
+```
+
+Всички проверки вървят в GitHub при всяко качване в pull request. Ако в
+Render се избере публикуване само след успешни проверки, нищо червено не
+стига до потребителите.
+
 Тестовете ползват измислени данни и база в паметта (mongomock) - не им трябва
 истинска MongoDB.
