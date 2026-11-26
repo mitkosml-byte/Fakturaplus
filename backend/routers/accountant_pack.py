@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from server import *
 from server import _count_bg
 import server
+from services import photo_store
 from services.month_names import MONTHS_BG_TITLE
 
 from services.translit import to_latin
@@ -76,7 +77,7 @@ async def _pack_records(scope: dict, period: Period, with_images: bool = False) 
 
 
 def _has_scan(invoice: dict) -> bool:
-    return bool(invoice.get("image_base64") or invoice.get("image_base64s"))
+    return photo_store.has_pages(invoice)
 
 
 async def _pack_checks(company_id: Optional[str], scope: dict, period: Period, records: dict) -> List[dict]:
@@ -144,7 +145,8 @@ async def _pack_summary(company_id: Optional[str], scope: dict, period: Period) 
     records = await _pack_records(scope, period)
     scanned_ids = set(await server.db.invoices.distinct("id", {"$and": [
         scope, {"date": period.datetime_filter()},
-        {"$or": [{"image_base64": {"$nin": [None, ""]}}, {"image_base64s.0": {"$exists": True}}]},
+        {"$or": [{"image_base64": {"$nin": [None, ""]}}, {"image_base64s.0": {"$exists": True}},
+                 {"image_keys.0": {"$exists": True}}]},
     ]}))
     for invoice in records["purchases"]:
         invoice["has_scan"] = invoice.get("id") in scanned_ids
@@ -187,7 +189,7 @@ async def build_accountant_pack(company_id: Optional[str], scope: dict, current_
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as pack:
         ledger = await asyncio.to_thread(
             ExportService.generate_vat_ledger_excel,
-            purchases=[{k: v for k, v in inv.items() if k not in ("image_base64", "image_base64s")} for inv in records["purchases"]],
+            purchases=[{k: v for k, v in inv.items() if k not in ("image_base64", "image_base64s", "image_keys")} for inv in records["purchases"]],
             sales=sales, company_name=company_name,
             period_label=f"Период: {period.start_text} - {period.end_text}", issued_invoices=records["issued"],
         )
@@ -204,7 +206,8 @@ async def build_accountant_pack(company_id: Optional[str], scope: dict, current_
             kind = "kreditno-izvestie" if document.get("doc_type") == "credit_note" else "faktura"
             pack.writestr(f"izdadeni/{kind}_{document.get('invoice_number') or document.get('id')}.pdf", pdf)
         for invoice in records["purchases"]:
-            pages = list(invoice.get("image_base64s") or []) or ([invoice["image_base64"]] if invoice.get("image_base64") else [])
+            # Kept in the invoice, or in the file storage (P1-4).
+            pages = photo_store.pages_of(invoice) or await photo_store.load_pages(invoice.get("company_id"), invoice.get("image_keys") or [])
             day = business_day(invoice.get("date"))
             stem = f"{day.isoformat() if day else 'bez-data'}_{_file_part(invoice.get('supplier'))}_{_file_part(invoice.get('invoice_number'), 20)}"
             for number, page in enumerate(pages, 1):

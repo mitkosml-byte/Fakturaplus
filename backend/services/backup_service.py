@@ -106,7 +106,7 @@ SECTIONS: List[Section] = [
             _norm(d.get("supplier_eik")) or _norm(d.get("supplier")),
             _norm(d.get("invoice_number")),
         ),
-        label="Фактури", legacy_key="invoices", skip_projection=("image_base64", "items"),
+        label="Фактури", legacy_key="invoices", skip_projection=("image_base64", "image_base64s", "image_keys", "items"),
     ),
     Section(
         "assets",

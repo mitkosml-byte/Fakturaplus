@@ -301,6 +301,7 @@ export const translations: Translations = {
   'status.job.scan_credits': { bg: 'Кредити за сканиране', en: 'Scan credits' },
   'status.job.backup_email': { bg: 'Архив по имейл', en: 'Backup by email' },
   'status.job.daily_backup': { bg: 'Дневен архив', en: 'Daily backup' },
+  'status.job.photos_to_storage': { bg: 'Снимки към хранилището', en: 'Photos to the file storage' },
   'status.every': { bg: 'на всеки {minutes} мин', en: 'every {minutes} min' },
   'status.lastRun': { bg: 'последно {time}', en: 'last {time}' },
   'status.state.ok': { bg: 'Работи', en: 'Works' },

@@ -35,6 +35,7 @@ from server import (
     _team_channel_id,
 )
 import server
+from services import photo_store
 from routers.locations import require_location
 from routers.price_tracking import (
     detect_pack_multiple,
@@ -212,7 +213,11 @@ async def create_invoice(invoice: InvoiceCreate, background_tasks: BackgroundTas
         credited_invoice_id=credited_target["id"] if credited_target else None,
         **{k: v for k, v in invoice_dict.items() if k not in ["date", "items", "payment_due_date"]}
     )
-    await server.db.invoices.insert_one(invoice_obj.model_dump())
+    stored = invoice_obj.model_dump()
+    # The photos go to the file storage when there is one (P1-4); the reply
+    # still carries them as sent.
+    await photo_store.keep_new_invoice_pages(company_id, stored)
+    await server.db.invoices.insert_one(stored)
     # What a credit note took off is no longer owed on its invoice; an
     # invoice picks up credit notes entered before it.
     if credited_target:
@@ -525,11 +530,12 @@ async def get_reverse_charge_protocols(current_user: User = Depends(get_current_
 @router.get("/invoices/{invoice_id}", response_model=Invoice)
 async def get_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
     require_permission(current_user, "manage_invoices")
-    _, scope = await get_company_scope(current_user)
+    company_id, scope = await get_company_scope(current_user)
     invoice = await server.db.invoices.find_one({"id": invoice_id, **scope}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Фактурата не е намерена")
-    return Invoice(**invoice)
+    # Its photos from wherever they are kept (P1-4).
+    return Invoice(**await photo_store.with_pages(company_id, invoice))
 
 @router.put("/invoices/{invoice_id}", response_model=Invoice)
 async def update_invoice(invoice_id: str, invoice_update: InvoiceUpdate, current_user: User = Depends(get_current_user)):

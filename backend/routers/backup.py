@@ -236,6 +236,9 @@ async def list_backups(current_user: User = Depends(get_current_user)):
     return {"backups": backups}
 
 def _restored_invoice_day(doc: dict) -> dict:
+    # Photo keys come back as they are: they are read only under the
+    # restoring company's own folder (services/photo_store), so a key that
+    # points at another company's photos shows nothing.
     # Kept as its business day, like every invoice saved today
     # (services/business_calendar) - a backup from before that change
     # restores onto the same day it showed.

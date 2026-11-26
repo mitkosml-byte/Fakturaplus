@@ -168,6 +168,7 @@ JOB_INTERVALS: Dict[str, int] = {
     "scan_credits": 3600,
     "backup_email": 3600,
     "daily_backup": 3600,
+    "photos_to_storage": 3600,
 }
 
 # Stripe (scan-credit purchases, see SCAN CREDITS below). Same
@@ -230,6 +231,7 @@ async def lifespan(app: FastAPI):
     await start_recurring_expense_loop()
     await start_backup_email_loop()
     await start_daily_backup_loop()
+    await start_photo_move_loop()
     await team_moments_router.start_team_moments_loop()
     await create_indexes()
     await run_data_migrations()
@@ -7153,6 +7155,22 @@ async def start_daily_backup_loop():
     with a file storage set up (services/object_storage)."""
     if object_storage.enabled():
         asyncio.create_task(_daily_backup_loop())
+
+
+async def _photo_move_tick():
+    from services import photo_store
+    await photo_store.move_invoice_photos(db)
+
+
+async def _photo_move_loop():
+    await error_log.run_job(db, "photos_to_storage", _photo_move_tick, JOB_INTERVALS["photos_to_storage"])
+
+
+async def start_photo_move_loop():
+    """The invoice photos still kept in the database move to the file
+    storage, a batch every hour (P1-4)."""
+    if object_storage.enabled():
+        asyncio.create_task(_photo_move_loop())
 
 PERIODIC_REMINDER_FALLBACK = "Отвори Дневния преглед във Фактура+ и виж какво чака действие."
 
