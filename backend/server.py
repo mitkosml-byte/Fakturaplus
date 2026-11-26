@@ -60,6 +60,7 @@ from services import revenue_vat
 from services.money_text import fmt_amount, fmt_eur
 from services.month_names import MONTHS_BG as _MONTHS_BG_GENITIVE
 from services import error_log
+from services import object_storage
 
 ROOT_DIR = Path(__file__).parent
 
@@ -166,6 +167,7 @@ JOB_INTERVALS: Dict[str, int] = {
     "budget_alerts": 3600,
     "scan_credits": 3600,
     "backup_email": 3600,
+    "daily_backup": 3600,
 }
 
 # Stripe (scan-credit purchases, see SCAN CREDITS below). Same
@@ -227,6 +229,7 @@ async def lifespan(app: FastAPI):
     await start_scan_credit_depletion_loop()
     await start_recurring_expense_loop()
     await start_backup_email_loop()
+    await start_daily_backup_loop()
     await team_moments_router.start_team_moments_loop()
     await create_indexes()
     await run_data_migrations()
@@ -4037,6 +4040,7 @@ async def _signal_receivables(company_id, scope, current_user, visibility) -> Op
 
 # The owner's own copy of the data is looked at again after this long.
 BACKUP_REMIND_DAYS = 45
+BACKUP_REMIND_DAYS_WITH_DAILY = 120
 
 
 async def _signal_backup(company_id, scope, current_user, visibility) -> Optional[dict]:
@@ -4044,13 +4048,21 @@ async def _signal_backup(company_id, scope, current_user, visibility) -> Optiona
     none yet once there is something to lose, or the last one 45+ days old."""
     if current_user.role != "owner":
         return None
+    # While the daily backup keeps the data outside the database, a copy of
+    # one's own is asked for far less often.
+    remind_days = BACKUP_REMIND_DAYS
+    if company_id and object_storage.enabled():
+        daily: Dict[str, Any] = await db.daily_backup_state.find_one({"company_id": company_id}, {"_id": 0, "stored_day": 1}) or {}
+        stored_day = daily.get("stored_day")
+        if stored_day and (today_local() - date.fromisoformat(stored_day)).days <= 2:
+            remind_days = BACKUP_REMIND_DAYS_WITH_DAILY
     latest = await db.backup_metadata.find(
         {"user_id": current_user.user_id}, {"_id": 0, "created_at": 1},
     ).sort("created_at", -1).limit(1).to_list(1)
     if latest:
         last_day = business_day(latest[0].get("created_at"))
         days = (today_local() - last_day).days if last_day else 0
-        if days < BACKUP_REMIND_DAYS:
+        if days < remind_days:
             return None
         detail = tr(f"Последният архив е отпреди {days} дни. Създай нов и го пази извън приложението.",
                     f"Your last backup is {days} days old. Make a new one and keep it outside the app.")
@@ -7126,6 +7138,22 @@ async def start_backup_email_loop():
     if EMAIL_FEATURES_ENABLED:
         asyncio.create_task(_backup_email_loop())
 
+
+async def _daily_backup_tick():
+    from routers.backup import run_daily_backups
+    await run_daily_backups()
+
+
+async def _daily_backup_loop():
+    await error_log.run_job(db, "daily_backup", _daily_backup_tick, JOB_INTERVALS["daily_backup"])
+
+
+async def start_daily_backup_loop():
+    """Every company's data into the file storage once a day (P1-3) - only
+    with a file storage set up (services/object_storage)."""
+    if object_storage.enabled():
+        asyncio.create_task(_daily_backup_loop())
+
 PERIODIC_REMINDER_FALLBACK = "Отвори Дневния преглед във Фактура+ и виж какво чака действие."
 
 
@@ -7300,6 +7328,9 @@ async def create_indexes():
         # by itself once it expires.
         await db.email_verifications.create_index([("user_id", 1)], unique=True)
         await db.email_verifications.create_index("expires_at", expireAfterSeconds=0)
+        # The key of the owner's emailed backups; how far the daily backup got.
+        await db.backup_keys.create_index([("user_id", 1)], unique=True)
+        await db.daily_backup_state.create_index([("company_id", 1)], unique=True)
 
         # A login waiting for its second step: found by its token, gone
         # once expired (the TTL monitor sweeps it; the code checks the time).

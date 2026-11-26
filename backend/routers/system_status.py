@@ -127,6 +127,7 @@ async def system_status(current_user: User = Depends(get_current_user)):
             "email": EMAIL_FEATURES_ENABLED,
             "payments": BILLING_ENABLED,
             "push": push_service.is_configured(),
+            "storage": object_storage.enabled(),
         },
         "jobs": jobs,
         "errors": {

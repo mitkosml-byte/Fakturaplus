@@ -4,12 +4,11 @@ deleted by mistake comes back from the activity log (С3) - with its number
 while no later document took it, and its receivable."""
 import asyncio
 import base64
-import gzip
-import json
 from datetime import datetime, timedelta, timezone
 
 import server
 from routers import backup as backup_router
+from services import backup_crypto
 from tests.test_customers import _issue
 from tests.test_whole_program_fixes import _company
 
@@ -53,11 +52,13 @@ def test_c2_a_monthly_copy_by_email(client, monkeypatch):
     monkeypatch.setattr(server, "send_email", fake_send)
 
     assert client.get("/api/backup/status", headers=owner).json()["monthly_email"] is False
-    assert client.put("/api/backup/settings", headers=owner, json={"monthly_email": True}).json() == {"monthly_email": True}
+    # Locked with a password the owner chooses (P1-3) - see test_daily_backup.
+    turned_on = client.put("/api/backup/settings", headers=owner, json={"monthly_email": True, "password": "Проба-Парола-7"})
+    assert turned_on.json() == {"monthly_email": True, "password_set": True}
     assert asyncio.run(backup_router.send_monthly_backup_emails()) >= 1
     mine = [m for m in sent if m["to"] == asyncio.run(server.db.users.find_one({"user_id": owner_id}))["email"]]
     [attachment] = mine[0]["attachments"]
-    backup = json.loads(gzip.decompress(base64.b64decode(attachment["content"])))
+    backup = backup_crypto.read_backup(base64.b64decode(attachment["content"]), "Проба-Парола-7")
     assert backup["company_id"] == company_id and backup["statistics"]["revenue_count"] == 1
     # Once a month: not again the next hour - and it counts as the owner's copy.
     before = len(sent)

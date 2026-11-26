@@ -30,7 +30,7 @@ const STATE_COLOR: Record<SystemJobState, string> = {
   off: COLORS.textMuted,
 };
 
-const FEATURES = ['ai', 'email', 'payments', 'push'] as const;
+const FEATURES = ['ai', 'email', 'payments', 'push', 'storage'] as const;
 
 // The "Състояние" screen: whether the server, the database and the
 // automatic jobs work, and the errors of the last day - the owner's own

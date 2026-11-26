@@ -725,6 +725,8 @@ async def delete_account(
     await server.db.user_sessions.delete_many({"user_id": current_user.user_id})
     await server.db.password_reset_codes.delete_many({"user_id": current_user.user_id})
     await server.db.push_subscriptions.delete_many({"user_id": current_user.user_id})
+    await server.db.email_verifications.delete_many({"user_id": current_user.user_id})
+    await server.db.backup_keys.delete_many({"user_id": current_user.user_id})
     await server.db.users.delete_one({"user_id": current_user.user_id})
 
     clear_session_cookies(response)

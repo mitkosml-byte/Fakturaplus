@@ -97,6 +97,17 @@ function formatApiErrorDetail(detail: unknown): string {
   return 'Грешка в заявката';
 }
 
+export interface BackupRestoreResult {
+  success: boolean;
+  message: string;
+  restored: { invoices: number; revenues: number; expenses: number; other?: number; total?: number };
+  // Already in the company (same id or same natural key) - not added twice.
+  already_present?: number;
+  // About a team member who is not in this company (their shifts, pay).
+  not_in_team?: number;
+  skipped?: { invoices: number; revenues: number; expenses: number; other?: number; total?: number };
+}
+
 class ApiService {
   private token: string | null = null;
 
@@ -1065,28 +1076,48 @@ class ApiService {
     // A copy by email every month, and whether email is set up at all.
     monthly_email?: boolean;
     email_available?: boolean;
+    // The emailed file is locked with a password the owner chose (P1-3).
+    email_password_set?: boolean;
+    // The daily backup outside the database, when a file storage is set up.
+    daily?: { enabled: boolean; keep_days: number; last_day: string | null };
   }> {
     return this.fetch('/backup/status');
   }
 
-  async setMonthlyBackupEmail(monthlyEmail: boolean): Promise<{ monthly_email: boolean }> {
-    return this.fetch('/backup/settings', { method: 'PUT', body: JSON.stringify({ monthly_email: monthlyEmail }) });
+  // On/off; a password the first time (and to change it).
+  async setMonthlyBackupEmail(monthlyEmail: boolean, password?: string): Promise<{ monthly_email: boolean; password_set: boolean }> {
+    return this.fetch('/backup/settings', {
+      method: 'PUT',
+      body: JSON.stringify(password ? { monthly_email: monthlyEmail, password } : { monthly_email: monthlyEmail }),
+    });
+  }
+
+  async getDailyBackups(): Promise<{ enabled: boolean; keep_days: number; days: { day: string; size_bytes: number }[] }> {
+    return this.fetch('/backup/daily');
+  }
+
+  async getDailyBackup(day: string): Promise<any> {
+    return this.fetch(`/backup/daily/${day}`);
+  }
+
+  async restoreDailyBackup(day: string): Promise<BackupRestoreResult> {
+    return this.fetch(`/backup/daily/${day}/restore`, { method: 'POST' });
+  }
+
+  // A backup file as it is - plain, gzip-ed, or the emailed one locked
+  // with the password.
+  async restoreBackupFile(fileBase64: string, password?: string): Promise<BackupRestoreResult> {
+    return this.fetch('/backup/restore-file', {
+      method: 'POST',
+      body: JSON.stringify(password ? { file_base64: fileBase64, password } : { file_base64: fileBase64 }),
+    });
   }
 
   async listBackups(): Promise<{ backups: any[] }> {
     return this.fetch('/backup/list');
   }
 
-  async restoreBackup(backupData: any): Promise<{
-    success: boolean;
-    message: string;
-    restored: { invoices: number; revenues: number; expenses: number; other?: number; total?: number };
-    // Already in the company (same id or same natural key) - not added twice.
-    already_present?: number;
-    // About a team member who is not in this company (their shifts, pay).
-    not_in_team?: number;
-    skipped?: { invoices: number; revenues: number; expenses: number; other?: number; total?: number };
-  }> {
+  async restoreBackup(backupData: any): Promise<BackupRestoreResult> {
     return this.fetch('/backup/restore', {
       method: 'POST',
       body: JSON.stringify(backupData),

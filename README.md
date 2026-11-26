@@ -55,6 +55,7 @@ EXPO_PUBLIC_BACKEND_URL=http://localhost:8000 npx expo start --web
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | плащането за сканиране (тогава е безплатно) |
 | `VAPID_PRIVATE_KEY` | известията на телефона |
 | `ADMIN_EMAIL` | администраторът: отзивите и грешките на всички фирми |
+| `STORAGE_S3_BUCKET` и ключовете му | дневният архив извън базата (файлово хранилище, S3-съвместимо) |
 
 Приложението има една настройка: `EXPO_PUBLIC_BACKEND_URL`, адресът на сървъра
 ([`frontend/.env.example`](frontend/.env.example)).

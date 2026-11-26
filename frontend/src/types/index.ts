@@ -2373,7 +2373,7 @@ export interface SystemStatus {
   checked_at: string;
   server: { started_at: string; version: string | null };
   database: { ok: boolean; ms: number | null };
-  features: { ai: boolean; email: boolean; payments: boolean; push: boolean };
+  features: { ai: boolean; email: boolean; payments: boolean; push: boolean; storage: boolean };
   jobs: SystemJob[];
   errors: { count: number; items: SystemError[] };
 }

@@ -163,7 +163,7 @@ def test_the_owner_sees_their_own_company_and_the_admin_sees_all(client, monkeyp
     assert [j["key"] for j in status["jobs"]] == list(server.JOB_INTERVALS)
     assert all(j["last_error"] is None for j in status["jobs"])
     assert status["database"]["ok"] is True
-    assert set(status["features"]) == {"ai", "email", "payments", "push"}
+    assert set(status["features"]) == {"ai", "email", "payments", "push", "storage"}
 
     monkeypatch.setattr(server, "ADMIN_EMAIL", other["email"].upper().lower())
     status = client.get("/api/system/status", headers=other["headers"]).json()
