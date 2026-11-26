@@ -1084,6 +1084,19 @@ export const translations: Translations = {
     bg: 'Общо разходи',
     en: 'Total Expenses',
   },
+  'profit.withoutVat': { bg: 'без ДДС', en: 'without VAT' },
+  'profit.howNoteVat': {
+    bg: 'Печалбата е без ДДС (то е за държавата), със заплатите и наема по дни.',
+    en: 'The profit is without VAT (it is the state\'s), with the salaries and the rent by the days.',
+  },
+  'profit.howNote': {
+    bg: 'Печалбата е със заплатите и наема по дни.',
+    en: 'The profit counts the salaries and the rent by the days.',
+  },
+  'profit.expectedPayroll': {
+    bg: 'Заплати, които още не са въведени: {amount} (по Екип).',
+    en: 'Salaries not entered yet: {amount} (from Team).',
+  },
   'home.profit': {
     bg: 'Печалба',
     en: 'Profit',
@@ -4289,8 +4302,8 @@ export const translations: Translations = {
     en: 'The period is short: purchases count on their invoice day, so the margin depends on when the big delivery came.',
   },
   'wallet.setAside': {
-    bg: 'Задържано: {parts}',
-    en: 'Kept back: {parts}',
+    bg: 'Вече извадени от печалбата: {parts}',
+    en: 'Already out of the profit: {parts}',
   },
   'wallet.setAsideVat': { bg: 'ДДС {amount}', en: 'VAT {amount}' },
   'wallet.setAsideSalaries': { bg: 'заплати {amount}', en: 'salaries {amount}' },
@@ -5457,7 +5470,10 @@ export const translations: Translations = {
   },
   'breakEven.missingAtEnd': { bg: 'не достигат, за да покрие месецът разходите си', en: 'short of the month\'s break-even' },
   'breakEven.reachedTitle': { bg: 'Месецът е на плюс', en: 'The month is in profit' },
-  'breakEven.reachedText': { bg: 'разходите на месеца са покрити - оттук нататък всяка продажба носи печалба', en: 'above break-even - from here on every sale is profit' },
+  'breakEven.reachedText': {
+    bg: 'оборот над нужния за месеца - разходите са покрити и оттук нататък всяка продажба носи печалба',
+    en: 'takings above the month\'s break-even - the costs are covered, from here on every sale brings profit',
+  },
   'breakEven.monthLine': { bg: 'За месеца: {soFar} от {target}', en: 'This month: {soFar} of {target}' },
   'breakEven.daysLeft': { bg: 'остават {days} работни дни', en: '{days} working days left' },
   'breakEven.howTitle': { bg: 'Откъде идва числото', en: 'Where the number comes from' },

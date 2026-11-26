@@ -6,7 +6,7 @@ import calendar
 import statistics
 
 from services.business_calendar import Period, business_day, day_start_utc, days_in_month, now_local, today_local
-from services import recurring_service
+from services import recurring_service, revenue_vat
 
 # Below this many months of history, a trend computed any way at all is
 # mostly noise dressed up as a number - with 2-3 points, a single unusual
@@ -119,6 +119,16 @@ def _resolve_window(
         months = max(1, round(days / 30.44))
         y, m = _ym_add(end_exclusive.year, end_exclusive.month, -months)
     return _month_start(y, m), end_exclusive
+
+
+def _invoice_amount(invoice: dict, net_of_vat: bool) -> float:
+    """An invoice's amount - without its VAT for a business that deducts it
+    (an old record without that amount: its total less its VAT)."""
+    if not net_of_vat:
+        return float(invoice.get("total_amount") or 0)
+    if invoice.get("amount_without_vat") is not None:
+        return float(invoice["amount_without_vat"])
+    return float(invoice.get("total_amount") or 0) - float(invoice.get("vat_amount") or 0)
 
 
 def _drop_partial_first_month(monthly_totals: Dict[str, float], first_activity: Optional[datetime]) -> None:
@@ -407,6 +417,15 @@ class ForecastService:
         member_ids = [m["user_id"] for m in members]
         return {"$or": [{"company_id": company_id}, {"user_id": {"$in": member_ids}, "company_id": None}]}
 
+    async def _vat_registered(self, company_id: str) -> bool:
+        """Whether the business deducts VAT - as server.company_vat_registered
+        reads it (not answered yet: registered). Its forecasts are then
+        without VAT, on the basis of Home's income and expenses (the one
+        profit)."""
+        company = await self.db.companies.find_one({"id": company_id}, {"_id": 0, "vat_registered": 1})
+        flag = (company or {}).get("vat_registered")
+        return flag if isinstance(flag, bool) else True
+
     async def _closed_lookup(self, company_id: str) -> tuple:
         """(closed weekdays, {date: closed}) - the company's calendar, as
         server.get_closed_days_lookup reads it."""
@@ -426,20 +445,25 @@ class ForecastService:
             return not exceptions[date_str]
         return datetime.strptime(date_str, "%Y-%m-%d").weekday() not in closed_weekdays
 
-    async def _revenue_by_day(self, scope: dict, period: Period, include_pocket_money: bool) -> Dict[str, float]:
-        """Revenue of each day entered in the period ("YYYY-MM-DD" -> EUR)."""
+    async def _revenue_by_day(
+        self, scope: dict, period: Period, include_pocket_money: bool, net_of_vat: bool = False,
+    ) -> Dict[str, float]:
+        """Revenue of each day entered in the period ("YYYY-MM-DD" -> EUR) -
+        the till without its VAT with net_of_vat."""
         rows = await self.db.daily_revenue.find(
-            {**scope, "date": period.text_filter()}, {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1},
+            {**scope, "date": period.text_filter()},
+            {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1, "vat_groups": 1},
         ).to_list(None)
         by_day: Dict[str, float] = defaultdict(float)
         for row in rows:
             if isinstance(row.get("date"), str):
-                by_day[row["date"][:10]] += float(row.get("fiscal_revenue", 0)) + (
+                fiscal = float(row.get("fiscal_revenue", 0)) - (revenue_vat.vat_in(row) if net_of_vat else 0.0)
+                by_day[row["date"][:10]] += fiscal + (
                     float(row.get("pocket_money", 0)) if include_pocket_money else 0.0
                 )
         return dict(by_day)
 
-    async def _issued_by_month(self, scope: dict, period: Period) -> Dict[str, float]:
+    async def _issued_by_month(self, scope: dict, period: Period, net_of_vat: bool = False) -> Dict[str, float]:
         """Invoices issued to customers in the period, by month ("YYYY-MM" ->
         EUR with VAT) - revenue of their issue date, the same documents as
         server.ISSUED_INVOICE_REVENUE (a cancelled one counts for nothing, one
@@ -449,13 +473,14 @@ class ForecastService:
         rows = await self.db.billing_documents.find(
             {**scope, "doc_type": {"$in": ["invoice", "credit_note"]}, "cancelled": {"$ne": True}, "in_till": {"$ne": True},
              "issue_date": period.text_filter()},
-            {"_id": 0, "issue_date": 1, "total_amount": 1},
+            {"_id": 0, "issue_date": 1, "total_amount": 1, "amount_without_vat": 1},
         ).to_list(None)
+        field = "amount_without_vat" if net_of_vat else "total_amount"
         totals: Dict[str, float] = defaultdict(float)
         for row in rows:
             day = str(row.get("issue_date") or "")
             if len(day) >= 7:
-                totals[day[:7]] += float(row.get("total_amount") or 0)
+                totals[day[:7]] += float(row.get(field) or 0)
         return dict(totals)
 
     def _estimate_from_entered_days(self, period: Period, by_day: Dict[str, float], lookup: tuple, upto=None) -> Dict[str, Any]:
@@ -495,7 +520,7 @@ class ForecastService:
 
     async def _revenue_month_estimates(
         self, company_id: str, scope: dict, window_start: datetime, window_end: datetime, include_pocket_money: bool,
-        daily: bool,
+        daily: bool, net_of_vat: bool = False,
     ) -> Dict[str, float]:
         """Every whole month in [window_start, window_end) with revenue.
 
@@ -508,9 +533,9 @@ class ForecastService:
         if window_end <= window_start:
             return {}
         window = Period(window_start.date(), (window_end - timedelta(days=1)).date())
-        by_day = await self._revenue_by_day(scope, window, include_pocket_money)
+        by_day = await self._revenue_by_day(scope, window, include_pocket_money, net_of_vat)
         # Invoices issued to customers: known amounts, added to their month.
-        issued = await self._issued_by_month(scope, window)
+        issued = await self._issued_by_month(scope, window, net_of_vat)
         if not by_day:
             return dict(issued)
         if not daily:
@@ -530,7 +555,7 @@ class ForecastService:
         return estimates
 
     async def _current_month_revenue(
-        self, company_id: str, scope: dict, include_pocket_money: bool, daily: bool,
+        self, company_id: str, scope: dict, include_pocket_money: bool, daily: bool, net_of_vat: bool = False,
     ) -> Dict[str, Any]:
         """The month in progress: revenue so far (the same records and days as
         /statistics/summary for it) and - for a company that enters revenue
@@ -539,10 +564,10 @@ class ForecastService:
         today = today_local()
         month = Period.month_of(today)
         so_far_period = Period(month.start, today)
-        by_day = await self._revenue_by_day(scope, so_far_period, include_pocket_money)
+        by_day = await self._revenue_by_day(scope, so_far_period, include_pocket_money, net_of_vat)
         reading = self._estimate_from_entered_days(month, by_day, await self._closed_lookup(company_id), upto=today.isoformat())
         # Invoices issued so far are in the month as they are - not projected.
-        issued_so_far = sum((await self._issued_by_month(scope, so_far_period)).values())
+        issued_so_far = sum((await self._issued_by_month(scope, so_far_period, net_of_vat)).values())
         expected = (
             reading["estimate"] + issued_so_far
             if daily and reading["estimate"] is not None and reading["entered_days"] >= CURRENT_MONTH_MIN_ENTERED_DAYS
@@ -557,6 +582,7 @@ class ForecastService:
 
     async def _current_month_expenses(
         self, company_id: str, scope: dict, include_off_book_expenses: bool, include_payroll: bool = True,
+        net_of_vat: bool = False,
     ) -> Dict[str, Any]:
         """The month in progress: expenses so far - the same as
         /statistics/summary counts for it (invoices and off-book expenses to
@@ -568,9 +594,11 @@ class ForecastService:
         month = Period.month_of(today)
         elapsed, dim = today.day, month.days
         invoices = await self.db.invoices.find(
-            {**scope, "date": Period(month.start, today).datetime_filter(), "asset_id": None}, {"_id": 0, "total_amount": 1},
+            {**scope, "date": Period(month.start, today).datetime_filter(), "asset_id": None},
+            {"_id": 0, "total_amount": 1, "amount_without_vat": 1, "vat_amount": 1},
         ).to_list(None)
-        variable = sum(float(i.get("total_amount", 0)) for i in invoices)
+        # Without VAT for a business that deducts it - Home's expenses.
+        variable = sum(_invoice_amount(i, net_of_vat) for i in invoices)
         # Off-book expenses only for who may see them; wages paid through
         # Work Schedule are payroll - for who keeps the payroll.
         expenses = await self.db.expenses.find(
@@ -600,7 +628,7 @@ class ForecastService:
         # Recurring expenses (rent, subscriptions) as they are - paid or
         # still to come this month - never spread as a daily pace.
         recurring = await recurring_service.month_projection(
-            self.db, company_id, scope, today.year, today.month, today, include_off_book_expenses,
+            self.db, company_id, scope, today.year, today.month, today, include_off_book_expenses, net_of_vat,
         )
         paced = max(0.0, variable - recurring["paid_so_far"])
         return {
@@ -613,7 +641,7 @@ class ForecastService:
 
     async def _expense_monthly_totals(
         self, company_id: str, scope: dict, window_start: datetime, window_end: datetime,
-        include_off_book_expenses: bool, include_payroll: bool = True,
+        include_off_book_expenses: bool, include_payroll: bool = True, net_of_vat: bool = False,
     ) -> tuple:
         """(monthly expense totals in [window_start, window_end), the date of
         the company's first recorded expense)."""
@@ -624,7 +652,7 @@ class ForecastService:
         # A fixed asset's invoice is expensed through its depreciation, not on its day.
         invoices = await self.db.invoices.find(
             {**scope, "date": {"$gte": window_start, "$lt": window_end}, "asset_id": None},
-            {"_id": 0, "date": 1, "total_amount": 1}
+            {"_id": 0, "date": 1, "total_amount": 1, "amount_without_vat": 1, "vat_amount": 1}
         ).to_list(None)
 
         # Non-invoice expenses (date is stored as a "YYYY-MM-DD" string):
@@ -650,7 +678,7 @@ class ForecastService:
         for inv in invoices:
             day = business_day(inv.get("date")) if isinstance(inv.get("date"), datetime) else None
             if day:
-                monthly_totals[day.strftime("%Y-%m")] += float(inv.get("total_amount", 0))
+                monthly_totals[day.strftime("%Y-%m")] += _invoice_amount(inv, net_of_vat)
 
         for exp in expenses:
             date_str = exp.get("date")
@@ -692,6 +720,7 @@ class ForecastService:
 
     async def _revenue_monthly_totals(
         self, scope: dict, window_start: datetime, window_end: datetime, include_pocket_money: bool,
+        net_of_vat: bool = False,
     ) -> tuple:
         """(monthly revenue totals in [window_start, window_end), {month: the
         dates revenue was entered on})."""
@@ -700,7 +729,7 @@ class ForecastService:
                 **scope,
                 "date": {"$gte": window_start.strftime("%Y-%m-%d"), "$lt": window_end.strftime("%Y-%m-%d")},
             },
-            {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1}
+            {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1, "vat_groups": 1}
         ).to_list(None)
 
         # Aggregate by month (date is stored as a "YYYY-MM-DD" string)
@@ -711,14 +740,16 @@ class ForecastService:
             date_str = rev.get("date")
             if isinstance(date_str, str) and len(date_str) >= 7:
                 month_key = date_str[:7]
-                monthly_totals[month_key] += float(rev.get("fiscal_revenue", 0))
+                monthly_totals[month_key] += float(rev.get("fiscal_revenue", 0)) - (
+                    revenue_vat.vat_in(rev) if net_of_vat else 0.0
+                )
                 if include_pocket_money:
                     monthly_totals[month_key] += float(rev.get("pocket_money", 0))
                 entered_days[month_key].add(date_str[:10])
         # Invoices issued to customers join their month's revenue (no days).
         if window_end > window_start:
             window = Period(window_start.date(), (window_end - timedelta(days=1)).date())
-            for month_key, amount in (await self._issued_by_month(scope, window)).items():
+            for month_key, amount in (await self._issued_by_month(scope, window, net_of_vat)).items():
                 monthly_totals[month_key] += amount
         return dict(monthly_totals), entered_days
 
@@ -754,6 +785,7 @@ class ForecastService:
 
     async def _year_back(
         self, company_id: str, kind: str, include_hidden: bool, include_payroll: bool = True,
+        net_of_vat: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """_year_back_analysis over the company's last SEASONAL_HISTORY_MONTHS
         whole months, whatever window the forecast itself was asked for:
@@ -764,12 +796,14 @@ class ForecastService:
         start = _month_start(*_ym_add(now.year, now.month, -SEASONAL_HISTORY_MONTHS))
         scope = await self._company_scope(company_id)
         if kind == "revenue":
-            totals, entered_days = await self._revenue_monthly_totals(scope, start, end, include_hidden)
+            totals, entered_days = await self._revenue_monthly_totals(scope, start, end, include_hidden, net_of_vat)
             first = await self._first_record_date(self.db.daily_revenue, scope)
             if first:
                 first = first.replace(tzinfo=None)
         else:
-            totals, first = await self._expense_monthly_totals(company_id, scope, start, end, include_hidden, include_payroll)
+            totals, first = await self._expense_monthly_totals(
+                company_id, scope, start, end, include_hidden, include_payroll, net_of_vat,
+            )
         if not first or not totals:
             return None
         first_month = max(first.strftime("%Y-%m"), start.strftime("%Y-%m"))
@@ -812,8 +846,11 @@ class ForecastService:
         year instead (see _year_back_analysis)."""
         window_start, window_end = _resolve_window(lookback_days, start_date, end_date)
         scope = await self._company_scope(company_id)
+        # On Home's basis (the one profit): without VAT for a business that
+        # deducts it.
+        net = await self._vat_registered(company_id)
         monthly_totals, first = await self._expense_monthly_totals(
-            company_id, scope, window_start, window_end, include_off_book_expenses, include_payroll
+            company_id, scope, window_start, window_end, include_off_book_expenses, include_payroll, net
         )
         _drop_partial_first_month(monthly_totals, first)
 
@@ -822,17 +859,19 @@ class ForecastService:
         # The month in progress is reported (so far, and its end at the pace
         # so far) but not fed into the history: invoices come in lumps, and a
         # mid-month pace of them says too little to move a forecast.
-        current = await self._current_month_expenses(company_id, scope, include_off_book_expenses, include_payroll)
-        year_back = await self._year_back(company_id, "expense", include_off_book_expenses, include_payroll)
+        current = await self._current_month_expenses(company_id, scope, include_off_book_expenses, include_payroll, net)
+        year_back = await self._year_back(company_id, "expense", include_off_book_expenses, include_payroll, net)
         result = _build_forecast(historical, months_ahead, year_back)
         result["current_month"] = current
         # A month ahead holds at least the recurring expenses already known
         # to be paid in it (a floor, not added on top: the history already
         # carries them) - one paid every few months in its own months.
         items = await recurring_service.active_items(self.db, company_id)
-        result["known_recurring_monthly"] = recurring_service.known_monthly_total(items, include_off_book_expenses)
+        result["known_recurring_monthly"] = recurring_service.known_monthly_total(
+            items, include_off_book_expenses, net_of_vat=net,
+        )
         for entry in result["forecast"]:
-            known = recurring_service.known_month_total(items, entry["month"], include_off_book_expenses)
+            known = recurring_service.known_month_total(items, entry["month"], include_off_book_expenses, net)
             if entry["predicted_amount"] < known:
                 entry.update({
                     "predicted_amount": known, "lower_bound": max(entry["lower_bound"], known),
@@ -868,8 +907,11 @@ class ForecastService:
         # days missing counts at its own daily average, one entered on too
         # few days is unknown - never a weak month.
         daily = await self._logs_revenue_daily(company_id, scope)
+        # On Home's basis (the one profit): without VAT for a business that
+        # deducts it.
+        net = await self._vat_registered(company_id)
         monthly_totals = await self._revenue_month_estimates(
-            company_id, scope, window_start, window_end, include_pocket_money, daily
+            company_id, scope, window_start, window_end, include_pocket_money, daily, net
         )
 
         _drop_partial_first_month(
@@ -879,13 +921,13 @@ class ForecastService:
         sorted_months = sorted(monthly_totals.keys())
         historical = [{"month": mk, "amount": round(monthly_totals[mk], 2)} for mk in sorted_months]
         # The month in progress joins the history as its expected end.
-        current = await self._current_month_revenue(company_id, scope, include_pocket_money, daily)
+        current = await self._current_month_revenue(company_id, scope, include_pocket_money, daily, net)
         if (
             current["expected"] is not None and current["days_elapsed"] >= CURRENT_MONTH_MIN_DAYS
             and window_end >= _month_start(*_ym_parts(current["month"]))
         ):
             historical.append({"month": current["month"], "amount": current["expected"], "estimated": True})
-        year_back = await self._year_back(company_id, "revenue", include_pocket_money)
+        year_back = await self._year_back(company_id, "revenue", include_pocket_money, net_of_vat=net)
         result = _build_forecast(historical, months_ahead, year_back)
         result["current_month"] = current
         return result

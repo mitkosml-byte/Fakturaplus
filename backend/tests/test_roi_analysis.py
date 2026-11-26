@@ -82,18 +82,20 @@ def test_payback_uses_dashboard_profit_and_names_what_moved():
     built = asyncio.run(_run())
     days = calendar.monthrange(*target)[1]
     revenue = 200.0 * days
-    assert built["target"]["profit"] == revenue - 2600.0 - 2500.0  # payroll counted
+    # The one profit (P1-1): a business registered for VAT (as one not yet
+    # asked is taken), so the till and Метро count without their VAT.
+    assert round(built["target"]["profit"], 2) == round(revenue / 1.2 - 2600.0 / 1.2 - 2500.0, 2)  # payroll counted
     # Whoever does not keep the payroll sees the profit without it, as on
     # their Home - the salaries are not theirs to see.
     no_payroll = server.User(**{**user.model_dump(), "permissions": [p for p in PERMS if p != "manage_payroll"]})
     without = asyncio.run(build_roi_analysis(no_payroll, target[0], target[1]))
-    assert without["target"]["profit"] == revenue - 2600.0
+    assert round(without["target"]["profit"], 2) == round(revenue / 1.2 - 2600.0 / 1.2, 2)
     payback = built["analysis"]["payback"]
     assert payback["invested"] == 3000.0
     assert "лично" in payback["text"] and "печалба" in payback["text"]
     metro = next(m for m in built["analysis"]["movers"] if m["kind"] == "supplier")
-    assert metro["label"] == "Метро" and metro["delta"] == 600.0 and metro["profit_effect"] == -600.0
-    assert "+600,00\u00a0€" in metro["text"]
+    assert metro["label"] == "Метро" and metro["delta"] == 500.0 and metro["profit_effect"] == -500.0
+    assert "+500,00\u00a0€" in metro["text"]
 
 
 def test_a_running_month_is_compared_on_the_same_days():

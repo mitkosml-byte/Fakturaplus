@@ -1,7 +1,7 @@
-"""Safe to withdraw (the personal notebook): the month's profit so far less
-what it still owes before any of it is the owner's - the month's VAT to pay
-and the salaries not entered yet, by the days gone - less what was already
-taken and what falls due soon (P0-3).
+"""Safe to withdraw (the personal notebook): the month's profit so far - the
+one profit Home shows, so without the VAT of a business registered for VAT
+and with the salaries not entered yet, by the days gone (P0-3, P1-1) - less
+what was already taken and what falls due soon.
 
 Invented business, people and numbers."""
 import asyncio
@@ -40,10 +40,13 @@ def test_safe_to_withdraw_keeps_back_the_vat_and_the_salaries(client, monkeypatc
     _on(monkeypatch, MID_NOVEMBER)
     _seed(client, owner)
     summary = client.get("/api/personal-wallet/summary", headers=owner).json()
-    assert summary["profit_this_month"] == 12000 - 3600
     salaries = asyncio.run(server.month_payroll(company_id, {"company_id": company_id}, 2026, 11))["expected"] * 15 / 30
     assert salaries > 0
+    # Sales and goods without their VAT, the salaries to come among the costs.
+    assert summary["profit_this_month"] == round(12000 - 2000 - 3000 - salaries, 2)
+    # Shown beside it: both already out of the profit.
     assert summary["set_aside"] == {"vat": 2000 - 600, "salaries": round(salaries, 2), "upcoming": 0}
+    # The same money as before the one profit: the VAT and the salaries kept back once.
     assert summary["safe_to_spend"] == round(12000 - 3600 - 1400 - salaries - 1000, 2)
 
 

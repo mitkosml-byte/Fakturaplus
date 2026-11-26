@@ -808,9 +808,10 @@ def test_roles_invitations_permissions(client):
     r = client.get("/api/roi/analysis?month=9&year=2026", headers=owner)
     assert r.status_code == 200
     owner_roi = r.json()
-    assert owner_roi["total_revenue"] == 115  # fiscal_revenue(100) + pocket_money(15)
+    # The one profit (P1-1): the till's 100 without its VAT (83.33) + pocket money 15.
+    assert owner_roi["total_revenue"] == round(100 / 1.2 + 15, 2)
     assert owner_roi["total_business_expense"] == 30  # off-book expense, no invoice left
-    assert owner_roi["total_profit"] == 85
+    assert owner_roi["total_profit"] == round(100 / 1.2 + 15 - 30, 2)
 
     r = client.get("/api/roi/analysis?month=9&year=2026", headers=staff)
     assert r.status_code == 200
@@ -818,9 +819,9 @@ def test_roles_invitations_permissions(client):
     # No view_pocket_money/view_off_book_expenses: both folded in as zero,
     # not just blanked, so revenue/expense/profit stay internally coherent
     # for exactly what this viewer may see - not the owner's real numbers.
-    assert staff_roi["total_revenue"] == 100
+    assert staff_roi["total_revenue"] == round(100 / 1.2, 2)
     assert staff_roi["total_business_expense"] == 0
-    assert staff_roi["total_profit"] == 100  # has view_profit, so still shown
+    assert staff_roi["total_profit"] == round(100 / 1.2, 2)  # has view_profit, so still shown
     assert staff_roi["total_profit"] != owner_roi["total_profit"]
 
     # months is generously large (not 2) so the Sept 2026 fixture data stays
@@ -831,7 +832,7 @@ def test_roles_invitations_permissions(client):
     r = client.get("/api/roi/trend?months=36", headers=staff)
     assert r.status_code == 200
     sept_entry = next(e for e in r.json()["trend"] if e["month"] == 9 and e["year"] == 2026)
-    assert sept_entry["profit"] == 100
+    assert sept_entry["profit"] == round(100 / 1.2, 2)   # the one profit: without the till's VAT
 
     # Now strip view_profit too - profit/ROI must disappear from every
     # field AND from the ai_insights prose (no leaking the same figures via
@@ -888,11 +889,12 @@ def test_roles_invitations_permissions(client):
     r = client.get("/api/forecast/revenue", headers=owner)
     assert r.status_code == 200
     owner_rev_hist = {e["month"]: e["amount"] for e in r.json()["historical"]}
-    assert owner_rev_hist.get("2026-09", 0) == 115  # fiscal_revenue (100) + pocket_money (15)
+    # fiscal_revenue (100, without its VAT - Home's income, P1-1) + pocket_money (15)
+    assert owner_rev_hist.get("2026-09", 0) == round(100 / 1.2 + 15, 2)
     r = client.get("/api/forecast/revenue", headers=staff)
     assert r.status_code == 200
     staff_rev_hist = {e["month"]: e["amount"] for e in r.json()["historical"]}
-    assert staff_rev_hist.get("2026-09", 0) == 100  # pocket_money redacted
+    assert staff_rev_hist.get("2026-09", 0) == round(100 / 1.2, 2)  # pocket_money redacted
 
     r = client.delete(f"/api/personal-expenses/{visibility_pe_id}", headers=owner)
     assert r.status_code == 200

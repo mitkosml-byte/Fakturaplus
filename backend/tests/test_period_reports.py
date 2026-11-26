@@ -69,7 +69,8 @@ def test_a_running_month_is_counted_so_far_with_its_pace(client):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["period"]["through_date"] == today.isoformat()
-    assert body["total_income"] == 1000.0 * len(entered)
+    # Without the VAT of the till (P1-1) - the pace below is in takings, as rung up.
+    assert body["total_income"] == pytest.approx(1000.0 / 1.2 * len(entered), abs=0.01)
     # The month's payroll for the days gone by - not all of it on the 15th.
     assert body["total_payroll_cost"] == pytest.approx(3000.0 * today.day / month.days, abs=0.01)
     pace = body["pace"]
@@ -145,13 +146,14 @@ def test_the_revenue_forecast_reads_the_month_in_progress(client):
 
     fc = client.get("/api/forecast/revenue?months_ahead=1&lookback_days=180", headers=headers).json()
     by_month = {h["month"]: h for h in fc["historical"]}
-    # A month with days missing counts at its own daily average.
+    # A month with days missing counts at its own daily average - without
+    # the till's VAT, as Home's income (P1-1).
     partial_month = history[1]
-    assert by_month[f"{partial_month.start.year}-{partial_month.start.month:02d}"]["amount"] == pytest.approx(1000.0 * partial_month.days)
+    assert by_month[f"{partial_month.start.year}-{partial_month.start.month:02d}"]["amount"] == pytest.approx(1000.0 / 1.2 * partial_month.days, abs=0.02)
     current = fc["current_month"]
-    assert current["so_far"] == 2000.0 * len(running)
+    assert current["so_far"] == pytest.approx(2000.0 / 1.2 * len(running), abs=0.01)
     if len(running) >= 3:
-        assert current["expected"] == pytest.approx(2000.0 * month.days)
+        assert current["expected"] == pytest.approx(2000.0 / 1.2 * month.days, abs=0.02)
         if today.day >= 7:
             assert fc["historical"][-1] == {"month": current["month"], "amount": current["expected"], "estimated": True}
 

@@ -67,14 +67,17 @@ def test_n5_this_months_break_even_and_todays_target(client, monkeypatch):
     result = client.get("/api/statistics/break-even", headers=owner).json()
     assert result["available"] is True and result["month"] == "2026-11"
     assert result["fixed_costs"] == {"payroll": round(payroll, 2), "recurring": 1200, "depreciation": 0, "total": fixed}
-    # 6 000 of goods on 10 000 sold, each month - the October rent left out of the goods.
-    assert result["margin_percent"] == 40 and result["margin_basis"] == {"kind": "last_months", "months": ["2026-10", "2026-09", "2026-08"]}
-    assert result["break_even_income"] == round(fixed / 0.4, 2)
+    # 5 000 of goods (without their VAT) on 10 000 sold, each month - the
+    # October rent left out of the goods - and the sixth of the takings that
+    # is VAT for the state (P1-1): no profit, so it follows the sales.
+    margin = 1 - (5000 + 10000 * 20 / 120) / 10000
+    assert result["margin_percent"] == 33.3 and result["margin_basis"] == {"kind": "last_months", "months": ["2026-10", "2026-09", "2026-08"]}
+    assert abs(result["break_even_income"] - fixed / margin) < 0.011
     assert (result["income_so_far"], result["income_today"], result["reached"]) == (4250, 250, False)
     # From today to the 30th without the three Sundays: 16 working days.
     assert result["open_days_left"] == 16 and result["today_is_open"] is True
-    assert result["daily_target"] == round((fixed / 0.4 - 4000) / 16, 2)
-    assert result["missing"] == round(fixed / 0.4 - 4250, 2)
+    assert abs(result["daily_target"] - (fixed / margin - 4000) / 16) < 0.011
+    assert abs(result["missing"] - (fixed / margin - 4250)) < 0.011
 
     # The month's payroll recorded: the same cost, once (not recorded + expected).
     [employee] = client.get("/api/employees", headers=owner).json()
@@ -84,7 +87,7 @@ def test_n5_this_months_break_even_and_todays_target(client, monkeypatch):
     # Past the point: above it, nothing more asked of the days.
     client.post("/api/daily-revenue", headers=owner, json={"date": "2026-11-01", "fiscal_revenue": 5000})
     above = client.get("/api/statistics/break-even", headers=owner).json()
-    assert above["reached"] is True and above["above"] == round(9250 - fixed / 0.4, 2) and above["daily_target"] == 0
+    assert above["reached"] is True and abs(above["above"] - (9250 - fixed / margin)) < 0.011 and above["daily_target"] == 0
 
     # The assistant can ask; someone who may not see the profit cannot.
     user = server.User(**server.sanitize_user(asyncio.run(server.db.users.find_one({"user_id": owner_id}, {"_id": 0}))))

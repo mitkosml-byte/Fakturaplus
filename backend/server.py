@@ -3090,6 +3090,19 @@ def _profit_formula(
 # asset (asset_id set when an asset is linked to its invoice).
 NOT_AN_ASSET: Dict[str, Any] = {"asset_id": None}
 
+# An invoice's amount without VAT - an old record without one: its total
+# less its VAT. The database's form, and the same for a record in hand.
+INVOICE_NET_EXPRESSION: Dict[str, Any] = {"$ifNull": [
+    "$amount_without_vat",
+    {"$subtract": [{"$ifNull": ["$total_amount", 0]}, {"$ifNull": ["$vat_amount", 0]}]},
+]}
+
+
+def invoice_net(doc: Dict[str, Any]) -> float:
+    if doc.get("amount_without_vat") is not None:
+        return float(doc["amount_without_vat"])
+    return float(doc.get("total_amount") or 0) - float(doc.get("vat_amount") or 0)
+
 
 def counted_period(period: Period) -> Period:
     """The days of a period that count now: a period still running counts
@@ -3119,7 +3132,7 @@ async def period_totals(company_id: Optional[str], scope: dict, user_id: str, pe
     # an invoice.
     invoices = await db.invoices.aggregate([
         {"$match": {**scope, "date": period.datetime_filter(), **NOT_AN_ASSET}},
-        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "net": {"$sum": "$amount_without_vat"}}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_amount"}, "net": {"$sum": INVOICE_NET_EXPRESSION}}},
     ]).to_list(ALL_ROWS)
     all_invoices = await db.invoices.aggregate([
         {"$match": {**scope, "date": period.datetime_filter()}},
@@ -3265,20 +3278,101 @@ def period_income_expense(totals: Dict[str, Any], visibility: Optional[dict] = N
     )
 
 
+PROFIT_COMPANY_FIELDS = {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1, "modules": 1}
+
+
+async def period_profit(
+    company_id: Optional[str], scope: dict, user_id: str, period: Period,
+    visibility: Optional[dict] = None, company: Optional[dict] = None,
+    totals: Optional[Dict[str, Any]] = None, today: Optional[date] = None,
+) -> Dict[str, Any]:
+    """The one profit of a period (P1-1): Home's and the statistics'
+    "Печалба", the notebook's safe-to-withdraw, the assistant, the
+    locations, the PDF report and the margins' operating profit are all
+    this - before, the same month came out with three different profits.
+
+    - income: the till, the invoices issued to customers and the pocket
+      money - without VAT for a business registered for VAT (the VAT is the
+      state's money), as they are for one that is not;
+    - expense: the purchase invoices (without VAT when registered) and the
+      expenses without invoice that are no recurring cost's payment (goods
+      and materials); the recurring costs - rent, utilities... - by the days
+      of their month; the payroll by the days of its month, with the
+      salaries not entered yet (this month and the last) by those in Екип;
+      the depreciation.
+
+    With a viewer's visibility, what they may not see (pocket money,
+    expenses without invoice, payroll) is out, as out of their totals;
+    without one, everything counts. `period` is taken as given - a caller
+    wanting "so far" passes counted_period(...)."""
+    if company is None and company_id:
+        company = await db.companies.find_one({"id": company_id}, PROFIT_COMPANY_FIELDS)
+    vat_registered = company_vat_registered(company)
+    show_pocket = visibility is None or bool(visibility["pocket_money"])
+    show_off_book = visibility is None or bool(visibility["off_book_expenses"])
+    show_payroll = visibility is None or bool(visibility.get("payroll", True))
+    # Salaries not entered yet are expected - for whoever sees the payroll
+    # of a business that keeps it.
+    expect_payroll = show_payroll and company_modules(company)["payroll"]
+    today = today or today_local()
+
+    async def _no_payroll_expected() -> float:
+        return 0.0
+
+    async def _given_totals() -> Dict[str, Any]:
+        return totals  # type: ignore[return-value]
+
+    period_sums, recurring, payroll_to_come = await asyncio.gather(
+        _given_totals() if totals is not None else period_totals(company_id, scope, user_id, period),
+        recurring_service.period_costs(db, company_id, scope, period, show_off_book, vat_registered),
+        expected_payroll(company_id, scope, period, today) if expect_payroll else _no_payroll_expected(),
+    )
+    pocket = period_sums["pocket_money"] if show_pocket else 0.0
+    if vat_registered:
+        income = (
+            period_sums["fiscal_revenue"] - period_sums["fiscal_vat"]
+            + period_sums.get("issued_invoice_net", 0.0) + pocket
+        )
+        purchases = period_sums["invoice_net"]
+    else:
+        income = period_sums["fiscal_revenue"] + period_sums.get("issued_invoice_total", 0.0) + pocket
+        purchases = period_sums["invoice_total"]
+    # The payments of recurring costs are among the invoices and expenses
+    # of their day; the costs themselves count by their days below.
+    goods = max(purchases + (period_sums["off_book_expenses"] if show_off_book else 0.0) - recurring["paid"], 0.0)
+    payroll = (period_sums["payroll_cost"] + payroll_to_come) if show_payroll else 0.0
+    depreciation = period_sums["depreciation_cost"]
+    expense = goods + payroll + recurring["accrued"] + depreciation
+    return {
+        "income": income,
+        "expense": expense,
+        "profit": income - expense,
+        "vat_excluded": vat_registered,
+        "goods": goods,
+        "payroll": payroll,
+        "payroll_expected": payroll_to_come if show_payroll else 0.0,
+        "recurring": recurring["accrued"],
+        "recurring_items": int(recurring["items"]),
+        "depreciation": depreciation,
+        "totals": period_sums,
+    }
+
+
 async def issued_invoices_by_day(scope: dict, period: Period) -> Dict[str, Dict[str, float]]:
     """Invoices issued to customers on each day of the period ("YYYY-MM-DD"
     -> {"total", "vat"}): revenue and VAT of their issue date, so a day's
     chart and the period's totals read the same documents."""
     rows = await db.billing_documents.find(
         {**scope, **ISSUED_INVOICE_REVENUE, "issue_date": period.text_filter()},
-        {"_id": 0, "issue_date": 1, "total_amount": 1, "vat_amount": 1},
+        {"_id": 0, "issue_date": 1, "total_amount": 1, "vat_amount": 1, "amount_without_vat": 1},
     ).to_list(ALL_ROWS)
     days: Dict[str, Dict[str, float]] = {}
     for row in rows:
         day = str(row.get("issue_date") or "")[:10]
-        entry = days.setdefault(day, {"total": 0.0, "vat": 0.0})
+        entry = days.setdefault(day, {"total": 0.0, "vat": 0.0, "net": 0.0})
         entry["total"] += float(row.get("total_amount") or 0)
         entry["vat"] += float(row.get("vat_amount") or 0)
+        entry["net"] += float(row.get("amount_without_vat") or 0)
     return days
 
 
@@ -3356,14 +3450,15 @@ async def _compute_month_profit(
     company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str,
     visibility: Optional[dict] = None,
 ) -> float:
-    """Profit for the personal-wallet module, read through period_totals
-    like every other profit in the app - the business's own profit, before
-    any personal use (the notebook takes that off itself). With a viewer's
-    visibility, what they may not see (pocket money, off-book expenses, the
-    payroll) is out of it, as out of their totals."""
-    totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
-    total_income, total_expense = period_income_expense(totals, visibility)
-    return total_income - total_expense
+    """The one profit (period_profit) of a period so far - the business's
+    own profit, before any personal use (the notebook takes that off
+    itself). With a viewer's visibility, what they may not see (pocket
+    money, off-book expenses, the payroll) is out of it, as out of their
+    totals."""
+    one_profit = await period_profit(
+        company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)), visibility,
+    )
+    return float(one_profit["profit"])
 
 def generate_wallet_advice(
     total_spent: float,
@@ -3464,16 +3559,21 @@ def generate_wallet_advice(
 async def _business_digest_period(
     company_id: Optional[str], scope: dict, user_id: str, start_date: str, end_date: str, visibility: dict
 ) -> dict:
-    """One period's totals for the chat digest - period_totals with the same
-    visibility redaction as /statistics/summary, so the chat and Home give
-    the same figures for the same period."""
-    totals = await period_totals(company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)))
-    total_income, total_expense = period_income_expense(totals, visibility)
+    """One period's totals for the chat digest - the one profit
+    (period_profit) with the same visibility as /statistics/summary, so the
+    chat and Home give the same figures for the same period."""
+    one_profit = await period_profit(
+        company_id, scope, user_id, counted_period(Period.parse(start_date, end_date)), visibility,
+    )
+    totals = one_profit["totals"]
+    total_income, total_expense = one_profit["income"], one_profit["expense"]
     profit = round(total_income - total_expense, 2) if visibility["profit"] else None
     return {
         "revenue": round(total_income, 2),
         "expenses": round(total_expense, 2),
         "profit": profit,
+        # Revenue and expenses without VAT (a business registered for VAT).
+        "vat_excluded": one_profit["vat_excluded"],
         # Company money spent personally and what is left after it - for
         # viewers of the personal notebook only (null for anyone else).
         **personal_use(totals, profit, visibility),
@@ -3583,9 +3683,7 @@ async def _business_digest_roi(company_id: Optional[str], scope: dict, user_id: 
     }, {"_id": 0, "amount": 1}).to_list(ALL_ROWS) if company_id else []
     total_personal = sum(e.get("amount", 0) for e in personal_expenses)
 
-    totals = await period_totals(company_id, scope, user_id, counted_period(month))
-    total_income, total_expense = period_income_expense(totals, visibility)
-    total_profit = total_income - total_expense
+    total_profit = (await period_profit(company_id, scope, user_id, counted_period(month), visibility))["profit"]
     roi_percent = (total_profit / total_personal * 100) if total_personal > 0 else (0 if total_profit <= 0 else 100)
 
     return {
@@ -4113,19 +4211,28 @@ async def month_payroll(company_id: Optional[str], scope: dict, year: int, month
     return {"recorded": round(recorded, 2), "expected": round(expected, 2)}
 
 
-async def expected_payroll(company_id: Optional[str], scope: dict, period: Period, today: date) -> float:
-    """The payroll not entered yet, by the salaries in Екип: for this month
-    and the month before - whose payroll is made after it ends - each
-    employee without an entry for it (month_payroll), by the period's share
-    of the month. An older month is as it was entered. The margins and the
-    notebook's safe-to-withdraw both count it."""
+async def expected_payroll_by_month(
+    company_id: Optional[str], scope: dict, period: Period, today: date,
+) -> Dict[Tuple[int, int], float]:
+    """The whole month's payroll not entered yet, for each month of the
+    period that can still expect one: this month and the month before -
+    whose payroll is made after it ends. An older month is as it was
+    entered."""
     pending = {(today.year, today.month), _add_months(today.year, today.month, -1)}
-    expected = 0.0
+    expected: Dict[Tuple[int, int], float] = {}
     for year, month in period.months():
-        share = period.month_share(year, month)
-        if (year, month) in pending and share:
-            expected += (await month_payroll(company_id, scope, year, month, expect=True))["expected"] * share
+        if (year, month) in pending and period.month_share(year, month):
+            expected[(year, month)] = (await month_payroll(company_id, scope, year, month, expect=True))["expected"]
     return expected
+
+
+async def expected_payroll(company_id: Optional[str], scope: dict, period: Period, today: date) -> float:
+    """The payroll not entered yet, by the salaries in Екип (each employee
+    without an entry for the month, month_payroll), by the period's share
+    of each month that can still expect it. The one profit
+    (period_profit) counts it - the margins, Home and the notebook."""
+    by_month = await expected_payroll_by_month(company_id, scope, period, today)
+    return sum(amount * period.month_share(year, month) for (year, month), amount in by_month.items())
 
 
 # The usual margin is read off this many full months before the current one.
@@ -4141,19 +4248,29 @@ async def break_even_for(company_id: Optional[str], scope: dict, current_user: U
     today = today_local()
     month = Period.month_of(today)
     month_key = today.strftime("%Y-%m")
-    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "modules": 1}) if company_id else None
+    company = await db.companies.find_one({"id": company_id}, PROFIT_COMPANY_FIELDS) if company_id else None
     modules = company_modules(company)
     off_book_visible = bool(visibility["off_book_expenses"])
+    # The one profit's rule (period_profit): for a business registered for
+    # VAT the VAT is no profit - the target stays in takings as rung up
+    # (with VAT), so the VAT of the sales is a cost that follows them and
+    # the purchases and recurring costs count without their VAT.
+    vat_registered = company_vat_registered(company)
 
     async def month_figures(period: Period, through: date) -> dict:
         totals = await period_totals(company_id, scope, current_user.user_id, period)
         income, _ = period_income_expense(totals, visibility)
         recurring = await recurring_service.month_projection(
-            db, company_id, scope, period.start.year, period.start.month, through, off_book_visible,
+            db, company_id, scope, period.start.year, period.start.month, through, off_book_visible, vat_registered,
         )
         # What follows the sales: every invoice and expense that is not a
-        # recurring one (payroll and depreciation are counted apart).
-        variable = totals["invoice_total"] + (totals["off_book_expenses"] if off_book_visible else 0) - recurring["paid_so_far"]
+        # recurring one (payroll and depreciation are counted apart) - and,
+        # registered for VAT, the VAT the sales carry.
+        purchases = (
+            totals["invoice_net"] + totals["fiscal_vat"] + totals.get("issued_invoice_vat", 0.0)
+            if vat_registered else totals["invoice_total"]
+        )
+        variable = purchases + (totals["off_book_expenses"] if off_book_visible else 0) - recurring["paid_so_far"]
         return {
             "month": period.start.strftime("%Y-%m"), "income": income, "variable": max(variable, 0.0),
             "revenue_days": len(totals["revenue_days"]), "issued": float(totals.get("issued_invoice_total") or 0),
@@ -4201,7 +4318,9 @@ async def break_even_for(company_id: Optional[str], scope: dict, current_user: U
     )
     wages = await schedule_wages_for_period(company_id, current_user.user_id, month.through(today) or month) if show_payroll else 0.0
     depreciation = await get_depreciation_cost_for_period(company_id, current_user.user_id, month.start, month.end)
-    recurring_now = await recurring_service.month_projection(db, company_id, scope, today.year, today.month, today, off_book_visible)
+    recurring_now = await recurring_service.month_projection(
+        db, company_id, scope, today.year, today.month, today, off_book_visible, vat_registered,
+    )
     fixed = {
         "payroll": round(payroll["recorded"] + payroll["expected"] + wages, 2),
         "recurring": round(recurring_now["month_total"], 2),
@@ -5670,27 +5789,30 @@ async def compute_budget_status(company_id: str, month: str, visibility: Optiona
     if not budget:
         return None
 
-    # The month's spend, read through period_totals like Home and every
-    # other module - every invoice and off-book expense of the month's
-    # days, plus its payroll and depreciation (real, recurring costs a
-    # budget cap must not ignore).
+    # The month's spend: the expenses of the one profit (period_profit), as
+    # Home shows them - the invoices and off-book expenses of the month's
+    # days (without VAT for a business registered for VAT), the payroll
+    # with the salaries not entered yet, the recurring costs and the
+    # depreciation by the days (real costs a budget cap must not ignore).
     year, mon = int(month[:4]), int(month[5:7])
     scope = await company_data_scope(company_id)
     whole = Period.month(year, mon)
     # A month still running counts through today, like Home (counted_period):
     # the invoices and off-book expenses so far, and the days gone by of
-    # the month's payroll and depreciation - not a whole month of salaries
-    # on its first day. user_id is unused by the payroll/depreciation
-    # helpers whenever company_id is set - a placeholder is safe.
+    # the month's monthly costs - not a whole month of salaries on its
+    # first day. user_id is unused by the payroll/depreciation helpers
+    # whenever company_id is set - a placeholder is safe.
     counted = counted_period(whole)
-    totals = await period_totals(company_id, scope, "", counted)
+    company = await db.companies.find_one({"id": company_id}, PROFIT_COMPANY_FIELDS)
+    one_profit = await period_profit(company_id, scope, "", counted, visibility, company=company)
+    totals = one_profit["totals"]
+    vat_registered = one_profit["vat_excluded"]
     show_off_book = visibility is None or bool(visibility.get("off_book_expenses"))
     show_payroll = visibility is None or bool(visibility.get("payroll", True))
-    total_payroll_cost = totals["payroll_cost"] if show_payroll else 0.0
-    total_depreciation_expense = totals["depreciation_cost"]
+    total_payroll_cost = one_profit["payroll"]
+    total_depreciation_expense = one_profit["depreciation"]
     off_book = totals["off_book_expenses"] if show_off_book else 0.0
-    variable_so_far = totals["invoice_total"] + off_book
-    total_spent = variable_so_far + total_payroll_cost + total_depreciation_expense
+    total_spent = one_profit["expense"]
 
     limit = budget.get("expense_limit", 0)
     threshold = budget.get("alert_threshold", 80)
@@ -5699,18 +5821,23 @@ async def compute_budget_status(company_id: str, month: str, visibility: Optiona
     is_alert = percent_used >= threshold
     is_exceeded = percent_used >= 100
 
-    # Where the month is heading: purchases at their pace so far, plus the
-    # month's whole payroll and depreciation (fixed, not a pace), plus its
-    # recurring expenses as they are - paid or still to come, never spread
-    # as a pace (rent paid on the 5th is not a daily rate).
+    # Where the month is heading: the goods at their pace so far, plus the
+    # month's whole payroll (with the salaries not entered yet) and
+    # depreciation (fixed, not a pace), plus its recurring expenses as they
+    # are - paid or still to come, never spread as a pace (rent paid on the
+    # 5th is not a daily rate).
     expected_month_end = None
     if counted.days < whole.days:
+        expect_payroll = show_payroll and company_modules(company)["payroll"]
         fixed_whole_month = (
             (await get_payroll_cost_for_period(company_id, "", whole.start, whole.end) if show_payroll else 0.0)
+            + (sum((await expected_payroll_by_month(company_id, scope, whole, today_local())).values()) if expect_payroll else 0.0)
             + await get_depreciation_cost_for_period(company_id, "", whole.start, whole.end)
         )
-        recurring = await recurring_service.month_projection(db, company_id, scope, year, mon, counted.end, show_off_book)
-        paced = max(0.0, variable_so_far - recurring["paid_so_far"])
+        recurring = await recurring_service.month_projection(
+            db, company_id, scope, year, mon, counted.end, show_off_book, vat_registered,
+        )
+        paced = max(0.0, one_profit["goods"])
         expected_month_end = round(paced / counted.days * whole.days + recurring["month_total"] + fixed_whole_month, 2)
 
     return {
@@ -5722,7 +5849,9 @@ async def compute_budget_status(company_id: str, month: str, visibility: Optiona
         "month": month,
         "expense_limit": limit,
         "total_spent": round(total_spent, 2),
-        "total_invoice_amount": round(totals["invoice_total"], 2),
+        # Without VAT for a business registered for VAT, as the spend.
+        "vat_excluded": vat_registered,
+        "total_invoice_amount": round(totals["invoice_net"] if vat_registered else totals["invoice_total"], 2),
         "total_non_invoice_expenses": round(off_book, 2) if show_off_book else None,
         "total_payroll_cost": round(total_payroll_cost, 2) if show_payroll else None,
         "total_depreciation_expense": round(total_depreciation_expense, 2),

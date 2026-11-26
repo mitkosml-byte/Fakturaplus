@@ -90,7 +90,6 @@ async def get_summary(
     total_fiscal_revenue = totals["fiscal_revenue"]
     total_pocket_money = totals["pocket_money"]
     total_expenses = totals["off_book_expenses"]
-    total_payroll_cost = totals["payroll_cost"]
     total_depreciation_expense = totals["depreciation_cost"]
 
     # Every aggregate below folds in the RAW pocket-money/off-book-expense
@@ -104,7 +103,7 @@ async def get_summary(
     # How the income came: the till's card part; cash - the rest of the
     # till plus pocket money (cash by definition); and the invoices issued
     # (not rung up at the till) by how each was paid - cash, card or bank.
-    # The three add up to the income.
+    # The three add up to the takings, as rung up (with VAT).
     by_method = totals.get("issued_by_method") or {}
     total_card_revenue = totals["card_revenue"] + by_method.get("card", 0.0)
     total_cash_revenue = total_fiscal_revenue - totals["card_revenue"] + effective_pocket_money + by_method.get("cash", 0.0)
@@ -128,9 +127,16 @@ async def get_summary(
     # единствената формула (server.vat_due_of).
     vat_to_pay = vat_due_of(totals)
 
-    # Общ приход/разход - единствената формула (_profit_formula), през
-    # period_income_expense с видимостта на този зрител.
-    total_income, total_expense = period_income_expense(totals, visibility)
+    # Income, expenses and profit: the one profit of the period
+    # (server.period_profit) - without VAT for a business registered for
+    # VAT, with the payroll (the salaries not entered yet too) and the
+    # recurring costs by their days - with this viewer's visibility. The
+    # margins, the notebook, the assistant and the report read the same.
+    company = await server.db.companies.find_one({"id": company_id}, PROFIT_COMPANY_FIELDS) if company_id else None
+    one_profit = await period_profit(
+        company_id, scope, current_user.user_id, counted, visibility, company=company, totals=totals, today=today,
+    )
+    total_income, total_expense = one_profit["income"], one_profit["expense"]
 
     # Печалбата е независимо скриваема от съставните ѝ части - тя влиза или
     # излиза от отговора само по view_profit, макар вече да е изчислена
@@ -138,11 +144,12 @@ async def get_summary(
     profit = round(total_income - total_expense, 2) if visibility["profit"] else None
 
     # Average per day with revenue entered, and - while the period runs -
-    # where it is heading (server.period_pace).
-    # Takings are averaged over the days entered; issued invoices are added
-    # to the expected end as they are, never spread over days.
+    # where it is heading (server.period_pace): the takings as rung up,
+    # with VAT. Issued invoices are added to the expected end as they are,
+    # never spread over days.
+    takings, _ = period_income_expense(totals, visibility)
     pace = await period_pace(
-        company_id, period, total_income - issued_total, totals["revenue_days"], unprojected=issued_total,
+        company_id, period, takings - issued_total, totals["revenue_days"], unprojected=issued_total,
     )
 
     # "statistics" is the overarching gate - without it, a viewer (e.g. a
@@ -172,12 +179,17 @@ async def get_summary(
         "vat_to_pay": _redact(round(vat_to_pay, 2)),
         "total_non_invoice_expenses": round(total_expenses, 2) if show_stats and visibility["off_book_expenses"] else None,
         # The payroll: for whoever keeps it (manage_payroll) - out of
-        # everyone else's totals, like pocket money.
-        "total_payroll_cost": round(total_payroll_cost, 2) if show_stats and visibility["payroll"] else None,
+        # everyone else's totals, like pocket money. As the profit counts
+        # it: with the salaries not entered yet (payroll_expected of it).
+        "total_payroll_cost": round(one_profit["payroll"], 2) if show_stats and visibility["payroll"] else None,
         "total_depreciation_expense": _redact(round(total_depreciation_expense, 2)),
         "total_income": _redact(round(total_income, 2)),
         "total_expense": _redact(round(total_expense, 2)),
         "profit": _redact(profit),
+        # The income and the expenses are without VAT (registered for VAT).
+        "vat_excluded": one_profit["vat_excluded"],
+        # Salaries not entered yet, counted among the expenses by Екип.
+        "payroll_expected": round(one_profit["payroll_expected"], 2) if show_stats and visibility["payroll"] else None,
         # The personal notebook beside the profit, for its viewers only:
         # company money spent personally and what is left after it.
         **({key: _redact(value) for key, value in personal_use(totals, profit, visibility).items()}),
@@ -191,10 +203,7 @@ async def get_summary(
         "overdue_invoice_count": _redact(len(overdue_invoices)),
         "financial_visibility": visibility,
         # Not registered for VAT: no VAT to pay or deduct - the screens hide it.
-        "vat_registered": company_vat_registered(
-            await server.db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1, "vat_registered": 1, "vat_number": 1})
-            if company_id else None
-        ),
+        "vat_registered": company_vat_registered(company),
         # The exact days these totals cover, and on how many of them
         # revenue was entered - what "the period" means, stated, not implied.
         "period": {
@@ -218,9 +227,12 @@ async def get_chart_data(
 ):
     """Revenue and expenses of a calendar period, by day (by month for a
     period over two months), only for days that have happened. The same
-    period, records and formula as /statistics/summary: the buckets add up
-    to its totals - expenses include each day's share of the month's
-    payroll and depreciation."""
+    period, records and formula as /statistics/summary - the one profit
+    (server.period_profit): the buckets add up to its totals. Without VAT
+    for a business registered for VAT; the expenses include each day's
+    share of the month's payroll (the salaries not entered yet too), its
+    recurring costs and its depreciation, and leave out the day's payments
+    of those recurring costs."""
     # Only the Stats tab calls this, and that tab is already hidden from a
     # viewer without view_statistics (frontend's showStatsTab) - this gate
     # is the backend-enforced version of the same rule.
@@ -247,8 +259,14 @@ async def get_chart_data(
     # out of the bars, not just omitted from a separate total.
     visibility = get_financial_visibility(current_user)
 
+    company = await server.db.companies.find_one({"id": company_id}, PROFIT_COMPANY_FIELDS) if company_id else None
+    vat_registered = company_vat_registered(company)
+    show_off_book = bool(visibility["off_book_expenses"])
+    show_payroll = bool(visibility["payroll"])
+
     invoices = await server.db.invoices.find(
-        {**scope, "date": shown.datetime_filter()}, {"_id": 0, "date": 1, "total_amount": 1, "vat_amount": 1, "asset_id": 1}
+        {**scope, "date": shown.datetime_filter()},
+        {"_id": 0, "date": 1, "total_amount": 1, "amount_without_vat": 1, "vat_amount": 1, "asset_id": 1},
     ).to_list(ALL_ROWS)
     revenues = await server.db.daily_revenue.find(
         {**scope, "date": shown.text_filter()},
@@ -259,30 +277,47 @@ async def get_chart_data(
     expenses = await server.db.expenses.find(
         {**scope, "date": shown.text_filter(), **NOT_WAGES}, {"_id": 0, "date": 1, "amount": 1}
     ).to_list(ALL_ROWS) if visibility["off_book_expenses"] else []
-    costs_by_day = await monthly_costs_by_day(company_id, current_user.user_id, shown, include_payroll=visibility["payroll"])
+    costs_by_day = await monthly_costs_by_day(company_id, current_user.user_id, shown, include_payroll=show_payroll)
+    # The recurring costs by the days of their month, their payments out of
+    # the day they were paid; the salaries not entered yet by their month's
+    # days - as the one profit counts them.
+    recurring = await recurring_service.period_costs(server.db, company_id, scope, shown, show_off_book, vat_registered)
+    payroll_to_come = (
+        await expected_payroll_by_month(company_id, scope, shown, today)
+        if show_payroll and company_modules(company)["payroll"] else {}
+    )
 
     from collections import defaultdict
     days: Dict[str, Dict[str, Any]] = {}
     for day in shown.iter_days():
         costs = costs_by_day.get(day.isoformat(), {"monthly": 0.0, "wages": 0.0})
+        in_month = days_in_month(day.year, day.month)
+        monthly = (
+            costs["monthly"]
+            + recurring["accrued_by_month"].get((day.year, day.month), 0.0) / in_month
+            + payroll_to_come.get((day.year, day.month), 0.0) / in_month
+        )
         days[day.isoformat()] = {
-            "income": 0.0, "expense": 0.0, "fixed": costs["monthly"] + costs["wages"], "monthly": costs["monthly"],
-            "vat": 0.0, "has_revenue": False,
+            "income": 0.0, "expense": -recurring["paid_by_day"].get(day.isoformat(), 0.0),
+            "fixed": monthly + costs["wages"], "monthly": monthly, "vat": 0.0, "has_revenue": False,
         }
     for inv in invoices:
         inv_day = business_day(inv.get("date"))
         if inv_day and inv_day.isoformat() in days:
             if not inv.get("asset_id"):  # an asset's invoice: its depreciation is the expense
-                days[inv_day.isoformat()]["expense"] += inv.get("total_amount", 0)
+                days[inv_day.isoformat()]["expense"] += (
+                    invoice_net(inv) if vat_registered else float(inv.get("total_amount") or 0)
+                )
             days[inv_day.isoformat()]["vat"] -= inv.get("vat_amount", 0)  # ДДС кредит
     for rev in revenues:
         date_str = rev["date"][:10] if isinstance(rev.get("date"), str) else None
         if date_str not in days:
             continue
         pocket_money = rev.get("pocket_money", 0) if visibility["pocket_money"] else 0
-        days[date_str]["income"] += rev.get("fiscal_revenue", 0) + pocket_money
+        sales_vat = revenue_vat.vat_in(rev)  # ДДС от продажби, всяка ставка поотделно
+        days[date_str]["income"] += float(rev.get("fiscal_revenue") or 0) - (sales_vat if vat_registered else 0.0) + pocket_money
         days[date_str]["has_revenue"] = True
-        days[date_str]["vat"] += revenue_vat.vat_in(rev)  # ДДС от продажби, всяка ставка поотделно
+        days[date_str]["vat"] += sales_vat
     for exp in expenses:
         date_str = exp["date"][:10] if isinstance(exp.get("date"), str) else None
         if date_str in days:
@@ -290,7 +325,7 @@ async def get_chart_data(
     # Invoices issued to customers: income and VAT of their issue date.
     for date_str, issued in (await issued_invoices_by_day(scope, shown)).items():
         if date_str in days:
-            days[date_str]["income"] += issued["total"]
+            days[date_str]["income"] += issued["net"] if vat_registered else issued["total"]
             days[date_str]["vat"] += issued["vat"]  # ДДС от продажби
 
     def _point(key: str, label: str, values: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
@@ -299,9 +334,9 @@ async def get_chart_data(
             "income": values["income"],
             "expense": values["expense"] + values["fixed"],
             "fixed_costs": values["fixed"],
-            # The month's payroll and depreciation (part of fixed_costs): a
-            # cost of the month - a day chart shows it apart, not as the
-            # day's spending.
+            # The month's payroll, recurring costs and depreciation (part of
+            # fixed_costs): a cost of the month - a day chart shows it
+            # apart, not as the day's spending.
             "monthly_costs": values["monthly"],
             "vat": values["vat"],
             **extra,

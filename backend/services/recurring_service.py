@@ -427,6 +427,7 @@ def _probable_invoice(item: dict, invoices: List[dict], used: set) -> Optional[d
 
 def outlook(
     items: List[dict], occurrences: Dict[str, dict], through: date, include_off_book: bool,
+    net_of_vat: bool = False,
 ) -> Dict[str, float]:
     """The month's recurring expenses for a projection of its expenses:
 
@@ -436,15 +437,17 @@ def outlook(
       is still expected (nothing for a month skipped).
 
     Off-book records only for a viewer who sees off-book expenses; an
-    expense without an invoice, still to come, likewise."""
+    expense without an invoice, still to come, likewise. With net_of_vat,
+    an invoice counts without its VAT (a business that deducts it): the
+    money that leaves is with VAT, the cost is not."""
     paid_so_far = 0.0
     kinds = {item["id"]: item_kind(item) for item in items}
     for occurrence in occurrences.values():
         paid_so_far += sum(
-            record["amount"] for record in _records(occurrence, include_off_book)
+            _amount(record, net_of_vat) for record in _records(occurrence, include_off_book)
             if record.get("date") and str(record["date"]) <= through.isoformat()
         )
-    month_total = month_cost(occurrences, kinds, include_off_book)
+    month_total = month_cost(occurrences, kinds, include_off_book, net_of_vat)
     return {"paid_so_far": round(paid_so_far, 2), "month_total": round(month_total, 2)}
 
 
@@ -502,10 +505,12 @@ async def period_costs(
     - accrued: each month's recurring costs (month_cost) by the share of
       its days in the period, as payroll is counted - the cost of running
       the business in those days, not on the day it was paid;
-    - items: how many recurring costs the business follows."""
+    - items: how many recurring costs the business follows;
+    - paid_by_day / accrued_by_month: the same two day by day and month by
+      month (a month's whole cost), for a chart of the one profit."""
     items = await active_items(db, company_id)
     if not items:
-        return {"paid": 0.0, "accrued": 0.0, "items": 0}
+        return {"paid": 0.0, "accrued": 0.0, "items": 0, "paid_by_day": {}, "accrued_by_month": {}}
     kinds = {item["id"]: item_kind(item) for item in items}
     ids = [item["id"] for item in items]
     # A payment dated in the period can be the month before's (paid late)
@@ -514,21 +519,31 @@ async def period_costs(
     last = add_months(period.end.year, period.end.month, 1)
     paid: Dict[str, dict] = {}
     accrued = 0.0
+    accrued_by_month: Dict[Tuple[int, int], float] = {}
     while month <= last:
         year, number = month
         occurrences = resolve_month(items, year, number, await load_month_records(db, scope, ids, year, number))
         share = period.month_share(year, number)
         if share:
-            accrued += share * month_cost(occurrences, kinds, include_off_book, net_of_vat)
+            whole = month_cost(occurrences, kinds, include_off_book, net_of_vat)
+            accrued_by_month[(year, number)] = whole
+            accrued += share * whole
         for occurrence in occurrences.values():
             for record in _records(occurrence, include_off_book):
                 if period.contains(_record_day(record)):
                     paid[str(record["id"])] = record
         month = add_months(year, number, 1)
+    paid_by_day: Dict[str, float] = {}
+    for record in paid.values():
+        day = _record_day(record)
+        if day is not None:
+            paid_by_day[day.isoformat()] = paid_by_day.get(day.isoformat(), 0.0) + _amount(record, net_of_vat)
     return {
         "paid": round(sum(_amount(record, net_of_vat) for record in paid.values()), 2),
         "accrued": round(accrued, 2),
         "items": len(items),
+        "paid_by_day": paid_by_day,
+        "accrued_by_month": accrued_by_month,
     }
 
 
@@ -542,6 +557,7 @@ async def active_items(db, company_id: Optional[str]) -> List[dict]:
 
 async def month_projection(
     db, company_id: Optional[str], scope: dict, year: int, month: int, through: date, include_off_book: bool,
+    net_of_vat: bool = False,
 ) -> Dict[str, float]:
     """outlook() for one company and month, straight from the database."""
     items = await active_items(db, company_id)
@@ -549,24 +565,33 @@ async def month_projection(
         return {"paid_so_far": 0.0, "month_total": 0.0}
     records = await load_month_records(db, scope, [item["id"] for item in items], year, month)
     occurrences = resolve_month(items, year, month, records)
-    return outlook(items, occurrences, through, include_off_book)
+    return outlook(items, occurrences, through, include_off_book, net_of_vat)
 
 
-def known_month_total(items: List[dict], key: str, include_off_book: bool) -> float:
+def _usual_amount(item: dict, net_of_vat: bool) -> float:
+    """An item's usual amount - an invoice's taken as including VAT at the
+    standard rate, so without it for a business that deducts VAT."""
+    amount = float(item.get("amount") or 0)
+    return amount / STANDARD_VAT_FACTOR if net_of_vat and item_kind(item) == INVOICE else amount
+
+
+def known_month_total(items: List[dict], key: str, include_off_book: bool, net_of_vat: bool = False) -> float:
     """What the active recurring expenses with a payment in the month come to."""
     return round(sum(
-        float(item.get("amount") or 0) for item in items
+        _usual_amount(item, net_of_vat) for item in items
         if (include_off_book or item_kind(item) == INVOICE) and is_due_month(item, key)
     ), 2)
 
 
-def known_monthly_total(items: List[dict], include_off_book: bool, today: Optional[date] = None) -> float:
+def known_monthly_total(
+    items: List[dict], include_off_book: bool, today: Optional[date] = None, net_of_vat: bool = False,
+) -> float:
     """What the active recurring expenses come to in an average month: one
     paid every few months counts its share of each month, one whose
     payments are over nothing."""
     today = today or current_day()
     this_month = month_key_of(today.year, today.month)
     return round(sum(
-        float(item.get("amount") or 0) / interval_months(item) for item in items
+        _usual_amount(item, net_of_vat) / interval_months(item) for item in items
         if (include_off_book or item_kind(item) == INVOICE) and next_due_month(item, this_month) is not None
     ), 2)

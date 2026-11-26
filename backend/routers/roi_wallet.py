@@ -4,7 +4,6 @@ Shares server.py's db/models/helpers/services via `from server import *`;
 after module load, so this file always accesses them as `server.db` /
 `server.AI_FEATURES_ENABLED` (qualified), never via the star-import, to
 stay correct when server.py's test fixture monkeypatches them."""
-import asyncio
 from collections import defaultdict
 from datetime import date as date_type
 
@@ -82,10 +81,14 @@ def _eur_text(value: float, en: bool = False) -> str:
 async def _roi_month_data(
     company_id: Optional[str], scope: dict, user_id: str, visibility: dict, months: List[tuple],
 ) -> Dict[str, Dict[str, Any]]:
-    """Each month's personal money in, revenue, supplier invoices, off-book
-    expenses, payroll and depreciation - one read per collection for the
-    whole window, revenue and expenses kept per day (the comparison with
-    earlier months is over the same days when the month is still running)."""
+    """Each month's personal money in, revenue, supplier invoices and
+    off-book expenses - one read per collection for the whole window, kept
+    per day (the comparison with earlier months is over the same days when
+    the month is still running) - and the month's one profit
+    (server.period_profit), the same as Home's. The days are on the
+    profit's basis: without VAT for a business registered for VAT."""
+    company = await server.db.companies.find_one({"id": company_id}, PROFIT_COMPANY_FIELDS) if company_id else None
+    vat_registered = company_vat_registered(company)
     first_start, _ = _month_range(*months[0])
     _, last_end = _month_range(*months[-1])
     data: Dict[str, Dict[str, Any]] = {
@@ -110,33 +113,35 @@ async def _roi_month_data(
                     month["investment_only"] += entry.get("amount", 0)
     revenues = await server.db.daily_revenue.find(
         {**scope, "date": {"$gte": first_start, "$lt": last_end}},
-        {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1},
+        {"_id": 0, "date": 1, "fiscal_revenue": 1, "pocket_money": 1, "vat_rate_percent": 1, "vat_groups": 1},
     ).to_list(ROI_MAX_ROWS)
     for r in revenues:
         date_str = r.get("date")
         month = data.get(date_str[:7]) if isinstance(date_str, str) else None
         if month is not None:
             day = int(date_str[8:10])
-            month["fiscal_by_day"][day] += r.get("fiscal_revenue", 0)
+            fiscal = float(r.get("fiscal_revenue") or 0)
+            month["fiscal_by_day"][day] += fiscal - revenue_vat.vat_in(r) if vat_registered else fiscal
             month["pocket_by_day"][day] += r.get("pocket_money", 0)
     # Invoices issued to customers are revenue of their issue date.
     window = Period.parse(first_start, (date_type.fromisoformat(last_end) - timedelta(days=1)).isoformat())
     for day_text, issued in (await issued_invoices_by_day(scope, window)).items():
         month = data.get(day_text[:7])
         if month is not None:
-            month["issued_by_day"][int(day_text[8:10])] += issued["total"]
+            month["issued_by_day"][int(day_text[8:10])] += issued["net"] if vat_registered else issued["total"]
     invoices = await server.db.invoices.find(
         {**scope, **NOT_AN_ASSET, "date": {
             "$gte": datetime.fromisoformat(first_start + "T00:00:00+00:00"),
             "$lt": datetime.fromisoformat(last_end + "T00:00:00+00:00"),
         }},
-        {"_id": 0, "date": 1, "supplier": 1, "total_amount": 1},
+        {"_id": 0, "date": 1, "supplier": 1, "total_amount": 1, "amount_without_vat": 1, "vat_amount": 1},
     ).to_list(ROI_MAX_ROWS)
     for inv in invoices:
         inv_day = business_day(inv.get("date")) if isinstance(inv.get("date"), datetime) else None
         month = data.get(inv_day.strftime("%Y-%m")) if inv_day else None
         if month is not None and inv_day is not None:
-            month["invoices"].append((inv_day.day, inv.get("supplier") or "—", inv.get("total_amount", 0)))
+            amount = invoice_net(inv) if vat_registered else float(inv.get("total_amount") or 0)
+            month["invoices"].append((inv_day.day, inv.get("supplier") or "—", amount))
     if visibility["off_book_expenses"]:
         expenses = await server.db.expenses.find(
             {**scope, **NOT_WAGES, "date": {"$gte": first_start, "$lt": last_end}}, {"_id": 0, "date": 1, "amount": 1},
@@ -146,22 +151,23 @@ async def _roi_month_data(
             month = data.get(date_str[:7]) if isinstance(date_str, str) else None
             if month is not None:
                 month["off_book"].append((int(date_str[8:10]), exp.get("amount", 0)))
+    today = today_local()
     for month in data.values():
         # The month still running counts through today (counted_period):
-        # its days so far, and that share of its payroll and depreciation.
+        # its days so far, and that share of its monthly costs.
         counted = counted_period(Period.month(month["year"], month["month"]))
         month["counted_through"] = counted.end.day if counted.days < Period.month(month["year"], month["month"]).days else None
-        month["payroll"] = await get_payroll_cost_for_period(company_id, user_id, counted.start_text, counted.end_text)
-        month["depreciation"] = await get_depreciation_cost_for_period(company_id, user_id, counted.start_text, counted.end_text)
+        month["profit"] = await period_profit(company_id, scope, user_id, counted, visibility, company=company, today=today)
     return data
 
 
 def _month_totals(month: Dict[str, Any], visibility: dict, through_day: Optional[int] = None) -> Dict[str, Any]:
-    """Revenue, expenses and profit - the same formula as the dashboard
-    (_profit_formula: payroll and depreciation included), with what this
-    viewer may not see counted as zero. through_day limits the daily
-    figures to days 1..through_day (payroll and depreciation, monthly, then
-    stay out: the comparison is about the days themselves)."""
+    """Revenue, expenses and profit: the month's one profit (as on Home)
+    for the whole month counted, and - with through_day - the days 1..
+    through_day themselves, revenue less the invoices and off-book
+    expenses of those days (the monthly costs stay out: the comparison
+    with the same days of other months is about the days). What this
+    viewer may not see counts as zero either way."""
     limit = through_day if through_day is not None else month.get("counted_through")
 
     def upto(day: int) -> bool:
@@ -172,14 +178,11 @@ def _month_totals(month: Dict[str, Any], visibility: dict, through_day: Optional
     pocket = sum(v for d, v in month["pocket_by_day"].items() if upto(d)) if visibility["pocket_money"] else 0.0
     invoice_total = sum(amount for d, _, amount in month["invoices"] if upto(d))
     off_book = sum(amount for d, amount in month["off_book"] if upto(d))
-    # The payroll for whoever keeps it, as in their totals.
-    payroll = month["payroll"] if through_day is None and visibility.get("payroll", True) else 0.0
-    depreciation = month["depreciation"] if through_day is None else 0.0
-    income, expense = _profit_formula(
-        fiscal_revenue=fiscal, pocket_money=pocket, invoice_total=invoice_total,
-        off_book_expenses=off_book, payroll_cost=payroll, depreciation_cost=depreciation,
-        issued_invoices=issued,
-    )
+    if through_day is None:
+        income, expense = month["profit"]["income"], month["profit"]["expense"]
+    else:
+        income = fiscal + pocket + issued
+        expense = invoice_total + off_book
     by_supplier: Dict[str, float] = defaultdict(float)
     for d, supplier, amount in month["invoices"]:
         if upto(d):
@@ -796,20 +799,20 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
 
     visibility = get_financial_visibility(current_user)
     month = counted_period(Period.parse(start_date, end_date))
-    totals, company = await asyncio.gather(
-        period_totals(company_id, scope, current_user.user_id, month),
-        server.db.companies.find_one({"id": company_id}, {"_id": 0, "vat_registered": 1}),
+    company = await server.db.companies.find_one({"id": company_id}, PROFIT_COMPANY_FIELDS) if company_id else None
+    # The month's profit so far - the one profit Home shows
+    # (server.period_profit): the VAT to pay is not in it (never income of
+    # a business registered for VAT) and the salaries not entered yet are
+    # among its expenses, by the days gone.
+    one_profit = await period_profit(
+        company_id, scope, current_user.user_id, month, visibility, company=company, today=now.date(),
     )
-    income, expense = period_income_expense(totals, visibility)
-    profit_this_month = income - expense
-    # What the month's profit still owes before any of it is the owner's:
-    # the VAT to pay for the month (in the profit with the sales; a refund
-    # is not counted on) and the salaries not entered yet, by the days gone
-    # - the same expected payroll the margins count.
-    vat_to_pay = max(vat_due_of(totals), 0.0) if company_vat_registered(company) else 0.0
-    salaries_expected = (
-        await expected_payroll(company_id, scope, month, now.date()) if visibility.get("payroll", True) else 0.0
-    )
+    profit_this_month = one_profit["profit"]
+    # Shown beside safe-to-withdraw, so the owner sees what is not theirs
+    # in the till: both are already out of the profit (a refund is not
+    # counted on).
+    vat_to_pay = max(vat_due_of(one_profit["totals"]), 0.0) if one_profit["vat_excluded"] else 0.0
+    salaries_expected = one_profit["payroll_expected"]
 
     today_str = now.strftime("%Y-%m-%d")
     two_weeks_str = (now + timedelta(days=14)).strftime("%Y-%m-%d")
@@ -835,8 +838,7 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
     # profit: anyone else gets the notebook's own records and sums.
     sees_profit = bool(visibility["profit"])
     safe_to_spend: Optional[float] = (
-        round(profit_this_month - vat_to_pay - salaries_expected - total_spent - upcoming_due_total, 2)
-        if sees_profit else None
+        round(profit_this_month - total_spent - upcoming_due_total, 2) if sees_profit else None
     )
     spent_percent_of_profit = round(total_spent / profit_this_month * 100, 1) if sees_profit and profit_this_month > 0 else None
 
@@ -866,7 +868,9 @@ async def get_personal_wallet_summary(current_user: User = Depends(get_current_u
         "wants_total": round(wants_total, 2),
         "profit_this_month": round(profit_this_month, 2) if sees_profit else None,
         "safe_to_spend": safe_to_spend,
-        # What safe_to_spend keeps back, for whoever sees the profit.
+        # What safe_to_spend keeps back, for whoever sees the profit: the
+        # VAT and the salaries to come (both already out of the profit) and
+        # the personal payments due within a week.
         "set_aside": {
             "vat": round(vat_to_pay, 2), "salaries": round(salaries_expected, 2), "upcoming": round(upcoming_due_total, 2),
         } if sees_profit else None,

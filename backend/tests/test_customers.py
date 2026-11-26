@@ -181,9 +181,13 @@ def test_c3_to_c6_chart_cents_payment_split_and_supplier_detail(client):
     # Ч3: the bars add up to the summary, to the cent.
     assert round(sum(p["expense"] for p in chart), 2) == summary["total_expense"]
     assert round(sum(p["income"] for p in chart), 2) == summary["total_income"]
-    # Ч4: cash + card + bank is the income (the cash invoice is at the till here).
+    # Ч4: cash + card + bank is the takings as rung up, with VAT - the till,
+    # the pocket money and the invoices issued (the cash one is at the till
+    # here); the income beside it is without VAT (P1-1).
     split = summary["total_cash_revenue"] + summary["total_card_revenue"] + summary["total_bank_revenue"]
-    assert round(split, 2) == summary["total_income"] and summary["total_bank_revenue"] == 120
+    takings = summary["total_fiscal_revenue"] + summary["total_pocket_money"] + summary["total_issued_invoices"]
+    assert round(split, 2) == round(takings, 2) and summary["total_bank_revenue"] == 120
+    assert summary["vat_excluded"] is True and summary["total_income"] < takings
 
     # Ч5: a credit note is no invoice of a delivery; Ч6: the asset is said.
     detail = client.get(f"/api/statistics/supplier/Метро ЕООД/detailed?{october}", headers=owner).json()

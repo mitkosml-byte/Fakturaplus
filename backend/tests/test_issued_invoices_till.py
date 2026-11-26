@@ -42,14 +42,15 @@ def test_d4_an_invoice_paid_at_the_till_is_not_counted_twice(client):
     at_till = _issue(client, owner, issue_date=day)
     assert at_till["in_till"] is True
     summary = client.get(f"/api/statistics/summary?{period}", headers=owner).json()
-    assert summary["total_income"] == 1000 and summary["total_issued_invoices"] == 0
+    # Once - the till's 1000 €, without its VAT (P1-1).
+    assert summary["total_income"] == round(1000 / 1.2, 2) and summary["total_issued_invoices"] == 0
     assert summary["fiscal_vat"] + summary["issued_invoice_vat"] == round(1000 * 20 / 120, 2)
 
     # Said otherwise (not rung up at the till), and by bank: income of their own.
     _issue(client, owner, in_till=False, issue_date=day)
     _issue(client, owner, payment_method="bank_transfer", issue_date=day)
     summary = client.get(f"/api/statistics/summary?{period}", headers=owner).json()
-    assert summary["total_issued_invoices"] == 480 and summary["total_income"] == 1480
+    assert summary["total_issued_invoices"] == 480 and summary["total_income"] == round(1000 / 1.2 + 400, 2)
 
     # The sales ledger lists every invoice and the till's day without them.
     issued = asyncio.run(server.db.billing_documents.find({"id": at_till["id"]}, {"_id": 0}).to_list(None))

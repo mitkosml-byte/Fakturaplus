@@ -143,10 +143,13 @@ def test_n11_locations_side_by_side_add_up_to_the_business(client, on_today):
     assert result["period"] == {"start": "2026-11-01", "end": "2026-11-17"}
     rows = {row["name"]: row for row in result["locations"]}
     centre_row, mladost_row = rows["Център"], rows["Младост"]
-    assert centre_row["parts"] == {"till": 1800, "issued_invoices": 60, "purchases": 240, "off_book": 0, "payroll": 0}
-    assert (centre_row["income"], centre_row["expense"], centre_row["profit"]) == (1960, 240, 1720)   # 1800 + pocket 100 + 60
+    # On the one profit's basis (P1-1): without VAT, the business is registered for it.
+    assert result["vat_excluded"] is True
+    assert centre_row["parts"] == {"till": 1500, "issued_invoices": 50, "purchases": 200, "off_book": 0, "payroll": 0}
+    assert (centre_row["income"], centre_row["expense"], centre_row["profit"]) == (1650, 200, 1450)   # 1500 + pocket 100 + 50
+    # A day's takings as rung up, with VAT.
     assert (centre_row["revenue_days"], centre_row["revenue_per_day"], centre_row["team"]) == (2, 900, 0)
-    assert (mladost_row["parts"]["till"], mladost_row["parts"]["off_book"], mladost_row["team"]) == (500, 60, 1)
+    assert (mladost_row["parts"]["till"], mladost_row["parts"]["off_book"], mladost_row["team"]) == (416.67, 60, 1)
 
     # The same numbers as Statistics: the locations and the shared part add up to them.
     summary = client.get(f"/api/statistics/summary?{NOVEMBER}", headers=owner).json()
@@ -155,7 +158,7 @@ def test_n11_locations_side_by_side_add_up_to_the_business(client, on_today):
     assert mladost_row["expense"] == round(60 + summary["total_payroll_cost"], 2)
     assert round(sum(r["income"] for r in rows.values()) + result["shared"]["income"], 2) == result["total"]["income"]
     assert round(sum(r["expense"] for r in rows.values()) + result["shared"]["expense"], 2) == result["total"]["expense"]
-    assert (result["shared"]["income"], result["shared"]["expense"]) == (300, 120)
+    assert (result["shared"]["income"], result["shared"]["expense"]) == (250, 100)
 
     # A bill of Младост: owed under Младост, so its cash logged as revenue goes there.
     bill = client.post("/api/billing-documents", headers=owner, json={
@@ -197,7 +200,7 @@ def test_n11_kept_by_who_runs_the_business(client, on_today):
     closed = client.put(f"/api/locations/{shop['id']}", headers=owner, json={"is_active": False})
     assert closed.status_code == 200 and closed.json()["is_active"] is False
     rows = client.get(f"/api/locations/compare?{NOVEMBER}", headers=owner).json()["locations"]
-    assert [(r["name"], r["is_active"], r["parts"]["till"]) for r in rows] == [("Магазин", False, 420)]
+    assert [(r["name"], r["is_active"], r["parts"]["till"]) for r in rows] == [("Магазин", False, 350)]   # 420 without VAT
     unused = _location(client, owner, "Нов обект")
     assert client.put(f"/api/locations/{unused['id']}", headers=owner, json={"name": "магазин"}).status_code == 409
     assert client.delete(f"/api/locations/{unused['id']}", headers=owner).status_code == 200
@@ -227,8 +230,12 @@ def test_n11_records_move_between_locations(client, on_today):
         "total_amount": 120, "date": "2026-11-04", "payment_method": "cash"}).json()
     assert client.put(f"/api/invoices/{invoice['id']}", headers=owner, json={"location_id": shop["id"]}).json()["location_id"] == shop["id"]
     rows = client.get(f"/api/locations/compare?{NOVEMBER}", headers=owner).json()
-    assert rows["locations"][0]["parts"]["purchases"] == 120 and rows["locations"][0]["parts"]["off_book"] == 0
-    assert rows["shared"]["expense"] == 300
+    assert rows["locations"][0]["parts"]["purchases"] == 100 and rows["locations"][0]["parts"]["off_book"] == 0   # without VAT
+    # Shared: the expense moved off the shop, and Иван's salary - no payroll
+    # entered yet, so counted from Екип by the days so far (P1-1).
+    summary = client.get(f"/api/statistics/summary?{NOVEMBER}", headers=owner).json()
+    assert summary["payroll_expected"] > 0
+    assert rows["shared"]["expense"] == round(300 + summary["payroll_expected"], 2)
 
 
 def test_n11_locations_come_along_in_a_backup(client, on_today, no_rate_limit):  # noqa: F811 - the fixture
@@ -245,7 +252,7 @@ def test_n11_locations_come_along_in_a_backup(client, on_today, no_rate_limit): 
     [moved] = client.get("/api/locations", headers=other).json()
     assert moved["name"] == "Магазин" and moved["id"] != shop["id"]
     [row] = client.get(f"/api/locations/compare?{NOVEMBER}", headers=other).json()["locations"]
-    assert (row["parts"]["till"], row["parts"]["off_book"]) == (400, 300)
+    assert (row["parts"]["till"], row["parts"]["off_book"]) == (333.33, 300)   # the till without VAT
     # Into the same business again: nothing doubles.
     again = client.post("/api/backup/restore", headers=owner, json=backup).json()
     assert again["restored"]["total"] == 0

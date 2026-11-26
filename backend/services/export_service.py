@@ -618,9 +618,12 @@ class ExportService:
         ws.cell(row=row, column=2, value="Стойност").font = header_font
         ws.cell(row=row, column=2).fill = header_fill
         
+        # The one profit's income and expenses: without VAT for a business
+        # registered for it (P1-1).
+        net = " (без ДДС)" if stats.get('vat_excluded') else ""
         summary_data = [
-            ("Общо приходи", stats.get('total_income', 0)),
-            ("Общо разходи", stats.get('total_expense', 0)),
+            (f"Общо приходи{net}", stats.get('total_income', 0)),
+            (f"Общо разходи{net}", stats.get('total_expense', 0)),
             ("Печалба", stats.get('profit', 0)),
             # A business outside VAT registration has no VAT to pay.
             *([] if stats.get('vat_registered') is False else [("ДДС за плащане", stats.get('vat_to_pay', 0))]),
@@ -1034,10 +1037,11 @@ class ExportService:
         elements.append(Spacer(1, 8*mm))
 
         elements.append(Paragraph("Обобщение", section_style))
+        net = " (без ДДС)" if stats.get('vat_excluded') else ""
         summary_rows = [
             ["Показател", "Стойност"],
-            ["Общо приходи", _money_or_hidden(stats.get('total_income'))],
-            ["Общо разходи", _money_or_hidden(stats.get('total_expense'))],
+            [f"Общо приходи{net}", _money_or_hidden(stats.get('total_income'))],
+            [f"Общо разходи{net}", _money_or_hidden(stats.get('total_expense'))],
             ["Печалба", _money_or_hidden(stats.get('profit'))],
             # A business outside VAT registration has no VAT to pay.
             *([] if stats.get('vat_registered') is False else [["ДДС за плащане", _money_or_hidden(stats.get('vat_to_pay'))]]),

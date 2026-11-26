@@ -157,8 +157,10 @@ export default function LocationsScreen() {
   };
 
   const maxIncome = Math.max(1, ...(comparison?.locations.map((row) => row.income) ?? [0]));
+  // The one profit (P1-1): without VAT for a business registered for it.
   const periodText = comparison
     ? `${format(parseISO(comparison.period.start), 'd MMM', { locale: dateLocale })} – ${format(parseISO(comparison.period.end), 'd MMM yyyy', { locale: dateLocale })}`
+      + (comparison.vat_excluded ? ` · ${t('profit.withoutVat')}` : '')
     : '';
 
   const renderRow = (row: LocationComparisonRow) => (

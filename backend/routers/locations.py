@@ -165,10 +165,11 @@ async def _payroll_by_location(company_id: Optional[str], user_id: str, period: 
     return totals
 
 
-async def _sum_by_location(collection: Any, match: dict, field: str) -> Dict[str, float]:
+async def _sum_by_location(collection: Any, match: dict, field: Any) -> Dict[str, float]:
+    """`field` is a field name or a database expression to sum."""
     rows = await collection.aggregate([
         {"$match": {**match, "location_id": {"$nin": [None, ""]}}},
-        {"$group": {"_id": "$location_id", "total": {"$sum": f"${field}"}}},
+        {"$group": {"_id": "$location_id", "total": {"$sum": f"${field}" if isinstance(field, str) else field}}},
     ]).to_list(ALL_ROWS)
     return {row["_id"]: float(row.get("total") or 0) for row in rows}
 
@@ -179,23 +180,38 @@ async def compare_locations(company_id: Optional[str], scope: dict, user: User, 
     visibility = get_financial_visibility(user)
     show_pocket, show_off_book = visibility["pocket_money"], visibility["off_book_expenses"]
     locations = await company_locations(company_id)
+    company = await server.db.companies.find_one({"id": company_id}, PROFIT_COMPANY_FIELDS) if company_id else None
+    # On the one profit's basis (server.period_profit): without VAT for a
+    # business registered for VAT.
+    vat_registered = company_vat_registered(company)
 
     fiscal: Dict[str, float] = {}
+    takings: Dict[str, float] = {}
     pocket: Dict[str, float] = {}
     open_days: Dict[str, int] = {}
     days = await server.db.daily_revenue.find(
-        {**scope, "date": period.text_filter(), "by_location": {"$exists": True}}, {"_id": 0, "by_location": 1},
+        {**scope, "date": period.text_filter(), "by_location": {"$exists": True}},
+        {"_id": 0, "by_location": 1, "fiscal_revenue": 1, "vat_rate_percent": 1, "vat_groups": 1},
     ).to_list(ALL_ROWS)
     for day in days:
+        # A location's share of the day's till carries the day's VAT share.
+        day_fiscal = float(day.get("fiscal_revenue") or 0)
+        net_share = 1.0 - revenue_vat.vat_in(day) / day_fiscal if vat_registered and day_fiscal > 0 else 1.0
         for location_id, entry in (day.get("by_location") or {}).items():
-            fiscal[location_id] = fiscal.get(location_id, 0.0) + float(entry.get("fiscal_revenue") or 0)
+            amount = float(entry.get("fiscal_revenue") or 0)
+            takings[location_id] = takings.get(location_id, 0.0) + amount
+            fiscal[location_id] = fiscal.get(location_id, 0.0) + amount * net_share
             pocket[location_id] = pocket.get(location_id, 0.0) + float(entry.get("pocket_money") or 0)
-            if float(entry.get("fiscal_revenue") or 0) > 0:
+            if amount > 0:
                 open_days[location_id] = open_days.get(location_id, 0) + 1
     issued = await _sum_by_location(
-        server.db.billing_documents, {**scope, **ISSUED_INVOICE_REVENUE, "issue_date": period.text_filter()}, "total_amount",
+        server.db.billing_documents, {**scope, **ISSUED_INVOICE_REVENUE, "issue_date": period.text_filter()},
+        "amount_without_vat" if vat_registered else "total_amount",
     )
-    invoices = await _sum_by_location(server.db.invoices, {**scope, "date": period.datetime_filter(), **NOT_AN_ASSET}, "total_amount")
+    invoices = await _sum_by_location(
+        server.db.invoices, {**scope, "date": period.datetime_filter(), **NOT_AN_ASSET},
+        INVOICE_NET_EXPRESSION if vat_registered else "total_amount",
+    )
     expenses = await _sum_by_location(server.db.expenses, {**scope, "date": period.text_filter(), **NOT_WAGES}, "amount")
     # The payroll for whoever keeps it - out of anyone else's figures.
     payroll = await _payroll_by_location(company_id, user.user_id, period) if visibility["payroll"] else {}
@@ -217,7 +233,8 @@ async def compare_locations(company_id: Optional[str], scope: dict, user: User, 
             "income": round(income, 2), "expense": round(expense, 2), "profit": round(income - expense, 2),
             "margin_percent": round((income - expense) / income * 100, 1) if income > 0 else None,
             "revenue_days": revenue_days,
-            "revenue_per_day": round(fiscal.get(lid, 0.0) / revenue_days, 2) if revenue_days else None,
+            # The till's takings a day, as rung up.
+            "revenue_per_day": round(takings.get(lid, 0.0) / revenue_days, 2) if revenue_days else None,
             "parts": {
                 "till": round(fiscal.get(lid, 0.0), 2), "issued_invoices": round(issued.get(lid, 0.0), 2),
                 "purchases": round(invoices.get(lid, 0.0), 2), "off_book": round(expenses.get(lid, 0.0), 2) if show_off_book else None,
@@ -225,14 +242,16 @@ async def compare_locations(company_id: Optional[str], scope: dict, user: User, 
             },
             "team": team.get(lid, 0),
         })
-    # The business's own numbers, as everywhere else: what no location holds is shared.
-    total_income, total_expense = period_income_expense(
-        await period_totals(company_id, scope, user.user_id, period), visibility,
-    )
+    # The business's own numbers, the one profit as everywhere else: what no
+    # location holds is shared - the monthly costs by their days among it.
+    one_profit = await period_profit(company_id, scope, user.user_id, period, visibility, company=company)
+    total_income, total_expense = one_profit["income"], one_profit["expense"]
     shared_income = total_income - sum(row["income"] for row in rows)
     shared_expense = total_expense - sum(row["expense"] for row in rows)
     return {
         "period": {"start": period.start.isoformat(), "end": period.end.isoformat()},
+        # Income and expenses without VAT (a business registered for VAT).
+        "vat_excluded": vat_registered,
         "locations": rows,
         "shared": {"income": round(shared_income, 2), "expense": round(shared_expense, 2), "profit": round(shared_income - shared_expense, 2)},
         "total": {"income": round(total_income, 2), "expense": round(total_expense, 2), "profit": round(total_income - total_expense, 2)},

@@ -300,6 +300,8 @@ export interface LocationComparisonRow {
 
 export interface LocationComparison {
   period: { start: string; end: string };
+  // Income and expenses without VAT (registered for VAT), as on Home.
+  vat_excluded?: boolean;
   locations: LocationComparisonRow[];
   // What no location holds (depreciation, a purchase for the whole business...).
   shared: { income: number; expense: number; profit: number };
@@ -1056,6 +1058,10 @@ export interface Summary {
   total_issued_invoices?: number | null;
   // false: the business is not registered for VAT - no VAT cards.
   vat_registered?: boolean;
+  // The one profit (P1-1): income and expenses without VAT (registered for
+  // VAT); the salaries not entered yet, counted among the expenses.
+  vat_excluded?: boolean;
+  payroll_expected?: number | null;
   issued_invoice_count?: number | null;
   issued_invoice_vat?: number | null;
   total_pocket_money: number | null;

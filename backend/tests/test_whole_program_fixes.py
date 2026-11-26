@@ -483,10 +483,11 @@ def test_p3_an_asset_bought_on_an_invoice_is_expensed_once(client):
     assert asset["invoice_id"] == bought["id"] and "8801" in asset["invoice_label"]
 
     after = client.get(f"/api/statistics/summary?{month}", headers=owner).json()
-    # The 6000 € is no longer an expense of 10 September - the asset's
-    # depreciation is - while its VAT stays a credit.
+    # The invoice (5000 € without its VAT - the business deducts VAT) is no
+    # longer an expense of 10 September - the asset's depreciation is -
+    # while its VAT stays a credit.
     depreciation = after["total_depreciation_expense"] - before["total_depreciation_expense"]
-    assert round(after["total_expense"], 2) == round(before["total_expense"] - 6000 + depreciation, 2)
+    assert round(after["total_expense"], 2) == round(before["total_expense"] - 5000 + depreciation, 2)
     assert depreciation < 6000
     assert after["vat_to_pay"] == before["vat_to_pay"]
     chart = client.get(f"/api/statistics/chart-data?{month}", headers=owner).json()
@@ -883,7 +884,8 @@ def test_v3_an_issued_invoice_is_revenue_and_vat_on_its_day_and_owed_until_paid(
     assert issued["due_date"] == "2026-10-24" and issued["receivable_id"]
 
     after = client.get(f"/api/statistics/summary?{october}", headers=owner).json()
-    assert round(after["total_income"] - before["total_income"], 2) == 294.5
+    # Income without VAT, the business being registered for it (P1-1).
+    assert round(after["total_income"] - before["total_income"], 2) == 250
     assert round(after["fiscal_vat"] - before["fiscal_vat"], 2) == 44.5
     assert round(after["vat_to_pay"] - before["vat_to_pay"], 2) == 44.5
     assert after["total_issued_invoices"] == 294.5 and after["issued_invoice_count"] == 1
@@ -892,7 +894,7 @@ def test_v3_an_issued_invoice_is_revenue_and_vat_on_its_day_and_owed_until_paid(
     chart = client.get("/api/statistics/chart-data?start_date=2026-10-10&end_date=2026-10-10", headers=owner)
     assert chart.status_code == 200, chart.text
     points = chart.json()
-    assert len(points) == 1 and abs(points[0]["income"] - 294.5) < 0.01, points
+    assert len(points) == 1 and abs(points[0]["income"] - 250) < 0.01, points
 
     # Owed until paid, and a payment on it is not new revenue.
     receivable = asyncio.run(server.db.receivables.find_one({"id": issued["receivable_id"]}))
@@ -951,9 +953,10 @@ def test_v3_issued_invoices_join_the_revenue_forecast_as_known_amounts(client):
         "items": [{"name": "Проект", "quantity": 1, "unit_price": 500, "vat_rate": 20}],
     })
     forecast = client.get("/api/forecast/revenue", headers=owner).json()
-    assert forecast["current_month"]["so_far"] == 600
+    # Without their VAT, as Home's income (P1-1): 500 and 1000 a month.
+    assert forecast["current_month"]["so_far"] == 500
     history = {row["month"]: row["amount"] for row in forecast.get("historical", [])}
-    assert sorted(history.values())[-3:] == [1200, 1200, 1200], forecast
+    assert sorted(history.values())[-3:] == [1000, 1000, 1000], forecast
 
 
 def test_x10_c1_the_sales_ledger_holds_the_invoices_issued(client, monkeypatch):

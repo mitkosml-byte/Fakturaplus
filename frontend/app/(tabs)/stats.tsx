@@ -1257,7 +1257,9 @@ export default function StatsScreen() {
                 <View style={styles.chartContainer}>
                   <View style={styles.chartHeader}>
                     <Ionicons name="arrow-up-circle" size={24} color={COLORS.success} />
-                    <Text style={styles.chartTitle}>{t('stats.income')}</Text>
+                    <Text style={styles.chartTitle}>
+                      {t('stats.income')}{summary?.vat_excluded ? ` ${t('profit.withoutVat')}` : ''}
+                    </Text>
                     {summary && summary.total_income !== null && (
                       <View style={styles.chartTotal}>
                         <Text style={[styles.chartTotalValue, { color: COLORS.success }]}>
@@ -1327,7 +1329,9 @@ export default function StatsScreen() {
                 <View style={styles.chartContainer}>
                   <View style={styles.chartHeader}>
                     <Ionicons name="arrow-down-circle" size={24} color={COLORS.danger} />
-                    <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
+                    <Text style={styles.chartTitle}>
+                      {t('home.totalExpenses')}{summary?.vat_excluded ? ` ${t('profit.withoutVat')}` : ''}
+                    </Text>
                     {summary && summary.total_expense !== null && (
                       <View style={styles.chartTotal}>
                         <Text style={[styles.chartTotalValue, { color: COLORS.danger }]}>

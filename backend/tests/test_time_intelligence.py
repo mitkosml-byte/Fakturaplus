@@ -91,6 +91,8 @@ def test_forecast_counts_only_complete_months():
 
     async def _run():
         await _register(user)
+        # Outside VAT: the takings are the income as they are (P1-1).
+        await server.db.companies.insert_one({"id": company_id, "name": "Проба", "vat_registered": False})
         docs = [
             {"user_id": user.user_id, "date": f"{month_back(k)}-02", "fiscal_revenue": 1000 + 100 * (5 - k),
              "pocket_money": 0, "card_revenue": 0}

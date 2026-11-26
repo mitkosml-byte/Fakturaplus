@@ -24,12 +24,14 @@ ACCOUNTANT = "accountant"   # the role's defaults: profit and payroll, no pocket
 MANAGER = "manager"         # the role's defaults: pocket money, off-book and profit, no payroll
 NOTEBOOK = "notebook"       # statistics, profit and the personal notebook only
 
-# What each sees of the month: income, expense, and the notebook's line.
+# What each sees of the month: income, expense, and the notebook's line -
+# the one profit (P1-1): the business is registered for VAT, so the till's
+# 1000 counts without its VAT (833.33) and the invoice without its own (250).
 EXPECTED = {
-    OWNER: {"income": 1200.0, "expense": 900.0, "payroll": 500.0, "personal": 150.0},
-    ACCOUNTANT: {"income": 1000.0, "expense": 800.0, "payroll": 500.0, "personal": None},
-    MANAGER: {"income": 1200.0, "expense": 400.0, "payroll": None, "personal": None},
-    NOTEBOOK: {"income": 1000.0, "expense": 300.0, "payroll": None, "personal": 150.0},
+    OWNER: {"income": 1033.33, "expense": 850.0, "payroll": 500.0, "personal": 150.0},
+    ACCOUNTANT: {"income": 833.33, "expense": 750.0, "payroll": 500.0, "personal": None},
+    MANAGER: {"income": 1033.33, "expense": 350.0, "payroll": None, "personal": None},
+    NOTEBOOK: {"income": 833.33, "expense": 250.0, "payroll": None, "personal": 150.0},
 }
 
 
@@ -85,14 +87,14 @@ def test_every_total_holds_what_its_viewer_may_see(client):
 
     for who, headers in viewers.items():
         want = EXPECTED[who]
-        profit = want["income"] - want["expense"]
+        profit = round(want["income"] - want["expense"], 2)
 
         # Home and Statistics.
         summary = client.get(f"/api/statistics/summary?{period}", headers=headers).json()
         assert (summary["total_income"], summary["total_expense"], summary["profit"]) == (want["income"], want["expense"], profit), who
         assert summary["total_payroll_cost"] == want["payroll"], who
         assert summary["personal_withdrawals"] == want["personal"], who
-        assert summary["left_after_personal"] == (profit - want["personal"] if want["personal"] is not None else None), who
+        assert summary["left_after_personal"] == (round(profit - want["personal"], 2) if want["personal"] is not None else None), who
 
         # The chart's days add up to the same totals.
         user = _user_of(headers)
@@ -173,13 +175,14 @@ def test_a_budget_alert_carries_only_its_readers_own_figures(client, monkeypatch
     this_month = today.strftime("%Y-%m")
     day = today.replace(day=1).isoformat()
     owner = viewers[OWNER]
-    client.post("/api/expenses", headers=owner, json={"description": "Ремонт", "amount": 700, "date": day})
+    client.post("/api/expenses", headers=owner, json={"description": "Ремонт", "amount": 750, "date": day})
     client.post("/api/invoices", headers=owner, json={
         "supplier": "Доставчик Проба ЕООД", "invoice_number": "0000000002", "date": day,
         "amount_without_vat": 250, "vat_amount": 50, "total_amount": 300, "payment_method": "cash",
     })
-    # Limit 1000: the owner's 1000 (300 + 700) is over it; the accountant,
-    # who does not see the expenses without invoice, is at 300 - 30%.
+    # Limit 1000: the owner's 1000 (the invoice's 250 without VAT + 750) is
+    # over it; the accountant, who does not see the expenses without
+    # invoice, is at 250 - 25%.
     asyncio.run(server.db.budgets.insert_one({
         "id": f"b-{company_id}", "company_id": company_id, "month": this_month, "expense_limit": 1000,
         "alert_threshold": 80, "alert_sent": False, "exceeded_sent": False,
@@ -195,7 +198,7 @@ def test_a_budget_alert_carries_only_its_readers_own_figures(client, monkeypatch
     owner_id = _user_of(owner).user_id
     assert any(owner_id in ids and title == "Бюджетът е надхвърлен" for ids, title, _ in sent)
     assert not any(accountant_id in ids for ids, _, _ in sent)
-    assert all("700" not in body for ids, _, body in sent if accountant_id in ids)
+    assert all("750" not in body for ids, _, body in sent if accountant_id in ids)
     # Not sent twice.
     sent.clear()
     asyncio.run(server._budget_alert_tick())

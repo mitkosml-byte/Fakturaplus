@@ -29,7 +29,6 @@ from fastapi import APIRouter
 from server import *
 import server
 from services import margins as margins_service
-from services import recurring_service
 
 router = APIRouter(prefix="/api")
 
@@ -44,39 +43,22 @@ def sees_margins(current_user: User) -> bool:
 
 
 async def _figures(
-    company_id: Optional[str], scope: dict, user_id: str, period: Period, visibility: dict, vat_registered: bool,
-    expect_payroll: bool, today: date,
+    company_id: Optional[str], scope: dict, user_id: str, period: Period, visibility: dict, company: Optional[dict],
+    today: date,
 ) -> Tuple[margins_service.Figures, int]:
-    """A period's figures for this viewer, and how many recurring costs the
-    business follows."""
-    off_book_visible = bool(visibility["off_book_expenses"])
-    totals, recurring, payroll_to_come = await asyncio.gather(
-        period_totals(company_id, scope, user_id, period),
-        recurring_service.period_costs(server.db, company_id, scope, period, off_book_visible, vat_registered),
-        expected_payroll(company_id, scope, period, today) if expect_payroll else _zero(),
-    )
-    pocket = totals["pocket_money"] if visibility["pocket_money"] else 0.0
-    if vat_registered:
-        sales = totals["fiscal_revenue"] - totals["fiscal_vat"] + totals["issued_invoice_net"] + pocket
-        purchases = totals["invoice_net"]
-    else:
-        sales = totals["fiscal_revenue"] + totals["issued_invoice_total"] + pocket
-        purchases = totals["invoice_total"]
-    goods = purchases + (totals["off_book_expenses"] if off_book_visible else 0.0) - recurring["paid"]
-    sees_payroll = bool(visibility.get("payroll", True))
+    """A period's figures for this viewer - the one profit's parts
+    (server.period_profit) - and how many recurring costs the business
+    follows."""
+    profit = await period_profit(company_id, scope, user_id, period, visibility, company=company, today=today)
     figures = margins_service.Figures(
-        sales=sales,
-        goods=max(goods, 0.0),
-        payroll=(totals["payroll_cost"] + payroll_to_come) if sees_payroll else 0.0,
-        recurring=recurring["accrued"],
-        depreciation=totals["depreciation_cost"],
-        payroll_expected=payroll_to_come if sees_payroll else 0.0,
+        sales=profit["income"],
+        goods=profit["goods"],
+        payroll=profit["payroll"],
+        recurring=profit["recurring"],
+        depreciation=profit["depreciation"],
+        payroll_expected=profit["payroll_expected"],
     )
-    return figures, int(recurring["items"])
-
-
-async def _zero() -> float:
-    return 0.0
+    return figures, profit["recurring_items"]
 
 
 async def period_margins(
@@ -96,14 +78,11 @@ async def period_margins(
     visibility = get_financial_visibility(current_user)
     vat_registered = company_vat_registered(company)
     tax_percent = margins_service.profit_tax_percent(company)
-    # Salaries not entered yet are expected - for whoever sees the payroll
-    # of a business that keeps it.
-    expect_payroll = bool(visibility.get("payroll", True)) and company_modules(company)["payroll"]
     today = server.today_local()
     before = margins_service.previous_period(period, counted)
     (figures, recurring_items), previous = await asyncio.gather(
-        _figures(company_id, scope, current_user.user_id, counted, visibility, vat_registered, expect_payroll, today),
-        _figures(company_id, scope, current_user.user_id, before, visibility, vat_registered, expect_payroll, today)
+        _figures(company_id, scope, current_user.user_id, counted, visibility, company, today),
+        _figures(company_id, scope, current_user.user_id, before, visibility, company, today)
         if before else _nothing(),
     )
     answer: Dict[str, Any] = {

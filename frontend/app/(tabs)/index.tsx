@@ -408,17 +408,28 @@ export default function HomeScreen() {
   // Джобче added up - for who sees both) and its expenses; for whoever sees
   // the personal notebook, the company money spent personally and what is
   // left in the business after it - never a business expense.
+  // The one profit (P1-1): its income and expenses are without VAT for a
+  // business registered for VAT - said beside them.
+  const withoutVat = (label: string) => (summary?.vat_excluded ? `${label} ${t('profit.withoutVat')}` : label);
   const ledgerRows: { key: string; label: string; value: number; tone?: string; onPress?: () => void }[] = [];
   if (summary) {
     if (usesTill) {
-      if (summary.total_fiscal_revenue !== null && summary.total_pocket_money !== null) {
-        ledgerRows.push({ key: 'till', label: t('home.revenueSum'), value: (summary.total_fiscal_revenue || 0) + (summary.total_pocket_money || 0) });
+      const tillSum = summary.total_fiscal_revenue !== null && summary.total_pocket_money !== null
+        ? (summary.total_fiscal_revenue || 0) + (summary.total_pocket_money || 0)
+        : null;
+      if (tillSum !== null) {
+        ledgerRows.push({ key: 'till', label: t('home.revenueSum'), value: tillSum });
+      }
+      // The till as rung up holds the VAT (and not the invoices issued):
+      // the income the profit counts, right under it, so the rows add up.
+      if (summary.total_income !== null && (tillSum === null || Math.abs((summary.total_income || 0) - tillSum) >= 0.01)) {
+        ledgerRows.push({ key: 'income', label: withoutVat(t('home.totalIncome')), value: summary.total_income || 0 });
       }
     } else if (summary.total_income !== null) {
-      ledgerRows.push({ key: 'income', label: t('home.totalIncome'), value: summary.total_income || 0 });
+      ledgerRows.push({ key: 'income', label: withoutVat(t('home.totalIncome')), value: summary.total_income || 0 });
     }
     if (summary.total_expense !== null) {
-      ledgerRows.push({ key: 'expense', label: t('home.totalExpenses'), value: summary.total_expense || 0 });
+      ledgerRows.push({ key: 'expense', label: withoutVat(t('home.totalExpenses')), value: summary.total_expense || 0 });
     }
     // The period's personal use and what is left in the business after it,
     // once something was taken - except for this month, which the notebook
@@ -605,6 +616,14 @@ export default function HomeScreen() {
                         ))}
                       </View>
                     )}
+                    {summary.profit !== null && (
+                      <Text style={styles.profitNote}>
+                        {summary.vat_excluded ? t('profit.howNoteVat') : t('profit.howNote')}
+                        {(summary.payroll_expected || 0) > 0
+                          ? ` ${t('profit.expectedPayroll').replace('{amount}', formatMoney(summary.payroll_expected || 0))}`
+                          : ''}
+                      </Text>
+                    )}
                   </>
                 )}
               </View>
@@ -781,6 +800,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  profitNote: { width: '100%', fontSize: 12, color: COLORS.textMuted, lineHeight: 17, marginTop: 8 },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

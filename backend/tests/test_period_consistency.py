@@ -94,10 +94,13 @@ def test_every_module_gives_the_same_month(client):
 
     oct_ = _summary(client, headers, *OCT)
     assert oct_["invoice_count"] == 3 and oct_["total_invoice_amount"] == 840.0
-    assert oct_["total_income"] == 3100.0
+    # The one profit (P1-1): the business is registered for VAT, so the
+    # till's 3100 counts without its VAT and the invoices without theirs.
+    assert oct_["vat_excluded"] is True
+    assert oct_["total_income"] == round(3100 / 1.2, 2)
     assert oct_["total_payroll_cost"] == 3100.0
-    assert oct_["total_expense"] == 4020.0          # 840 invoices + 80 off-book + 3100 payroll
-    assert oct_["profit"] == -920.0
+    assert oct_["total_expense"] == 3880.0          # 700 invoices without VAT + 80 off-book + 3100 payroll
+    assert oct_["profit"] == round(3100 / 1.2 - 3880, 2)
     assert oct_["period"] == {"start_date": "2026-10-01", "end_date": "2026-10-31", "days": 31, "through_date": "2026-10-31"}
 
     # The web pick of 1 November is November's, not October's (or nobody's).

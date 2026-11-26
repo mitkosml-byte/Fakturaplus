@@ -414,7 +414,9 @@ def build_chat_tools(data: ChatDataTools) -> list:
     @beta_async_tool(
         name="period_totals",
         description=(
-            "Revenue (оборот), expenses, profit and invoice count for ANY date range, plus how many days in "
+            "Revenue, expenses, profit and invoice count for ANY date range - the same profit Home shows: "
+            "when vat_excluded is true, revenue and expenses are without VAT, and the expenses include the "
+            "payroll (salaries not entered yet too) and recurring costs by their days - plus how many days in "
             "it have revenue entered. Call it for a question about a specific day, week, month, quarter or "
             "year that the JSON digest does not cover, and once per period when comparing periods."
         ),
@@ -434,9 +436,10 @@ def build_chat_tools(data: ChatDataTools) -> list:
     @beta_async_tool(
         name="revenue_breakdown",
         description=(
-            "Revenue for a date range split by day, ISO week, month or weekday, with the number of days that "
-            "have revenue entered in each group. Call it for trends, best/worst days or weekdays, and month "
-            "by month comparisons. Days without an entry are missing data, not zero revenue."
+            "Takings (оборот, as rung up - with VAT) for a date range split by day, ISO week, month or weekday, "
+            "with the number of days that have revenue entered in each group. Call it for trends, best/worst "
+            "days or weekdays, and month by month comparisons. Days without an entry are missing data, not "
+            "zero revenue. Not the revenue of period_totals, which is without VAT for a VAT-registered business."
         ),
         input_schema={
             "type": "object",
