@@ -39,6 +39,7 @@ import { useTranslation, useLanguageStore } from '../../src/i18n';
 import { COLORS } from '../../src/theme/colors';
 import { toApiDate } from '../../src/utils/periodRange';
 import { formatAmount, formatMoney, parseAmount, readAmount } from '../../src/utils/money';
+import { DraftCheckCard, headerProblemText, linesProblemText } from '../../src/components/scan/DraftCheckCard';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -756,47 +757,13 @@ export default function ScanScreen() {
   const money = (value: number) => formatAmount(Math.abs(value));
   const lineName = (index: number | null) => (index != null && items[index]?.name.trim()) || '?';
 
-  const headerProblemText = (header: NonNullable<InvoiceDraftCheck['header']>) =>
-    t('scanCheck.headerMismatch')
-      .replace('{expected}', money(header.expected_total))
-      .replace('{total}', money(header.total_amount));
-
-  const linesProblemText = (lines: NonNullable<InvoiceDraftCheck['lines']>) =>
-    t('scanCheck.linesMismatch')
-      .replace('{sum}', money(lines.sum))
-      .replace('{base}', money(lines.base))
-      .replace('{diff}', money(lines.difference));
-
   // What does not add up, one sentence each (purchase invoices only).
   const draftProblems = (): string[] => {
     if (scanMode !== 'purchase' || !draftCheck) return [];
     const problems: string[] = [];
-    if (draftCheck.header) problems.push(headerProblemText(draftCheck.header));
-    if (draftCheck.lines && !draftCheck.lines.ok) problems.push(linesProblemText(draftCheck.lines));
+    if (draftCheck.header) problems.push(headerProblemText(t, draftCheck.header));
+    if (draftCheck.lines && !draftCheck.lines.ok) problems.push(linesProblemText(t, draftCheck.lines));
     return problems;
-  };
-
-  const draftCauseText = (lines: NonNullable<InvoiceDraftCheck['lines']>): string | null => {
-    switch (lines.cause) {
-      case 'line_values':
-        return lines.index != null
-          ? t('scanCheck.causeLineValuesOne').replace('{name}', lineName(lines.index))
-          : t('scanCheck.causeLineValues').replace('{n}', String(lines.fixes.length));
-      case 'vat_included':
-        return t('scanCheck.causeVatIncluded');
-      case 'duplicate_line':
-        return t('scanCheck.causeDuplicate').replace('{name}', lineName(lines.remove_index));
-      case 'decimal_slip':
-        return t('scanCheck.causeDecimal')
-          .replace('{name}', lineName(lines.index))
-          .replace('{price}', String(lines.fixes[0]?.unit_price ?? ''));
-      case 'missing_line':
-        return t('scanCheck.causeMissing').replace('{diff}', money(lines.difference));
-      case 'extra':
-        return t('scanCheck.causeExtra').replace('{diff}', money(lines.difference));
-      default:
-        return null;
-    }
   };
 
   // A fix keeps a line's printed value in step when it agreed with the line
@@ -826,74 +793,6 @@ export default function ScanScreen() {
       byIndex.forEach((_, i) => { delete next[i]; });
       return next;
     });
-  };
-
-  const renderDraftCheck = (check: InvoiceDraftCheck) => {
-    const lines = check.lines;
-    const problem = !!check.header || (!!lines && !lines.ok);
-    const fixButton = (label: string, onPress: () => void) => (
-      <TouchableOpacity style={styles.packFixButton} onPress={onPress}>
-        <Ionicons name="construct-outline" size={14} color={COLORS.warning} />
-        <Text style={styles.packFixButtonText}>{label}</Text>
-      </TouchableOpacity>
-    );
-    let action: React.ReactNode = null;
-    if (lines && !lines.ok && draftCheckFresh) {
-      if (lines.cause === 'line_values' && lines.fixes.length > 1) {
-        action = fixButton(t('scanCheck.fixLinePrices').replace('{n}', String(lines.fixes.length)), () => applyDraftFixes(lines.fixes));
-      } else if (lines.cause === 'line_values' && lines.fixes.length === 1) {
-        // One line off: its price or its quantity was misread - offer both
-        // readings that give the printed value, as on the line itself.
-        const flag = draftLineFlags[lines.fixes[0].index];
-        const index = lines.fixes[0].index;
-        action = (
-          <View style={styles.lineFixRow}>
-            {fixButton(t('scanCheck.setPrice').replace('{price}', String(lines.fixes[0].unit_price)), () => applyDraftFixes(lines.fixes))}
-            {flag?.quantity != null && fixButton(
-              t('scanCheck.setQuantity').replace('{qty}', String(flag.quantity)),
-              () => updateItem(index, { quantity: String(flag.quantity) }),
-            )}
-          </View>
-        );
-      } else if (lines.cause === 'decimal_slip' && lines.fixes.length === 1) {
-        action = fixButton(t('scanCheck.setPrice').replace('{price}', String(lines.fixes[0].unit_price)), () => applyDraftFixes(lines.fixes));
-      } else if (lines.cause === 'vat_included') {
-        action = fixButton(t('scanCheck.fixVatIncluded'), () => applyDraftFixes(lines.fixes));
-      } else if (lines.cause === 'duplicate_line' && lines.remove_index != null) {
-        const index = lines.remove_index;
-        action = fixButton(t('scanCheck.removeDuplicate'), () => removeItem(index));
-      } else if (lines.cause === 'missing_line') {
-        action = fixButton(t('scanCheck.addMissingLine'), addItem);
-      }
-    }
-    const cause = lines && !lines.ok && draftCheckFresh ? draftCauseText(lines) : null;
-    return (
-      <View style={[styles.checkCard, problem ? styles.checkCardWarn : styles.checkCardOk, !draftCheckFresh && styles.checkCardStale]}>
-        {check.header && (
-          <View style={styles.checkRow}>
-            <Ionicons name="alert-circle" size={16} color={COLORS.warning} />
-            <Text style={[styles.checkText, styles.checkTitle]}>{headerProblemText(check.header)}</Text>
-          </View>
-        )}
-        {lines && (lines.ok ? (
-          <View style={styles.checkRow}>
-            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
-            <Text style={[styles.checkText, { color: COLORS.success }]}>
-              {t('scanCheck.allGood').replace('{sum}', money(lines.sum))}
-            </Text>
-          </View>
-        ) : (
-          <View style={check.header ? styles.checkSpaced : undefined}>
-            <View style={styles.checkRow}>
-              <Ionicons name="alert-circle" size={16} color={COLORS.warning} />
-              <Text style={[styles.checkText, styles.checkTitle]}>{linesProblemText(lines)}</Text>
-            </View>
-            {cause && <Text style={styles.checkCause}>{cause}</Text>}
-            {action && <View style={styles.checkActions}>{action}</View>}
-          </View>
-        ))}
-      </View>
-    );
   };
 
   const updateItem = (index: number, patch: Partial<EditableItem>) => {
@@ -1754,7 +1653,18 @@ export default function ScanScreen() {
                       </TouchableOpacity>
                     </View>
 
-                    {draftCheck && (draftCheck.header || draftCheck.lines) && renderDraftCheck(draftCheck)}
+                    {draftCheck && (draftCheck.header || draftCheck.lines) && (
+                      <DraftCheckCard
+                        check={draftCheck}
+                        fresh={draftCheckFresh}
+                        lineFlags={draftLineFlags}
+                        lineName={lineName}
+                        onApplyFixes={applyDraftFixes}
+                        onSetQuantity={(index, quantity) => updateItem(index, { quantity })}
+                        onRemoveLine={removeItem}
+                        onAddLine={addItem}
+                      />
+                    )}
 
                     {items.length === 0 ? (
                       <Text style={styles.itemsEmptyHint}>
@@ -2477,51 +2387,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: COLORS.warning,
-  },
-  // Do the amounts add up?
-  checkCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 10,
-    borderWidth: 1,
-  },
-  checkCardWarn: {
-    borderColor: COLORS.warning,
-  },
-  checkCardOk: {
-    borderColor: COLORS.success,
-  },
-  checkCardStale: {
-    opacity: 0.55,
-  },
-  checkSpaced: {
-    marginTop: 8,
-  },
-  checkRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-  },
-  checkText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 17,
-    color: COLORS.textSecondary,
-  },
-  checkTitle: {
-    color: 'white',
-    fontWeight: '600',
-  },
-  checkCause: {
-    fontSize: 12,
-    lineHeight: 17,
-    color: COLORS.textSecondary,
-    marginTop: 6,
-    marginLeft: 22,
-  },
-  checkActions: {
-    marginLeft: 22,
   },
   lineFixRow: {
     flexDirection: 'row',
