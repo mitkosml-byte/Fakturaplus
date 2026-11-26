@@ -200,15 +200,29 @@ async def cancel_invitation(invitation_id: str, current_user: User = Depends(get
     
     return {"message": "Поканата е отменена"}
 
+EMAIL_NOT_VERIFIED_FOR_INVITATION = "Първо потвърдете имейла си с кода, който ви изпратихме - после влезте във фирмата."
+
+
 @router.post("/invitations/accept")
 @limiter.limit("10/minute")
 async def accept_invitation(request: Request, current_user: User = Depends(get_current_user)):
     """Приема покана по код"""
     body = await request.json()
-    code = body.get("code", "").upper().strip()
+    return await accept_invitation_code(current_user, body.get("code", ""))
+
+
+async def accept_invitation_code(current_user: User, raw_code: str) -> dict:
+    """Joins the company of an invitation - from the code typed in, or the
+    one kept at registration until the email was confirmed. Only an account
+    whose email is confirmed may join: invitations go to a person by their
+    email, and an account opened with someone else's email must not walk
+    into that person's team."""
+    code = str(raw_code or "").upper().strip()
 
     if not code:
         raise HTTPException(status_code=400, detail="Въведете код на поканата")
+    if not current_user.email_verified:
+        raise HTTPException(status_code=403, detail=EMAIL_NOT_VERIFIED_FOR_INVITATION)
 
     # Find valid invitation
     invitation = await server.db.invitations.find_one({

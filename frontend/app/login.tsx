@@ -74,6 +74,9 @@ export default function LoginScreen() {
             t('login.codeDidntWork'),
             result.invite_error + '\n\n' + t('login.accountCreatedTryAgain')
           );
+        } else if (result.user.invite_pending) {
+          // A good invitation waits for the email's code (P1-7).
+          Alert.alert(t('verifyEmail.title'), t('login.confirmEmailFirst').replace('{email}', result.user.email));
         }
         setUser(result.user);
       } else {

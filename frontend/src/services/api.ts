@@ -178,11 +178,21 @@ class ApiService {
   }
 
   // Auth
-  async register(email: string, password: string, name: string, invitationCode?: string): Promise<{ user: User; session_token: string; invite_error?: string | null }> {
+  async register(email: string, password: string, name: string, invitationCode?: string): Promise<{ user: User; session_token: string; invite_error?: string | null; email_code_sent?: boolean }> {
     return this.fetch('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password, name, invitation_code: invitationCode || undefined }),
     });
+  }
+
+  // The email confirmed with the 6-digit code sent to it; an invitation
+  // kept from the registration is taken up right after.
+  async verifyEmail(code: string): Promise<{ user: User; joined_company?: { id: string; name: string } | null; invite_error?: string | null }> {
+    return this.fetch('/auth/verify-email', { method: 'POST', body: JSON.stringify({ code }) });
+  }
+
+  async resendEmailCode(): Promise<{ sent: boolean; already_verified: boolean }> {
+    return this.fetch('/auth/verify-email/resend', { method: 'POST' });
   }
 
   // Either the session, or - with a second step turned on - a challenge

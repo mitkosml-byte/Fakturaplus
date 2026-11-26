@@ -1084,6 +1084,34 @@ export const translations: Translations = {
     bg: 'Общо разходи',
     en: 'Total Expenses',
   },
+  'verifyEmail.title': { bg: 'Потвърдете имейла си', en: 'Confirm your email' },
+  'verifyEmail.text': {
+    bg: 'Изпратихме код от 6 цифри на {email}. Проверете и папката за нежелана поща.',
+    en: 'We sent a 6-digit code to {email}. Check the spam folder too.',
+  },
+  'verifyEmail.invitePending': {
+    bg: 'След потвърждението влизате във фирмата, която ви покани.',
+    en: 'Once confirmed, you join the business that invited you.',
+  },
+  'verifyEmail.placeholder': { bg: 'Код от имейла', en: 'Code from the email' },
+  'verifyEmail.confirm': { bg: 'Потвърди', en: 'Confirm' },
+  'verifyEmail.resend': { bg: 'Изпрати нов код', en: 'Send a new code' },
+  'verifyEmail.sixDigits': { bg: 'Кодът е от 6 цифри.', en: 'The code has 6 digits.' },
+  'verifyEmail.sentAgain': { bg: 'Изпратихме нов код.', en: 'A new code is on its way.' },
+  'verifyEmail.notSent': {
+    bg: 'Имейлът не тръгна. Опитайте отново след малко.',
+    en: 'The email did not go out. Try again in a moment.',
+  },
+  'verifyEmail.done': { bg: 'Имейлът е потвърден.', en: 'Your email is confirmed.' },
+  'verifyEmail.joined': { bg: 'Имейлът е потвърден. Вече сте във {company}.', en: 'Email confirmed. You are now in {company}.' },
+  'verifyEmail.inviteFailed': {
+    bg: 'Имейлът е потвърден, но поканата не сработи: {reason}. Поискайте нов код за покана.',
+    en: 'Email confirmed, but the invitation did not work: {reason}. Ask for a new invitation code.',
+  },
+  'login.confirmEmailFirst': {
+    bg: 'Изпратихме код на {email}. Въведете го на началния екран - след това влизате във фирмата, която ви покани.',
+    en: 'We sent a code to {email}. Enter it on the home screen - then you join the business that invited you.',
+  },
   'profit.withoutVat': { bg: 'без ДДС', en: 'without VAT' },
   'profit.howNoteVat': {
     bg: 'Печалбата е без ДДС (то е за държавата), със заплатите и наема по дни.',

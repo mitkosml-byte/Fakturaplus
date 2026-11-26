@@ -10,6 +10,10 @@ export interface User {
   // A second step at login (a code from an authenticator app or by email).
   two_factor_enabled?: boolean;
   two_factor_method?: TwoFactorMethod | null;
+  // The email confirmed with the code sent to it (P1-7); an invitation
+  // used at registration waits for that.
+  email_verified?: boolean;
+  invite_pending?: boolean;
   created_at: string;
 }
 

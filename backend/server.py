@@ -146,6 +146,16 @@ def is_app_admin(email: Optional[str]) -> bool:
     return bool(ADMIN_EMAIL) and (email or '').strip().lower() == ADMIN_EMAIL
 
 
+def email_is_verified(user_doc: Dict[str, Any]) -> bool:
+    """Whether the account's email was confirmed with the code sent to it.
+    An account from before the check (no mark) counts as confirmed; so does
+    every account while the program sends no email - there is no code to
+    send then, and nobody may be held back by a step they cannot take."""
+    if not EMAIL_FEATURES_ENABLED:
+        return True
+    return user_doc.get("email_verified") is not False
+
+
 # The background jobs and how often each runs (seconds), in the order the
 # status screen lists them.
 JOB_INTERVALS: Dict[str, int] = {
@@ -393,6 +403,10 @@ class User(BaseModel):
     # and how; its secret and codes never leave the server (sanitize_user).
     two_factor_enabled: bool = False
     two_factor_method: Optional[str] = None
+    # Whether the email was confirmed with the code sent to it (see
+    # email_is_verified); and whether an invitation waits for that.
+    email_verified: bool = True
+    invite_pending: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserSession(BaseModel):
@@ -1070,6 +1084,8 @@ def sanitize_user(user_doc: dict) -> dict:
     user_doc.pop("two_factor_pending", None)
     user_doc["two_factor_enabled"] = bool(two_factor.get("method"))
     user_doc["two_factor_method"] = two_factor.get("method")
+    user_doc["email_verified"] = email_is_verified(user_doc)
+    user_doc["invite_pending"] = bool(user_doc.pop("pending_invitation_code", None))
     role = user_doc.get("role", "staff")
     if not user_doc.get("permissions"):
         user_doc["permissions"] = resolve_permissions(role, None)
@@ -7280,6 +7296,10 @@ async def create_indexes():
         await db.error_log.create_index([("last_at", -1)])
         await db.error_log.create_index("expires_at", expireAfterSeconds=0)
         await db.job_status.create_index([("key", 1)], unique=True)
+        # The code that confirms an account's email: one per account, gone
+        # by itself once it expires.
+        await db.email_verifications.create_index([("user_id", 1)], unique=True)
+        await db.email_verifications.create_index("expires_at", expireAfterSeconds=0)
 
         # A login waiting for its second step: found by its token, gone
         # once expired (the TTL monitor sweeps it; the code checks the time).

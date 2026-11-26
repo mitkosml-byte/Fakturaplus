@@ -30,7 +30,10 @@ from server import (
     _ym_diff,
     _team_channel_id,
 )
+import html
+
 import server
+from routers.company import accept_invitation_code
 from services import two_factor as tf
 
 router = APIRouter(prefix="/api")
@@ -43,6 +46,55 @@ LOGIN_CHALLENGE_TRIES = 5
 # a known password cannot be paired with endless guesses of the code.
 SECOND_STEP_FAILURES = 10
 SECOND_STEP_PAUSE_MINUTES = 15
+
+# The code that confirms the email of a new account: good for a day (the
+# email may be read in the evening), 5 tries, a new one at most once a
+# minute.
+EMAIL_CODE_HOURS = 24
+EMAIL_CODE_TRIES = 5
+EMAIL_CODE_RESEND_SECONDS = 60
+# At most this many codes a day for one account: with 5 tries each, a code
+# cannot be guessed by asking for new ones, and an inbox is not flooded.
+EMAIL_CODES_PER_DAY = 10
+
+
+def _utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+async def _send_email_code(user: Dict[str, Any]) -> bool:
+    """A new code for the account's email - the one before it stops
+    working. The email carries nothing the person who opened the account
+    wrote (not even the name): it may reach someone else's inbox."""
+    code = tf.new_email_code()
+    now = datetime.now(timezone.utc)
+    before: Dict[str, Any] = await server.db.email_verifications.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    day_start = _utc(before.get("day_start"))
+    day_sends = int(before.get("day_sends") or 0)
+    if not day_start or now - day_start >= timedelta(hours=24):
+        day_start, day_sends = now, 0
+    await server.db.email_verifications.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "user_id": user["user_id"], "code_hash": tf.hash_code(code), "tries": 0,
+            "sent_at": now, "expires_at": now + timedelta(hours=EMAIL_CODE_HOURS),
+            "day_start": day_start, "day_sends": day_sends + 1,
+        }},
+        upsert=True,
+    )
+    return await server.send_email(
+        to_email=user["email"],
+        subject="Потвърдете имейла си - Фактура+",
+        html_body=(
+            "<p>Здравейте!</p>"
+            "<p>С този имейл беше отворен профил във Фактура+. Кодът за потвърждение е:</p>"
+            f"<h2 style=\"letter-spacing:4px;\">{code}</h2>"
+            f"<p>Въведете го в приложението. Валиден е {EMAIL_CODE_HOURS} часа.</p>"
+            "<p>Ако не сте били вие, не правете нищо: без кода профилът не може да влезе в ничия фирма.</p>"
+        ),
+    )
 
 
 def _second_step_paused(second: Dict[str, Any]) -> bool:
@@ -91,7 +143,7 @@ async def _send_login_code(user: dict, code: str) -> bool:
         to_email=user["email"],
         subject="Код за вход - Фактура+",
         html_body=(
-            f"<p>Здравейте, {user.get('name', '')}!</p>"
+            f"<p>Здравейте, {html.escape(user.get('name') or '')}!</p>"
             f"<p>Кодът за вход във Фактура+ е:</p><h2 style=\"letter-spacing:4px;\">{code}</h2>"
             f"<p>Валиден е {LOGIN_CHALLENGE_MINUTES} минути. Ако не влизате вие, сменете паролата си.</p>"
         ),
@@ -220,6 +272,16 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
                 invitation = None
                 invite_error = "Тази покана е издадена за друг имейл адрес"
 
+    # A new account confirms its email with a code (whenever the program
+    # sends email at all). Until then a good invitation only waits: the
+    # account starts in its own new company, as with a code that did not
+    # work, and joins the inviter's once the code is in - an invitation goes
+    # to a person by their email, and anyone can type any email here.
+    needs_check = server.EMAIL_FEATURES_ENABLED
+    pending_invitation_code = invitation["code"] if invitation and needs_check else None
+    if pending_invitation_code:
+        invitation = None
+
     if invitation:
         company_id = invitation["company_id"]
         role = invitation["role"]
@@ -246,13 +308,18 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
         "company_id": company_id,
         "password_hash": password_hash,
         "auth_provider": "email",
+        "email_verified": not needs_check,
         "created_at": datetime.now(timezone.utc)
     }
+    if pending_invitation_code:
+        new_user["pending_invitation_code"] = pending_invitation_code
     await server.db.users.insert_one(new_user)
 
     if invitation:
         await ensure_membership(user_id, company_id, role, permissions)
         await server.db.invitations.update_one({"id": invitation["id"]}, {"$set": {"status": "accepted"}})
+
+    email_code_sent = await _send_email_code(new_user) if needs_check else False
 
     # Create session
     session_token = uuid.uuid4().hex
@@ -270,7 +337,75 @@ async def register_user(request: Request, user_data: UserRegister, response: Res
 
     user_doc = await server.db.users.find_one({"user_id": user_id}, {"_id": 0})
     assert user_doc is not None  # the user document was just inserted above under this same user_id
-    return {"user": sanitize_user(user_doc), "session_token": session_token, "invite_error": invite_error}
+    return {
+        "user": sanitize_user(user_doc), "session_token": session_token, "invite_error": invite_error,
+        "email_code_sent": email_code_sent,
+    }
+
+
+class EmailCode(BaseModel):
+    code: str = Field(min_length=4, max_length=20)
+
+
+@router.post("/auth/verify-email")
+@limiter.limit("10/minute")
+async def verify_email(request: Request, payload: EmailCode, current_user: User = Depends(get_current_user)):
+    """Confirms the account's email with the code sent to it; an invitation
+    kept from the registration is taken up right after."""
+    user = await server.db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="Потребителят не е намерен")
+    if not server.email_is_verified(user):
+        invalid = HTTPException(status_code=400, detail="Невалиден или изтекъл код - поискайте нов")
+        sent = await server.db.email_verifications.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if not sent or not sent.get("code_hash"):
+            raise invalid
+        expires_at = _utc(sent["expires_at"])
+        if (expires_at and expires_at < datetime.now(timezone.utc)) or int(sent.get("tries") or 0) >= EMAIL_CODE_TRIES:
+            # Spent - but the record of when codes went out stays, so asking
+            # for new ones keeps its pace.
+            await server.db.email_verifications.update_one({"user_id": user["user_id"]}, {"$set": {"code_hash": None}})
+            raise invalid
+        if not tf.matches_hash(payload.code, sent.get("code_hash")):
+            await server.db.email_verifications.update_one({"user_id": user["user_id"]}, {"$inc": {"tries": 1}})
+            raise invalid
+        # Each code counts once, even for two tries at the same moment.
+        spent = await server.db.email_verifications.delete_one({"user_id": user["user_id"], "code_hash": sent["code_hash"]})
+        if spent.deleted_count != 1:
+            raise invalid
+        await server.db.users.update_one({"user_id": user["user_id"]}, {"$set": {"email_verified": True}})
+
+    joined_company = None
+    invite_error = None
+    pending = user.get("pending_invitation_code")
+    if pending:
+        await server.db.users.update_one({"user_id": user["user_id"]}, {"$unset": {"pending_invitation_code": ""}})
+        fresh = await server.db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        try:
+            joined = await accept_invitation_code(User(**sanitize_user(fresh or {})), pending)
+            joined_company = joined.get("company")
+        except HTTPException as e:
+            invite_error = str(e.detail)
+    user_doc = await server.db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return {"user": sanitize_user(user_doc or {}), "joined_company": joined_company, "invite_error": invite_error}
+
+
+@router.post("/auth/verify-email/resend")
+@limiter.limit("3/minute")
+async def resend_email_code(request: Request, current_user: User = Depends(get_current_user)):
+    """A new code for the account's email - at most once a minute."""
+    user = await server.db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    if not user or server.email_is_verified(user):
+        return {"sent": False, "already_verified": True}
+    last: Dict[str, Any] = await server.db.email_verifications.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    now = datetime.now(timezone.utc)
+    sent_at = _utc(last.get("sent_at"))
+    if sent_at and now - sent_at < timedelta(seconds=EMAIL_CODE_RESEND_SECONDS):
+        raise HTTPException(status_code=429, detail="Нов код може след минута - проверете и папката за нежелана поща")
+    day_start = _utc(last.get("day_start"))
+    if day_start and now - day_start < timedelta(hours=24) and int(last.get("day_sends") or 0) >= EMAIL_CODES_PER_DAY:
+        raise HTTPException(status_code=429, detail="Днес бяха изпратени много кодове - опитайте отново утре")
+    return {"sent": await _send_email_code(user), "already_verified": False}
 
 @router.post("/auth/login")
 @limiter.limit("10/minute")
@@ -601,7 +736,7 @@ async def forgot_password(request: Request, data: ForgotPasswordRequest):
     """Изпраща код за възстановяване на паролата по имейл. Винаги връща
     същия отговор, независимо дали имейлът съществува, има парола, или
     не - иначе би издало кои имейли са регистрирани в системата."""
-    if not EMAIL_FEATURES_ENABLED:
+    if not server.EMAIL_FEATURES_ENABLED:
         raise HTTPException(status_code=503, detail="Възстановяването на парола временно не е налично. Моля, свържете се с администратора.")
 
     generic_response = {"message": "Ако имейлът съществува в системата, изпратихме код за възстановяване на паролата."}
@@ -614,11 +749,11 @@ async def forgot_password(request: Request, data: ForgotPasswordRequest):
     reset_code = PasswordResetCode(user_id=user["user_id"])
     await server.db.password_reset_codes.insert_one(reset_code.model_dump())
 
-    await send_email(
+    await server.send_email(
         to_email=user["email"],
         subject="Код за възстановяване на паролата - Фактура+",
         html_body=(
-            f"<p>Здравейте, {user.get('name', '')}!</p>"
+            f"<p>Здравейте, {html.escape(user.get('name') or '')}!</p>"
             f"<p>Получихме заявка за възстановяване на паролата на вашия акаунт във Фактура+.</p>"
             f"<p>Вашият код за възстановяване е:</p>"
             f"<h2 style=\"letter-spacing:4px;\">{reset_code.code}</h2>"
@@ -657,7 +792,9 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
         raise generic_error
 
     new_hash = pwd_context.hash(data.new_password)
-    await server.db.users.update_one({"user_id": user["user_id"]}, {"$set": {"password_hash": new_hash}})
+    # The code came to this inbox: the email is confirmed by it as well.
+    await server.db.users.update_one({"user_id": user["user_id"]}, {"$set": {"password_hash": new_hash, "email_verified": True}})
+    await server.db.email_verifications.delete_one({"user_id": user["user_id"]})
     await server.db.password_reset_codes.update_one({"id": reset_doc["id"]}, {"$set": {"used": True}})
 
     # A password reset proves account ownership via email, but doesn't
