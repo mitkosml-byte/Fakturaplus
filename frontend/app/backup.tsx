@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { AmbientGlow } from '../src/components/AmbientGlow';
 import {
   View,
   Text,
@@ -10,14 +11,18 @@ import {
   RefreshControl,
   Share,
   Platform,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Alert } from '../src/utils/alert';
 import * as DocumentPicker from 'expo-document-picker';
-import { api } from '../src/services/api';
-import { format } from 'date-fns';
+import { api, type BackupRestoreResult } from '../src/services/api';
+import { format } from 'date-fns/format';
+import { parseISO } from 'date-fns/parseISO';
+import { PasswordPrompt } from '../src/components/PasswordPrompt';
+import { Toast } from '../src/utils/toast';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
@@ -37,14 +42,66 @@ export default function BackupScreen() {
     last_backup_date: string | null;
     file_name?: string;
     statistics?: { invoices: number; revenues: number; expenses: number };
+    monthly_email?: boolean;
+    email_available?: boolean;
+    email_password_set?: boolean;
+    daily?: { enabled: boolean; keep_days: number; last_day: string | null };
   } | null>(null);
+  const [savingMonthly, setSavingMonthly] = useState(false);
+  // The days kept by the daily backup outside the database (P1-3).
+  const [dailyDays, setDailyDays] = useState<{ day: string; size_bytes: number }[]>([]);
+  const [showAllDays, setShowAllDays] = useState(false);
+  // A password asked for: a new one for the emailed backup, or the one that
+  // opens a locked file.
+  const [prompt, setPrompt] = useState<null | 'email' | 'file'>(null);
+  const [promptBusy, setPromptBusy] = useState(false);
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<{ name: string; base64: string } | null>(null);
+
+  // A copy of the data by email every month, locked with a password: the
+  // first time, the password is chosen before it turns on.
+  const toggleMonthlyEmail = async (value: boolean) => {
+    if (value && !backupStatus?.email_password_set) {
+      setPromptError(null);
+      setPrompt('email');
+      return;
+    }
+    setSavingMonthly(true);
+    try {
+      await api.setMonthlyBackupEmail(value);
+      setBackupStatus((prev) => (prev ? { ...prev, monthly_email: value } : prev));
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setSavingMonthly(false);
+    }
+  };
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+
+  const savePassword = async (password: string) => {
+    setPromptBusy(true);
+    setPromptError(null);
+    try {
+      const result = await api.setMonthlyBackupEmail(true, password);
+      setBackupStatus((prev) => (prev ? { ...prev, monthly_email: result.monthly_email, email_password_set: result.password_set } : prev));
+      setPrompt(null);
+      Toast.success(t('backup.passwordSaved'));
+    } catch (error: any) {
+      setPromptError(error.message);
+    } finally {
+      setPromptBusy(false);
+    }
+  };
 
   const loadBackupStatus = useCallback(async () => {
     try {
       const status = await api.getBackupStatus();
       setBackupStatus(status);
+      if (status.daily?.enabled) {
+        const daily = await api.getDailyBackups().catch(() => null);
+        setDailyDays(daily?.days ?? []);
+      }
     } catch (error) {
       console.error('Error loading backup status:', error);
     } finally {
@@ -61,6 +118,17 @@ export default function BackupScreen() {
     await loadBackupStatus();
     setRefreshing(false);
   }, [loadBackupStatus]);
+
+  // What a backup holds: the three main sections, then everything else
+  // (team, payroll, schedule, assets, receivables, settings...) as one line.
+  const backupSummary = (stats: {
+    invoice_count: number; revenue_count: number; expense_count: number; total_records?: number;
+  }) => {
+    const main = stats.invoice_count + stats.revenue_count + stats.expense_count;
+    const other = Math.max((stats.total_records ?? main) - main, 0);
+    return `📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${stats.invoice_count}\n• ${t('backup.revenues')}: ${stats.revenue_count}\n• ${t('backup.expenses')}: ${stats.expense_count}`
+      + (other > 0 ? `\n• ${t('backup.otherRecords')}: ${other}` : '');
+  };
 
   const handleCreateBackup = async () => {
     setIsCreatingBackup(true);
@@ -86,10 +154,7 @@ export default function BackupScreen() {
         document.body.removeChild(link);
         URL.revokeObjectURL(objectUrl);
 
-        Alert.alert(
-          t('backup.successTitle'),
-          `${t('backup.backupCreated')}\n\n📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${backupData.statistics.invoice_count}\n• ${t('backup.revenues')}: ${backupData.statistics.revenue_count}\n• ${t('backup.expenses')}: ${backupData.statistics.expense_count}`
-        );
+        Alert.alert(t('backup.successTitle'), `${t('backup.backupCreated')}\n\n${backupSummary(backupData.statistics)}`);
       } else {
         // The top-level "expo-file-system" export is SDK 54's new
         // File/Directory API, which no longer includes documentDirectory/
@@ -112,7 +177,7 @@ export default function BackupScreen() {
 
           Alert.alert(
             t('backup.successTitle'),
-            `${t('backup.backupCreated')}\n\n📊 ${t('backup.statistics')}:\n• ${t('backup.invoices')}: ${backupData.statistics.invoice_count}\n• ${t('backup.revenues')}: ${backupData.statistics.revenue_count}\n• ${t('backup.expenses')}: ${backupData.statistics.expense_count}\n\n${t('backup.saveFile')}`
+            `${t('backup.backupCreated')}\n\n${backupSummary(backupData.statistics)}\n\n${t('backup.saveFile')}`
           );
         } else {
           Alert.alert(
@@ -132,11 +197,70 @@ export default function BackupScreen() {
     }
   };
 
+  // What a restore brought back, already there, or skipped.
+  const showRestoreResult = (restoreResult: BackupRestoreResult) => {
+                const skippedTotal = restoreResult.skipped
+                  ? restoreResult.skipped.total ?? (restoreResult.skipped.invoices + restoreResult.skipped.revenues + restoreResult.skipped.expenses)
+                  : 0;
+                const notes = [
+                  restoreResult.already_present ? `ℹ️ ${t('backup.alreadyPresent')}: ${restoreResult.already_present}` : '',
+                  restoreResult.not_in_team ? `ℹ️ ${t('backup.notInTeam')}: ${restoreResult.not_in_team}` : '',
+                  skippedTotal > 0 ? `⚠️ ${t('backup.skippedRecords')}: ${skippedTotal}` : '',
+                ].filter(Boolean).join('\n');
+                const other = restoreResult.restored.other ?? 0;
+
+                Alert.alert(
+                  t('backup.successTitle'),
+                  `${t('backup.restored')}\n\n📊 ${t('backup.restoredRecords')}:\n• ${t('backup.invoices')}: ${restoreResult.restored.invoices}\n• ${t('backup.revenues')}: ${restoreResult.restored.revenues}\n• ${t('backup.expenses')}: ${restoreResult.restored.expenses}${other > 0 ? `\n• ${t('backup.otherRecords')}: ${other}` : ''}${notes ? `\n\n${notes}` : ''}`
+                );
+  };
+
+  // The file as it is (plain, gzip-ed, or the emailed one locked with the
+  // password): the server reads it; a locked one asks for the password.
+  const restoreFile = async (file: { name: string; base64: string }, password?: string) => {
+    setIsRestoring(true);
+    if (password) setPromptBusy(true);
+    try {
+      const restoreResult = await api.restoreBackupFile(file.base64, password);
+      setPrompt(null);
+      setPendingFile(null);
+      showRestoreResult(restoreResult);
+      await loadBackupStatus();
+    } catch (error: any) {
+      if (error?.code === 'backup_password_needed' || error?.code === 'backup_password_wrong') {
+        setPendingFile(file);
+        setPromptError(error.code === 'backup_password_wrong' ? error.message : null);
+        setPrompt('file');
+      } else {
+        setPrompt(null);
+        Alert.alert(t('common.error'), error.message || t('backup.restoreError'));
+      }
+    } finally {
+      setIsRestoring(false);
+      setPromptBusy(false);
+    }
+  };
+
+  // The picked file's bytes as base64 - on the web from the browser's File,
+  // on a phone through expo-file-system/legacy (see handleCreateBackup).
+  const fileAsBase64 = async (file: DocumentPicker.DocumentPickerAsset): Promise<string> => {
+    if (Platform.OS === 'web') {
+      const bytes = new Uint8Array(await file.file!.arrayBuffer());
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000) as unknown as number[]);
+      }
+      return btoa(binary);
+    }
+    return require('expo-file-system/legacy').readAsStringAsync(file.uri, { encoding: 'base64' });
+  };
+
   const handleRestoreBackup = async () => {
     try {
-      // Select file
+      // Any file: the one made here (.json), packed (.json.gz) or the one
+      // from the email (.fpbak).
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/json',
+        type: '*/*',
         copyToCacheDirectory: true,
       });
       
@@ -156,37 +280,10 @@ export default function BackupScreen() {
             text: t('backup.restoreButton'),
             style: 'destructive',
             onPress: async () => {
-              setIsRestoring(true);
               try {
-                // Read file. On web, expo-document-picker hands back the
-                // actual browser File object (readable directly); on
-                // native, its uri needs expo-file-system/legacy, since
-                // the top-level "expo-file-system" export no longer
-                // implements readAsStringAsync (see handleCreateBackup).
-                const content = Platform.OS === 'web'
-                  ? await file.file!.text()
-                  : await require('expo-file-system/legacy').readAsStringAsync(file.uri);
-                const backupData = JSON.parse(content);
-                
-                // Send to server for restoration
-                const restoreResult = await api.restoreBackup(backupData);
-
-                const skippedTotal = restoreResult.skipped
-                  ? restoreResult.skipped.invoices + restoreResult.skipped.revenues + restoreResult.skipped.expenses
-                  : 0;
-                const skippedNote = skippedTotal > 0 ? `\n\n⚠️ ${t('backup.skippedRecords')}: ${skippedTotal}` : '';
-
-                Alert.alert(
-                  t('backup.successTitle'),
-                  `${t('backup.restored')}\n\n📊 ${t('backup.restoredRecords')}:\n• ${t('backup.invoices')}: ${restoreResult.restored.invoices}\n• ${t('backup.revenues')}: ${restoreResult.restored.revenues}\n• ${t('backup.expenses')}: ${restoreResult.restored.expenses}${skippedNote}`
-                );
-                
-                await loadBackupStatus();
-                
+                await restoreFile({ name: file.name, base64: await fileAsBase64(file) });
               } catch (error: any) {
                 Alert.alert(t('common.error'), error.message || t('backup.restoreError'));
-              } finally {
-                setIsRestoring(false);
               }
             },
           },
@@ -201,6 +298,32 @@ export default function BackupScreen() {
     }
   };
 
+  const restoreDay = (day: string) => {
+    const label = format(parseISO(day), 'd MMMM yyyy', { locale: dateLocale });
+    Alert.alert(
+      t('backup.confirmation'),
+      `${t('backup.dailyQuestion').replace('{day}', label)}\n\n⚠️ ${t('backup.restoreWarning')}`,
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('backup.restoreButton'),
+          style: 'destructive',
+          onPress: async () => {
+            setIsRestoring(true);
+            try {
+              showRestoreResult(await api.restoreDailyBackup(day));
+              await loadBackupStatus();
+            } catch (error: any) {
+              Alert.alert(t('common.error'), error.message || t('backup.restoreError'));
+            } finally {
+              setIsRestoring(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   if (!isOwner) {
     return <AccessDenied />;
   }
@@ -209,6 +332,7 @@ export default function BackupScreen() {
     return (
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
+          <AmbientGlow />
           <SafeAreaView style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.success} />
           </SafeAreaView>
@@ -221,6 +345,7 @@ export default function BackupScreen() {
     <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           {/* Header */}
           <View style={styles.header}>
@@ -295,7 +420,60 @@ export default function BackupScreen() {
                   <Text style={styles.statusText}>{t('backup.noBackup')}</Text>
                 </View>
               )}
+              {backupStatus?.email_available && (
+                <View style={[styles.statusRow, { marginTop: 12 }]}>
+                  <Ionicons name="mail-outline" size={20} color={COLORS.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.statusText}>{t('backup.monthlyEmail')}</Text>
+                    <Text style={styles.monthlyHint}>{t('backup.monthlyEmailHint')}</Text>
+                    {backupStatus.email_password_set && (
+                      <TouchableOpacity onPress={() => { setPromptError(null); setPrompt('email'); }} hitSlop={6} accessibilityRole="button">
+                        <Text style={styles.linkText}>{t('backup.passwordSet')} · {t('backup.passwordChange')}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <Switch
+                    value={!!backupStatus.monthly_email}
+                    onValueChange={toggleMonthlyEmail}
+                    disabled={savingMonthly}
+                    accessibilityLabel={t('backup.monthlyEmail')}
+                  />
+                </View>
+              )}
             </View>
+
+            {/* The daily backup outside the database (P1-3). */}
+            {backupStatus?.daily?.enabled && (
+              <View style={styles.statusCard}>
+                <Text style={styles.sectionTitle}>{t('backup.dailyTitle')}</Text>
+                <Text style={styles.monthlyHint}>
+                  {t('backup.dailyText').replace('{days}', String(backupStatus.daily.keep_days))}
+                </Text>
+                {dailyDays.length === 0 ? (
+                  <Text style={[styles.statusText, { marginTop: 10 }]}>{t('backup.dailyNone')}</Text>
+                ) : (
+                  (showAllDays ? dailyDays : dailyDays.slice(0, 5)).map((entry) => (
+                    <View key={entry.day} style={styles.dailyRow}>
+                      <Ionicons name="calendar-outline" size={18} color={COLORS.success} />
+                      <Text style={styles.dailyDay}>{format(parseISO(entry.day), 'd MMMM yyyy', { locale: dateLocale })}</Text>
+                      <TouchableOpacity
+                        onPress={() => restoreDay(entry.day)}
+                        disabled={isRestoring}
+                        hitSlop={6}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.linkText}>{t('backup.dailyRestore')}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                )}
+                {!showAllDays && dailyDays.length > 5 && (
+                  <TouchableOpacity onPress={() => setShowAllDays(true)} hitSlop={6} accessibilityRole="button">
+                    <Text style={[styles.linkText, { marginTop: 10 }]}>{t('backup.dailyShowAll')}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
 
             {/* Actions */}
             <View style={styles.actionsContainer}>
@@ -363,6 +541,21 @@ export default function BackupScreen() {
             </View>
 
           </ScrollView>
+          <PasswordPrompt
+            visible={prompt !== null}
+            title={prompt === 'file' ? t('backup.filePasswordTitle') : t('backup.passwordTitle')}
+            text={prompt === 'file' ? t('backup.filePasswordText') : t('backup.passwordText')}
+            confirmLabel={prompt === 'file' ? t('backup.passwordOpen') : t('backup.passwordSave')}
+            repeat={prompt === 'email'}
+            minLength={prompt === 'email' ? 8 : 1}
+            busy={promptBusy}
+            error={promptError}
+            onCancel={() => { setPrompt(null); setPendingFile(null); }}
+            onSubmit={(password) => {
+              if (prompt === 'email') savePassword(password);
+              else if (pendingFile) restoreFile(pendingFile, password);
+            }}
+          />
         </SafeAreaView>
       </View>
     </ImageBackground>
@@ -371,6 +564,13 @@ export default function BackupScreen() {
 }
 
 const styles = StyleSheet.create({
+  monthlyHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  linkText: { fontSize: 13, color: COLORS.primary, fontWeight: '600', marginTop: 6 },
+  dailyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border, marginTop: 6,
+  },
+  dailyDay: { flex: 1, fontSize: 14, color: 'white' },
   backgroundImage: {
     flex: 1,
   },

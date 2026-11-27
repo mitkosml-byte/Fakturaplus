@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  format,
-  startOfWeek,
-  differenceInCalendarDays,
-  differenceInCalendarWeeks,
-  differenceInCalendarMonths,
-  differenceInCalendarYears,
-} from 'date-fns';
+import { format } from 'date-fns/format';
+import { parseISO } from 'date-fns/parseISO';
+import { startOfWeek } from 'date-fns/startOfWeek';
+import { differenceInCalendarDays } from 'date-fns/differenceInCalendarDays';
+import { differenceInCalendarWeeks } from 'date-fns/differenceInCalendarWeeks';
+import { differenceInCalendarMonths } from 'date-fns/differenceInCalendarMonths';
+import { differenceInCalendarYears } from 'date-fns/differenceInCalendarYears';
 import DateTimePickerModal from './AppDateTimePicker';
 import { useTranslation } from '../i18n';
 import {
@@ -19,6 +18,7 @@ import {
 } from '../utils/periodRange';
 import { COLORS } from '../theme/colors';
 import { ChipTabs } from './ChipTabs';
+import type { Summary } from '../types';
 
 interface PeriodNavigatorProps {
   state: PeriodState;
@@ -94,6 +94,7 @@ export function PeriodNavigator({ state, onChange }: PeriodNavigatorProps) {
     <View style={styles.container}>
       <View style={styles.modeRow}>
         <ChipTabs
+          compact
           active={state.mode}
           onChange={selectMode}
           options={MODES.map((m) => ({ key: m, label: modeLabel(m) }))}
@@ -200,9 +201,9 @@ const styles = StyleSheet.create({
     padding: 8,
     marginBottom: 16,
   },
+  // A column, not a row: the tabs then take exactly the card's width (a
+  // row let them grow to their labels' width and stick out on 360 px).
   modeRow: {
-    flexDirection: 'row',
-    gap: 4,
     marginBottom: 8,
   },
   modeChip: {
@@ -216,7 +217,7 @@ const styles = StyleSheet.create({
   },
   modeChipText: {
     color: COLORS.textMuted,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
   },
   modeChipTextActive: {
@@ -274,4 +275,22 @@ const styles = StyleSheet.create({
   rangeDash: {
     color: COLORS.textMuted,
   },
+  soFarNote: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: -6,
+    marginBottom: 10,
+  },
 });
+
+// Under the navigator, for a period still running: which days the totals
+// below cover ("Досега: 1 ное – 15 ное") - the rest of the period hasn't
+// happened yet, so "November" on the 15th means its first half.
+export function PeriodSoFarNote({ summary }: { summary: Summary | null }) {
+  const { t, dateLocale } = useTranslation();
+  const period = summary?.period;
+  if (!period || period.through_date >= period.end_date) return null;
+  const range = `${format(parseISO(period.start_date), 'd MMM', { locale: dateLocale })} – ${format(parseISO(period.through_date), 'd MMM', { locale: dateLocale })}`;
+  return <Text style={styles.soFarNote}>{t('periodNav.soFar').replace('{range}', range)}</Text>;
+}

@@ -1,6 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+// "Online" means our own server answers - what reading a scan and saving
+// need - not that some third party's page loads (a network that blocks it,
+// or a server of ours that is down, would read wrongly either way).
+NetInfo.configure({
+  reachabilityUrl: `${API_URL}/api/health`,
+  // The health route answers GET (a HEAD gets 405).
+  reachabilityMethod: 'GET',
+  reachabilityTest: async (response) => response.status === 200,
+  reachabilityShortTimeout: 5 * 1000,
+  reachabilityLongTimeout: 60 * 1000,
+  reachabilityRequestTimeout: 15 * 1000,
+});
+
 interface NetworkState {
   isConnected: boolean | null;
   isInternetReachable: boolean | null;

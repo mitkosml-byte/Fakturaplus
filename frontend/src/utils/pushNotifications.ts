@@ -1,10 +1,16 @@
 import { Platform } from 'react-native';
 import { api } from '../services/api';
 
-// Public VAPID key - not secret, safe to ship in client code (it's only
-// usable to SUBSCRIBE a browser to push from this app's own backend, never
-// to send push or to read anything).
-const VAPID_PUBLIC_KEY = 'BG5n5W382MNqBPUBfGWEOg-u8tYLKabgYMgRg_SOvdH0SdC18IIgcoRjlxUQejEViK1cZ9dvYmvZtfwOMcVhr7M';
+// Public VAPID key - not secret (it's only usable to SUBSCRIBE a browser to
+// push from this app's own backend). The server gives the one of its own
+// key pair (GET /push/public-key), so a new install with its own keys works
+// unchanged; this one, the first install's, is the fallback.
+const FALLBACK_VAPID_PUBLIC_KEY = 'BG5n5W382MNqBPUBfGWEOg-u8tYLKabgYMgRg_SOvdH0SdC18IIgcoRjlxUQejEViK1cZ9dvYmvZtfwOMcVhr7M';
+
+async function vapidPublicKey(): Promise<string> {
+  const served = await api.getPushPublicKey().catch(() => null);
+  return served?.public_key || FALLBACK_VAPID_PUBLIC_KEY;
+}
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -25,6 +31,18 @@ export function isPushSupported(): boolean {
     typeof window !== 'undefined' &&
     'PushManager' in window
   );
+}
+
+// An iPhone or iPad sends a site's notifications only once the site is
+// added to the home screen and opened from there (iOS 16.4 on) - in Safari
+// itself push is simply missing. Then the app says how to add it.
+export function needsHomeScreenForPush(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined' || typeof window === 'undefined') return false;
+  const agent = navigator.userAgent || '';
+  const apple = /iPad|iPhone|iPod/.test(agent) || (agent.includes('Macintosh') && typeof document !== 'undefined' && 'ontouchend' in document);
+  const installed = (navigator as unknown as { standalone?: boolean }).standalone === true
+    || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+  return apple && !installed;
 }
 
 export type PushStatus = 'unsupported' | 'default' | 'granted' | 'denied';
@@ -59,7 +77,7 @@ export async function enablePushNotifications(): Promise<{ ok: boolean; error?: 
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        applicationServerKey: urlBase64ToUint8Array(await vapidPublicKey()),
       });
     }
 

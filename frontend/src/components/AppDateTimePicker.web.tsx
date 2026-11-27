@@ -5,7 +5,8 @@
 // app can import this one drop-in instead, unchanged.
 import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { format, parse } from 'date-fns';
+import { format } from 'date-fns/format';
+import { parse } from 'date-fns/parse';
 import { COLORS } from '../theme/colors';
 
 interface AppDateTimePickerProps {

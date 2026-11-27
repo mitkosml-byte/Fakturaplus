@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { AmbientGlow } from '../src/components/AmbientGlow';
 import {
   View,
   Text,
@@ -14,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, Redirect } from 'expo-router';
 import { SimpleSlider } from '../src/components/SimpleSlider';
 import { Alert } from '../src/utils/alert';
 import { Haptics } from '../src/utils/haptics';
@@ -25,7 +26,10 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { ScreenEnter, ScanCreditsRing } from '../src/components';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useQueryClient } from '@tanstack/react-query';
+import { scanBalanceQueryKey } from '../src/queries/useScanBalance';
 import { COLORS } from '../src/theme/colors';
+import { formatAmount, formatMoney } from '../src/utils/money';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
@@ -48,9 +52,11 @@ function openCheckout(url: string) {
 
 export default function ScanCreditsScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { t } = useTranslation();
-  const { hasPermission } = useAuth();
+  const { hasPermission, isLoading: authLoading } = useAuth();
   const canManageBilling = hasPermission('manage_billing');
+  const canViewScanCredits = hasPermission('manage_invoices');
 
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState<ScanBalance | null>(null);
@@ -62,6 +68,7 @@ export default function ScanCreditsScreen() {
   const [packages, setPackages] = useState<ScanPackage[]>([]);
   const [history, setHistory] = useState<ScanTransaction[]>([]);
   const [buyingId, setBuyingId] = useState<string | null>(null);
+  const [depletionForecast, setDepletionForecast] = useState<Awaited<ReturnType<typeof api.getScanCreditsForecast>> | null>(null);
 
   const [customQuantity, setCustomQuantity] = useState(50);
   const [customBuying, setCustomBuying] = useState(false);
@@ -76,6 +83,10 @@ export default function ScanCreditsScreen() {
         api.getScanPackages(),
         api.getScanCreditsHistory(),
       ]);
+      // Separate, non-blocking - a forecast that can't be computed yet
+      // (too little usage history) must never stop the balance itself
+      // from showing.
+      api.getScanCreditsForecast().then(setDepletionForecast).catch(() => setDepletionForecast(null));
       const storedRaw = await AsyncStorage.getItem(LAST_FREE_REMAINING_KEY);
       const stored = storedRaw !== null ? parseInt(storedRaw, 10) : null;
       setRingAnimateFrom(stored !== null && stored !== balanceData.free_remaining ? stored : null);
@@ -84,6 +95,11 @@ export default function ScanCreditsScreen() {
       setBalance(balanceData);
       setPackages(packagesData);
       setHistory(historyData);
+      // Pushes the balance this screen just fetched into the shared
+      // cache ScanCreditsBadge/ScanCreditsReloadButton read from, so a
+      // purchase or scan reflected here shows up there too without a
+      // second redundant fetch (Module 1 audit finding #5).
+      queryClient.setQueryData(scanBalanceQueryKey, balanceData);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message || t('scanCredits.loadError'));
     } finally {
@@ -92,8 +108,8 @@ export default function ScanCreditsScreen() {
   }, [t]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (canViewScanCredits) loadData();
+  }, [loadData, canViewScanCredits]);
 
   const packageName = (pkg: ScanPackage) => t(PACKAGE_NAME_KEYS[pkg.id] || pkg.id) || pkg.name;
 
@@ -183,10 +199,21 @@ export default function ScanCreditsScreen() {
     }
   };
 
+  // The Account-tab menu entry pointing here is already hidden without
+  // manage_invoices (see (tabs)/profile.tsx) - this is the direct-URL/
+  // deep-link half of the same gate, same Redirect pattern as Home's own
+  // view_statistics gate. Every fetch above is 403'd server-side too, but
+  // without this the screen would otherwise just spin forever (balance
+  // stays null after the load effect's catch swallows the error).
+  if (!authLoading && !canViewScanCredits) {
+    return <Redirect href="/(tabs)/profile" />;
+  }
+
   if (loading || !balance) {
     return (
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
+          <AmbientGlow />
           <SafeAreaView style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primary} />
           </SafeAreaView>
@@ -203,6 +230,7 @@ export default function ScanCreditsScreen() {
     <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={() => router.back()} accessibilityLabel={t('common.cancel')}>
@@ -233,6 +261,22 @@ export default function ScanCreditsScreen() {
                   </Text>
                 </View>
               </View>
+
+              {/* Depletion forecast - was just a static count with no
+                  sense of "is that a lot or a little for me"; reuses the
+                  same ledger to say when, not just how many. */}
+              {depletionForecast && !depletionForecast.insufficient_data && depletionForecast.days_remaining !== null && (
+                <Text
+                  style={[
+                    styles.depletionForecastText,
+                    depletionForecast.days_remaining <= 7 && styles.depletionForecastTextUrgent,
+                  ]}
+                >
+                  {depletionForecast.days_remaining <= 0
+                    ? t('scanCredits.depletionNow')
+                    : t('scanCredits.depletionForecast').replace('{days}', String(depletionForecast.days_remaining))}
+                </Text>
+              )}
             </View>
 
             {/* History card */}
@@ -278,11 +322,11 @@ export default function ScanCreditsScreen() {
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={styles.packageName} numberOfLines={2}>{packageLine(pkg)}</Text>
                       <Text style={[styles.packagePerScan, isBest && { color: COLORS.primaryLight }]}>
-                        {t('scanCredits.perScan').replace('{price}', pkg.price_per_scan.toFixed(2))}
+                        {t('scanCredits.perScan').replace('{price}', formatAmount(pkg.price_per_scan))}
                       </Text>
                     </View>
                     <View style={styles.packageActions}>
-                      <Text style={styles.packagePrice}>{pkg.price_eur.toFixed(2)}&nbsp;&euro;</Text>
+                      <Text style={styles.packagePrice}>{formatMoney(pkg.price_eur)}</Text>
                       {canManageBilling && (
                         <TouchableOpacity
                           style={[styles.buyButton, isBest && styles.buyButtonBest]}
@@ -332,9 +376,9 @@ export default function ScanCreditsScreen() {
                     }}
                   />
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={styles.packagePrice}>{customPriceEur(customQuantity).toFixed(2)}&nbsp;&euro;</Text>
+                    <Text style={styles.packagePrice}>{formatMoney(customPriceEur(customQuantity))}</Text>
                     <Text style={styles.packagePerScan}>
-                      {t('scanCredits.perScan').replace('{price}', (customPriceEur(customQuantity) / customQuantity).toFixed(2))}
+                      {t('scanCredits.perScan').replace('{price}', formatAmount((customPriceEur(customQuantity) / customQuantity)))}
                     </Text>
                   </View>
                 </View>
@@ -391,7 +435,7 @@ export default function ScanCreditsScreen() {
               {packages.map((pkg) => (
                 <TouchableOpacity key={pkg.id} style={styles.modalPackageRow} onPress={() => handleEnableAutoReload(pkg)}>
                   <Text style={styles.modalPackageText}>{packageLine(pkg)}</Text>
-                  <Text style={styles.packagePrice}>{pkg.price_eur.toFixed(2)}&nbsp;&euro;</Text>
+                  <Text style={styles.packagePrice}>{formatMoney(pkg.price_eur)}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -424,7 +468,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 18 },
   cardHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   cardTitle: { fontSize: 14, fontWeight: '600', color: 'white' },
-  emptyHint: { fontSize: 11.5, color: COLORS.textMuted, lineHeight: 17, marginTop: 2 },
+  emptyHint: { fontSize: 12.5, color: COLORS.textMuted, lineHeight: 17, marginTop: 2 },
   balanceRow: { flexDirection: 'row', gap: 18, alignItems: 'center' },
   ringWrapper: { width: 84, height: 84 },
   ringTextWrap: {
@@ -432,11 +476,15 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   ringNumber: { fontSize: 17, fontWeight: '700', color: 'white' },
-  ringLabel: { fontSize: 9, color: COLORS.textMuted, marginTop: 2 },
+  ringLabel: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   balanceInfo: { flex: 1, minWidth: 0 },
   balanceTotal: { fontSize: 32, fontWeight: '700', color: 'white', lineHeight: 36 },
   balanceTotalLabel: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
-  balanceSubtext: { fontSize: 11, color: COLORS.textMuted, marginTop: 6 },
+  balanceSubtext: { fontSize: 12, color: COLORS.textMuted, marginTop: 6 },
+  depletionForecastText: {
+    fontSize: 12, color: COLORS.textSecondary, marginTop: 10, textAlign: 'center',
+  },
+  depletionForecastTextUrgent: { color: COLORS.danger, fontWeight: '600' },
   txRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
   txDescription: { flex: 1, fontSize: 12, color: COLORS.textSubtle },
   txDelta: { fontSize: 12, fontWeight: '600' },
@@ -458,7 +506,7 @@ const styles = StyleSheet.create({
   bestBadgeText: { color: 'white', fontSize: 10, fontWeight: '700' },
   packageRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   packageName: { fontSize: 14, fontWeight: '600', color: 'white' },
-  packagePerScan: { fontSize: 11, color: COLORS.textMuted, marginTop: 3 },
+  packagePerScan: { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
   packageActions: { alignItems: 'flex-end', gap: 8, flexShrink: 0 },
   packagePrice: { fontSize: 16, fontWeight: '700', color: 'white' },
   buyButton: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: COLORS.border, minWidth: 64, alignItems: 'center' },

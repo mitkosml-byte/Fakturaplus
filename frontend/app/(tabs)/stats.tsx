@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { AmbientGlow } from '../../src/components/AmbientGlow';
+import { FirstUseHint } from '../../src/components/FirstUseHint';
 import {
   View,
   Text,
@@ -6,30 +8,49 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Dimensions,
   ImageBackground,
   ActivityIndicator,
   Modal,
+  Switch,
+  TextInput,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { api } from '../../src/services/api';
-import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse } from '../../src/types';
+import { Summary, ChartDataPoint, SupplierOverviewResponse, SupplierStats, ChartType, SupplierDetailedResponse, SupplierGroupBy, PriceAlertSettings, PriceAlertMute, ItemStatistics, ItemOtherSize, RelatedItems } from '../../src/types';
+import { formatUnitPrice } from '../../src/utils/priceAlert';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useTranslation } from '../../src/i18n';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useModules } from '../../src/stores/modulesStore';
+import { useLocationsStore } from '../../src/stores/locationsStore';
 import { Alert } from '../../src/utils/alert';
+import { Toast } from '../../src/utils/toast';
 import { downloadAndShareFile } from '../../src/utils/downloadFile';
-import { PeriodNavigator } from '../../src/components/PeriodNavigator';
-import { ChipTabs, FadeIn, CountUp, SkeletonStat } from '../../src/components';
-import { PeriodState, DEFAULT_PERIOD_STATE, getPeriodBounds, toApiDate } from '../../src/utils/periodRange';
+import { PeriodNavigator, PeriodSoFarNote } from '../../src/components/PeriodNavigator';
+import { ChipTabs, FadeIn, CountUp } from '../../src/components';
+import { getPeriodBounds, getComparablePrevious, toApiDate } from '../../src/utils/periodRange';
+import { useSharedPeriod } from '../../src/utils/sharedPeriod';
+import { differenceInCalendarDays } from 'date-fns/differenceInCalendarDays';
+import { PriceAlertsCard } from '../../src/components/stats/PriceAlertsCard';
+import { ReorderPlanCard } from '../../src/components/stats/ReorderPlanCard';
+import { WeekdayRevenueCard } from '../../src/components/stats/WeekdayRevenueCard';
+import { StaffingEfficiencyCard } from '../../src/components/stats/StaffingEfficiencyCard';
+import { ForecastCard } from '../../src/components/stats/ForecastCard';
+import { PriceInflationCard } from '../../src/components/stats/PriceInflationCard';
+import { PaymentKindsCard } from '../../src/components/stats/PaymentKindsCard';
+import { BreakEvenCard } from '../../src/components/home/BreakEvenCard';
+import { PersonalInvestmentsCard } from '../../src/components/PersonalInvestmentsCard';
+import { AlertSettingsModal } from '../../src/components/stats/AlertSettingsModal';
+import { SupplierCompareModal } from '../../src/components/stats/SupplierCompareModal';
+import { SupplierDetailModal } from '../../src/components/stats/SupplierDetailModal';
 import { COLORS } from '../../src/theme/colors';
+import { restrictedDataNote } from '../../src/utils/visibilityNote';
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, interpolate, Extrapolation } from 'react-native-reanimated';
+import { formatAmount, formatMoney } from '../../src/utils/money';
 
-const { width } = Dimensions.get('window');
-const chartWidth = width - 80;
-const pieChartRadius = (width - 80) / 3;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 // Color palette for charts
@@ -37,14 +58,38 @@ const CHART_COLORS: string[] = [
   COLORS.primary, COLORS.success, COLORS.warning, COLORS.danger, COLORS.info,
   COLORS.pink, COLORS.teal, COLORS.orange, COLORS.indigo, COLORS.lime
 ];
+// The suppliers the chart shows (the server ranks ten), and the smallest
+// share written on its slice.
+const SUPPLIER_CHART_TOP = 10;
+const PIE_TEXT_MIN_PERCENT = 5;
 
 export default function StatsScreen() {
   const { t } = useTranslation();
-  const { hasPermission, isOwner } = useAuth();
-  const params = useLocalSearchParams<{ period?: string }>();
+  const { hasPermission } = useAuth();
+  const { uses } = useModules();
+  // A business with locations sees them side by side (Н11).
+  const hasLocations = useLocationsStore((state) => state.locations.length > 0);
+  const router = useRouter();
+  // Dimensions.get('window') used to be read ONCE at module-eval time -
+  // harmless on native, but this app's web build is statically pre-rendered
+  // (app.json's web.output: "static"), where there is no real browser
+  // window yet, so Dimensions.get fell back to a small default and that
+  // frozen value shipped to every client regardless of actual screen size -
+  // charts rendered in a tiny, phone-sized box even on a wide desktop
+  // monitor. useWindowDimensions reads the real window on the client and
+  // stays reactive, fixing both the freeze and (as a side effect) giving
+  // charts the full available width on desktop instead of the leftover
+  // ~56px/chartWidth phones were already getting.
+  const { width: windowWidth } = useWindowDimensions();
+  // Capped so a very wide monitor gets a comfortably-sized chart instead of
+  // one stretched edge-to-edge with huge gaps between a handful of bars
+  // (each bar's own width is separately capped below, independent of this).
+  const chartAreaWidth = Math.min(windowWidth, 980) - 80;
+  const chartWidth = chartAreaWidth;
+  const pieChartRadius = chartAreaWidth / 3;
+  const params = useLocalSearchParams<{ tab?: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
-  const [period, setPeriod] = useState<'week' | 'month' | 'year'>('week');
 
   // Header shrinks/fades as the page scrolls past it - a calm, premium
   // reaction to scroll instead of the title just sitting there inert.
@@ -62,23 +107,18 @@ export default function StatsScreen() {
     };
   });
 
-  // Lets other screens (e.g. the Home dashboard's average-turnover card)
-  // deep-link straight into a specific period here instead of always
-  // landing on the default "week" view.
+  // ...and Home's daily review straight into the tab a signal's card is on
+  // (prices and reorder under Items, the forecast under Overview).
   useEffect(() => {
-    if (params.period === 'week' || params.period === 'month' || params.period === 'year') {
-      setPeriod(params.period);
+    if (params.tab === 'overview' || params.tab === 'suppliers' || params.tab === 'items') {
+      setActiveTab(params.tab);
     }
-  }, [params.period]);
+  }, [params.tab]);
 
-  // The income/expense charts below show a fixed 7-day window instead of
-  // cramming a whole month/year of bars into one view - 0 is the most
-  // recent 7 days, 1 the 7 before those, etc. Reset to the latest window
-  // whenever the period (and therefore the underlying data) changes.
+  // The income/expense charts below show 7 bars at a time instead of
+  // cramming a whole month/year into one view - 0 is the latest 7, 1 the 7
+  // before those, etc. Back to the latest whenever the period changes.
   const [chartPage, setChartPage] = useState(0);
-  useEffect(() => {
-    setChartPage(0);
-  }, [period]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'suppliers' | 'items'>('overview');
@@ -111,6 +151,12 @@ export default function StatsScreen() {
   const [itemPriceHistory, setItemPriceHistory] = useState<any>(null);
   const [itemBySupplier, setItemBySupplier] = useState<any>(null);
   const [loadingItemDetail, setLoadingItemDetail] = useState(false);
+  // The owner's catalog for the open item ("same" / "different" answers)
+  // and which of its look-alikes is being answered right now.
+  const [itemRelated, setItemRelated] = useState<RelatedItems | null>(null);
+  const [catalogBusy, setCatalogBusy] = useState<string | null>(null);
+  // Quantity ranking is per unit - which unit's ranking is shown.
+  const [quantityUnit, setQuantityUnit] = useState<string | null>(null);
 
   // Price inflation (overall spend-weighted price change across items over a period)
   const [inflationPeriod, setInflationPeriod] = useState<'month' | 'quarter' | 'year'>('quarter');
@@ -118,32 +164,64 @@ export default function StatsScreen() {
   const [loadingInflation, setLoadingInflation] = useState(false);
   const [inflationExpanded, setInflationExpanded] = useState(false);
 
-  // Which period the overview summary cards (income/expense/VAT/profit)
-  // below show - independent of `period` above, which only controls the
-  // rolling chart window further down. Defaults to the current calendar
-  // month, matching the previous hardcoded behavior.
-  const [summaryPeriodState, setSummaryPeriodState] = useState<PeriodState>(DEFAULT_PERIOD_STATE);
+  // The period every report on this screen shows - the cards, the charts,
+  // the averages, suppliers and items - and the same one Home and the tips
+  // show (one shared choice, see utils/sharedPeriod).
+  const [summaryPeriodState, setSummaryPeriodState] = useSharedPeriod();
+  const periodBounds = useMemo(() => getPeriodBounds(summaryPeriodState), [summaryPeriodState]);
+  const periodStart = toApiDate(periodBounds.start);
+  const periodEnd = toApiDate(periodBounds.end);
+  // Suppliers and items: the chosen period, or the whole history.
+  const [reportScope, setReportScope] = useState<'period' | 'all'>('period');
+  const reportRange = useMemo(
+    () => (reportScope === 'period' ? { start_date: periodStart, end_date: periodEnd } : undefined),
+    [reportScope, periodStart, periodEnd],
+  );
+  // A supplier's purchases by day, week, month or year - picked in its
+  // detail, else the one that suits the period's length.
+  const [supplierGroupBy, setSupplierGroupBy] = useState<SupplierGroupBy | null>(null);
+  const periodDays = differenceInCalendarDays(periodBounds.end, periodBounds.start) + 1;
+  const defaultSupplierGroupBy: SupplierGroupBy = reportScope === 'all' ? 'month'
+    : periodDays <= 14 ? 'day' : periodDays <= 92 ? 'week' : periodDays <= 731 ? 'month' : 'year';
+  const activeSupplierGroupBy = supplierGroupBy ?? defaultSupplierGroupBy;
+  useEffect(() => {
+    setChartPage(0);
+  }, [periodStart, periodEnd]);
 
   // Overview enrichments: previous-period comparison, top-3 quick view,
   // forecast and ROI trend
   const [previousSummary, setPreviousSummary] = useState<Summary | null>(null);
   const [topSuppliers, setTopSuppliers] = useState<SupplierStats[]>([]);
   const [topItems, setTopItems] = useState<any[]>([]);
+  const [reorderPlan, setReorderPlan] = useState<Awaited<ReturnType<typeof api.getReorderPlan>> | null>(null);
+  const [weekdayRevenue, setWeekdayRevenue] = useState<Awaited<ReturnType<typeof api.getWeekdayRevenuePattern>>['weekdays']>([]);
+  const [weakDaySuggestion, setWeakDaySuggestion] = useState<Awaited<ReturnType<typeof api.getWeekdayRevenuePattern>>['weak_day_suggestion']>(null);
+  const [staffingEfficiency, setStaffingEfficiency] = useState<Awaited<ReturnType<typeof api.getStaffingEfficiency>>['weekdays']>([]);
+  const [staffingRebalanceSuggestion, setStaffingRebalanceSuggestion] = useState<Awaited<ReturnType<typeof api.getStaffingEfficiency>>['rebalance_suggestion']>(null);
   const [expenseForecast, setExpenseForecast] = useState<any>(null);
   const [revenueForecast, setRevenueForecast] = useState<any>(null);
   const [roiTrend, setRoiTrend] = useState<any[]>([]);
+  // How far back the forecast looks for its trend/average - a hardcoded
+  // 6 months used to be the only option, which made the forecast blind
+  // (and its "trend" noise) for any company under 6 months old. Days,
+  // not a month count, to match ForecastService's lookback_days param.
+  const [forecastRangeDays, setForecastRangeDays] = useState<number>(180);
 
   const loadData = useCallback(async () => {
     try {
       const bounds = getPeriodBounds(summaryPeriodState);
       const start_date = toApiDate(bounds.start);
       const end_date = toApiDate(bounds.end);
-      const prevStart = toApiDate(bounds.prevStart);
-      const prevEnd = toApiDate(bounds.prevEnd);
+      // Like with like: a period still running is compared with the same
+      // days of the previous one (1-15 November with 1-15 October), never
+      // half a month with a whole one.
+      const previous = getComparablePrevious(bounds);
+      const prevStart = toApiDate(previous.prevStart);
+      const prevEnd = toApiDate(previous.prevEnd);
 
       const [summaryData, chartDataResult, prevSummaryData] = await Promise.all([
         api.getSummary({ start_date, end_date }),
-        api.getChartData(period),
+        api.getChartData({ start_date, end_date }),
         api.getSummary({ start_date: prevStart, end_date: prevEnd }),
       ]);
       setSummary(summaryData);
@@ -155,25 +233,50 @@ export default function StatsScreen() {
 
     if (hasPermission('view_statistics')) {
       try {
-        const [supplierData, itemData] = await Promise.all([
-          api.getSupplierOverview(),
-          api.getItemStatistics({ top_n: 3 }),
+        // The top 3 of the same period as the cards above.
+        const bounds = getPeriodBounds(summaryPeriodState);
+        const range = { start_date: toApiDate(bounds.start), end_date: toApiDate(bounds.end) };
+        const [supplierData, itemData, planData] = await Promise.all([
+          api.getSupplierOverview(range),
+          api.getItemStatistics({ ...range, top_n: 3 }),
+          api.getReorderPlan(),
         ]);
         setTopSuppliers((supplierData.top_by_amount || []).slice(0, 3));
         setTopItems(itemData.top_by_value || []);
+        setReorderPlan(planData);
       } catch (error) {
         console.error('Error loading top suppliers/items:', error);
       }
 
       try {
         const [expFc, revFc] = await Promise.all([
-          api.getExpenseForecast(1),
-          api.getRevenueForecast(1),
+          api.getExpenseForecast(1, { lookbackDays: forecastRangeDays }),
+          api.getRevenueForecast(1, { lookbackDays: forecastRangeDays }),
         ]);
         setExpenseForecast(expFc);
         setRevenueForecast(revFc);
       } catch (error) {
         console.error('Error loading forecast:', error);
+      }
+
+      try {
+        const weekdayData = await api.getWeekdayRevenuePattern();
+        setWeekdayRevenue(weekdayData.weekdays || []);
+        setWeakDaySuggestion(weekdayData.weak_day_suggestion || null);
+      } catch (error) {
+        console.error('Error loading weekday revenue pattern:', error);
+      }
+
+      // Needs manage_budget too (schedule/payroll data) - same gate the
+      // backend endpoint itself enforces.
+      if (hasPermission('manage_budget')) {
+        try {
+          const staffingData = await api.getStaffingEfficiency();
+          setStaffingEfficiency(staffingData.weekdays || []);
+          setStaffingRebalanceSuggestion(staffingData.rebalance_suggestion || null);
+        } catch (error) {
+          console.error('Error loading staffing efficiency:', error);
+        }
       }
     }
 
@@ -185,31 +288,37 @@ export default function StatsScreen() {
         console.error('Error loading ROI trend:', error);
       }
     }
-  }, [period, summaryPeriodState, hasPermission, isOwner]);
+  }, [summaryPeriodState, hasPermission, forecastRangeDays]);
 
   const loadSupplierStats = useCallback(async () => {
     setLoadingSuppliers(true);
     try {
-      const data = await api.getSupplierOverview();
+      const data = await api.getSupplierOverview(reportRange);
       setSupplierOverview(data);
     } catch (error) {
       console.error('Error loading supplier stats:', error);
     } finally {
       setLoadingSuppliers(false);
     }
-  }, []);
+  }, [reportRange]);
 
-  const loadSupplierDetail = useCallback(async (supplierName: string) => {
+  const loadSupplierDetail = useCallback(async (supplierName: string, groupBy: SupplierGroupBy) => {
     setLoadingDetail(true);
     try {
-      const data = await api.getSupplierDetailed(supplierName);
+      const data = await api.getSupplierDetailed(supplierName, { ...reportRange, group_by: groupBy });
       setSupplierDetail(data);
     } catch (error) {
       console.error('Error loading supplier detail:', error);
     } finally {
       setLoadingDetail(false);
     }
-  }, []);
+  }, [reportRange]);
+
+  const closeSupplierDetail = () => {
+    setSelectedSupplier(null);
+    setSupplierDetail(null);
+    setSupplierGroupBy(null);
+  };
 
   const toggleCompareSelection = (supplierName: string) => {
     setSelectedForCompare((prev) => {
@@ -232,7 +341,8 @@ export default function StatsScreen() {
     setLoadingCompare(true);
     setCompareModalVisible(true);
     try {
-      const data = await api.compareSuppliers(selectedForCompare);
+      // The same period as the list the suppliers were picked from.
+      const data = await api.compareSuppliers(selectedForCompare, reportRange);
       setCompareResult(data);
     } catch (error) {
       console.error('Error comparing suppliers:', error);
@@ -248,7 +358,9 @@ export default function StatsScreen() {
 
   const handleExportStatisticsPdf = async () => {
     try {
-      await downloadAndShareFile('/api/export/statistics/pdf', `statistics_${new Date().toISOString().slice(0, 10)}.pdf`);
+      // The period chosen on screen - the sheet prints it.
+      const query = new URLSearchParams({ start_date: periodStart, end_date: periodEnd }).toString();
+      await downloadAndShareFile(`/api/export/statistics/pdf?${query}`, `statistics_${periodStart}_${periodEnd}.pdf`);
     } catch (error) {
       Alert.alert(t('common.error'), t('invoices.downloadError'));
     }
@@ -259,7 +371,7 @@ export default function StatsScreen() {
     setLoadingItems(true);
     try {
       const [statsData, alertsData] = await Promise.all([
-        api.getItemStatistics(),
+        api.getItemStatistics(reportRange),
         api.getPriceAlerts()
       ]);
       setItemStats(statsData);
@@ -270,17 +382,19 @@ export default function StatsScreen() {
     } finally {
       setLoadingItems(false);
     }
-  }, []);
+  }, [reportRange]);
   
   const loadItemDetail = useCallback(async (itemName: string) => {
     setLoadingItemDetail(true);
     try {
-      const [historyData, supplierData] = await Promise.all([
+      const [historyData, supplierData, relatedData] = await Promise.all([
         api.getItemPriceHistory(itemName),
-        api.getItemBySupplier(itemName)
+        api.getItemBySupplier(itemName),
+        api.getRelatedItems(itemName).catch(() => null),
       ]);
       setItemPriceHistory(historyData);
       setItemBySupplier(supplierData);
+      setItemRelated(relatedData);
     } catch (error) {
       console.error('Error loading item detail:', error);
     } finally {
@@ -294,7 +408,7 @@ export default function StatsScreen() {
     if (preset === 'month') start.setMonth(start.getMonth() - 1);
     else if (preset === 'quarter') start.setMonth(start.getMonth() - 3);
     else start.setFullYear(start.getFullYear() - 1);
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const fmt = toApiDate;
     return { start_date: fmt(start), end_date: fmt(end) };
   };
 
@@ -331,6 +445,77 @@ export default function StatsScreen() {
     }
   };
 
+  const muteAlertItem = async (alert: any) => {
+    try {
+      await api.createPriceAlertMute(alert.item_name, alert.supplier);
+      await api.updatePriceAlert(alert.id, 'dismissed');
+      setPriceAlerts(prev => prev.filter(a => a.id !== alert.id));
+      if (alert.status === 'unread') setUnreadAlerts(prev => Math.max(0, prev - 1));
+      Toast.success(t('priceAlertPopup.muted'));
+      loadAlertSettings();
+    } catch (error) {
+      console.error('Error muting price alert:', error);
+    }
+  };
+
+  const viewAlertInvoice = (alert: any) => {
+    router.push({ pathname: '/(tabs)/invoices', params: { invoiceId: alert.invoice_id } });
+  };
+
+  // Price-alert settings + the per-item mute list - the only place in the
+  // app these are reachable from, so this doubles as the feature's
+  // "settings" screen (opened via the gear icon next to the alerts card).
+  const [alertSettingsModalVisible, setAlertSettingsModalVisible] = useState(false);
+  const [alertSettings, setAlertSettings] = useState<PriceAlertSettings | null>(null);
+  const [alertMutes, setAlertMutes] = useState<PriceAlertMute[]>([]);
+  const [savingAlertSettings, setSavingAlertSettings] = useState(false);
+
+  const loadAlertSettings = useCallback(async () => {
+    try {
+      const [settings, mutesData] = await Promise.all([
+        api.getPriceAlertSettings(),
+        api.getPriceAlertMutes(),
+      ]);
+      setAlertSettings(settings);
+      setAlertMutes(mutesData.mutes || []);
+    } catch (error) {
+      console.error('Error loading price alert settings:', error);
+    }
+  }, []);
+
+  const openAlertSettings = () => {
+    setAlertSettingsModalVisible(true);
+    loadAlertSettings();
+  };
+
+  const saveAlertSettings = async () => {
+    if (!alertSettings) return;
+    setSavingAlertSettings(true);
+    try {
+      await api.updatePriceAlertSettings({
+        threshold_percent: alertSettings.threshold_percent,
+        min_monthly_impact: alertSettings.min_monthly_impact,
+        alert_on_decrease: alertSettings.alert_on_decrease,
+        enabled: alertSettings.enabled,
+      });
+      Toast.success(t('priceAlertSettings.saved'));
+      setAlertSettingsModalVisible(false);
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setSavingAlertSettings(false);
+    }
+  };
+
+  const unmuteItem = async (muteId: string) => {
+    try {
+      await api.deletePriceAlertMute(muteId);
+      setAlertMutes(prev => prev.filter(m => m.id !== muteId));
+    } catch (error) {
+      console.error('Error unmuting item:', error);
+    }
+  };
+
   // Tab screens stay mounted, so returning here (e.g. after scanning and
   // saving a new invoice) doesn't remount the screen - only re-fetching on
   // focus picks up the change without needing a manual pull-to-refresh.
@@ -340,17 +525,18 @@ export default function StatsScreen() {
     }, [loadData])
   );
 
+  // Each tab reloads when it is opened and whenever its period changes.
   useEffect(() => {
-    if (activeTab === 'suppliers' && !supplierOverview) {
+    if (activeTab === 'suppliers') {
       loadSupplierStats();
     }
-  }, [activeTab, supplierOverview, loadSupplierStats]);
-  
+  }, [activeTab, loadSupplierStats]);
+
   useEffect(() => {
-    if (activeTab === 'items' && !itemStats) {
+    if (activeTab === 'items') {
       loadItemStats();
     }
-  }, [activeTab, itemStats, loadItemStats]);
+  }, [activeTab, loadItemStats]);
 
   useEffect(() => {
     if (activeTab === 'items') {
@@ -360,9 +546,9 @@ export default function StatsScreen() {
 
   useEffect(() => {
     if (selectedSupplier) {
-      loadSupplierDetail(selectedSupplier);
+      loadSupplierDetail(selectedSupplier, activeSupplierGroupBy);
     }
-  }, [selectedSupplier, loadSupplierDetail]);
+  }, [selectedSupplier, activeSupplierGroupBy, loadSupplierDetail]);
   
   useEffect(() => {
     if (selectedItem) {
@@ -382,11 +568,53 @@ export default function StatsScreen() {
     setRefreshing(false);
   }, [loadData, loadSupplierStats, loadItemStats, activeTab]);
   
+  const closeItemDetail = () => {
+    setSelectedItem(null);
+    setItemPriceHistory(null);
+    setItemBySupplier(null);
+    setItemRelated(null);
+  };
+
+  // "Same" joins the look-alike into this item (or this item into the group
+  // the other already belongs to - then the detail follows the group name);
+  // "different" keeps the two apart from now on.
+  const answerCatalog = async (otherName: string, same: boolean) => {
+    if (!selectedItem || catalogBusy) return;
+    setCatalogBusy(otherName);
+    try {
+      if (same) {
+        const result = await api.markItemsSame(selectedItem, otherName);
+        if (result.canonical_name && result.canonical_name !== selectedItem) {
+          setSelectedItem(result.canonical_name);
+        } else {
+          await loadItemDetail(selectedItem);
+        }
+      } else {
+        await api.markItemsDifferent(selectedItem, otherName);
+        await loadItemDetail(selectedItem);
+      }
+      loadItemStats();
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error?.message || '');
+    } finally {
+      setCatalogBusy(null);
+    }
+  };
+
+  // Quantity is ranked within one unit at a time - the units on offer, most
+  // common first, and the one currently shown.
+  const restrictedNote = restrictedDataNote(summary?.financial_visibility, t);
+  // The months something was put in - the only ones with a return to show.
+  const investedMonths = roiTrend.filter((pt) => (pt.personal_investment || 0) > 0 && pt.roi_percent !== null);
+  const quantityUnits: string[] = Object.keys(itemStats?.top_by_quantity_by_unit || {});
+  const activeQuantityUnit = quantityUnit && quantityUnits.includes(quantityUnit) ? quantityUnit : quantityUnits[0] ?? null;
+
   // Get current item ranking
-  const getCurrentItemRanking = () => {
+  const getCurrentItemRanking = (): ItemStatistics[] => {
     if (!itemStats) return [];
     switch (itemRankingType) {
       case 'quantity':
+        if (activeQuantityUnit) return itemStats.top_by_quantity_by_unit?.[activeQuantityUnit] || [];
         return itemStats.top_by_quantity || [];
       case 'frequency':
         return itemStats.top_by_frequency || [];
@@ -395,34 +623,36 @@ export default function StatsScreen() {
     }
   };
 
-  // Open (non-closed) days within the currently loaded window - drives the
-  // average-daily-turnover card below instead of a fixed period day count,
-  // so a rest/holiday day (marked in Профил > Почивни дни) doesn't drag the
-  // average down like a bad zero-revenue day would.
-  const openDaysInWindow = Math.max(1, chartData.filter((d) => !d.is_closed).length);
-
   // Chart data for overview - a closed day (from Профил > Почивни дни) is
   // shown in muted grey instead of green/red, so a genuinely closed day
   // reads as "expected" at a glance instead of looking like a problem the
   // way an unexplained zero on an open day would.
+  // A month bar is labelled MM.YY - MM.YYYY doesn't fit under a bar.
+  const barLabel = (item: ChartDataPoint) =>
+    item.bucket === 'month' ? `${item.date.slice(5, 7)}.${item.date.slice(2, 4)}` : item.label;
   const incomeBarData = chartData.map((item) => ({
     value: item.income,
-    label: item.label,
+    label: barLabel(item),
     frontColor: item.is_closed ? COLORS.borderLight : COLORS.success,
     topLabelComponent: () => (
-      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.success, fontSize: 10 }}>
+      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.success, fontSize: 12 }}>
         {item.income > 0 ? item.income.toFixed(0) : ''}
       </Text>
     ),
   }));
 
+  // A day's bar is what was spent that day; the month's salaries and
+  // depreciation are a cost of the month, told in a line under the chart
+  // (a month's bar holds them - they are that month's).
+  const barExpense = (item: ChartDataPoint) =>
+    item.bucket === 'day' ? Math.round((item.expense - (item.monthly_costs ?? 0)) * 100) / 100 : item.expense;
   const expenseBarData = chartData.map((item) => ({
-    value: item.expense,
-    label: item.label,
+    value: barExpense(item),
+    label: barLabel(item),
     frontColor: item.is_closed ? COLORS.borderLight : COLORS.danger,
     topLabelComponent: () => (
-      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.danger, fontSize: 10 }}>
-        {item.expense > 0 ? item.expense.toFixed(0) : ''}
+      <Text style={{ color: item.is_closed ? COLORS.textMuted : COLORS.danger, fontSize: 12 }}>
+        {barExpense(item) > 0 ? barExpense(item).toFixed(0) : ''}
       </Text>
     ),
   }));
@@ -444,7 +674,27 @@ export default function StatsScreen() {
         : `${windowedIncomeBarData[0].label} - ${windowedIncomeBarData[windowedIncomeBarData.length - 1].label}`)
     : '';
 
-  // Small "+12% спрямо миналия месец" style badge for the summary cards
+  // Salaries and depreciation of the period, by name: apart from the day
+  // bars, or the part of the month bars they are.
+  const monthlyCostsTotal = Math.round(chartData.reduce((sum, item) => sum + (item.monthly_costs ?? 0), 0) * 100) / 100;
+  const monthlyCostsNote = (() => {
+    if (monthlyCostsTotal < 0.01) return null;
+    const depreciation = summary?.total_depreciation_expense;
+    const parts: string[] = [];
+    if (depreciation === null || depreciation === undefined) {
+      parts.push(t('stats.monthlyCostsBoth').replace('{amount}', `${formatMoney(monthlyCostsTotal)}`));
+    } else {
+      const payroll = Math.round((monthlyCostsTotal - depreciation) * 100) / 100;
+      if (payroll >= 0.01) parts.push(t('stats.monthlyPayroll').replace('{amount}', `${formatMoney(payroll)}`));
+      if (depreciation >= 0.01) parts.push(t('stats.monthlyDepreciation').replace('{amount}', `${formatMoney(depreciation)}`));
+    }
+    if (!parts.length) return null;
+    const costs = parts.join(t('stats.and'));
+    const sentence = t(chartData[0]?.bucket === 'month' ? 'stats.monthlyCostsIncluded' : 'stats.monthlyCostsApart').replace('{costs}', costs);
+    return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+  })();
+
+  // Small "+12% спрямо миналия месец" style badge for the chart totals
   const renderTrendBadge = (current?: number | null, previous?: number | null, higherIsBetter: boolean = true) => {
     if (current === undefined || current === null || previous === undefined || previous === null || !previous) return null;
     const diff = current - previous;
@@ -475,56 +725,80 @@ export default function StatsScreen() {
     }
   };
 
+  // The chart's suppliers: the chosen ranking's top ones (the server ranks
+  // ten) - the title, the slices, the legend and the bars all count these.
+  // It used to say "Top 10" over five slices, a nameless grey one and
+  // seven bars.
+  const chartSuppliers = () => getCurrentRanking().slice(0, SUPPLIER_CHART_TOP);
+  // Everyone else: their part of the total, and how many they are.
+  const chartRest = () => {
+    if (!supplierOverview) return { amount: 0, count: 0, percent: 0 };
+    const shown = chartSuppliers();
+    const total = supplierOverview.totals.total_amount;
+    const amount = Math.max(0, total - shown.reduce((sum, s) => sum + s.total_amount, 0));
+    const count = Math.max(0, supplierOverview.executive_summary.total_suppliers - shown.length);
+    return { amount, count, percent: total > 0 ? (amount / total) * 100 : 0 };
+  };
+
   // Prepare pie chart data
   const getPieChartData = () => {
-    const ranking = getCurrentRanking();
-    const top5 = ranking.slice(0, 5);
-    const othersTotal = ranking.slice(5).reduce((sum, s) => sum + s.total_amount, 0);
-    
-    const data = top5.map((supplier, index) => ({
+    // The share on a slice only where it fits; the legend has every one.
+    const data = chartSuppliers().map((supplier, index) => ({
       value: supplier.total_amount,
-      color: CHART_COLORS[index],
-      text: `${supplier.dependency_percent.toFixed(0)}%`,
+      color: CHART_COLORS[index % CHART_COLORS.length],
+      text: supplier.dependency_percent >= PIE_TEXT_MIN_PERCENT ? `${supplier.dependency_percent.toFixed(0)}%` : '',
       shiftTextX: -8,
       shiftTextY: 0,
     }));
-    
-    if (othersTotal > 0) {
+    const rest = chartRest();
+    if (rest.count > 0 && rest.amount > 0) {
       data.push({
-        value: othersTotal,
+        value: rest.amount,
         color: COLORS.textMuted,
-        text: '',
+        text: rest.percent >= PIE_TEXT_MIN_PERCENT ? `${rest.percent.toFixed(0)}%` : '',
         shiftTextX: 0,
         shiftTextY: 0,
       });
     }
-    
     return data;
   };
 
   // Prepare bar chart data for suppliers
   const getSupplierBarData = () => {
-    const ranking = getCurrentRanking().slice(0, 7);
+    const ranking = chartSuppliers();
+    // Shorter names when there are many bars, so the labels do not overlap.
+    const labelLength = ranking.length > 7 ? 4 : 6;
     return ranking.map((supplier, index) => ({
       value: supplierRankingType === 'frequency' ? supplier.invoice_count :
              supplierRankingType === 'avg' ? supplier.avg_invoice : supplier.total_amount,
       // Company names are often quoted (e.g. "Марс-1" ООД) - strip a
       // leading quote before truncating so the label doesn't start with
       // a stray punctuation mark instead of an actual letter.
-      label: supplier.supplier.replace(/^["'„”]+/, '').substring(0, 6),
+      label: supplier.supplier.replace(/^["'„”]+/, '').substring(0, labelLength),
       frontColor: CHART_COLORS[index % CHART_COLORS.length],
     }));
   };
 
-  // Prepare line chart data for supplier monthly trend
-  const getSupplierLineData = () => {
-    if (!supplierDetail?.monthly_trend) return [];
-    return supplierDetail.monthly_trend.map(m => ({
-      value: m.amount,
-      label: m.month.substring(5),
-      dataPointColor: COLORS.primary,
-    }));
-  };
+  // Suppliers and items: the chosen period (the same as everywhere) or the
+  // whole history.
+  const renderReportScope = () => (
+    <>
+      <View style={[styles.rankingSelector, styles.reportScopeSelector]}>
+        {(['period', 'all'] as const).map((scope) => (
+          <TouchableOpacity
+            key={scope}
+            style={[styles.rankingButton, reportScope === scope && styles.rankingButtonActive]}
+            onPress={() => setReportScope(scope)}
+          >
+            <Text style={[styles.rankingButtonText, reportScope === scope && styles.rankingButtonTextActive]}>
+              {scope === 'period' ? t('stats.byPeriod') : t('stats.allTime')}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {reportScope === 'period' && <PeriodNavigator state={summaryPeriodState} onChange={setSummaryPeriodState} />}
+    </>
+  );
 
   // Render chart type selector
   const renderChartTypeSelector = () => (
@@ -550,232 +824,15 @@ export default function StatsScreen() {
     </View>
   );
 
-  // Render supplier detail modal
-  const renderSupplierDetailModal = () => (
-    <Modal
-      visible={!!selectedSupplier}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={() => {
-        setSelectedSupplier(null);
-        setSupplierDetail(null);
-      }}
-    >
-      <View style={styles.modalContainer}>
-        <View style={styles.modalHeader}>
-          <TouchableOpacity 
-            style={styles.modalCloseButton}
-            onPress={() => {
-              setSelectedSupplier(null);
-              setSupplierDetail(null);
-            }}
-          >
-            <Ionicons name="close" size={24} color="white" />
-          </TouchableOpacity>
-          <Text style={styles.modalTitle} numberOfLines={1}>{selectedSupplier}</Text>
-          <View style={{ width: 40 }} />
-        </View>
-
-        {loadingDetail ? (
-          <View style={styles.modalLoading}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
-          </View>
-        ) : supplierDetail?.found ? (
-          <ScrollView style={styles.modalContent}>
-            {/* Overview Card */}
-            <View style={styles.detailCard}>
-              <Text style={styles.detailCardTitle}>{t('stats.supplierOverview')}</Text>
-              <View style={styles.detailGrid}>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailValue}>{supplierDetail.overview?.total_amount.toFixed(2)} €</Text>
-                  <Text style={styles.detailLabel}>{t('stats.totalAmount')}</Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailValue}>{supplierDetail.overview?.invoice_count}</Text>
-                  <Text style={styles.detailLabel}>{t('stats.invoiceCount')}</Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailValue}>{supplierDetail.overview?.avg_invoice.toFixed(2)} €</Text>
-                  <Text style={styles.detailLabel}>{t('stats.avgInvoice')}</Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailValue}>{supplierDetail.overview?.total_vat.toFixed(2)} €</Text>
-                  <Text style={styles.detailLabel}>{t('stats.vat')}</Text>
-                </View>
-              </View>
-              
-              <View style={styles.detailDates}>
-                <View style={styles.detailDateItem}>
-                  <Ionicons name="calendar-outline" size={16} color={COLORS.textMuted} />
-                  <Text style={styles.detailDateLabel}>{t('stats.firstDelivery')}: </Text>
-                  <Text style={styles.detailDateValue}>{supplierDetail.overview?.first_delivery || t('stats.noValue')}</Text>
-                </View>
-                <View style={styles.detailDateItem}>
-                  <Ionicons name="time-outline" size={16} color={COLORS.textMuted} />
-                  <Text style={styles.detailDateLabel}>{t('stats.lastDelivery')}: </Text>
-                  <Text style={styles.detailDateValue}>{supplierDetail.overview?.last_delivery || t('stats.noValue')}</Text>
-                </View>
-              </View>
-              
-              <View style={[
-                styles.statusBadge, 
-                { backgroundColor: supplierDetail.overview?.is_active ? '#10B98120' : '#EF444420' }
-              ]}>
-                <Ionicons 
-                  name={supplierDetail.overview?.is_active ? "checkmark-circle" : "alert-circle"} 
-                  size={16} 
-                  color={supplierDetail.overview?.is_active ? COLORS.success : COLORS.danger} 
-                />
-                <Text style={[
-                  styles.statusText, 
-                  { color: supplierDetail.overview?.is_active ? COLORS.success : COLORS.danger }
-                ]}>
-                  {supplierDetail.overview?.is_active ? t('stats.activeSupplier') : `${t('stats.inactiveSupplier')} (${supplierDetail.overview?.days_inactive} ${t('stats.days')})`}
-                </Text>
-              </View>
-            </View>
-
-            {/* Monthly Trend Chart */}
-            {supplierDetail.monthly_trend && supplierDetail.monthly_trend.length > 0 && (
-              <View style={styles.detailCard}>
-                <Text style={styles.detailCardTitle}>{t('stats.monthlyTrend')}</Text>
-                <LineChart
-                  data={getSupplierLineData()}
-                  width={chartWidth - 20}
-                  height={150}
-                  color={COLORS.primary}
-                  thickness={2}
-                  dataPointsColor={COLORS.primary}
-                  yAxisColor={COLORS.border}
-                  xAxisColor={COLORS.border}
-                  yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
-                  xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
-                  hideRules
-                  isAnimated
-                  curved
-                />
-              </View>
-            )}
-
-            {/* Anomalies */}
-            {supplierDetail.anomalies && supplierDetail.anomalies.length > 0 && (
-              <View style={styles.detailCard}>
-                <View style={styles.anomalyHeader}>
-                  <Ionicons name="warning" size={20} color={COLORS.warning} />
-                  <Text style={styles.detailCardTitle}>{t('stats.anomalies')}</Text>
-                </View>
-                {supplierDetail.anomalies.map((anomaly, index) => (
-                  <View key={index} style={styles.anomalyItem}>
-                    <View>
-                      <Text style={styles.anomalyInvoice}>№{anomaly.invoice_number}</Text>
-                      <Text style={styles.anomalyDate}>{anomaly.date}</Text>
-                    </View>
-                    <View style={styles.anomalyAmount}>
-                      <Text style={styles.anomalyValue}>{anomaly.amount.toFixed(2)} €</Text>
-                      <Text style={styles.anomalyDeviation}>+{anomaly.deviation_percent}%</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {/* Recent Invoices */}
-            {supplierDetail.recent_invoices && supplierDetail.recent_invoices.length > 0 && (
-              <View style={styles.detailCard}>
-                <Text style={styles.detailCardTitle}>{t('stats.recentInvoices')}</Text>
-                {supplierDetail.recent_invoices.map((invoice, index) => (
-                  <View key={index} style={styles.recentInvoiceItem}>
-                    <View>
-                      <Text style={styles.recentInvoiceNumber}>№{invoice.invoice_number}</Text>
-                      <Text style={styles.recentInvoiceDate}>{invoice.date}</Text>
-                    </View>
-                    <Text style={styles.recentInvoiceAmount}>{invoice.total_amount.toFixed(2)} €</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-            
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        ) : (
-          <View style={styles.modalLoading}>
-            <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
-            <Text style={styles.noDataText}>{t('stats.noSupplierData')}</Text>
-          </View>
-        )}
-      </View>
-    </Modal>
-  );
-
-  // Render supplier comparison modal
-  const renderCompareModal = () => {
-    const maxAmount = compareResult?.suppliers?.length
-      ? Math.max(...compareResult.suppliers.map((s: any) => s.total_amount), 1)
-      : 1;
-    return (
-      <Modal
-        visible={compareModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => {
-          setCompareModalVisible(false);
-          setCompareResult(null);
-        }}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle} numberOfLines={1}>{t('stats.compareTitle')}</Text>
-            <TouchableOpacity onPress={() => { setCompareModalVisible(false); setCompareResult(null); }}>
-              <Ionicons name="close" size={28} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-          </View>
-
-          {loadingCompare ? (
-            <View style={styles.modalLoading}>
-              <ActivityIndicator size="large" color={COLORS.primary} />
-            </View>
-          ) : compareResult?.suppliers?.length ? (
-            <ScrollView style={{ flex: 1, padding: 16 }}>
-              {compareResult.suppliers.map((s: any, idx: number) => (
-                <View key={s.supplier} style={styles.compareCard}>
-                  <Text style={styles.compareSupplierName} numberOfLines={1}>{s.supplier}</Text>
-
-                  <View style={styles.compareBarRow}>
-                    <Text style={styles.compareBarLabel}>{t('stats.compareTotalAmount')}</Text>
-                    <Text style={styles.compareBarValue}>{s.total_amount.toFixed(2)} €</Text>
-                  </View>
-                  <View style={styles.compareBarTrack}>
-                    <View style={[styles.compareBarFill, { width: `${(s.total_amount / maxAmount) * 100}%`, backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }]} />
-                  </View>
-
-                  <View style={styles.compareStatsRow}>
-                    <View style={styles.compareStatItem}>
-                      <Text style={styles.compareStatLabel}>{t('stats.compareInvoiceCount')}</Text>
-                      <Text style={styles.compareStatValue}>{s.invoice_count}</Text>
-                    </View>
-                    <View style={styles.compareStatItem}>
-                      <Text style={styles.compareStatLabel}>{t('stats.compareAvgInvoice')}</Text>
-                      <Text style={styles.compareStatValue}>{s.avg_invoice.toFixed(2)} €</Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          ) : (
-            <View style={styles.modalLoading}>
-              <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
-              <Text style={styles.noDataText}>{t('stats.noData')}</Text>
-            </View>
-          )}
-        </View>
-      </Modal>
-    );
+  const closeCompareModal = () => {
+    setCompareModalVisible(false);
+    setCompareResult(null);
   };
 
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <Animated.ScrollView
             style={styles.scrollView}
@@ -795,6 +852,48 @@ export default function StatsScreen() {
               )}
             </Animated.View>
 
+            {/* Navigation-architecture review (2026-10): "Запитай числата
+                си" (AI chat), Бюджет and Активи used to be buried in
+                Profile's "accounting" category - they're all "understand
+                my numbers" tools, the same subject as this whole screen,
+                so a visible link belongs here instead. Plain action
+                buttons, not another ChipTabs selector - tapping one
+                navigates away, it doesn't become a persistent "active"
+                state on this screen. */}
+            {(hasPermission('view_statistics') || hasPermission('manage_budget')) && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.quickLinksRow}
+                contentContainerStyle={styles.quickLinksContent}
+              >
+                {hasPermission('manage_budget') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/budget')}>
+                    <Ionicons name="wallet-outline" size={15} color={COLORS.primary} />
+                    <Text style={styles.quickLinkChipText}>{t('profile.budget')}</Text>
+                  </TouchableOpacity>
+                )}
+                {(hasPermission('view_statistics') || hasPermission('manage_invoices')) && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/price-list')}>
+                    <Ionicons name="pricetags-outline" size={15} color={COLORS.primary} />
+                    <Text style={styles.quickLinkChipText}>{t('priceList.title')}</Text>
+                  </TouchableOpacity>
+                )}
+                {hasLocations && hasPermission('view_profit') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/locations')}>
+                    <Ionicons name="storefront-outline" size={15} color={COLORS.success} />
+                    <Text style={styles.quickLinkChipText}>{t('locations.title')}</Text>
+                  </TouchableOpacity>
+                )}
+                {uses('assets') && hasPermission('manage_budget') && (
+                  <TouchableOpacity style={styles.quickLinkChip} onPress={() => router.push('/assets')}>
+                    <Ionicons name="business-outline" size={15} color={COLORS.warning} />
+                    <Text style={styles.quickLinkChipText}>{t('assets.title')}</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            )}
+
             {/* Tab Selector */}
             <ChipTabs
               active={activeTab}
@@ -813,111 +912,80 @@ export default function StatsScreen() {
 
             {activeTab === 'overview' ? (
               <>
-                {/* Period Selector */}
-                <View style={styles.periodSelectorWrap}>
-                  <ChipTabs
-                    active={period}
-                    onChange={setPeriod}
-                    options={[
-                      { key: 'week', label: t('stats.week') },
-                      { key: 'month', label: t('stats.month') },
-                      { key: 'year', label: t('stats.year') },
-                    ]}
-                  />
-                </View>
-
-                {/* Average Daily Turnover - reacts to the same period selector above,
-                    so it doubles as period-by-period business analysis rather than
-                    a single fixed number. Divided by calendar days in the rolling
-                    window (not just days with entries), matching the backend's
-                    week/month/year window definition in getChartData. */}
-                <View style={styles.avgTurnoverStatCard}>
-                  <View style={styles.avgTurnoverStatHeader}>
-                    <Ionicons name="speedometer" size={24} color={COLORS.info} />
-                    <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
-                  </View>
-                  <CountUp
-                    value={chartData.reduce((sum, d) => sum + d.income, 0) / openDaysInWindow}
-                    formatter={(n) => `${(Number.isFinite(n) ? n : 0).toFixed(2)} €`}
-                    style={styles.avgTurnoverStatValue}
-                  />
-                  <Text style={styles.avgTurnoverStatSubtitle}>
-                    {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(openDaysInWindow))}
-                  </Text>
-                </View>
-
+                <FirstUseHint id="stats" icon="bar-chart" text={t('hint.stats')} />
+                {/* One period for everything below - the cards, the
+                    average, the charts, the top 3 - and for Home. */}
                 <PeriodNavigator state={summaryPeriodState} onChange={setSummaryPeriodState} />
+                <PeriodSoFarNote summary={summary} />
 
-                {/* Summary Cards - a skeleton stand-in until the first real
-                    summary lands, so the grid never briefly shows "0.00 €"
-                    for data that just hasn't arrived yet. */}
-                {!summary ? (
-                  <View style={styles.summaryGrid}>
-                    <SkeletonStat style={styles.summaryCard} />
-                    <SkeletonStat style={styles.summaryCard} />
-                    <SkeletonStat style={styles.summaryCard} />
-                    <SkeletonStat style={styles.summaryCard} />
-                  </View>
-                ) : (
-                <View style={styles.summaryGrid}>
-                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.success }]}>
-                    <Ionicons name="trending-up" size={24} color={COLORS.success} />
-                    <Text style={styles.cardLabel}>{t('stats.totalIncome')}</Text>
+                {/* Average per day: the period's revenue over the days it
+                    was entered on (a day nobody entered is unknown, not a
+                    zero day) - the same numbers as Home's card - and, for a
+                    period still running, where it is heading. */}
+                {(!summary || summary.pace) && (
+                  <View style={styles.avgTurnoverStatCard}>
+                    <View style={styles.avgTurnoverStatHeader}>
+                      <Ionicons name="speedometer" size={24} color={COLORS.info} />
+                      <Text style={styles.avgTurnoverStatTitle}>{t('stats.avgDailyTurnover')}</Text>
+                    </View>
                     <CountUp
-                      value={summary?.total_income || 0}
-                      formatter={(n) => `${n.toFixed(2)} €`}
-                      style={[styles.cardValue, { color: COLORS.success }]}
+                      value={summary?.pace?.avg_per_revenue_day ?? 0}
+                      formatter={(n) => `${formatMoney((Number.isFinite(n) ? n : 0))}`}
+                      style={styles.avgTurnoverStatValue}
                     />
-                    {renderTrendBadge(summary?.total_income, previousSummary?.total_income, true)}
-                  </View>
-                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.danger }]}>
-                    <Ionicons name="trending-down" size={24} color={COLORS.danger} />
-                    <Text style={styles.cardLabel}>{t('stats.totalExpense')}</Text>
-                    <CountUp
-                      value={summary?.total_expense || 0}
-                      formatter={(n) => `${n.toFixed(2)} €`}
-                      style={[styles.cardValue, { color: COLORS.danger }]}
-                    />
-                    {renderTrendBadge(summary?.total_expense, previousSummary?.total_expense, false)}
-                  </View>
-                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.primary }]}>
-                    <Ionicons name="calculator" size={24} color={COLORS.primary} />
-                    <Text style={styles.cardLabel}>{t('stats.vatToPay')}</Text>
-                    <CountUp
-                      value={summary?.vat_to_pay || 0}
-                      formatter={(n) => `${n.toFixed(2)} €`}
-                      style={[styles.cardValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}
-                    />
-                    {renderTrendBadge(summary?.vat_to_pay, previousSummary?.vat_to_pay, false)}
-                  </View>
-                  <View style={[styles.summaryCard, { borderLeftColor: COLORS.warning }]}>
-                    <Ionicons name="wallet" size={24} color={COLORS.warning} />
-                    <Text style={styles.cardLabel}>{t('stats.profitLabel')}</Text>
-                    {summary && summary.profit === null ? (
-                      <Ionicons name="lock-closed" size={20} color={COLORS.textMuted} style={{ marginVertical: 4 }} />
-                    ) : (
-                      <>
-                        <CountUp
-                          value={summary?.profit || 0}
-                          formatter={(n) => `${n.toFixed(2)} €`}
-                          style={[styles.cardValue, { color: (summary?.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
-                        />
-                        {renderTrendBadge(summary?.profit, previousSummary?.profit, true)}
-                      </>
+                    <Text style={styles.avgTurnoverStatSubtitle}>
+                      {t('stats.avgDailyTurnoverSubtitle').replace('{days}', String(summary?.pace?.revenue_days ?? 0))}
+                    </Text>
+                    {summary?.pace?.is_current && summary.pace.expected_income !== null && (
+                      <Text style={[styles.avgTurnoverStatSubtitle, styles.avgTurnoverExpected]}>
+                        {t('home.expectedPeriodEnd').replace('{amount}', `${formatMoney(summary.pace.expected_income)}`)}
+                      </Text>
                     )}
                   </View>
-                </View>
                 )}
 
-                {summary?.financial_visibility && (
-                  summary.financial_visibility.pocket_money === false ||
-                  summary.financial_visibility.off_book_expenses === false ||
-                  summary.financial_visibility.profit === false
-                ) && (
+                {restrictedNote && (
                   <View style={styles.restrictedNote}>
                     <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
-                    <Text style={styles.restrictedNoteText}>{t('home.restrictedDataNote')}</Text>
+                    <Text style={styles.restrictedNoteText}>{restrictedNote}</Text>
                   </View>
+                )}
+
+                {/* Sections of Statistics (Л8): money ahead, and everything
+                    for the accountant - each one tap, not a hidden link. */}
+                {(hasPermission('view_profit') || hasPermission('export_data')) && (
+                  <View style={styles.sectionLinks}>
+                    {hasPermission('view_profit') && (
+                      <TouchableOpacity style={styles.sectionLink} onPress={() => router.push('/cash-flow')}>
+                        <Ionicons name="trending-up-outline" size={20} color={COLORS.success} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.sectionLinkTitle}>{t('cashFlow.title')}</Text>
+                          <Text style={styles.sectionLinkText}>{t('stats.cashFlowSection')}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+                      </TouchableOpacity>
+                    )}
+                    {hasPermission('export_data') && (
+                      <TouchableOpacity
+                        style={[styles.sectionLink, hasPermission('view_profit') && styles.sectionLinkDivider]}
+                        onPress={() => router.push('/accountant-pack')}
+                      >
+                        <Ionicons name="briefcase-outline" size={20} color={COLORS.primary} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.sectionLinkTitle}>{t('accountantPack.title')}</Text>
+                          <Text style={styles.sectionLinkText}>{t('stats.accountantPackSection')}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Moved here from Home (Л4): how the income came in, and
+                    what the month has to sell to end at zero. */}
+                {summary && <PaymentKindsCard summary={summary} usesTill={uses('till')} />}
+                {hasPermission('view_profit') && (
+                  <BreakEvenCard canManageBudget={hasPermission('manage_budget')} refreshSignal={summary} />
                 )}
 
                 {/* Chart window navigation - only relevant once the period
@@ -949,8 +1017,23 @@ export default function StatsScreen() {
                 <View style={styles.chartContainer}>
                   <View style={styles.chartHeader}>
                     <Ionicons name="arrow-up-circle" size={24} color={COLORS.success} />
-                    <Text style={styles.chartTitle}>{t('stats.income')}</Text>
+                    <Text style={styles.chartTitle}>
+                      {t('stats.income')}{summary?.vat_excluded ? ` ${t('profit.withoutVat')}` : ''}
+                    </Text>
+                    {summary && summary.total_income !== null && (
+                      <View style={styles.chartTotal}>
+                        <Text style={[styles.chartTotalValue, { color: COLORS.success }]}>
+                          {formatMoney((summary.total_income || 0))}
+                        </Text>
+                        {renderTrendBadge(summary.total_income, previousSummary?.total_income, true)}
+                      </View>
+                    )}
                   </View>
+                  {!!summary?.total_issued_invoices && (
+                    <Text style={styles.chartSubNote}>
+                      {t('stats.ofWhichIssuedInvoices').replace('{amount}', formatAmount(summary.total_issued_invoices))}
+                    </Text>
+                  )}
                   {windowedIncomeBarData.length > 0 ? (() => {
                     // Size bars/spacing to the windowed (max 7) day count so
                     // all of them fit within the chart's width comfortably -
@@ -1006,7 +1089,17 @@ export default function StatsScreen() {
                 <View style={styles.chartContainer}>
                   <View style={styles.chartHeader}>
                     <Ionicons name="arrow-down-circle" size={24} color={COLORS.danger} />
-                    <Text style={styles.chartTitle}>{t('home.totalExpenses')}</Text>
+                    <Text style={styles.chartTitle}>
+                      {t('home.totalExpenses')}{summary?.vat_excluded ? ` ${t('profit.withoutVat')}` : ''}
+                    </Text>
+                    {summary && summary.total_expense !== null && (
+                      <View style={styles.chartTotal}>
+                        <Text style={[styles.chartTotalValue, { color: COLORS.danger }]}>
+                          {formatMoney((summary.total_expense || 0))}
+                        </Text>
+                        {renderTrendBadge(summary.total_expense, previousSummary?.total_expense, false)}
+                      </View>
+                    )}
                   </View>
                   {windowedExpenseBarData.length > 0 ? (() => {
                     const yAxisLabelWidth = 34;
@@ -1042,8 +1135,31 @@ export default function StatsScreen() {
                       <Text style={styles.noDataText}>{t('stats.noData')}</Text>
                     </View>
                   )}
+                  {!!monthlyCostsNote && <Text style={styles.chartNote}>{monthlyCostsNote}</Text>}
+                  {/* The personal notebook beside the business's own numbers -
+                      only for whoever sees it, never one of the expenses. */}
+                  {summary?.personal_withdrawals != null && summary.personal_withdrawals > 0 && (
+                    <TouchableOpacity
+                      style={styles.personalUseRow}
+                      onPress={() => router.push({ pathname: '/personal-expenses', params: { tab: 'wallet' } })}
+                      accessibilityRole="button"
+                    >
+                      <Ionicons name="wallet-outline" size={16} color={COLORS.warning} />
+                      <Text style={styles.personalUseText}>
+                        {summary.left_after_personal != null
+                          ? t('stats.personalUseLine')
+                            .replace('{amount}', formatMoney(-summary.personal_withdrawals))
+                            .replace('{left}', formatMoney(summary.left_after_personal))
+                          : t('stats.personalUseOnly').replace('{amount}', formatMoney(-summary.personal_withdrawals))}
+                      </Text>
+                      <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  )}
                 </View>
 
+                {/* Not registered for VAT: no VAT breakdown */}
+                {summary?.vat_registered !== false && (
+                <>
                 {/* VAT Breakdown */}
                 <View style={styles.vatBreakdown}>
                   <Text style={styles.sectionTitle}>{t('stats.vatBreakdown')}</Text>
@@ -1052,13 +1168,13 @@ export default function StatsScreen() {
                     <View style={styles.vatItem}>
                       <Text style={styles.vatLabel}>{t('stats.vatFromSales')}</Text>
                       <Text style={[styles.vatValue, { color: COLORS.danger }]}>
-                        +{summary?.fiscal_vat.toFixed(2) || '0.00'} €
+                        +{formatMoney(summary?.fiscal_vat)}
                       </Text>
                     </View>
                     <View style={styles.vatItem}>
                       <Text style={styles.vatLabel}>{t('stats.vatCredit')}</Text>
                       <Text style={[styles.vatValue, { color: COLORS.success }]}>
-                        -{summary?.total_invoice_vat.toFixed(2) || '0.00'} €
+                        -{formatMoney(summary?.total_invoice_vat)}
                       </Text>
                     </View>
                   </View>
@@ -1066,69 +1182,12 @@ export default function StatsScreen() {
                   <View style={styles.vatTotal}>
                     <Text style={styles.vatTotalLabel}>{t('stats.vatToPay')}</Text>
                     <Text style={[styles.vatTotalValue, { color: (summary?.vat_to_pay || 0) >= 0 ? COLORS.danger : COLORS.success }]}>
-                      {summary?.vat_to_pay.toFixed(2) || '0.00'} €
+                      {formatMoney(summary?.vat_to_pay)}
                     </Text>
                   </View>
                 </View>
-
-                {/* Additional Stats */}
-                <View style={styles.additionalStats}>
-                  <Text style={styles.sectionTitle}>{t('stats.additionalInfo')}</Text>
-                  
-                  <View style={styles.statRow}>
-                    <View style={styles.statItem}>
-                      <Ionicons name="receipt" size={20} color={COLORS.primary} />
-                      <Text style={styles.statLabel}>{t('stats.invoiceCount')}</Text>
-                      <Text style={styles.statValue}>{summary?.invoice_count || 0}</Text>
-                    </View>
-                    <View style={styles.statItem}>
-                      <Ionicons name="cash" size={20} color={COLORS.success} />
-                      <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
-                      <Text style={styles.statValue}>{summary?.total_fiscal_revenue.toFixed(0) || 0} €</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.statRow}>
-                    <View style={styles.statItem}>
-                      <Ionicons name="wallet" size={20} color={COLORS.warning} />
-                      <Text style={styles.statLabel}>{t('home.pocket')}</Text>
-                      {summary && summary.total_pocket_money === null ? (
-                        <Ionicons name="lock-closed" size={16} color={COLORS.textMuted} />
-                      ) : (
-                        <Text style={styles.statValue}>{summary?.total_pocket_money?.toFixed(0) || 0} €</Text>
-                      )}
-                    </View>
-                    <View style={styles.statItem}>
-                      <Ionicons name="remove-circle" size={20} color={COLORS.danger} />
-                      <Text style={styles.statLabel}>{t('stats.expensesNoInvoice')}</Text>
-                      {summary && summary.total_non_invoice_expenses === null ? (
-                        <Ionicons name="lock-closed" size={16} color={COLORS.textMuted} />
-                      ) : (
-                        <Text style={styles.statValue}>{summary?.total_non_invoice_expenses?.toFixed(0) || 0} €</Text>
-                      )}
-                    </View>
-                  </View>
-
-                  {!!summary?.total_payroll_cost && (
-                    <View style={styles.statRow}>
-                      <View style={[styles.statItem, { flex: 1 }]}>
-                        <Ionicons name="people" size={20} color={COLORS.success} />
-                        <Text style={styles.statLabel}>{t('payroll.totalCostThisMonth')}</Text>
-                        <Text style={styles.statValue}>{summary.total_payroll_cost.toFixed(2)} €</Text>
-                      </View>
-                    </View>
-                  )}
-
-                  {!!summary?.total_depreciation_expense && (
-                    <View style={styles.statRow}>
-                      <View style={[styles.statItem, { flex: 1 }]}>
-                        <Ionicons name="business" size={20} color={COLORS.warning} />
-                        <Text style={styles.statLabel}>{t('assets.depreciationThisMonth')}</Text>
-                        <Text style={styles.statValue}>{summary.total_depreciation_expense.toFixed(2)} €</Text>
-                      </View>
-                    </View>
-                  )}
-                </View>
+                </>
+                )}
 
                 {/* Top 3 quick view */}
                 {hasPermission('view_statistics') && (topSuppliers.length > 0 || topItems.length > 0) && (
@@ -1136,13 +1195,16 @@ export default function StatsScreen() {
                     <Text style={styles.sectionTitle}>{t('stats.top3Title')}</Text>
                     <View style={styles.top3Row}>
                       <View style={styles.top3Column}>
-                        <Text style={styles.top3ColumnTitle}>{t('stats.topSuppliers')}</Text>
+                        {/* Suppliers are whole invoices (with VAT); items are
+                            invoice lines, read without VAT - said, so the two
+                            columns are never compared as if alike. */}
+                        <Text style={styles.top3ColumnTitle}>{t('stats.topSuppliers')} · {t('stats.top3WithVat')}</Text>
                         {topSuppliers.length > 0 ? (
                           topSuppliers.map((s, idx) => (
                             <View key={s.supplier} style={styles.top3Item}>
                               <Text style={styles.top3Rank}>{idx + 1}</Text>
                               <Text style={styles.top3Name} numberOfLines={1}>{s.supplier}</Text>
-                              <Text style={styles.top3Value}>{s.total_amount.toFixed(0)} €</Text>
+                              <Text style={styles.top3Value}>{formatMoney(s.total_amount)}</Text>
                             </View>
                           ))
                         ) : (
@@ -1150,13 +1212,13 @@ export default function StatsScreen() {
                         )}
                       </View>
                       <View style={styles.top3Column}>
-                        <Text style={styles.top3ColumnTitle}>{t('stats.topItems')}</Text>
+                        <Text style={styles.top3ColumnTitle}>{t('stats.topItems')} · {t('stats.top3WithoutVat')}</Text>
                         {topItems.length > 0 ? (
                           topItems.map((item, idx) => (
                             <View key={item.item_name} style={styles.top3Item}>
                               <Text style={styles.top3Rank}>{idx + 1}</Text>
                               <Text style={styles.top3Name} numberOfLines={1}>{item.item_name}</Text>
-                              <Text style={styles.top3Value}>{item.total_value.toFixed(0)} €</Text>
+                              <Text style={styles.top3Value}>{formatMoney(item.total_value)}</Text>
                             </View>
                           ))
                         ) : (
@@ -1168,56 +1230,36 @@ export default function StatsScreen() {
                 )}
 
                 {/* Forecast */}
-                {hasPermission('view_statistics') && (revenueForecast?.forecast?.length > 0 || expenseForecast?.forecast?.length > 0) && (
-                  <View style={styles.forecastSection}>
-                    <View style={styles.chartHeader}>
-                      <Ionicons name="analytics" size={22} color={COLORS.primary} />
-                      <Text style={styles.chartTitle}>{t('stats.forecastTitle')}</Text>
-                    </View>
-                    <Text style={styles.forecastHint}>{t('stats.forecastHint')}</Text>
-                    <View style={styles.forecastRow}>
-                      {revenueForecast?.forecast?.[0] && (
-                        <View style={styles.forecastCard}>
-                          <Ionicons name="trending-up" size={20} color={COLORS.success} />
-                          <Text style={styles.forecastLabel}>{t('stats.forecastRevenue')}</Text>
-                          <Text style={[styles.forecastValue, { color: COLORS.success }]}>
-                            {revenueForecast.forecast[0].predicted_amount.toFixed(0)} €
-                          </Text>
-                          <Text style={styles.forecastTrend}>
-                            {revenueForecast.trend === 'increasing' ? '📈' : revenueForecast.trend === 'decreasing' ? '📉' : '➖'}
-                            {' '}{revenueForecast.trend_percent > 0 ? '+' : ''}{revenueForecast.trend_percent}%
-                          </Text>
-                        </View>
-                      )}
-                      {expenseForecast?.forecast?.[0] && (
-                        <View style={styles.forecastCard}>
-                          <Ionicons name="trending-down" size={20} color={COLORS.danger} />
-                          <Text style={styles.forecastLabel}>{t('stats.forecastExpense')}</Text>
-                          <Text style={[styles.forecastValue, { color: COLORS.danger }]}>
-                            {expenseForecast.forecast[0].predicted_amount.toFixed(0)} €
-                          </Text>
-                          <Text style={styles.forecastTrend}>
-                            {expenseForecast.trend === 'increasing' ? '📈' : expenseForecast.trend === 'decreasing' ? '📉' : '➖'}
-                            {' '}{expenseForecast.trend_percent > 0 ? '+' : ''}{expenseForecast.trend_percent}%
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
+                {hasPermission('view_statistics') && (
+                  revenueForecast?.forecast?.length > 0 || expenseForecast?.forecast?.length > 0 ||
+                  revenueForecast?.current_month?.so_far > 0 || expenseForecast?.current_month?.so_far > 0
+                ) && (
+                  <ForecastCard
+                    revenueForecast={revenueForecast}
+                    expenseForecast={expenseForecast}
+                    forecastRangeDays={forecastRangeDays}
+                    onChangeRangeDays={setForecastRangeDays}
+                  />
+                )}
+
+                {/* What the owner put in and what the business gives back -
+                    moved here from Home (Л4). */}
+                {uses('wallet') && hasPermission('view_personal_investments') && (
+                  <PersonalInvestmentsCard periodState={summaryPeriodState} />
                 )}
 
                 {/* ROI Trend - owner or a delegated view_personal_investments
                     viewer, but also gated on view_profit: roi_percent/profit
                     come back null without it (see /roi/trend), and a null
                     value would otherwise break the chart. */}
-                {hasPermission('view_personal_investments') && hasPermission('view_profit') && roiTrend.length > 0 && (
+                {hasPermission('view_personal_investments') && hasPermission('view_profit') && investedMonths.length >= 2 && (
                   <View style={styles.chartContainer}>
                     <View style={styles.chartHeader}>
                       <Ionicons name="pulse" size={24} color={COLORS.primary} />
                       <Text style={styles.chartTitle}>{t('stats.roiTrendTitle')}</Text>
                     </View>
                     <LineChart
-                      data={roiTrend.map((pt) => ({ value: pt.roi_percent, label: pt.label }))}
+                      data={investedMonths.map((pt) => ({ value: pt.roi_percent, label: pt.label }))}
                       width={chartWidth}
                       height={180}
                       color={COLORS.primary}
@@ -1240,6 +1282,7 @@ export default function StatsScreen() {
             ) : activeTab === 'suppliers' ? (
               /* ========== ADVANCED SUPPLIERS TAB ========== */
               <View style={styles.suppliersContainer}>
+                {renderReportScope()}
                 {loadingSuppliers ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.primary} />
@@ -1263,15 +1306,22 @@ export default function StatsScreen() {
                           <Text style={[styles.execValue, { color: COLORS.success }]}>
                             {supplierOverview.executive_summary.active_suppliers}
                           </Text>
-                          <Text style={styles.execLabel}>{t('stats.activeSuppliers')}</Text>
+                          <Text style={styles.execLabel}>
+                            {supplierOverview.activity_basis === 'period' ? t('stats.activeInPeriod') : t('stats.activeSuppliers')}
+                          </Text>
                         </View>
                         <View style={styles.execItem}>
                           <Text style={[styles.execValue, { color: COLORS.danger }]}>
                             {supplierOverview.executive_summary.inactive_suppliers}
                           </Text>
-                          <Text style={styles.execLabel}>{t('stats.inactiveSuppliers')}</Text>
+                          <Text style={styles.execLabel}>
+                            {supplierOverview.activity_basis === 'period' ? t('stats.inactiveInPeriod') : t('stats.inactiveSuppliers')}
+                          </Text>
                         </View>
                       </View>
+                      {supplierOverview.activity_basis !== 'period' && (
+                        <Text style={styles.activityNote}>{t('stats.activityLast30Note')}</Text>
+                      )}
                       
                       {/* Concentration indicators */}
                       <View style={styles.concentrationRow}>
@@ -1302,17 +1352,19 @@ export default function StatsScreen() {
 
                     {/* Totals Summary */}
                     <View style={styles.supplierTotalsCard}>
-                      <Text style={styles.supplierTotalsTitle}>{t('stats.currentMonthTotal')}</Text>
+                      <Text style={styles.supplierTotalsTitle}>
+                        {reportScope === 'period' ? t('stats.periodTotal') : t('stats.allTimeTotal')}
+                      </Text>
                       <View style={styles.supplierTotalsRow}>
                         <View style={styles.supplierTotalItem}>
                           <Text style={styles.supplierTotalValue}>
-                            {supplierOverview.totals.total_amount.toFixed(2)} €
+                            {formatMoney(supplierOverview.totals.total_amount)}
                           </Text>
                           <Text style={styles.supplierTotalLabel}>{t('stats.totalAmount')}</Text>
                         </View>
                         <View style={styles.supplierTotalItem}>
                           <Text style={styles.supplierTotalValue}>
-                            {supplierOverview.totals.total_vat.toFixed(2)} €
+                            {formatMoney(supplierOverview.totals.total_vat)}
                           </Text>
                           <Text style={styles.supplierTotalLabel}>{t('stats.vat')}</Text>
                         </View>
@@ -1331,6 +1383,11 @@ export default function StatsScreen() {
                           <Text style={styles.supplierTotalLabel}>{t('stats.invoiceCount')}</Text>
                         </View>
                       </View>
+                      {(supplierOverview.totals.assets_total || 0) > 0 && (
+                        <Text style={styles.detailNote}>
+                          {t('stats.assetsIncluded').replace('{amount}', formatAmount((supplierOverview.totals.assets_total || 0)))}
+                        </Text>
+                      )}
                     </View>
 
                     {/* Chart Type & Ranking Selectors */}
@@ -1369,7 +1426,9 @@ export default function StatsScreen() {
                     <View style={styles.chartContainer}>
                       <View style={styles.chartHeader}>
                         <Ionicons name="trophy" size={24} color={COLORS.warning} />
-                        <Text style={styles.chartTitle}>{t('stats.top10')}</Text>
+                        <Text style={styles.chartTitle}>
+                          {t('stats.topSuppliersN').replace('{count}', String(chartSuppliers().length))}
+                        </Text>
                       </View>
                       
                       {supplierChartType === 'pie' && getPieChartData().length > 0 && (
@@ -1378,37 +1437,55 @@ export default function StatsScreen() {
                             data={getPieChartData()}
                             radius={pieChartRadius}
                             innerRadius={pieChartRadius * 0.5}
-                            centerLabelComponent={() => (
-                              <View style={styles.pieCenter}>
-                                <Text style={styles.pieCenterValue}>
-                                  {supplierOverview.totals.total_amount.toFixed(0)}€
-                                </Text>
-                                <Text style={styles.pieCenterLabel}>{t('stats.totalAmount')}</Text>
-                              </View>
-                            )}
+                            // The hole in the card's colour: the total is
+                            // white, and on the default white hole it was
+                            // not seen at all.
+                            innerCircleColor={COLORS.surface}
+                            centerLabelComponent={() => {
+                              // Sized to the hole, whatever the total's length.
+                              const total = formatMoney(supplierOverview.totals.total_amount);
+                              const room = pieChartRadius - 10;
+                              const fontSize = Math.max(10, Math.min(18, Math.floor(room / (total.length * 0.6))));
+                              return (
+                                <View style={[styles.pieCenter, { width: room }]}>
+                                  <Text style={[styles.pieCenterValue, { fontSize }]} numberOfLines={1}>{total}</Text>
+                                  <Text style={styles.pieCenterLabel} numberOfLines={1}>{t('stats.totalAmount')}</Text>
+                                </View>
+                              );
+                            }}
                             showText
                             textColor="white"
                             textSize={10}
                           />
                           
-                          {/* Legend */}
+                          {/* Legend: every slice, the rest included */}
                           <View style={styles.legendContainer}>
-                            {getCurrentRanking().slice(0, 5).map((supplier, index) => (
+                            {chartSuppliers().map((supplier, index) => (
                               <TouchableOpacity 
                                 key={supplier.supplier} 
                                 style={styles.legendItem}
                                 onPress={() => setSelectedSupplier(supplier.supplier)}
                               >
-                                <View style={[styles.legendColor, { backgroundColor: CHART_COLORS[index] }]} />
+                                <View style={[styles.legendColor, { backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
                                 <Text style={styles.legendText} numberOfLines={1}>{supplier.supplier}</Text>
                                 <Text style={styles.legendValue}>{supplier.dependency_percent.toFixed(0)}%</Text>
                               </TouchableOpacity>
                             ))}
+                            {chartRest().count > 0 && chartRest().amount > 0 && (
+                              <View style={styles.legendItem}>
+                                <View style={[styles.legendColor, { backgroundColor: COLORS.textMuted }]} />
+                                <Text style={[styles.legendText, styles.legendRest]} numberOfLines={1}>
+                                  {t('stats.otherSuppliers').replace('{count}', String(chartRest().count))}
+                                </Text>
+                                <Text style={styles.legendValue}>{chartRest().percent.toFixed(0)}%</Text>
+                              </View>
+                            )}
                           </View>
                         </View>
                       )}
                       
-                      {(() => {
+                      {/* Bars only when chosen - they used to show under the pie too. */}
+                      {supplierChartType === 'bar' && (() => {
                         const barData = getSupplierBarData();
                         if (barData.length === 0) return null;
                         // Size bars/spacing to the actual item count so all
@@ -1445,23 +1522,38 @@ export default function StatsScreen() {
                         );
                       })()}
                       
-                      {supplierChartType === 'line' && getSupplierBarData().length > 0 && (
-                        <LineChart
-                          data={getSupplierBarData().map(d => ({ value: d.value, label: d.label, dataPointColor: COLORS.primary }))}
-                          width={chartWidth}
-                          height={200}
-                          color={COLORS.primary}
-                          thickness={3}
-                          dataPointsColor={COLORS.primary}
-                          yAxisColor={COLORS.border}
-                          xAxisColor={COLORS.border}
-                          yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
-                          xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
-                          hideRules
-                          isAnimated
-                          curved
-                        />
-                      )}
+                      {supplierChartType === 'line' && (() => {
+                        const lineData = getSupplierBarData();
+                        if (lineData.length === 0) return null;
+                        // Every point within the card (ten used to run off its
+                        // right edge), and straight between them: a curve
+                        // drew rises between suppliers that are not there.
+                        const yAxisLabelWidth = 34;
+                        const edge = 12;
+                        const plotWidth = chartWidth - yAxisLabelWidth;
+                        const spacing = Math.floor((plotWidth - 2 * edge) / Math.max(1, lineData.length - 1));
+                        return (
+                          <LineChart
+                            data={lineData.map(d => ({ value: d.value, label: d.label, dataPointColor: COLORS.primary }))}
+                            width={plotWidth}
+                            height={200}
+                            spacing={spacing}
+                            initialSpacing={edge}
+                            endSpacing={edge}
+                            noOfSections={4}
+                            color={COLORS.primary}
+                            thickness={3}
+                            dataPointsColor={COLORS.primary}
+                            yAxisColor={COLORS.border}
+                            xAxisColor={COLORS.border}
+                            yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 10 }}
+                            xAxisLabelTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
+                            yAxisLabelWidth={yAxisLabelWidth}
+                            hideRules
+                            isAnimated
+                          />
+                        );
+                      })()}
                     </View>
 
                     {/* Top Suppliers List */}
@@ -1469,8 +1561,9 @@ export default function StatsScreen() {
                       <View style={styles.topSuppliersHeader}>
                         <Ionicons name="list" size={24} color={COLORS.primary} />
                         <Text style={[styles.topSuppliersTitle, { flex: 1 }]}>
-                          {supplierRankingType === 'amount' ? t('stats.topByAmount') :
-                           supplierRankingType === 'frequency' ? t('stats.topByFrequency') : t('stats.topByAvg')}
+                          {(supplierRankingType === 'amount' ? t('stats.topByAmount') :
+                            supplierRankingType === 'frequency' ? t('stats.topByFrequency') : t('stats.topByAvg'))
+                            .replace('{count}', String(getCurrentRanking().length))}
                         </Text>
                         <TouchableOpacity
                           style={[styles.compareToggle, compareMode && styles.compareToggleActive]}
@@ -1517,12 +1610,12 @@ export default function StatsScreen() {
                                   {supplier.supplier}
                                 </Text>
                                 <Text style={styles.supplierMeta}>
-                                  {supplier.invoice_count} {t('stats.invoices')} • {t('stats.avgShort')} {supplier.avg_invoice.toFixed(0)}€
+                                  {supplier.invoice_count} {t('stats.invoices')} • {t('stats.avgShort')} {formatMoney(supplier.avg_invoice)}
                                 </Text>
                               </View>
                               <View style={styles.supplierAmounts}>
                                 <Text style={styles.supplierAmount}>
-                                  {supplier.total_amount.toFixed(2)} €
+                                  {formatMoney(supplier.total_amount)}
                                 </Text>
                                 <View style={styles.dependencyBadge}>
                                   <Text style={[
@@ -1556,7 +1649,9 @@ export default function StatsScreen() {
                       <View style={styles.inactiveCard}>
                         <View style={styles.inactiveHeader}>
                           <Ionicons name="time" size={24} color={COLORS.danger} />
-                          <Text style={styles.inactiveTitle}>{t('stats.inactiveSuppliers')}</Text>
+                          <Text style={styles.inactiveTitle}>
+                            {supplierOverview.activity_basis === 'period' ? t('stats.inactiveInPeriod') : t('stats.inactiveSuppliers')}
+                          </Text>
                         </View>
                         {supplierOverview.inactive_suppliers.slice(0, 5).map((supplier, index) => (
                           <TouchableOpacity 
@@ -1607,6 +1702,16 @@ export default function StatsScreen() {
             ) : activeTab === 'items' ? (
               /* ========== ITEMS TAB ========== */
               <View style={styles.suppliersContainer}>
+                {/* Orders first: the day's action (the day card's "За
+                    поръчка днес" opens here), by supplier, what to order
+                    now, soon or not yet - from the rhythm of the scanned
+                    purchases, not stock tracking, and not tied to the
+                    period below. */}
+                <ReorderPlanCard
+                  plan={reorderPlan}
+                  onChanged={() => { api.getReorderPlan().then(setReorderPlan).catch(() => {}); }}
+                />
+                {renderReportScope()}
                 {loadingItems ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.primary} />
@@ -1614,55 +1719,20 @@ export default function StatsScreen() {
                   </View>
                 ) : (
                   <FadeIn>
-                    {/* Price Alerts Section */}
-                    {priceAlerts.length > 0 && (
-                      <View style={styles.priceAlertsCard}>
-                        <View style={styles.priceAlertsHeader}>
-                          <Ionicons name="alert-circle" size={24} color={COLORS.danger} />
-                          <Text style={styles.priceAlertsTitle}>{t('stats.priceAlerts')}</Text>
-                          {unreadAlerts > 0 && (
-                            <View style={styles.alertCountBadge}>
-                              <Text style={styles.alertCountText}>{unreadAlerts}</Text>
-                            </View>
-                          )}
-                        </View>
-                        
-                        {priceAlerts.filter(a => a.status !== 'dismissed').slice(0, 5).map((alert) => (
-                          <View 
-                            key={alert.id} 
-                            style={[styles.alertItem, alert.status === 'unread' && styles.alertItemUnread]}
-                          >
-                            <View style={styles.alertInfo}>
-                              <Text style={styles.alertItemName} numberOfLines={1}>{alert.item_name}</Text>
-                              <Text style={styles.alertSupplier}>{alert.supplier}</Text>
-                              <View style={styles.alertPrices}>
-                                <Text style={styles.alertOldPrice}>{alert.old_price.toFixed(2)}€</Text>
-                                <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
-                                <Text style={styles.alertNewPrice}>{alert.new_price.toFixed(2)}€</Text>
-                                <View style={styles.alertChangeBadge}>
-                                  <Text style={styles.alertChangeText}>+{alert.change_percent}%</Text>
-                                </View>
-                              </View>
-                            </View>
-                            <View style={styles.alertActions}>
-                              {alert.status === 'unread' && (
-                                <TouchableOpacity 
-                                  style={styles.alertActionBtn}
-                                  onPress={() => markAlertAsRead(alert.id)}
-                                >
-                                  <Ionicons name="checkmark" size={18} color={COLORS.success} />
-                                </TouchableOpacity>
-                              )}
-                              <TouchableOpacity 
-                                style={styles.alertActionBtn}
-                                onPress={() => dismissAlert(alert.id)}
-                              >
-                                <Ionicons name="close" size={18} color={COLORS.danger} />
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        ))}
-                      </View>
+                    {/* Price Alerts Section - header (with settings access) is
+                        always shown once items exist, even with zero current
+                        alerts, since this is the only place the threshold/
+                        mute-list settings are reachable from. */}
+                    {itemStats && (
+                      <PriceAlertsCard
+                        priceAlerts={priceAlerts}
+                        unreadAlerts={unreadAlerts}
+                        onOpenSettings={openAlertSettings}
+                        onViewInvoice={viewAlertInvoice}
+                        onMute={muteAlertItem}
+                        onMarkRead={markAlertAsRead}
+                        onDismiss={dismissAlert}
+                      />
                     )}
 
                     {/* Item Totals */}
@@ -1678,86 +1748,49 @@ export default function StatsScreen() {
                           </View>
                           <View style={styles.supplierTotalItem}>
                             <Text style={styles.supplierTotalValue}>
-                              {(itemStats.totals?.total_value || 0).toFixed(0)} €
+                              {formatMoney((itemStats.totals?.total_value || 0))}
                             </Text>
                             <Text style={styles.supplierTotalLabel}>{t('stats.totalValue')}</Text>
                           </View>
                         </View>
+                        {/* Invoices whose lines were never read add nothing
+                            here, so the items fall short of the suppliers -
+                            by how much is said, not left to guess. */}
+                        {itemStats.coverage?.share != null && itemStats.coverage.invoices_without_lines > 0 && (
+                          <Text style={styles.itemsCoverageText}>
+                            {t('stats.itemsCoverage')
+                              .replace('{percent}', String(Math.round(itemStats.coverage.share * 100)))
+                              .replace('{count}', String(itemStats.coverage.invoices_without_lines))}
+                          </Text>
+                        )}
                       </View>
                     )}
 
+
+                    {/* Cross-data-source insight #2: revenue bucketed by
+                        weekday over the trailing 8 weeks, highlighting a
+                        weekday that consistently underperforms. */}
+                    <WeekdayRevenueCard weekdays={weekdayRevenue} suggestion={weakDaySuggestion} />
+
+                    {/* Cross-data-source insight #1: the same weekday
+                        pattern divided by Work Schedule's own scheduled
+                        hours - needs manage_budget too. */}
+                    {hasPermission('manage_budget') && (
+                      <StaffingEfficiencyCard
+                        weekdays={staffingEfficiency}
+                        suggestion={staffingRebalanceSuggestion}
+                      />
+                    )}
+
                     {/* Price Inflation Card */}
-                    <View style={styles.inflationCard}>
-                      <View style={styles.priceAlertsHeader}>
-                        <Ionicons name="analytics" size={24} color={COLORS.warning} />
-                        <Text style={styles.inflationTitle}>{t('stats.priceInflation')}</Text>
-                      </View>
-
-                      <View style={styles.rankingSelector}>
-                        {(['month', 'quarter', 'year'] as const).map((p) => (
-                          <TouchableOpacity
-                            key={p}
-                            style={[styles.rankingButton, inflationPeriod === p && styles.rankingButtonActive]}
-                            onPress={() => setInflationPeriod(p)}
-                          >
-                            <Text style={[styles.rankingButtonText, inflationPeriod === p && styles.rankingButtonTextActive]}>
-                              {t(`stats.inflationPeriod.${p}`)}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-
-                      {loadingInflation ? (
-                        <ActivityIndicator size="small" color={COLORS.warning} style={{ marginVertical: 16 }} />
-                      ) : inflationData && inflationData.items_compared > 0 ? (
-                        <>
-                          <View style={styles.inflationHeadline}>
-                            <Text style={[
-                              styles.inflationHeadlineValue,
-                              { color: inflationData.overall_change_percent > 0 ? COLORS.danger : inflationData.overall_change_percent < 0 ? COLORS.success : COLORS.textSecondary }
-                            ]}>
-                              {inflationData.overall_change_percent > 0 ? '+' : ''}{inflationData.overall_change_percent}%
-                            </Text>
-                            <Text style={styles.inflationHeadlineLabel}>
-                              {t('stats.inflationHeadline')} ({inflationData.items_compared} {t('stats.inflationItemsCompared')})
-                            </Text>
-                          </View>
-
-                          <TouchableOpacity
-                            style={styles.inflationToggle}
-                            onPress={() => setInflationExpanded(!inflationExpanded)}
-                          >
-                            <Text style={styles.inflationToggleText}>
-                              {inflationExpanded ? t('stats.inflationHideDetails') : t('stats.inflationShowDetails')}
-                            </Text>
-                            <Ionicons name={inflationExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.warning} />
-                          </TouchableOpacity>
-
-                          {inflationExpanded && inflationData.items.map((item: any) => (
-                            <View key={item.item_name} style={styles.alertItem}>
-                              <View style={styles.alertInfo}>
-                                <Text style={styles.alertItemName} numberOfLines={1}>{item.item_name}</Text>
-                                <Text style={styles.alertSupplier}>{item.supplier} • {item.purchase_count}x</Text>
-                                <View style={styles.alertPrices}>
-                                  <Text style={styles.alertOldPrice}>{item.start_price.toFixed(2)}€</Text>
-                                  <Ionicons name="arrow-forward" size={14} color={COLORS.textMuted} />
-                                  <Text style={[styles.alertNewPrice, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>
-                                    {item.end_price.toFixed(2)}€
-                                  </Text>
-                                  <View style={[styles.alertChangeBadge, { backgroundColor: item.change_percent >= 0 ? '#EF444420' : '#10B98120' }]}>
-                                    <Text style={[styles.alertChangeText, { color: item.change_percent >= 0 ? COLORS.danger : COLORS.success }]}>
-                                      {item.change_percent > 0 ? '+' : ''}{item.change_percent}%
-                                    </Text>
-                                  </View>
-                                </View>
-                              </View>
-                            </View>
-                          ))}
-                        </>
-                      ) : (
-                        <Text style={styles.inflationNoData}>{t('stats.inflationNoData')}</Text>
-                      )}
-                    </View>
+                    <PriceInflationCard
+                      inflationData={inflationData}
+                      inflationPeriod={inflationPeriod}
+                      onChangePeriod={setInflationPeriod}
+                      loadingInflation={loadingInflation}
+                      inflationExpanded={inflationExpanded}
+                      onToggleExpanded={() => setInflationExpanded(!inflationExpanded)}
+                    />
 
                     {/* Ranking Type Selector */}
                     <View style={styles.rankingSelector}>
@@ -1787,6 +1820,24 @@ export default function StatsScreen() {
                       </TouchableOpacity>
                     </View>
 
+                    {/* Quantity is compared within one unit: kg with kg, pieces with pieces */}
+                    {itemRankingType === 'quantity' && quantityUnits.length > 1 && (
+                      <View style={styles.unitChipsRow}>
+                        {quantityUnits.map((unit) => (
+                          <TouchableOpacity
+                            key={unit}
+                            style={[styles.unitChip, activeQuantityUnit === unit && styles.unitChipActive]}
+                            onPress={() => setQuantityUnit(unit)}
+                          >
+                            <Text style={[styles.unitChipText, activeQuantityUnit === unit && styles.unitChipTextActive]}>
+                              {unit}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                        <Text style={styles.unitChipsHint}>{t('stats.quantityByUnit')}</Text>
+                      </View>
+                    )}
+
                     {/* Items Ranking List */}
                     <View style={styles.topSuppliersCard}>
                       <View style={styles.topSuppliersHeader}>
@@ -1798,7 +1849,7 @@ export default function StatsScreen() {
                       </View>
                       
                       {getCurrentItemRanking().length > 0 ? (
-                        getCurrentItemRanking().map((item: any, index: number) => (
+                        getCurrentItemRanking().map((item, index) => (
                           <TouchableOpacity 
                             key={item.item_name} 
                             style={styles.supplierItem}
@@ -1822,9 +1873,9 @@ export default function StatsScreen() {
                             </View>
                             <View style={styles.supplierAmounts}>
                               <Text style={styles.supplierAmount}>
-                                {itemRankingType === 'quantity' 
-                                  ? `${item.quantity.toFixed(1)} ${t('units.pieces')}`
-                                  : `${item.total_value.toFixed(2)} €`}
+                                {itemRankingType === 'quantity'
+                                  ? `${Number.isInteger(item.quantity) ? item.quantity : item.quantity.toFixed(1)} ${item.unit || ''}`.trim()
+                                  : `${formatMoney(item.total_value)}`}
                               </Text>
                               <View style={styles.itemTrendBadge}>
                                 <Ionicons 
@@ -1875,7 +1926,7 @@ export default function StatsScreen() {
                               ]}>
                                 {item.trend_percent > 0 ? '+' : ''}{item.trend_percent.toFixed(1)}%
                               </Text>
-                              <Text style={styles.itemAvgPrice}>{t('stats.avgPrice')}: {item.avg_price.toFixed(2)}€</Text>
+                              <Text style={styles.itemAvgPrice}>{t('stats.avgPrice')}: {formatMoney(item.avg_price)}</Text>
                             </View>
                           </TouchableOpacity>
                         ))}
@@ -1891,31 +1942,49 @@ export default function StatsScreen() {
       </View>
       
       {/* Supplier Detail Modal */}
-      {renderSupplierDetailModal()}
+      <SupplierDetailModal
+        supplier={selectedSupplier}
+        detail={supplierDetail}
+        loading={loadingDetail}
+        reportScope={reportScope}
+        groupBy={activeSupplierGroupBy}
+        onGroupBy={setSupplierGroupBy}
+        chartWidth={chartWidth}
+        onClose={closeSupplierDetail}
+      />
 
       {/* Supplier Compare Modal */}
-      {renderCompareModal()}
+      <SupplierCompareModal
+        visible={compareModalVisible}
+        onClose={closeCompareModal}
+        loadingCompare={loadingCompare}
+        compareResult={compareResult}
+      />
+
+      {/* Price Alert Settings Modal */}
+      <AlertSettingsModal
+        visible={alertSettingsModalVisible}
+        onClose={() => setAlertSettingsModalVisible(false)}
+        alertSettings={alertSettings}
+        onChangeSettings={setAlertSettings}
+        alertMutes={alertMutes}
+        savingAlertSettings={savingAlertSettings}
+        onSave={saveAlertSettings}
+        onUnmute={unmuteItem}
+      />
 
       {/* Item Detail Modal */}
       <Modal
         visible={!!selectedItem}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => {
-          setSelectedItem(null);
-          setItemPriceHistory(null);
-          setItemBySupplier(null);
-        }}
+        onRequestClose={closeItemDetail}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity 
               style={styles.modalCloseButton}
-              onPress={() => {
-                setSelectedItem(null);
-                setItemPriceHistory(null);
-                setItemBySupplier(null);
-              }}
+              onPress={closeItemDetail}
             >
               <Ionicons name="close" size={24} color="white" />
             </TouchableOpacity>
@@ -1935,15 +2004,15 @@ export default function StatsScreen() {
                   <Text style={styles.detailCardTitle}>{t('stats.priceHistory')}</Text>
                   <View style={styles.detailGrid}>
                     <View style={styles.detailItem}>
-                      <Text style={styles.detailValue}>{itemPriceHistory.statistics.avg_price}€</Text>
+                      <Text style={styles.detailValue}>{formatMoney(itemPriceHistory.statistics.avg_price)}</Text>
                       <Text style={styles.detailLabel}>{t('stats.avgPrice')}</Text>
                     </View>
                     <View style={styles.detailItem}>
-                      <Text style={styles.detailValue}>{itemPriceHistory.statistics.min_price}€</Text>
+                      <Text style={styles.detailValue}>{formatMoney(itemPriceHistory.statistics.min_price)}</Text>
                       <Text style={styles.detailLabel}>{t('stats.minPrice')}</Text>
                     </View>
                     <View style={styles.detailItem}>
-                      <Text style={styles.detailValue}>{itemPriceHistory.statistics.max_price}€</Text>
+                      <Text style={styles.detailValue}>{formatMoney(itemPriceHistory.statistics.max_price)}</Text>
                       <Text style={styles.detailLabel}>{t('stats.maxPrice')}</Text>
                     </View>
                     <View style={styles.detailItem}>
@@ -1956,6 +2025,18 @@ export default function StatsScreen() {
                       <Text style={styles.detailLabel}>{t('stats.priceTrends')}</Text>
                     </View>
                   </View>
+                  {/* Price per kg / l / piece - shown when it says something the
+                      line price does not (a 5 kg tin, a 250 ml bottle) */}
+                  {itemPriceHistory.statistics.avg_base_price != null && itemPriceHistory.statistics.base_unit &&
+                    Math.abs(itemPriceHistory.statistics.avg_base_price - itemPriceHistory.statistics.avg_price) > 0.005 && (
+                    <View style={styles.basePriceRow}>
+                      <Ionicons name="scale-outline" size={16} color={COLORS.primary} />
+                      <Text style={styles.basePriceText}>
+                        {t('stats.pricePerBaseUnit').replace('{unit}', itemPriceHistory.statistics.base_unit)}:{' '}
+                        <Text style={styles.basePriceValue}>{formatUnitPrice(itemPriceHistory.statistics.avg_base_price)} €</Text>
+                      </Text>
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -1997,8 +2078,19 @@ export default function StatsScreen() {
                       <View style={{ flex: 1, marginLeft: 8 }}>
                         <Text style={styles.recommendationTitle}>{t('stats.bestSupplier')}</Text>
                         <Text style={styles.recommendationText}>
-                          {itemBySupplier.recommendation.best_supplier} - {itemBySupplier.recommendation.avg_price}€
+                          {itemBySupplier.recommendation.best_supplier} - {
+                            itemBySupplier.recommendation.compared_per === 'base_unit' &&
+                            itemBySupplier.recommendation.avg_base_price != null &&
+                            itemBySupplier.recommendation.base_unit
+                              ? `${formatUnitPrice(itemBySupplier.recommendation.avg_base_price)}\u00A0€/${itemBySupplier.recommendation.base_unit}`
+                              : formatMoney(itemBySupplier.recommendation.avg_price)
+                          }
                         </Text>
+                        {itemBySupplier.recommendation.compared_per === 'base_unit' && itemBySupplier.recommendation.base_unit && (
+                          <Text style={styles.recommendationSavings}>
+                            {t('stats.comparedPerBase').replace('{unit}', itemBySupplier.recommendation.base_unit)}
+                          </Text>
+                        )}
                         <Text style={styles.recommendationSavings}>
                           {t('stats.potentialSavings')}: {itemBySupplier.recommendation.potential_savings_percent}%
                         </Text>
@@ -2023,9 +2115,116 @@ export default function StatsScreen() {
                         </Text>
                       </View>
                       <View style={styles.supplierComparePrices}>
-                        <Text style={styles.supplierComparePrice}>{sup.avg_price}€</Text>
-                        <Text style={styles.supplierComparePriceLabel}>{t('stats.avgPrice')}</Text>
+                        <Text style={styles.supplierComparePrice}>{formatMoney(sup.avg_price)}{sup.unit ? `/${sup.unit}` : ''}</Text>
+                        {sup.avg_base_price != null && sup.base_unit && Math.abs(sup.avg_base_price - sup.avg_price) > 0.005 ? (
+                          <Text style={styles.supplierComparePriceLabel}>
+                            {formatUnitPrice(sup.avg_base_price)}{'\u00A0'}€/{sup.base_unit}
+                          </Text>
+                        ) : (
+                          <Text style={styles.supplierComparePriceLabel}>{t('stats.avgPrice')}</Text>
+                        )}
                       </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Other pack sizes of the same product, per kg / l / piece */}
+              {(itemBySupplier?.sizes?.length ?? 0) > 0 && (
+                <View style={styles.detailCard}>
+                  <Text style={styles.detailCardTitle}>{t('stats.otherSizes')}</Text>
+                  <Text style={styles.catalogDesc}>
+                    {t('stats.otherSizesDesc').replace('{unit}', itemBySupplier.sizes[0].base_unit)}
+                    {itemPriceHistory?.statistics?.avg_base_price != null && itemPriceHistory.statistics.base_unit
+                      ? ` ${t('stats.thisSizePrice')
+                        .replace('{price}', formatUnitPrice(itemPriceHistory.statistics.avg_base_price))
+                        .replace('{unit}', itemPriceHistory.statistics.base_unit)}`
+                      : ''}
+                  </Text>
+                  {itemBySupplier.sizes.map((size: ItemOtherSize) => {
+                    const diff = size.difference_percent;
+                    return (
+                      <TouchableOpacity
+                        key={size.item_name}
+                        style={styles.supplierCompareItem}
+                        onPress={() => setSelectedItem(size.item_name)}
+                      >
+                        <View style={styles.supplierCompareInfo}>
+                          <Text style={styles.supplierCompareName} numberOfLines={1}>{size.item_name}</Text>
+                          <Text style={styles.supplierCompareMeta}>{size.purchase_count} {t('stats.times')}</Text>
+                        </View>
+                        <View style={styles.supplierComparePrices}>
+                          <Text style={styles.supplierComparePrice}>{formatUnitPrice(size.avg_base_price)}{'\u00A0'}€/{size.base_unit}</Text>
+                          {diff != null && (
+                            <Text style={[
+                              styles.supplierComparePriceLabel,
+                              { color: diff < -1 ? COLORS.success : diff > 1 ? COLORS.danger : COLORS.textMuted },
+                            ]}>
+                              {diff < -1
+                                ? t('stats.cheaperBy').replace('{pct}', String(Math.round(Math.abs(diff))))
+                                : diff > 1
+                                  ? t('stats.dearerBy').replace('{pct}', String(Math.round(diff)))
+                                  : t('stats.samePricePerUnit')}
+                            </Text>
+                          )}
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} style={{ marginLeft: 6 }} />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* The owner's catalog: is a look-alike name the same item? */}
+              {itemRelated && (itemRelated.merged_with.length > 0 || itemRelated.similar.length > 0) && (
+                <View style={styles.detailCard}>
+                  <Text style={styles.detailCardTitle}>{t('stats.catalogTitle')}</Text>
+                  <Text style={styles.catalogDesc}>{t('stats.catalogDesc')}</Text>
+                  {itemRelated.merged_with.length > 0 && (
+                    <Text style={styles.catalogSubtitle}>{t('stats.mergedWith')}</Text>
+                  )}
+                  {itemRelated.merged_with.map((name) => (
+                    <View key={`merged-${name}`} style={styles.catalogRow}>
+                      <Text style={styles.catalogName} numberOfLines={2}>{name}</Text>
+                      {catalogBusy === name ? (
+                        <ActivityIndicator size="small" color={COLORS.primary} />
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.catalogButton}
+                          disabled={!!catalogBusy}
+                          onPress={() => answerCatalog(name, false)}
+                        >
+                          <Text style={styles.catalogButtonText}>{t('stats.separate')}</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                  {itemRelated.similar.length > 0 && (
+                    <Text style={styles.catalogSubtitle}>{t('stats.similarNames')}</Text>
+                  )}
+                  {itemRelated.similar.map((similar) => (
+                    <View key={`similar-${similar.item_name}`} style={styles.catalogRow}>
+                      <Text style={styles.catalogName} numberOfLines={2}>{similar.item_name}</Text>
+                      {catalogBusy === similar.item_name ? (
+                        <ActivityIndicator size="small" color={COLORS.primary} />
+                      ) : (
+                        <View style={styles.catalogButtons}>
+                          <TouchableOpacity
+                            style={[styles.catalogButton, styles.catalogButtonPrimary]}
+                            disabled={!!catalogBusy}
+                            onPress={() => answerCatalog(similar.item_name, true)}
+                          >
+                            <Text style={[styles.catalogButtonText, styles.catalogButtonTextPrimary]}>{t('stats.markSame')}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.catalogButton}
+                            disabled={!!catalogBusy}
+                            onPress={() => answerCatalog(similar.item_name, false)}
+                          >
+                            <Text style={styles.catalogButtonText}>{t('stats.markDifferent')}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   ))}
                 </View>
@@ -2041,7 +2240,7 @@ export default function StatsScreen() {
                         <Text style={styles.recentInvoiceNumber}>№{h.invoice_number}</Text>
                         <Text style={styles.recentInvoiceDate}>{h.date} • {h.supplier}</Text>
                       </View>
-                      <Text style={styles.recentInvoiceAmount}>{h.unit_price.toFixed(2)}€</Text>
+                      <Text style={styles.recentInvoiceAmount}>{formatMoney(h.unit_price)}</Text>
                     </View>
                   ))}
                 </View>
@@ -2094,8 +2293,40 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 4,
   },
-  periodSelectorWrap: {
-    marginBottom: 20,
+  sectionLinks: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  sectionLink: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
+  sectionLinkDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border },
+  sectionLinkTitle: { color: 'white', fontSize: 15, fontWeight: '600' },
+  sectionLinkText: { color: COLORS.textMuted, fontSize: 12, marginTop: 1 },
+  quickLinksRow: {
+    marginTop: 12,
+    height: 36,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  quickLinksContent: {
+    alignItems: 'center',
+  },
+  quickLinkChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: COLORS.surface,
+    marginRight: 8,
+    flexShrink: 0,
+  },
+  quickLinkChipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
   periodButton: {
     flex: 1,
@@ -2144,28 +2375,46 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
   },
-  summaryGrid: {
+  avgTurnoverExpected: {
+    marginTop: 6,
+    color: COLORS.info,
+  },
+  personalUseRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 20,
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
   },
-  summaryCard: {
-    width: '47%',
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 16,
-    borderLeftWidth: 4,
-  },
-  cardLabel: {
-    fontSize: 12,
+  personalUseText: {
+    flex: 1,
+    minWidth: 0,
     color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  chartNote: {
+    fontSize: 12,
+    color: COLORS.textMuted,
     marginTop: 8,
   },
-  cardValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 4,
+  reportScopeSelector: {
+    marginBottom: 12,
+  },
+  activityNote: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginTop: -6,
+    marginBottom: 10,
+  },
+  detailNote: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 8,
   },
   restrictedNote: {
     flexDirection: 'row',
@@ -2175,7 +2424,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   restrictedNoteText: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
     flexShrink: 1,
   },
@@ -2226,6 +2475,9 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 16,
   },
+  chartTotal: { marginLeft: 'auto', alignItems: 'flex-end' },
+  chartTotalValue: { fontSize: 16, fontWeight: 'bold' },
+  chartSubNote: { fontSize: 12, color: COLORS.textSecondary, marginTop: -6, marginBottom: 8, textAlign: 'right' },
   chartTitle: {
     fontSize: 16,
     fontWeight: '600',
@@ -2264,7 +2516,7 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   vatLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginBottom: 4,
   },
@@ -2290,35 +2542,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
-  additionalStats: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-  },
-  statRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
-  },
-  statItem: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-  },
-  statLabel: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: 'white',
-    marginTop: 4,
-  },
   top3Section: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,
@@ -2332,6 +2555,12 @@ const styles = StyleSheet.create({
   },
   top3Column: {
     flex: 1,
+  },
+  itemsCoverageText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 10,
+    textAlign: 'center',
   },
   top3ColumnTitle: {
     fontSize: 12,
@@ -2364,45 +2593,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: 'white',
-  },
-  forecastSection: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 16,
-  },
-  forecastHint: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: -4,
-    marginBottom: 12,
-  },
-  forecastRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  forecastCard: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-  },
-  forecastLabel: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  forecastValue: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    marginTop: 4,
-  },
-  forecastTrend: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 4,
   },
   tabSelector: {
     flexDirection: 'row',
@@ -2469,6 +2659,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   execItem: {
+    flex: 1,
     alignItems: 'center',
   },
   execValue: {
@@ -2480,6 +2671,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 4,
+    textAlign: 'center',
   },
   concentrationRow: {
     marginBottom: 12,
@@ -2616,7 +2808,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   pieCenterLabel: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
   legendContainer: {
@@ -2643,6 +2835,10 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 13,
     fontWeight: 'bold',
+  },
+  // "The rest (3)": not a supplier of its own, so not in white.
+  legendRest: {
+    color: COLORS.textSecondary,
   },
   
   // Top Suppliers
@@ -2703,60 +2899,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
-  compareCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-  },
-  compareSupplierName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: 'white',
-    marginBottom: 10,
-  },
-  compareBarRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  compareBarLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  compareBarValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'white',
-  },
-  compareBarTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.background,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  compareBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  compareStatsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  compareStatItem: {
-    alignItems: 'center',
-  },
-  compareStatLabel: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginBottom: 2,
-  },
-  compareStatValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-  },
   supplierItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2784,7 +2926,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   supplierMeta: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -2805,7 +2947,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   dependencyText: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.primary,
     fontWeight: 'bold',
   },
@@ -2845,7 +2987,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   inactiveMeta: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -2858,7 +3000,7 @@ const styles = StyleSheet.create({
     color: COLORS.danger,
   },
   inactiveDaysLabel: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
   
@@ -2970,80 +3112,11 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   detailLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 4,
   },
-  detailDates: {
-    marginTop: 16,
-  },
-  detailDateItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  detailDateLabel: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-  },
-  detailDateValue: {
-    fontSize: 12,
-    color: 'white',
-    fontWeight: '500',
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginTop: 16,
-  },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
   
-  // Anomaly
-  anomalyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  anomalyItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-  },
-  anomalyInvoice: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-  },
-  anomalyDate: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-  },
-  anomalyAmount: {
-    alignItems: 'flex-end',
-  },
-  anomalyValue: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: COLORS.warning,
-  },
-  anomalyDeviation: {
-    fontSize: 10,
-    color: COLORS.danger,
-    fontWeight: 'bold',
-  },
   
   // Recent Invoices
   recentInvoiceItem: {
@@ -3060,7 +3133,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   recentInvoiceDate: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
   },
   recentInvoiceAmount: {
@@ -3088,146 +3161,8 @@ const styles = StyleSheet.create({
   },
   
   // Price Alerts Card
-  priceAlertsCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.danger,
-  },
-  priceAlertsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
-  priceAlertsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.danger,
-    flex: 1,
-  },
-  alertCountBadge: {
-    backgroundColor: COLORS.danger,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  alertCountText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  alertItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
-  },
-  alertItemUnread: {
-    borderLeftWidth: 3,
-    borderLeftColor: COLORS.danger,
-  },
-  alertInfo: {
-    flex: 1,
-  },
-  alertItemName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-  },
-  alertSupplier: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  alertPrices: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-  },
-  alertOldPrice: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    textDecorationLine: 'line-through',
-  },
-  alertNewPrice: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: COLORS.danger,
-  },
-  alertChangeBadge: {
-    backgroundColor: '#EF444420',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  alertChangeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: COLORS.danger,
-  },
-  alertActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  alertActionBtn: {
-    padding: 8,
-    backgroundColor: COLORS.surface,
-    borderRadius: 8,
-  },
 
   // Price Inflation Card
-  inflationCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.warning,
-  },
-  inflationTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.warning,
-    flex: 1,
-  },
-  inflationHeadline: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  inflationHeadlineValue: {
-    fontSize: 36,
-    fontWeight: 'bold',
-  },
-  inflationHeadlineLabel: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  inflationToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-  },
-  inflationToggleText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.warning,
-  },
-  inflationNoData: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
 
   // Item Trend Badge
   itemTrendBadge: {
@@ -3241,11 +3176,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   itemTrendText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 'bold',
   },
   itemAvgPrice: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -3270,7 +3205,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   recommendationSavings: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.success,
     marginTop: 4,
   },
@@ -3303,7 +3238,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   supplierCompareMeta: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -3316,7 +3251,112 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   supplierComparePriceLabel: {
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.textMuted,
+  },
+
+  // Price per kg / l / piece
+  basePriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    backgroundColor: COLORS.background,
+    borderRadius: 10,
+    padding: 10,
+  },
+  basePriceText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  basePriceValue: {
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+
+  // Quantity ranking per unit
+  unitChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  unitChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  unitChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  unitChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  unitChipTextActive: {
+    color: 'white',
+  },
+  unitChipsHint: {
+    width: '100%',
+    fontSize: 12,
+    color: COLORS.textMuted,
+  },
+
+  // Same / different catalog
+  catalogDesc: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: -8,
+    marginBottom: 12,
+  },
+  catalogSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  catalogRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    gap: 8,
+  },
+  catalogName: {
+    flex: 1,
+    fontSize: 14,
+    color: 'white',
+  },
+  catalogButtons: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  catalogButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  catalogButtonPrimary: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  catalogButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  catalogButtonTextPrimary: {
+    color: 'white',
   },
 });

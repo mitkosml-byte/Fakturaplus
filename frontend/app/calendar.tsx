@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { AmbientGlow } from '../src/components/AmbientGlow';
 import {
   View,
   Text,
@@ -13,13 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
 import { CalendarEvent } from '../src/types';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
-import { AccessDenied, ScreenEnter, BottomSheet } from '../src/components';
+import { AccessDenied, ScreenEnter, BottomSheet, Avatar } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
@@ -45,6 +46,10 @@ export default function CalendarScreen() {
 
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  // A shared event only ever stored creator_name (a snapshot), never a
+  // picture - resolved from the company directory instead, same approach
+  // as message-thread.tsx.
+  const [pictureByUserId, setPictureByUserId] = useState<Record<string, string | null>>({});
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -76,6 +81,9 @@ export default function CalendarScreen() {
   useFocusEffect(
     useCallback(() => {
       loadEvents();
+      api.getCompanyDirectory()
+        .then((dir) => setPictureByUserId(Object.fromEntries(dir.map((d) => [d.user_id, d.picture]))))
+        .catch(() => {});
     }, [loadEvents])
   );
 
@@ -176,6 +184,7 @@ export default function CalendarScreen() {
     <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -221,10 +230,15 @@ export default function CalendarScreen() {
                         <Text style={styles.eventDescription} numberOfLines={2}>{ev.description}</Text>
                       )}
                       <View style={styles.eventFooter}>
-                        <Text style={styles.eventMeta}>
-                          {ev.visibility === 'shared' ? `${t('calendar.sharedBy')} ${ev.creator_name}` : t('calendar.personal')}
-                          {ev.reminder_minutes_before ? ` · 🔔` : ''}
-                        </Text>
+                        <View style={styles.eventMetaRow}>
+                          {ev.visibility === 'shared' && (
+                            <Avatar uri={pictureByUserId[ev.creator_id]} name={ev.creator_name} size={16} />
+                          )}
+                          <Text style={styles.eventMeta}>
+                            {ev.visibility === 'shared' ? `${t('calendar.sharedBy')} ${ev.creator_name}` : t('calendar.personal')}
+                            {ev.reminder_minutes_before ? ` · 🔔` : ''}
+                          </Text>
+                        </View>
                         <TouchableOpacity onPress={() => handleDelete(ev)} hitSlop={8}>
                           <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
                         </TouchableOpacity>
@@ -316,17 +330,17 @@ export default function CalendarScreen() {
                     ))}
                   </View>
 
-                  <TouchableOpacity
-                    style={[styles.saveButton, saving && { opacity: 0.6 }]}
-                    onPress={handleSave}
-                    disabled={saving}
-                  >
-                    {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
-                    <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                  </TouchableOpacity>
                 </ScrollView>
+                <TouchableOpacity
+                  style={[styles.saveButton, saving && { opacity: 0.6 }]}
+                  onPress={handleSave}
+                  disabled={saving}
+                >
+                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveButtonText}>{t('common.save')}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
               </View>
           </BottomSheet>
 
@@ -406,12 +420,14 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   eventMeta: { fontSize: 12, color: COLORS.textMuted },
+  eventMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
   modalContent: {
+    flexShrink: 1,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

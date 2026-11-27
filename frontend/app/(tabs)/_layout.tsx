@@ -1,15 +1,20 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Tabs, useRouter, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, View, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../../src/i18n';
+import { useAuth } from '../../src/contexts/AuthContext';
 import { AnimatedTabIcon } from '../../src/components';
 import { COLORS } from '../../src/theme/colors';
+import { useShowTeamTab } from '../../src/hooks/useTeamTab';
+import { ScreenErrorFallback } from '../../src/components/ScreenErrorFallback';
 
-// Left-to-right order of the tab bar, used to resolve which tab a swipe
-// should land on and to know a swipe's direction relative to it.
-const TAB_ROUTES = ['/', '/scan', '/invoices', '/stats', '/profile'];
+// A tab that breaks while drawing: a way back, inside the app's frame.
+export function ErrorBoundary(props: { error: Error; retry: () => Promise<void> }) {
+  return <ScreenErrorFallback {...props} />;
+}
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
@@ -17,22 +22,73 @@ export default function TabsLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const { width } = useWindowDimensions();
+  const { hasPermission } = useAuth();
+
+  // The Team tab (Calendar/Messages/Payroll/Absences/Work schedule) earns
+  // a slot in the bar for a viewer who can reach at least one of
+  // Calendar/Messages/Payroll/Absences (same two permissions gating each
+  // individually), OR who simply belongs to a company - Work schedule
+  // itself is self-visible to every team member (their own shifts), with
+  // no permission required, so the tab can't stay gated behind the
+  // others once that card exists. Left-to-right order of the tab bar,
+  // used to resolve which tab a swipe should land on and to know a
+  // swipe's direction relative to it - recomputed here (not a
+  // module-level constant) since it now depends on this check.
+  // ...and only while the business uses the team or payroll module.
+  const showTeamTab = useShowTeamTab();
+  // Scan/Invoices both ultimately create or manage invoice records (the
+  // scan endpoint itself requires manage_invoices server-side), and Stats
+  // is squarely "advanced statistics" - none of these were ever meant to
+  // be universally visible the way Team (own work schedule) and Account
+  // are. They used to show in the bar for every team member regardless of
+  // permission - a staff account with none of these three still saw all
+  // three tabs, even though opening them would 403 or (for Stats) render
+  // a financial picture they shouldn't see fields of.
+  const showInvoicesTab = hasPermission('manage_invoices');
+  const showScanTab = hasPermission('manage_invoices');
+  const showStatsTab = hasPermission('view_statistics');
+  // Home itself used to be the one tab every team member saw regardless of
+  // permission - but once its summary cards were locked down to
+  // view_statistics (Module: zero-permission-staff-sees-company-totals
+  // incident), a viewer without it only ever lands on a wall of blurred
+  // placeholders and an empty daily briefing. Same gate as Stats, same
+  // precedent as Scan/Invoices above - a viewer with none of these simply
+  // never sees Home at all, and lands on Team (their own work schedule)
+  // instead; see the Redirect in (tabs)/index.tsx for the other half of
+  // this (hiding the tab alone wouldn't stop login from landing there).
+  const showHomeTab = hasPermission('view_statistics');
+  const TAB_ROUTES = useMemo(
+    () => [
+      ...(showHomeTab ? ['/'] : []),
+      ...(showScanTab ? ['/scan'] : []),
+      ...(showInvoicesTab ? ['/invoices'] : []),
+      ...(showStatsTab ? ['/stats'] : []),
+      ...(showTeamTab ? ['/team'] : []),
+      '/profile',
+    ],
+    [showHomeTab, showScanTab, showInvoicesTab, showStatsTab, showTeamTab]
+  );
 
   // PanResponder below is created once via useRef so its handlers don't
   // reattach on every render; goToTab must therefore read the *current*
-  // route from a ref rather than close over the `pathname` value from
-  // whichever render first built the responder, or every swipe after
-  // the first navigation would still act as if we were on the initial tab.
+  // route (and the *current* TAB_ROUTES, now that it can change at
+  // runtime if a permission check flips - e.g. right after login, before
+  // the user profile has fully loaded) from refs rather than close over
+  // values from whichever render first built the responder, or every
+  // swipe after that would still act on stale data.
   const pathnameRef = useRef(pathname);
   pathnameRef.current = pathname;
+  const tabRoutesRef = useRef(TAB_ROUTES);
+  tabRoutesRef.current = TAB_ROUTES;
 
   const goToTab = useCallback(
     (delta: number) => {
-      const currentIndex = TAB_ROUTES.indexOf(pathnameRef.current);
+      const routes = tabRoutesRef.current;
+      const currentIndex = routes.indexOf(pathnameRef.current);
       if (currentIndex === -1) return;
       const nextIndex = currentIndex + delta;
-      if (nextIndex < 0 || nextIndex >= TAB_ROUTES.length) return;
-      router.navigate(TAB_ROUTES[nextIndex] as any);
+      if (nextIndex < 0 || nextIndex >= routes.length) return;
+      router.navigate(routes[nextIndex] as any);
     },
     [router]
   );
@@ -94,6 +150,8 @@ export default function TabsLayout() {
           },
           tabBarActiveTintColor: COLORS.primary,
           tabBarInactiveTintColor: COLORS.textMuted,
+          // 11 px, the one text under 12: six labels under icons share a
+          // 360 px phone, and at 12 "Фактури" and "Сканирай" are cut.
           tabBarLabelStyle: {
             fontSize: 11,
             fontWeight: '600',
@@ -104,6 +162,7 @@ export default function TabsLayout() {
           name="index"
           options={{
             title: t('nav.home'),
+            href: showHomeTab ? undefined : null,
             tabBarIcon: ({ color, focused }) => (
               <AnimatedTabIcon focused={focused}>
                 <Ionicons name="home" size={24} color={color} />
@@ -115,11 +174,16 @@ export default function TabsLayout() {
           name="scan"
           options={{
             title: t('nav.scan'),
+            // Same hide-from-bar-without-unmounting technique as Team
+            // below - scanning ultimately requires manage_invoices
+            // server-side anyway, so a viewer without it only ever saw a
+            // button that would ultimately fail.
+            href: showScanTab ? undefined : null,
             tabBarIcon: ({ focused }) => (
               <AnimatedTabIcon focused={focused}>
-                <View style={styles.scanButton}>
+                <LinearGradient colors={['#A78BFA', '#7C3AED']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.scanButton}>
                   <Ionicons name="scan" size={28} color="white" />
-                </View>
+                </LinearGradient>
               </AnimatedTabIcon>
             ),
           }}
@@ -128,6 +192,7 @@ export default function TabsLayout() {
           name="invoices"
           options={{
             title: t('nav.invoices'),
+            href: showInvoicesTab ? undefined : null,
             tabBarIcon: ({ color, focused }) => (
               <AnimatedTabIcon focused={focused}>
                 <Ionicons name="document-text" size={24} color={color} />
@@ -139,9 +204,28 @@ export default function TabsLayout() {
           name="stats"
           options={{
             title: t('nav.stats'),
+            href: showStatsTab ? undefined : null,
             tabBarIcon: ({ color, focused }) => (
               <AnimatedTabIcon focused={focused}>
                 <Ionicons name="stats-chart" size={24} color={color} />
+              </AnimatedTabIcon>
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="team"
+          options={{
+            title: t('nav.team'),
+            // Hides the tab from the bar (and from swipe, via TAB_ROUTES
+            // above) without unmounting the route - a direct deep link to
+            // /team still resolves, it just isn't advertised in the bar
+            // for a viewer showTeamTab is false for (effectively only
+            // someone with no active company at all, now that Work
+            // schedule makes the tab relevant to every company member).
+            href: showTeamTab ? undefined : null,
+            tabBarIcon: ({ color, focused }) => (
+              <AnimatedTabIcon focused={focused}>
+                <Ionicons name="people-circle" size={26} color={color} />
               </AnimatedTabIcon>
             ),
           }}
@@ -166,18 +250,20 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  // The scan button: the brand violet as a gradient, with its glow.
   scanButton: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: COLORS.primary,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
     shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.55,
+    shadowRadius: 14,
+    elevation: 10,
   },
 });

@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import {
+  ScrollView,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +18,7 @@ import { downloadAndShareFile, NotLoggedInError } from '../src/utils/downloadFil
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import { toApiDate } from '../src/utils/periodRange';
 
 export default function ExportScreen() {
   const { t } = useTranslation();
@@ -59,7 +60,7 @@ export default function ExportScreen() {
     const targetMonth = ledgerPeriod === 'lastMonth' ? now.getMonth() - 1 : now.getMonth();
     const start = new Date(now.getFullYear(), targetMonth, 1);
     const end = new Date(now.getFullYear(), targetMonth + 1, 0);
-    const toDateStr = (d: Date) => d.toISOString().slice(0, 10);
+    const toDateStr = toApiDate;
     const endpoint = `/api/export/vat-ledger/excel?start_date=${toDateStr(start)}&end_date=${toDateStr(end)}`;
     const filename = `dnevnik_${toDateStr(start).slice(0, 7)}.xlsx`;
     downloadFile(endpoint, filename, 'ledger');
@@ -82,8 +83,22 @@ export default function ExportScreen() {
           <View style={{ width: 40 }} />
         </View>
 
-        <View style={styles.content}>
+        {/* Scrolls: on a phone the cards are taller than the screen, and
+            without it they ran out under it (a white band on the web). */}
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
           <Text style={styles.subtitle}>{t('export.subtitle')}</Text>
+
+          {/* The month's pack for the accountant: everything in one go */}
+          <TouchableOpacity style={styles.exportCard} onPress={() => router.push('/accountant-pack')}>
+            <View style={[styles.iconContainer, { backgroundColor: 'rgba(139, 92, 246, 0.2)' }]}>
+              <Ionicons name="briefcase" size={32} color={COLORS.primary} />
+            </View>
+            <View style={styles.cardContent}>
+              <Text style={styles.cardTitle}>{t('accountantPack.title')}</Text>
+              <Text style={styles.cardDesc}>{t('accountantPack.exportDesc')}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color={COLORS.textMuted} />
+          </TouchableOpacity>
 
           {/* VAT Ledger Export */}
           <View style={styles.ledgerCard}>
@@ -182,7 +197,7 @@ export default function ExportScreen() {
             <Text style={styles.statsLinkText}>{t('export.statsExportHint')}</Text>
             <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </View>
     </ScreenEnter>
@@ -213,9 +228,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
-  content: {
+  scroll: {
     flex: 1,
+  },
+  content: {
     padding: 20,
+    paddingBottom: 40,
   },
   subtitle: {
     fontSize: 14,
@@ -243,6 +261,10 @@ const styles = StyleSheet.create({
   },
   ledgerPeriodChip: {
     flex: 1,
+    // minWidth: 0 overrides flex items' web default of min-width: auto,
+    // which refuses to shrink a chip below its text's natural width and
+    // overflows a longer label past its border instead of wrapping.
+    minWidth: 0,
     paddingVertical: 10,
     borderRadius: 10,
     backgroundColor: COLORS.background,
@@ -255,6 +277,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
     fontWeight: '500',
+    textAlign: 'center',
   },
   ledgerPeriodTextActive: {
     color: 'white',

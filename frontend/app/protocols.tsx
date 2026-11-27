@@ -13,11 +13,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { api } from '../src/services/api';
 import { Invoice } from '../src/types';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
+import { formatMoney } from '../src/utils/money';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -117,7 +118,7 @@ export default function ProtocolsScreen() {
                   </View>
                   <View style={styles.protocolAmountRow}>
                     <Text style={styles.protocolAmountLabel}>{t('invoices.withoutVAT')}</Text>
-                    <Text style={styles.protocolAmountValue}>{inv.amount_without_vat.toFixed(2)} €</Text>
+                    <Text style={styles.protocolAmountValue}>{formatMoney(inv.amount_without_vat)}</Text>
                   </View>
                 </View>
               );

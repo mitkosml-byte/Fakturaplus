@@ -29,6 +29,10 @@ def _mock_database():
     server.forecast_service.db = server.db
     server.scan_credit_service.db = server.db
     server.AI_FEATURES_ENABLED = False
+    # The second step required of owners and accountants is tested on its
+    # own (test_two_factor_required) - elsewhere it would turn every owner
+    # without it away once its day passed.
+    server.TWO_FACTOR_REQUIRED = False
     yield
 
 

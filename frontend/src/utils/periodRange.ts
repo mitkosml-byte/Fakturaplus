@@ -1,19 +1,17 @@
-import {
-  format,
-  startOfWeek,
-  endOfWeek,
-  startOfMonth,
-  endOfMonth,
-  startOfYear,
-  endOfYear,
-  subDays,
-  subWeeks,
-  subMonths,
-  subYears,
-  differenceInCalendarDays,
-  addDays,
-  type Locale,
-} from 'date-fns';
+import type { Locale } from 'date-fns';
+import { format } from 'date-fns/format';
+import { startOfWeek } from 'date-fns/startOfWeek';
+import { endOfWeek } from 'date-fns/endOfWeek';
+import { startOfMonth } from 'date-fns/startOfMonth';
+import { endOfMonth } from 'date-fns/endOfMonth';
+import { startOfYear } from 'date-fns/startOfYear';
+import { endOfYear } from 'date-fns/endOfYear';
+import { subDays } from 'date-fns/subDays';
+import { subWeeks } from 'date-fns/subWeeks';
+import { subMonths } from 'date-fns/subMonths';
+import { subYears } from 'date-fns/subYears';
+import { differenceInCalendarDays } from 'date-fns/differenceInCalendarDays';
+import { addDays } from 'date-fns/addDays';
 
 // Shared period-navigation model for any screen that shows totals for "a
 // period" (Home's dashboard cards, Stats' overview cards) - lets a user step
@@ -78,6 +76,21 @@ export function getPeriodBounds(state: PeriodState, now: Date = new Date()): Per
   }
 }
 
+// The previous period to compare a period with, like with like: for a
+// period still running (it contains today) only its first days are known,
+// so it is compared with the same number of days at the start of the
+// previous period - 1-15 November against 1-15 October, not against all of
+// October. A finished period compares with the whole previous one.
+export function getComparablePrevious(bounds: PeriodBounds, now: Date = new Date()): { prevStart: Date; prevEnd: Date } {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (bounds.start <= today && today <= bounds.end) {
+    const elapsed = differenceInCalendarDays(today, bounds.start);
+    const sameDays = addDays(bounds.prevStart, elapsed);
+    return { prevStart: bounds.prevStart, prevEnd: sameDays < bounds.prevEnd ? sameDays : bounds.prevEnd };
+  }
+  return { prevStart: bounds.prevStart, prevEnd: bounds.prevEnd };
+}
+
 export function formatPeriodLabel(state: PeriodState, bounds: PeriodBounds, locale: Locale): string {
   switch (state.mode) {
     case 'day':
@@ -94,9 +107,18 @@ export function formatPeriodLabel(state: PeriodState, bounds: PeriodBounds, loca
   }
 }
 
-// yyyy-MM-dd, the wire format every date-range backend endpoint expects.
+// yyyy-MM-dd, the wire format every date-range backend endpoint expects -
+// the day as the device shows it. Never d.toISOString().slice(0, 10): that
+// is the UTC day, which in Bulgaria is the day before for anything picked
+// between midnight and 02:00/03:00 (and for every date picked on the web,
+// which arrives as local midnight).
 export function toApiDate(d: Date): string {
   return format(d, 'yyyy-MM-dd');
+}
+
+// yyyy-MM, the month as the device shows it (same reason as toApiDate).
+export function toApiMonth(d: Date): string {
+  return format(d, 'yyyy-MM');
 }
 
 export { addDays };

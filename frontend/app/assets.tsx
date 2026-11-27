@@ -14,18 +14,20 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from '../src/components/AppDateTimePicker';
 import { Alert } from '../src/utils/alert';
 import { api } from '../src/services/api';
-import { FixedAsset, AssetCategory, AssetCategoryInfo, AssetsSummary } from '../src/types';
-import { format } from 'date-fns';
+import { FixedAsset, AssetCategory, AssetCategoryInfo, AssetsSummary, LinkableInvoice } from '../src/types';
+import { format } from 'date-fns/format';
+import { parseISO } from 'date-fns/parseISO';
 import { useTranslation, useLanguageStore } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
 import { COLORS } from '../src/theme/colors';
+import { formatMoney, parseAmount, readAmount } from '../src/utils/money';
 
 const CATEGORY_SHORT_LABELS: Record<AssetCategory, string> = {
   cat_i: 'I · Сгради',
@@ -75,6 +77,15 @@ export default function AssetsScreen() {
   const [assetImage, setAssetImage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // The purchase invoice: linked, it stops being an expense of its day.
+  const params = useLocalSearchParams<{ fromInvoice?: string }>();
+  const canLinkInvoices = hasPermission('manage_invoices');
+  const [linkedInvoice, setLinkedInvoice] = useState<{ id: string; label: string } | null>(null);
+  const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceCandidates, setInvoiceCandidates] = useState<LinkableInvoice[]>([]);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
+
   const [disposeModalVisible, setDisposeModalVisible] = useState(false);
   const [disposalDate, setDisposalDate] = useState(new Date());
   const [isDisposalDatePickerVisible, setDisposalDatePickerVisible] = useState(false);
@@ -119,8 +130,59 @@ export default function AssetsScreen() {
     setAcquisitionDate(new Date());
     setInServiceDate(new Date());
     setAssetImage(null);
+    setLinkedInvoice(null);
+    setInvoicePickerOpen(false);
     setAssetModalVisible(true);
   };
+
+  const invoiceLabel = (inv: LinkableInvoice) => `${inv.supplier} № ${inv.invoice_number}`;
+
+  // Picking the purchase invoice also fills what is still empty: the name
+  // from its first line, the value from its total, both dates from its date.
+  const applyInvoice = (inv: LinkableInvoice, isNew: boolean) => {
+    setLinkedInvoice({ id: inv.id, label: invoiceLabel(inv) });
+    setInvoicePickerOpen(false);
+    setAssetForm((p) => ({
+      ...p,
+      name: p.name || inv.first_item || '',
+      acquisition_value: p.acquisition_value || String(inv.total_amount),
+    }));
+    if (isNew && inv.date) {
+      setAcquisitionDate(parseISO(inv.date));
+      setInServiceDate(parseISO(inv.date));
+    }
+  };
+
+  const searchInvoices = useCallback(async (search: string) => {
+    setLoadingCandidates(true);
+    try {
+      setInvoiceCandidates(await api.getLinkableInvoices({ search }));
+    } catch (error: any) {
+      Alert.alert(t('common.error'), error.message);
+    } finally {
+      setLoadingCandidates(false);
+    }
+  }, [t]);
+
+  const openInvoicePicker = () => {
+    setInvoicePickerOpen(true);
+    searchInvoices(invoiceSearch);
+  };
+
+  // "Record as an asset" from an invoice's details.
+  useEffect(() => {
+    const invoiceId = params.fromInvoice;
+    if (!invoiceId || !canLinkInvoices) return;
+    api.getLinkableInvoices({ invoiceId })
+      .then((found) => {
+        if (!found.length) return;
+        openNewAsset();
+        applyInvoice(found[0], true);
+      })
+      .catch(() => {});
+    // Once per invoice id it was opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.fromInvoice]);
 
   const openEditAsset = (asset: FixedAsset) => {
     setEditingAsset(asset);
@@ -135,6 +197,8 @@ export default function AssetsScreen() {
     setAcquisitionDate(new Date(asset.acquisition_date));
     setInServiceDate(new Date(asset.in_service_date));
     setAssetImage(asset.image_base64 || null);
+    setLinkedInvoice(asset.invoice_id ? { id: asset.invoice_id, label: asset.invoice_label || '' } : null);
+    setInvoicePickerOpen(false);
     setAssetModalVisible(true);
   };
 
@@ -169,13 +233,15 @@ export default function AssetsScreen() {
       category: assetForm.category,
       acquisition_date: format(acquisitionDate, 'yyyy-MM-dd'),
       in_service_date: format(inServiceDate, 'yyyy-MM-dd'),
-      acquisition_value: parseFloat(assetForm.acquisition_value) || 0,
+      acquisition_value: parseAmount(assetForm.acquisition_value),
       annual_depreciation_rate_percent: assetForm.annual_depreciation_rate_percent
-        ? parseFloat(assetForm.annual_depreciation_rate_percent)
+        ? readAmount(assetForm.annual_depreciation_rate_percent)
         : undefined,
       responsible_person: assetForm.responsible_person.trim() || undefined,
       notes: assetForm.notes.trim() || undefined,
       image_base64: assetImage || undefined,
+      // "" removes a link the asset had; undefined leaves things as they are.
+      invoice_id: linkedInvoice ? linkedInvoice.id : (editingAsset?.invoice_id ? '' : undefined),
     };
     try {
       if (editingAsset) {
@@ -262,19 +328,19 @@ export default function AssetsScreen() {
 
         <View style={styles.summaryCard}>
           <Text style={styles.summaryLabel}>{t('assets.netBookValue')}</Text>
-          <Text style={styles.summaryValue}>{(summary?.total_net_book_value || 0).toFixed(2)} €</Text>
+          <Text style={styles.summaryValue}>{formatMoney((summary?.total_net_book_value || 0))}</Text>
           <View style={styles.summaryRow}>
             <View style={styles.summarySubItem}>
               <Text style={styles.summarySubLabel}>{t('assets.acquisitionValue')}</Text>
-              <Text style={styles.summarySubValue}>{(summary?.total_acquisition_value || 0).toFixed(2)} €</Text>
+              <Text style={styles.summarySubValue}>{formatMoney((summary?.total_acquisition_value || 0))}</Text>
             </View>
             <View style={styles.summarySubItem}>
               <Text style={styles.summarySubLabel}>{t('assets.accumulatedDepreciation')}</Text>
-              <Text style={styles.summarySubValue}>{(summary?.total_accumulated_depreciation || 0).toFixed(2)} €</Text>
+              <Text style={styles.summarySubValue}>{formatMoney((summary?.total_accumulated_depreciation || 0))}</Text>
             </View>
             <View style={styles.summarySubItem}>
               <Text style={styles.summarySubLabel}>{t('assets.monthlyDepreciation')}</Text>
-              <Text style={styles.summarySubValue}>{(summary?.monthly_depreciation_total || 0).toFixed(2)} €</Text>
+              <Text style={styles.summarySubValue}>{formatMoney((summary?.monthly_depreciation_total || 0))}</Text>
             </View>
           </View>
         </View>
@@ -312,6 +378,11 @@ export default function AssetsScreen() {
                     <Text style={styles.assetMeta}>
                       {asset.inventory_number} · {CATEGORY_SHORT_LABELS[asset.category]}
                     </Text>
+                    {asset.invoice_label ? (
+                      <Text style={styles.assetMeta} numberOfLines={1}>
+                        {t('assets.invoiceShort')}: {asset.invoice_label}
+                      </Text>
+                    ) : null}
                   </View>
                   <View style={[styles.statusBadge, { backgroundColor: `${STATUS_COLORS[asset.status]}22` }]}>
                     <Text style={[styles.statusBadgeText, { color: STATUS_COLORS[asset.status] }]}>
@@ -322,11 +393,11 @@ export default function AssetsScreen() {
                 <View style={styles.assetFigures}>
                   <View style={styles.assetFigureItem}>
                     <Text style={styles.assetFigureLabel}>{t('assets.netBookValue')}</Text>
-                    <Text style={styles.assetFigureValue}>{asset.net_book_value.toFixed(2)} €</Text>
+                    <Text style={styles.assetFigureValue}>{formatMoney(asset.net_book_value)}</Text>
                   </View>
                   <View style={styles.assetFigureItem}>
                     <Text style={styles.assetFigureLabel}>{t('assets.monthlyDepreciation')}</Text>
-                    <Text style={styles.assetFigureValue}>{asset.monthly_depreciation.toFixed(2)} €</Text>
+                    <Text style={styles.assetFigureValue}>{formatMoney(asset.monthly_depreciation)}</Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -422,6 +493,64 @@ export default function AssetsScreen() {
               />
               <Text style={styles.lowValueHint}>{t('assets.lowValueHint')}</Text>
 
+              {canLinkInvoices && (
+                <View style={styles.invoiceLinkBox}>
+                  <Text style={styles.inputLabel}>{t('assets.purchaseInvoice')}</Text>
+                  {linkedInvoice ? (
+                    <View style={styles.invoiceLinkedRow}>
+                      <Ionicons name="document-text" size={16} color={COLORS.primary} />
+                      <Text style={styles.invoiceLinkedText} numberOfLines={1}>{linkedInvoice.label}</Text>
+                      <TouchableOpacity onPress={() => setLinkedInvoice(null)} hitSlop={8}>
+                        <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+                  ) : invoicePickerOpen ? (
+                    <View>
+                      <TextInput
+                        style={styles.input}
+                        value={invoiceSearch}
+                        onChangeText={(v) => { setInvoiceSearch(v); searchInvoices(v); }}
+                        placeholder={t('assets.invoiceSearchPlaceholder')}
+                        placeholderTextColor={COLORS.textMuted}
+                      />
+                      {loadingCandidates ? (
+                        <ActivityIndicator color={COLORS.warning} style={{ marginVertical: 8 }} />
+                      ) : invoiceCandidates.length === 0 ? (
+                        <Text style={styles.fieldHint}>{t('assets.noInvoicesFound')}</Text>
+                      ) : (
+                        invoiceCandidates.slice(0, 8).map((inv) => {
+                          const taken = !!inv.asset_id && inv.asset_id !== editingAsset?.id;
+                          return (
+                            <TouchableOpacity
+                              key={inv.id}
+                              style={[styles.invoiceCandidate, taken && { opacity: 0.45 }]}
+                              disabled={taken}
+                              onPress={() => applyInvoice(inv, !editingAsset)}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.invoiceCandidateTitle} numberOfLines={1}>{invoiceLabel(inv)}</Text>
+                                <Text style={styles.invoiceCandidateMeta} numberOfLines={1}>
+                                  {inv.date ? format(parseISO(inv.date), 'd MMM yyyy', { locale: dateLocale }) : ''}
+                                  {inv.first_item ? ` · ${inv.first_item}` : ''}
+                                  {taken ? ` · ${t('assets.invoiceTaken')}` : ''}
+                                </Text>
+                              </View>
+                              <Text style={styles.invoiceCandidateAmount}>{formatMoney(inv.total_amount)}</Text>
+                            </TouchableOpacity>
+                          );
+                        })
+                      )}
+                    </View>
+                  ) : (
+                    <TouchableOpacity style={styles.attachButton} onPress={openInvoicePicker}>
+                      <Ionicons name="link-outline" size={18} color={COLORS.warning} />
+                      <Text style={styles.attachButtonText}>{t('assets.linkInvoice')}</Text>
+                    </TouchableOpacity>
+                  )}
+                  <Text style={styles.fieldHint}>{t('assets.purchaseInvoiceHint')}</Text>
+                </View>
+              )}
+
               <Text style={styles.inputLabel}>{t('assets.depreciationRate')}</Text>
               <TextInput
                 style={styles.input}
@@ -460,11 +589,11 @@ export default function AssetsScreen() {
                 <View style={styles.previewCard}>
                   <View style={styles.previewRow}>
                     <Text style={styles.previewLabel}>{t('assets.accumulatedDepreciation')}</Text>
-                    <Text style={styles.previewValue}>{editingAsset.accumulated_depreciation.toFixed(2)} €</Text>
+                    <Text style={styles.previewValue}>{formatMoney(editingAsset.accumulated_depreciation)}</Text>
                   </View>
                   <View style={[styles.previewRow, styles.previewRowHighlight]}>
                     <Text style={styles.previewLabelBold}>{t('assets.netBookValue')}</Text>
-                    <Text style={styles.previewValueBold}>{editingAsset.net_book_value.toFixed(2)} €</Text>
+                    <Text style={styles.previewValueBold}>{formatMoney(editingAsset.net_book_value)}</Text>
                   </View>
                 </View>
               )}
@@ -547,7 +676,7 @@ export default function AssetsScreen() {
         fields={[
           { key: 'name', label: t('assets.name') },
           { key: 'category', label: t('assets.category') },
-          { key: 'acquisition_value', label: t('assets.acquisitionValue'), format: (v) => `${Number(v).toFixed(2)} €` },
+          { key: 'acquisition_value', label: t('assets.acquisitionValue'), format: (v) => `${formatMoney(Number(v))}` },
         ]}
         onImported={loadData}
       />
@@ -557,6 +686,48 @@ export default function AssetsScreen() {
 }
 
 const styles = StyleSheet.create({
+  invoiceLinkBox: {
+    marginTop: 4,
+  },
+  invoiceLinkedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  invoiceLinkedText: {
+    flex: 1,
+    color: COLORS.textLight,
+    fontSize: 14,
+  },
+  invoiceCandidate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  invoiceCandidateTitle: {
+    color: COLORS.textLight,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  invoiceCandidateMeta: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  invoiceCandidateAmount: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
   container: { flex: 1, backgroundColor: COLORS.background },
   safeArea: { flex: 1 },
   header: {
@@ -582,7 +753,7 @@ const styles = StyleSheet.create({
   summaryValue: { fontSize: 24, fontWeight: 'bold', color: COLORS.warning, marginTop: 4 },
   summaryRow: { flexDirection: 'row', marginTop: 14, width: '100%' },
   summarySubItem: { flex: 1, alignItems: 'center' },
-  summarySubLabel: { fontSize: 10, color: COLORS.textMuted, textAlign: 'center' },
+  summarySubLabel: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center' },
   summarySubValue: { fontSize: 13, fontWeight: '600', color: 'white', marginTop: 2 },
   content: { flex: 1, paddingHorizontal: 16 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
@@ -605,7 +776,7 @@ const styles = StyleSheet.create({
   statusBadgeText: { fontSize: 10, fontWeight: '600' },
   assetFigures: { flexDirection: 'row', backgroundColor: COLORS.background, borderRadius: 10, padding: 12 },
   assetFigureItem: { flex: 1 },
-  assetFigureLabel: { fontSize: 11, color: COLORS.textSecondary },
+  assetFigureLabel: { fontSize: 12, color: COLORS.textSecondary },
   assetFigureValue: { fontSize: 14, fontWeight: '600', color: 'white', marginTop: 2 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 22 },
@@ -619,14 +790,14 @@ const styles = StyleSheet.create({
   categoryChipActive: { backgroundColor: COLORS.warning },
   categoryChipText: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '500' },
   categoryChipTextActive: { color: 'white' },
-  categoryFullLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: 8, lineHeight: 15 },
+  categoryFullLabel: { fontSize: 12, color: COLORS.textMuted, marginTop: 8, lineHeight: 15 },
   dateInputButton: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: COLORS.background, borderRadius: 10, padding: 12,
   },
   dateInputText: { color: 'white', fontSize: 13 },
-  lowValueHint: { fontSize: 11, color: COLORS.textMuted, marginTop: 6, lineHeight: 15 },
-  fieldHint: { fontSize: 11, color: COLORS.textMuted, marginTop: 6 },
+  lowValueHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 6, lineHeight: 15 },
+  fieldHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 6 },
   attachButton: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, alignSelf: 'flex-start' },
   attachButtonText: { fontSize: 13, color: COLORS.warning, fontWeight: '500' },
   previewCard: { backgroundColor: COLORS.background, borderRadius: 12, padding: 14, marginTop: 16 },

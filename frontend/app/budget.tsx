@@ -21,39 +21,39 @@ import { useTranslation } from '../src/i18n';
 import { useAuth } from '../src/contexts/AuthContext';
 import { AccessDenied, ScreenEnter, PressableScale, CountUp, Skeleton, SkeletonRow, AnimatedEmptyIcon } from '../src/components';
 import ExcelImportModal from '../src/components/ExcelImportModal';
+import { RecurringExpensesSection } from '../src/components/RecurringExpensesSection';
+import type { RecurringOverview } from '../src/types';
 import { COLORS } from '../src/theme/colors';
+import { toApiMonth } from '../src/utils/periodRange';
+import { format } from 'date-fns/format';
+import { parseISO } from 'date-fns/parseISO';
+import { formatAmount, formatMoney, readAmount } from '../src/utils/money';
 
 export default function BudgetScreen() {
-  const { t } = useTranslation();
+  const { t, dateLocale } = useTranslation();
   const { hasPermission } = useAuth();
   const router = useRouter();
   const [budgetStatus, setBudgetStatus] = useState<any>(null);
-  const [recurringExpenses, setRecurringExpenses] = useState<any[]>([]);
+  const [recurring, setRecurring] = useState<RecurringOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
-  const [showRecurringModal, setShowRecurringModal] = useState(false);
   const [savingBudget, setSavingBudget] = useState(false);
-  const [savingRecurring, setSavingRecurring] = useState(false);
 
   // Budget form
   const [budgetLimit, setBudgetLimit] = useState('');
   const [alertThreshold, setAlertThreshold] = useState('80');
-  
-  // Recurring expense form
-  const [recurringDesc, setRecurringDesc] = useState('');
-  const [recurringAmount, setRecurringAmount] = useState('');
-  const [recurringDay, setRecurringDay] = useState('1');
+
 
   const loadData = useCallback(async () => {
     try {
-      const [status, recurring] = await Promise.all([
+      const [status, recurringOverview] = await Promise.all([
         api.getBudgetStatus(),
         api.getRecurringExpenses()
       ]);
       setBudgetStatus(status);
-      setRecurringExpenses(recurring.recurring_expenses || []);
+      setRecurring(recurringOverview);
     } catch (error) {
       console.error('Error loading budget data:', error);
     } finally {
@@ -87,18 +87,18 @@ export default function BudgetScreen() {
   };
 
   const saveBudget = async () => {
-    if (!budgetLimit || parseFloat(budgetLimit) <= 0) {
+    if (!(readAmount(budgetLimit) > 0)) {
       Alert.alert(t('common.error'), t('budget.invalidAmount'));
       return;
     }
 
     setSavingBudget(true);
     try {
-      const currentMonth = new Date().toISOString().slice(0, 7);
+      const currentMonth = toApiMonth(new Date());
       await api.createBudget({
         month: currentMonth,
-        expense_limit: parseFloat(budgetLimit),
-        alert_threshold: parseFloat(alertThreshold)
+        expense_limit: readAmount(budgetLimit),
+        alert_threshold: readAmount(alertThreshold)
       });
       Haptics.success();
       Toast.success(t('budget.saved'));
@@ -109,55 +109,6 @@ export default function BudgetScreen() {
     } finally {
       setSavingBudget(false);
     }
-  };
-
-  const saveRecurringExpense = async () => {
-    if (!recurringDesc || !recurringAmount || parseFloat(recurringAmount) <= 0) {
-      Alert.alert(t('common.error'), t('budget.invalidData'));
-      return;
-    }
-
-    setSavingRecurring(true);
-    try {
-      await api.createRecurringExpense({
-        description: recurringDesc,
-        amount: parseFloat(recurringAmount),
-        day_of_month: parseInt(recurringDay)
-      });
-      Haptics.success();
-      Toast.success(t('budget.recurringCreated'));
-      setShowRecurringModal(false);
-      setRecurringDesc('');
-      setRecurringAmount('');
-      setRecurringDay('1');
-      loadData();
-    } catch (error) {
-      Alert.alert(t('common.error'), t('budget.saveError'));
-    } finally {
-      setSavingRecurring(false);
-    }
-  };
-
-  const deleteRecurring = async (id: string) => {
-    Alert.alert(
-      t('common.confirm'),
-      t('budget.deleteRecurringConfirm'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.deleteRecurringExpense(id);
-              loadData();
-            } catch (error) {
-              Alert.alert(t('common.error'), t('budget.deleteError'));
-            }
-          }
-        }
-      ]
-    );
   };
 
   const getProgressColor = (percent: number) => {
@@ -257,7 +208,7 @@ export default function BudgetScreen() {
                     <Text style={styles.budgetStatLabel}>{t('budget.spent')}</Text>
                     <CountUp
                       value={budgetStatus.total_spent}
-                      formatter={(n) => `${n.toFixed(2)} €`}
+                      formatter={(n) => `${formatMoney(n)}`}
                       style={[styles.budgetStatValue, { color: COLORS.danger }]}
                     />
                   </View>
@@ -265,7 +216,7 @@ export default function BudgetScreen() {
                     <Text style={styles.budgetStatLabel}>{t('budget.remaining')}</Text>
                     <CountUp
                       value={budgetStatus.remaining}
-                      formatter={(n) => `${n.toFixed(2)} €`}
+                      formatter={(n) => `${formatMoney(n)}`}
                       style={[styles.budgetStatValue, { color: COLORS.success }]}
                     />
                   </View>
@@ -273,12 +224,26 @@ export default function BudgetScreen() {
                     <Text style={styles.budgetStatLabel}>{t('budget.limit')}</Text>
                     <CountUp
                       value={budgetStatus.expense_limit}
-                      formatter={(n) => `${n.toFixed(2)} €`}
+                      formatter={(n) => `${formatMoney(n)}`}
                       style={styles.budgetStatValue}
                     />
                   </View>
                 </View>
                 
+                {budgetStatus.is_running && budgetStatus.expected_month_end != null && (
+                  <View style={styles.projectionRow}>
+                    <Ionicons name="trending-up-outline" size={16} color={COLORS.textMuted} />
+                    <Text style={styles.projectionText}>
+                      {t('budget.soFarNote').replace('{date}', format(parseISO(budgetStatus.counted_through), 'd MMM', { locale: dateLocale }))}
+                      {' '}
+                      <Text style={{ color: (budgetStatus.expected_percent ?? 0) >= 100 ? COLORS.danger : COLORS.textSecondary, fontWeight: '600' }}>
+                        {t('budget.expectedMonthEnd').replace('{amount}', formatAmount(budgetStatus.expected_month_end))}
+                        {budgetStatus.expected_percent != null ? ` (${budgetStatus.expected_percent.toFixed(0)}%)` : ''}
+                      </Text>
+                    </Text>
+                  </View>
+                )}
+
                 {budgetStatus.is_exceeded && (
                   <View style={styles.alertBanner}>
                     <Ionicons name="warning" size={20} color={COLORS.danger} />
@@ -303,40 +268,7 @@ export default function BudgetScreen() {
           </View>
 
           {/* Recurring Expenses */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="repeat" size={24} color={COLORS.success} />
-              <Text style={styles.sectionTitle}>{t('budget.recurring')}</Text>
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={() => setShowRecurringModal(true)}
-                accessibilityLabel={t('budget.addRecurring')}
-              >
-                <Ionicons name="add" size={24} color="white" />
-              </TouchableOpacity>
-            </View>
-
-            {recurringExpenses.length > 0 ? (
-              recurringExpenses.map((expense) => (
-                <View key={expense.id} style={styles.recurringItem}>
-                  <View style={styles.recurringInfo}>
-                    <Text style={styles.recurringDesc}>{expense.description}</Text>
-                    <Text style={styles.recurringDay}>
-                      {t('budget.everyMonth')} {expense.day_of_month}
-                    </Text>
-                  </View>
-                  <Text style={styles.recurringAmount}>{expense.amount.toFixed(2)} €</Text>
-                  <TouchableOpacity onPress={() => deleteRecurring(expense.id)}>
-                    <Ionicons name="trash-outline" size={20} color={COLORS.danger} />
-                  </TouchableOpacity>
-                </View>
-              ))
-            ) : (
-              <View style={styles.emptyRecurring}>
-                <Text style={styles.emptyText}>{t('budget.noRecurring')}</Text>
-              </View>
-            )}
-          </View>
+          <RecurringExpensesSection overview={recurring} onChanged={loadData} />
 
           <View style={{ height: 40 }} />
         </ScrollView>
@@ -383,56 +315,6 @@ export default function BudgetScreen() {
         </View>
       </Modal>
 
-      {/* Recurring Expense Modal */}
-      <Modal visible={showRecurringModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{t('budget.addRecurring')}</Text>
-            
-            <Text style={styles.inputLabel}>{t('budget.description')}</Text>
-            <TextInput
-              style={styles.input}
-              value={recurringDesc}
-              onChangeText={setRecurringDesc}
-              placeholder={t('budget.descPlaceholder')}
-              placeholderTextColor={COLORS.textMuted}
-            />
-            
-            <Text style={styles.inputLabel}>{t('budget.amount')}</Text>
-            <TextInput
-              style={styles.input}
-              value={recurringAmount}
-              onChangeText={setRecurringAmount}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={COLORS.textMuted}
-            />
-            
-            <Text style={styles.inputLabel}>{t('budget.dayOfMonth')}</Text>
-            <TextInput
-              style={styles.input}
-              value={recurringDay}
-              onChangeText={setRecurringDay}
-              keyboardType="number-pad"
-              placeholder="1-28"
-              placeholderTextColor={COLORS.textMuted}
-            />
-            
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={styles.modalCancelBtn}
-                onPress={() => setShowRecurringModal(false)}
-              >
-                <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
-              </TouchableOpacity>
-              <PressableScale style={styles.modalSaveBtn} onPress={saveRecurringExpense} disabled={savingRecurring}>
-                {savingRecurring ? <ActivityIndicator color="white" /> : <Text style={styles.modalSaveText}>{t('common.save')}</Text>}
-              </PressableScale>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
       <ExcelImportModal
         visible={importModalVisible}
         onClose={() => setImportModalVisible(false)}
@@ -440,7 +322,7 @@ export default function BudgetScreen() {
         title={t('import.button')}
         fields={[
           { key: 'month', label: t('budget.month') },
-          { key: 'expense_limit', label: t('budget.limit'), format: (v) => `${Number(v).toFixed(2)} €` },
+          { key: 'expense_limit', label: t('budget.limit'), format: (v) => `${formatMoney(Number(v))}` },
         ]}
         onImported={loadData}
       />
@@ -564,6 +446,18 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
+  projectionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: 12,
+  },
+  projectionText: {
+    flex: 1,
+    fontSize: 12,
+    color: COLORS.textMuted,
+    lineHeight: 18,
+  },
   alertBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -597,43 +491,6 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 14,
     marginTop: 4,
-  },
-  recurringItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-  },
-  recurringInfo: {
-    flex: 1,
-  },
-  recurringDesc: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  recurringDay: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  recurringAmount: {
-    color: COLORS.warning,
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginRight: 12,
-  },
-  emptyRecurring: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 24,
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: COLORS.textMuted,
-    fontSize: 14,
   },
   modalOverlay: {
     flex: 1,

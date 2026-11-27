@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { AmbientGlow } from '../src/components/AmbientGlow';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Switch,
-  TextInput,
   ScrollView,
   ActivityIndicator,
   ImageBackground,
@@ -19,11 +19,15 @@ import { Haptics } from '../src/utils/haptics';
 import { api } from '../src/services/api';
 import { NotificationSettings } from '../src/types';
 import { useTranslation } from '../src/i18n';
-import { getPushStatus, enablePushNotifications, disablePushNotifications } from '../src/utils/pushNotifications';
+import { getPushStatus, enablePushNotifications, disablePushNotifications, needsHomeScreenForPush } from '../src/utils/pushNotifications';
 import { ScreenEnter } from '../src/components';
 import { COLORS } from '../src/theme/colors';
 
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
+// The hours the server accepts for the morning push (05:00-20:00).
+const PUSH_HOURS = Array.from({ length: 16 }, (_, i) => i + 5);
+const DEFAULT_PUSH_HOUR = 8;
+const formatHour = (hour: number) => `${String(hour).padStart(2, '0')}:00`;
 const BACKGROUND_IMAGE = 'https://images.unsplash.com/photo-1571161535093-e7642c4bd0c8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxjYWxtJTIwbmF0dXJlJTIwbGFuZHNjYXBlfGVufDB8fHxibHVlfDE3Njk3OTQ3ODF8MA&ixlib=rb-4.1.0&q=85';
 
 export default function NotificationsSettingsScreen() {
@@ -31,9 +35,11 @@ export default function NotificationsSettingsScreen() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
-  const [thresholdEnabled, setThresholdEnabled] = useState(false);
-  const [thresholdAmount, setThresholdAmount] = useState('');
+
+  // Both reminders carry each person's OWN daily review - computed with
+  // their own permissions on the server - so they are offered to everyone.
+  const [dailyEnabled, setDailyEnabled] = useState(true);
+  const [dailyHour, setDailyHour] = useState(DEFAULT_PUSH_HOUR);
   const [periodicEnabled, setPeriodicEnabled] = useState(false);
   const [selectedDates, setSelectedDates] = useState<number[]>([]);
 
@@ -75,8 +81,8 @@ export default function NotificationsSettingsScreen() {
   const loadSettings = async () => {
     try {
       const settings = await api.getNotificationSettings();
-      setThresholdEnabled(settings.vat_threshold_enabled);
-      setThresholdAmount(settings.vat_threshold_amount > 0 ? settings.vat_threshold_amount.toString() : '');
+      setDailyEnabled(settings.daily_push_enabled ?? true);
+      setDailyHour(settings.daily_push_hour ?? DEFAULT_PUSH_HOUR);
       setPeriodicEnabled(settings.periodic_enabled);
       setSelectedDates(settings.periodic_dates || []);
     } catch (error) {
@@ -90,8 +96,8 @@ export default function NotificationsSettingsScreen() {
     setSaving(true);
     try {
       await api.updateNotificationSettings({
-        vat_threshold_enabled: thresholdEnabled,
-        vat_threshold_amount: parseFloat(thresholdAmount) || 0,
+        daily_push_enabled: dailyEnabled,
+        daily_push_hour: dailyHour,
         periodic_enabled: periodicEnabled,
         periodic_dates: selectedDates,
       });
@@ -117,6 +123,7 @@ export default function NotificationsSettingsScreen() {
     return (
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
+          <AmbientGlow />
           <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={COLORS.primary} />
@@ -131,6 +138,7 @@ export default function NotificationsSettingsScreen() {
     <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -141,89 +149,19 @@ export default function NotificationsSettingsScreen() {
           </View>
 
           <ScrollView style={styles.content}>
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <View style={[styles.sectionIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-              <Ionicons name="alert-circle" size={24} color={COLORS.danger} />
-            </View>
-            <View style={styles.sectionTitleContainer}>
-              <Text style={styles.sectionTitle}>{t('notifications.thresholdTitle')}</Text>
-              <Text style={styles.sectionSubtitle}>{t('notifications.thresholdSubtitle')}</Text>
-            </View>
-            <Switch
-              value={thresholdEnabled}
-              onValueChange={setThresholdEnabled}
-              trackColor={{ false: COLORS.border, true: COLORS.primary }}
-              thumbColor={thresholdEnabled ? 'white' : COLORS.textMuted}
-            />
-          </View>
-
-          {thresholdEnabled && (
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>{t('notifications.thresholdAmountLabel')}</Text>
-              <TextInput
-                style={styles.input}
-                value={thresholdAmount}
-                onChangeText={setThresholdAmount}
-                keyboardType="decimal-pad"
-                placeholder={t('notifications.thresholdAmountPlaceholder')}
-                placeholderTextColor={COLORS.textMuted}
-              />
-              <Text style={styles.inputHint}>
-                {t('notifications.thresholdHint')}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={[styles.sectionIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
-              <Ionicons name="calendar" size={24} color={COLORS.primary} />
-            </View>
-            <View style={styles.sectionTitleContainer}>
-              <Text style={styles.sectionTitle}>{t('notifications.periodicTitle')}</Text>
-              <Text style={styles.sectionSubtitle}>{t('notifications.periodicSubtitle')}</Text>
-            </View>
-            <Switch
-              value={periodicEnabled}
-              onValueChange={setPeriodicEnabled}
-              trackColor={{ false: COLORS.border, true: COLORS.primary }}
-              thumbColor={periodicEnabled ? 'white' : COLORS.textMuted}
-            />
-          </View>
-
-          {periodicEnabled && (
-            <View style={styles.datesContainer}>
-              <Text style={styles.inputLabel}>{t('notifications.selectDatesLabel')}</Text>
-              <View style={styles.datesGrid}>
-                {DAYS_OF_MONTH.map(day => (
-                  <TouchableOpacity
-                    key={day}
-                    style={[
-                      styles.dateButton,
-                      selectedDates.includes(day) && styles.dateButtonSelected
-                    ]}
-                    onPress={() => toggleDate(day)}
-                  >
-                    <Text style={[
-                      styles.dateButtonText,
-                      selectedDates.includes(day) && styles.dateButtonTextSelected
-                    ]}>
-                      {day}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+            {!pushSupported && needsHomeScreenForPush() && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <View style={[styles.sectionIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                    <Ionicons name="phone-portrait-outline" size={22} color={COLORS.success} />
+                  </View>
+                  <View style={styles.sectionTitleContainer}>
+                    <Text style={styles.sectionTitle}>{t('notifications.iosTitle')}</Text>
+                    <Text style={styles.sectionSubtitle}>{t('notifications.iosSteps')}</Text>
+                  </View>
+                </View>
               </View>
-              {selectedDates.length > 0 && (
-                <Text style={styles.selectedDatesText}>
-                  {t('notifications.selectedDatesLabel')}: {selectedDates.join(', ')}
-                </Text>
-              )}
-            </View>
-          )}
-        </View>
-
+            )}
             {pushSupported && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
@@ -247,6 +185,95 @@ export default function NotificationsSettingsScreen() {
                 </View>
               </View>
             )}
+
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={[styles.sectionIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                  <Ionicons name="sunny" size={24} color={COLORS.warning} />
+                </View>
+                <View style={styles.sectionTitleContainer}>
+                  <Text style={styles.sectionTitle}>{t('notifications.dailyTitle')}</Text>
+                  <Text style={styles.sectionSubtitle}>{t('notifications.dailySubtitle')}</Text>
+                </View>
+                <Switch
+                  value={dailyEnabled}
+                  onValueChange={setDailyEnabled}
+                  trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                  thumbColor={dailyEnabled ? 'white' : COLORS.textMuted}
+                />
+              </View>
+
+              {(dailyEnabled || periodicEnabled) && (
+                <View style={styles.datesContainer}>
+                  <Text style={styles.inputLabel}>{t('notifications.dailyHourLabel')}</Text>
+                  <View style={styles.datesGrid}>
+                    {PUSH_HOURS.map(hour => (
+                      <TouchableOpacity
+                        key={hour}
+                        style={[styles.dateButton, styles.hourButton, dailyHour === hour && styles.dateButtonSelected]}
+                        onPress={() => setDailyHour(hour)}
+                      >
+                        <Text style={[styles.dateButtonText, dailyHour === hour && styles.dateButtonTextSelected]}>
+                          {formatHour(hour)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.inputHint}>{t('notifications.dailyHourHint')}</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={[styles.sectionIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+                  <Ionicons name="calendar" size={24} color={COLORS.primary} />
+                </View>
+                <View style={styles.sectionTitleContainer}>
+                  <Text style={styles.sectionTitle}>{t('notifications.periodicTitle')}</Text>
+                  <Text style={styles.sectionSubtitle}>{t('notifications.periodicSubtitle')}</Text>
+                </View>
+                <Switch
+                  value={periodicEnabled}
+                  onValueChange={setPeriodicEnabled}
+                  trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                  thumbColor={periodicEnabled ? 'white' : COLORS.textMuted}
+                />
+              </View>
+
+              {periodicEnabled && (
+                <View style={styles.datesContainer}>
+                  <Text style={styles.inputLabel}>{t('notifications.selectDatesLabel')}</Text>
+                  <View style={styles.datesGrid}>
+                    {DAYS_OF_MONTH.map(day => (
+                      <TouchableOpacity
+                        key={day}
+                        style={[
+                          styles.dateButton,
+                          selectedDates.includes(day) && styles.dateButtonSelected
+                        ]}
+                        onPress={() => toggleDate(day)}
+                      >
+                        <Text style={[
+                          styles.dateButtonText,
+                          selectedDates.includes(day) && styles.dateButtonTextSelected
+                        ]}>
+                          {day}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {selectedDates.length > 0 && (
+                    <Text style={styles.selectedDatesText}>
+                      {t('notifications.selectedDatesLabel')}: {selectedDates.join(', ')}
+                    </Text>
+                  )}
+                  <Text style={styles.inputHint}>
+                    {t('notifications.periodicHint').replace('{{time}}', formatHour(dailyHour))}
+                  </Text>
+                </View>
+              )}
+            </View>
 
             <View style={styles.infoCard}>
               <Ionicons name="information-circle" size={24} color={COLORS.textMuted} />
@@ -348,25 +375,10 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 2,
   },
-  inputContainer: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
   inputLabel: {
     fontSize: 14,
     color: COLORS.textSecondary,
     marginBottom: 8,
-  },
-  input: {
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 16,
-    color: 'white',
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
   },
   inputHint: {
     fontSize: 12,
@@ -394,6 +406,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  hourButton: {
+    width: 64,
   },
   dateButtonSelected: {
     backgroundColor: COLORS.primary,

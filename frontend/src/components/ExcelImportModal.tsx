@@ -38,7 +38,7 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
   const { t } = useTranslation();
   const [step, setStep] = useState<Step>('pick');
   const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
-  const [commitSummary, setCommitSummary] = useState<{ imported: number; failed: number } | null>(null);
+  const [commitSummary, setCommitSummary] = useState<{ imported: number; failed: number; alreadyPresent: number } | null>(null);
 
   const reset = () => {
     setStep('pick');
@@ -91,7 +91,7 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
     setStep('committing');
     try {
       const result = await api.commitImport(entity, validRows);
-      setCommitSummary({ imported: result.imported, failed: result.failed.length });
+      setCommitSummary({ imported: result.imported, failed: result.failed.length, alreadyPresent: result.already_present ?? 0 });
       setStep('done');
       onImported();
     } catch (error: any) {
@@ -209,6 +209,11 @@ export default function ExcelImportModal({ visible, onClose, entity, title, fiel
                 <Text style={styles.doneText}>
                   {t('import.doneSummary').replace('{imported}', String(commitSummary.imported))}
                 </Text>
+                {commitSummary.alreadyPresent > 0 && (
+                  <Text style={styles.warningText}>
+                    {t('import.alreadyPresentSummary').replace('{count}', String(commitSummary.alreadyPresent))}
+                  </Text>
+                )}
                 {commitSummary.failed > 0 && (
                   <Text style={styles.warningText}>
                     {t('import.doneFailedSummary').replace('{failed}', String(commitSummary.failed))}
@@ -316,7 +321,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   summaryLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
     marginTop: 2,
   },

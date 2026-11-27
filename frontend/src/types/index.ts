@@ -2,12 +2,447 @@ export interface User {
   user_id: string;
   email: string;
   name: string;
-  picture?: string;
+  picture?: string | null;
   role: 'owner' | 'manager' | 'staff' | 'accountant';
   company_id?: string;
   permissions?: string[];
   has_password?: boolean;
+  // A second step at login (a code from an authenticator app or by email).
+  two_factor_enabled?: boolean;
+  two_factor_method?: TwoFactorMethod | null;
+  // The email confirmed with the code sent to it (P1-7); an invitation
+  // used at registration waits for that.
+  email_verified?: boolean;
+  invite_pending?: boolean;
+  // A second step at login is required of the owner and the accountant: by
+  // this day (null when not required or already on), and whether it passed.
+  two_factor_due_at?: string | null;
+  two_factor_overdue?: boolean;
   created_at: string;
+}
+
+// The parts of the program a business uses (the owner chooses): the till
+// and pocket money, invoices issued to customers, the team and its
+// schedule, payroll, fixed assets, the owner's personal wallet.
+export type BusinessModule = 'till' | 'billing' | 'team' | 'payroll' | 'assets' | 'wallet';
+export type BusinessModules = Record<BusinessModule, boolean>;
+
+// This month's break-even and the day's target (Н5).
+export interface BreakEven {
+  available: boolean;
+  reason?: 'not_enough_data' | 'no_margin' | 'no_fixed_costs';
+  message?: string;
+  month: string;
+  fixed_costs?: { payroll: number; recurring: number; depreciation: number; total: number };
+  // The salaries are hidden from this viewer: the fixed costs are without them.
+  payroll_left_out?: boolean;
+  margin_percent?: number;
+  margin_basis?: { kind: 'last_months' | 'this_month'; months: string[] };
+  break_even_income?: number;
+  income_so_far?: number;
+  missing?: number;
+  above?: number;
+  reached?: boolean;
+  open_days_left?: number;
+  today_is_open?: boolean;
+  daily_target?: number;
+  income_today?: number;
+  progress?: number;
+}
+
+// The till's daily report read from a photo (Н3) - a draft for the form.
+export interface ZReportResult {
+  date: string | null;
+  report_number: string | null;
+  fiscal_revenue: number;
+  card_revenue: number | null;
+  cash_revenue: number | null;
+  vat_groups: VatGroupAmount[];
+  warnings: string[];
+}
+
+// The month's pack for the accountant (Н4).
+export interface AccountantPack {
+  month: string;
+  label: string;
+  counts: {
+    purchases: number;
+    scanned: number;
+    revenue_days: number;
+    issued_invoices: number;
+    credit_notes: number;
+    payroll_entries: number;
+  };
+  checks: { key: string; severity: 'warning' | 'info'; message: string; items: string[] }[];
+  accountant_email?: string | null;
+  email_available: boolean;
+  last_sent?: { month: string; sent_to: string; sent_at: string; size: number } | null;
+}
+
+// Cash flow for the days ahead (Н1).
+export interface CashFlowEvent {
+  date: string;
+  amount: number; // money in above zero, out below
+  // subscription: an invoice that repeats, not issued yet for its month;
+  // personal: company money spent personally, coming due (the personal
+  // notebook) - for its viewers only.
+  kind: 'receivable' | 'revenue' | 'invoice' | 'recurring' | 'payroll' | 'vat' | 'subscription' | 'personal';
+  label: string;
+  overdue: boolean;
+}
+
+export interface CashFlowDay {
+  date: string;
+  in: number;
+  out: number;
+  revenue: number;
+  balance: number;
+}
+
+export interface CashFlow {
+  from: string;
+  to: string;
+  days: number;
+  start_balance: number;
+  end_balance: number;
+  lowest: { date: string; balance: number };
+  first_negative: string | null;
+  total_in: number;
+  total_out: number;
+  usual_revenue_total: number;
+  series: CashFlowDay[];
+  events: CashFlowEvent[];
+  position: { cash: number; bank: number; date: string; age_days: number } | null;
+  overdue_receivables: number;
+  receivables_without_due_date: number;
+  usual_revenue_by_weekday: Record<string, number>;
+  pay_day: number;
+  notes: string[];
+}
+
+// A file picked to send (expo-document-picker): on the web its File too.
+export interface PickedFile {
+  uri: string;
+  name: string;
+  mimeType?: string;
+  file?: any;
+}
+
+// A bank statement read and matched (Н2). sure: certain, offered ticked;
+// ask: likely, the person decides; entered: already on record another way
+// (typed in by hand, or recorded from another file of the same days);
+// none: no document for it - only listed, nothing is made of it;
+// applied: this very movement, recorded from this statement before.
+export type BankMatchStatus = 'sure' | 'ask' | 'entered' | 'none' | 'applied';
+
+export interface BankTarget {
+  kind: 'invoice' | 'receivable';
+  id: string;
+  label: string;
+  name: string;
+  number: string;
+  // What the document still owes.
+  left: number;
+  // What the movement puts on it (proposals and recorded payments).
+  amount?: number;
+}
+
+export interface BankStatementRow {
+  id: string;
+  date: string;
+  // Money in above zero, money out below.
+  amount: number;
+  counterparty: string;
+  description: string;
+  reference: string;
+  status: BankMatchStatus;
+  reason: string;
+  targets: BankTarget[];
+  alternatives: BankTarget[];
+  entered?: { kind: 'invoice' | 'receivable'; id: string; label: string; date: string; amount: number };
+}
+
+export interface BankStatementPreview {
+  format: 'csv' | 'xlsx' | 'mt940' | 'camt';
+  count: number;
+  skipped_rows: number;
+  other_currency_rows: number;
+  from: string;
+  to: string;
+  money_in: number;
+  money_out: number;
+  closing_balance: number | null;
+  closing_date: string;
+  // May the closing balance become the money in the bank (the cash flow)?
+  can_set_balance: boolean;
+  current_bank_balance: number | null;
+  current_balance_date: string | null;
+  // A newer amount was entered after the statement's last day - it stays.
+  balance_is_newer: boolean;
+  can_pay_invoices: boolean;
+  can_receive: boolean;
+  counts: Record<BankMatchStatus, number>;
+  transactions: BankStatementRow[];
+}
+
+export interface BankStatementApply {
+  payments: {
+    transaction_id: string;
+    date: string;
+    amount: number;
+    targets: { kind: 'invoice' | 'receivable'; id: string; amount: number }[];
+  }[];
+  closing_balance?: number | null;
+  closing_date?: string | null;
+}
+
+export interface BankStatementApplyResult {
+  applied: number;
+  already_recorded: number;
+  failed: { transaction_id: string; target_id: string | null; message: string }[];
+  balance_set: boolean;
+  paid_to_suppliers: number;
+  received_from_customers: number;
+}
+
+// A payment reminder to a customer (Н6): due on the due date, a week and
+// two weeks after it - each stage suggested once, sent by the person.
+export type ReminderStage = 'due' | 'week' | 'two_weeks';
+
+export interface PaymentReminderItem {
+  receivable_id: string;
+  customer_id: string | null;
+  customer_name: string;
+  // The customer's address, when the program knows it.
+  email: string | null;
+  document: { id: string; kind: string; number: string | null; has_pdf: boolean } | null;
+  label: string;
+  amount_left: number;
+  due_date: string;
+  days_overdue: number;
+  stage: ReminderStage;
+  suggested: boolean;
+  history: { stage: ReminderStage | 'manual'; channel: 'email' | 'other' | 'skipped'; to: string | null; at: string }[];
+  subject: string;
+  message: string;
+}
+
+export interface PaymentReminders {
+  email_enabled: boolean;
+  suggested: PaymentReminderItem[];
+  other: PaymentReminderItem[];
+}
+
+// An invoice that repeats every month (Н7).
+export type RecurringInvoiceState = 'issued' | 'ready' | 'upcoming' | 'paused' | 'ended';
+
+export interface RecurringInvoice {
+  id: string;
+  customer_id: string | null;
+  customer_name: string;
+  customer_eik: string | null;
+  customer_address: string | null;
+  items: BillingDocumentItem[];
+  notes: string | null;
+  payment_method: 'cash' | 'bank_transfer' | 'card';
+  day_of_month: number;
+  due_days: number;
+  start_month: string;
+  end_month: string | null;
+  is_active: boolean;
+  amount_without_vat: number;
+  vat_amount: number;
+  total_amount: number;
+  month: string;
+  month_label: string;
+  issue_day: string;
+  state: RecurringInvoiceState;
+  issued_document: { id: string; invoice_number: string | null; issue_date: string; total_amount: number } | null;
+  history: { month: string; document_id: string; invoice_number: string | null; total_amount: number }[];
+}
+
+export interface RecurringInvoiceInput {
+  from_document_id?: string;
+  customer_name?: string;
+  items?: BillingDocumentItem[];
+  notes?: string | null;
+  day_of_month?: number;
+  due_days?: number;
+  end_month?: string;
+  is_active?: boolean;
+}
+
+// The business's own deadlines (Н10): what the owner enters - an
+// insurance, an inspection, a contract, what the accountant needs.
+export type DeadlineCategory = 'insurance' | 'inspection' | 'contract' | 'accountant' | 'tax' | 'license' | 'other';
+export type DeadlineRepeat = 'none' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly' | 'months';
+
+// The business's locations (Н11): shops, sites, branches.
+export interface BusinessLocation {
+  id: string;
+  name: string;
+  address: string | null;
+  is_active: boolean;
+}
+
+export interface LocationComparisonRow {
+  id: string;
+  name: string;
+  is_active: boolean;
+  income: number;
+  expense: number;
+  profit: number;
+  margin_percent: number | null;
+  revenue_days: number;
+  revenue_per_day: number | null;
+  parts: {
+    till: number;
+    issued_invoices: number;
+    purchases: number;
+    off_book: number | null;  // null: hidden from this person
+    // null: the salaries are hidden from this viewer.
+    payroll: number | null;
+  };
+  team: number;
+}
+
+export interface LocationComparison {
+  period: { start: string; end: string };
+  // Income and expenses without VAT (registered for VAT), as on Home.
+  vat_excluded?: boolean;
+  locations: LocationComparisonRow[];
+  // What no location holds (depreciation, a purchase for the whole business...).
+  shared: { income: number; expense: number; profit: number };
+  // The business's own numbers - the same as in Statistics.
+  total: { income: number; expense: number; profit: number };
+}
+
+export interface Deadline {
+  id: string;
+  title: string;
+  category: DeadlineCategory;
+  due_date: string;
+  repeat: DeadlineRepeat;
+  repeat_months: number | null;
+  remind_days_before: number;
+  notes: string | null;
+  amount: number | null;
+  is_active: boolean;
+  days_left: number;
+  status: 'overdue' | 'soon' | 'later' | 'done';
+  next_dates: string[];
+  last_done: string | null;
+}
+
+export interface DeadlineInput {
+  title?: string;
+  category?: DeadlineCategory;
+  due_date?: string;
+  repeat?: DeadlineRepeat;
+  repeat_months?: number | null;
+  remind_days_before?: number;
+  notes?: string | null;
+  amount?: number | null;
+}
+
+// The business's own selling prices and their margin (Н8).
+export interface CostPart {
+  item_name: string;
+  quantity: number;
+  unit?: string | null;
+}
+
+export interface PriceListEntry {
+  id: string;
+  name: string;
+  unit: string;
+  // Without VAT (an invoice line); price_gross is what the customer pays (a bill).
+  price: number;
+  vat_rate: number;
+  price_gross: number;
+  price_set_at?: string | null;
+  // Only for those who see purchase prices.
+  costs?: (CostPart & { unit_price: number | null; line_cost: number | null; supplier: string | null; date: string | null })[];
+  cost?: number | null;
+  cost_at_price?: number | null;
+  margin_percent?: number | null;
+  margin_then_percent?: number | null;
+  margin_dropped?: boolean;
+  suggested_price?: number | null;
+  suggested_gross?: number | null;
+}
+
+export interface PriceList {
+  entries: PriceListEntry[];
+  can_edit: boolean;
+  sees_costs: boolean;
+  vat_registered: boolean;
+}
+
+export interface PurchaseItem {
+  item_name: string;
+  unit: string | null;
+  unit_price: number;
+  supplier: string | null;
+  date: string;
+}
+
+export interface SoldItem {
+  name: string;
+  unit: string;
+  price: number;
+  vat_rate: number;
+  last_sold: string;
+  count: number;
+}
+
+export interface PriceEntryInput {
+  name?: string;
+  unit?: string;
+  price?: number;
+  vat_rate?: number;
+  costs?: CostPart[];
+}
+
+// Home's cards for a business that invoices.
+export interface BillingOverview {
+  issued_count: number;
+  issued_total: number;
+  total_owed: number;
+  unpaid_count: number;
+  total_overdue: number;
+  overdue_count: number;
+}
+
+export type TwoFactorMethod = 'totp' | 'email';
+
+// The password was right; the login waits for the code (or a recovery code).
+export interface LoginChallenge {
+  two_factor_required: true;
+  challenge_token: string;
+  method: TwoFactorMethod;
+  // Email method only: false when the email could not be sent.
+  code_sent?: boolean;
+}
+
+export interface LoginSession {
+  user: User;
+  session_token: string;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  method: TwoFactorMethod | null;
+  recovery_codes_left: number;
+  email_available: boolean;
+  recommended: boolean;
+}
+
+export interface TwoFactorSetup {
+  method: TwoFactorMethod;
+  secret?: string;
+  otpauth_uri?: string;
+  sent_to?: string;
 }
 
 export interface Company {
@@ -22,9 +457,16 @@ export interface Company {
   email?: string;
   bank_name?: string;
   bank_iban?: string;
+  // Registered for VAT, as the owner set it; null/absent = not answered
+  // yet (the app then behaves as registered and asks once).
+  vat_registered?: boolean | null;
   // Weekdays the business is normally closed (0=Monday..6=Sunday) - excluded
   // from "average per day" statistics instead of counting as zero-revenue.
   closed_weekdays?: number[];
+  modules?: Partial<BusinessModules> | null;
+  // The profit tax rate (%) for the net margin on Home; null/absent = the
+  // law's for the legal form (10% a company, 15% a sole trader).
+  profit_tax_percent?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -91,15 +533,25 @@ export type VatTreatment =
   | 'reverse_charge'
   | 'outside_scope';
 
-export type PaymentMethod = 'cash' | 'bank_transfer';
+// Cash and card are paid at the till; a bank transfer is owed until paid.
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'card';
+
+// A supplier's credit note (goods returned, a discount on an earlier
+// invoice) is kept with the invoices, its amounts stored below zero so it
+// takes purchases and the VAT credit down; nothing is owed on it.
+export type InvoiceDocumentType = 'invoice' | 'credit_note';
 
 export interface Invoice {
   id: string;
   user_id: string;
   company_id?: string;
+  // The location it was bought for; none: the whole business.
+  location_id?: string | null;
   supplier: string;
   supplier_eik?: string;
   invoice_number: string;
+  // null/absent (invoices from before credit notes) or 'invoice' is an invoice.
+  document_type?: InvoiceDocumentType | null;
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;
@@ -109,7 +561,12 @@ export interface Invoice {
   image_base64?: string; // Legacy - едностранично сканиране
   image_base64s?: string[]; // Всички страници на сканираната фактура, по ред
   notes?: string;
-  items?: InvoiceItemCreate[];
+  // What the backend actually stores/returns - full items, each with its
+  // own id (needed to target one line item for correction) and computed
+  // total_price/vat_amount. createInvoice overrides this back to
+  // InvoiceItemCreate[] for the one call site building a NEW invoice,
+  // where items don't have ids yet.
+  items?: InvoiceItem[];
   payment_method?: PaymentMethod;
   is_paid: boolean;
   // Cumulative amount paid so far - "fully paid" means paid_amount >=
@@ -118,7 +575,23 @@ export interface Invoice {
   paid_amount: number;
   payment_due_date?: string;
   paid_at?: string;
+  // Each payment to the supplier on an invoice by bank, on its own day.
+  payments?: ReceivablePayment[];
   created_at: string;
+  // Set when this is a fixed asset's purchase invoice (not an expense of its day).
+  asset_id?: string | null;
+  // Credit note: the invoice it corrects ("към фактура №"), linked once entered.
+  credited_invoice_number?: string | null;
+  credited_invoice_id?: string | null;
+  // Invoice: what credit notes to it took off - no longer owed; past what is
+  // left to pay, the supplier's to refund or offset.
+  credited_amount?: number;
+}
+
+// One VAT group of the till's daily report: its rate and its sales (with VAT).
+export interface VatGroupAmount {
+  rate_percent: number;
+  amount: number;
 }
 
 export interface DailyRevenue {
@@ -130,6 +603,9 @@ export interface DailyRevenue {
   pocket_money: number;
   card_revenue: number;
   vat_rate_percent: number;
+  // The day by VAT rate (adding up to fiscal_revenue); empty when the
+  // whole day is at vat_rate_percent.
+  vat_groups?: VatGroupAmount[];
   created_at: string;
 }
 
@@ -140,6 +616,397 @@ export interface NonInvoiceExpense {
   amount: number;
   date: string;
   created_at: string;
+  // A recurring expense's payment for a month (recorded from Budget)
+  recurring_id?: string | null;
+  recurring_month?: string | null;
+  location_id?: string | null;
+}
+
+export interface Customer {
+  id: string;
+  company_id: string | null;
+  user_id: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  notes?: string | null;
+  // What an invoice to them names.
+  eik?: string | null;
+  vat_number?: string | null;
+  address?: string | null;
+  created_at: string;
+}
+
+export interface CustomerInput {
+  name: string;
+  eik?: string | null;
+  vat_number?: string | null;
+  address?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+}
+
+// One customer at a glance: invoiced, owed and overdue now, their last
+// documents and open debts.
+export interface CustomerCard {
+  customer: Customer;
+  totals: {
+    invoiced: number;
+    invoice_count: number;
+    last_invoice_date: string | null;
+    owed: number;
+    overdue: number;
+    paid: number;
+  };
+  documents: {
+    id: string;
+    doc_type: BillingDocumentType;
+    invoice_number?: string | null;
+    issue_date: string;
+    total_amount: number;
+    cancelled?: boolean;
+    external?: boolean;
+    in_till?: boolean;
+  }[];
+  open_receivables: {
+    id: string;
+    description?: string | null;
+    amount: number;
+    left: number;
+    due_date?: string | null;
+    overdue: boolean;
+  }[];
+}
+
+export interface Receivable {
+  id: string;
+  company_id: string | null;
+  user_id: string;
+  customer_id?: string | null;
+  customer_name: string;
+  description?: string | null;
+  amount: number;
+  due_date?: string | null;
+  is_paid: boolean;
+  paid_amount: number;
+  paid_at?: string | null;
+  // Each payment received (in part or in full), on its day and by its method.
+  payments?: ReceivablePayment[];
+  // Owed on an invoice the business issued - already revenue on its date,
+  // so a payment on it is never offered as new revenue.
+  billing_document_id?: string | null;
+  revenue_counted?: boolean;
+  // Owed on a bill of a location: logged as revenue, it goes to that location.
+  location_id?: string | null;
+  // Taken off by credit notes to its invoice.
+  credited_amount?: number;
+  // Its document was cancelled after money came in: nothing is owed, what
+  // was paid is the customer's to get back.
+  cancelled?: boolean;
+  // As shown: still owed, and to give back.
+  left_amount?: number;
+  refund_due?: number;
+  created_at: string;
+}
+
+export interface ReceivablePayment {
+  id: string;
+  amount: number;
+  date: string;
+  method?: 'cash' | 'bank_transfer' | 'card' | null;
+}
+
+export interface BillingDocumentItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;  // on an invoice: without VAT
+  vat_rate?: number;   // an invoice's line only (20, 9, 0...)
+}
+
+// quote / bill: non-fiscal; invoice: issued to a customer - numbered in
+// sequence, with VAT, revenue and VAT on its issue date, owed until paid.
+// credit_note: a credit note to a customer on an invoice issued to them -
+// numbered with the invoices, its amounts below zero.
+export type BillingDocumentType = 'quote' | 'bill' | 'invoice' | 'credit_note';
+
+export interface BillingDocument {
+  id: string;
+  company_id: string | null;
+  user_id: string;
+  doc_type: BillingDocumentType;
+  customer_id?: string | null;
+  customer_name: string;
+  items: BillingDocumentItem[];
+  notes?: string | null;
+  location_id?: string | null;
+  issue_date: string;
+  due_date?: string | null;
+  total_amount: number;  // an invoice's is with VAT
+  receivable_id?: string | null;
+  invoice_number?: string | null;
+  customer_eik?: string | null;
+  customer_address?: string | null;
+  payment_method?: 'cash' | 'bank_transfer' | 'card' | null;
+  amount_without_vat?: number;
+  vat_amount?: number;
+  vat_by_rate?: { rate: number; base: number; vat: number }[];
+  // Not registered for VAT: the invoice carries none and says why.
+  vat_exempt_basis?: string | null;
+  // A cancelled invoice keeps its number and counts for nothing.
+  cancelled?: boolean;
+  // Issued in another program and entered here with its own number.
+  external?: boolean;
+  // Paid in cash or by card through the till: its money is in that day's
+  // till revenue already - not counted again as income or VAT.
+  in_till?: boolean;
+  // A credit note: the invoice it is to.
+  credited_document_id?: string | null;
+  credited_invoice_number?: string | null;
+  credited_issue_date?: string | null;
+  // An invoice: what its credit notes took off (above zero).
+  credited_amount?: number;
+  // A quote: valid until, its answer, and the bill or invoice made of it.
+  valid_until?: string | null;
+  quote_status?: 'open' | 'accepted' | 'declined' | null;
+  converted_document_id?: string | null;
+  // A bill or an invoice made of a quote.
+  source_quote_id?: string | null;
+  // Issued from an invoice that repeats, for its month ("YYYY-MM").
+  recurring_invoice_id?: string | null;
+  recurring_month?: string | null;
+  // Where a bill's or an invoice's money stands (as listed).
+  payment_status?: 'paid' | 'partly_paid' | 'owed' | 'overdue' | 'credited' | null;
+  paid_amount?: number | null;
+  amount_left?: number | null;
+  refund_due?: number | null;
+  created_at: string;
+}
+
+// Proactive Second Brain engine (Module 11 Finding #1) - one ranked
+// signal list over every other piece of intelligence the app computes.
+// What the viewer can say about a Home signal. Money-at-risk signals offer
+// only "snooze"; "dismiss" hides a signal until its situation changes
+// (fingerprint); the reorder question offers still_buying/discontinue.
+export type ProactiveSignalAction =
+  | 'snooze' | 'dismiss' | 'still_buying' | 'discontinue' | 'mark_paid'
+  // A recurring expense's month: paid - record it / skip it / is this it?
+  | 'recurring_record' | 'recurring_skip' | 'recurring_yes' | 'recurring_no';
+
+export interface ProactiveSignal {
+  key: string;
+  severity: 'critical' | 'warning' | 'info';
+  priority: number;
+  title: string;
+  detail: string;
+  route: string;
+  fingerprint: string;
+  actions: ProactiveSignalAction[];
+  item_key?: string;
+  // invoices_likely_paid only: the invoices "mark paid" applies to
+  invoice_ids?: string[];
+  // Recurring expense signals: which expense and month, and the record asked about
+  recurring_id?: string;
+  recurring_month?: string;
+  match_source?: 'expense' | 'invoice';
+  match_id?: string;
+  // First shown to this viewer within the last day (or back after a while away)
+  is_new?: boolean;
+}
+
+// Recurring expenses: "invoice" - its invoice is the expense, awaited at each
+// payment; "no_invoice" - recorded as an off-book expense (asked, or on its
+// day). Paid every month or every few months (interval_months), with an end
+// when it has a number of payments (installments, a lease).
+export type RecurringKind = 'invoice' | 'no_invoice';
+
+export type RecurringState =
+  | 'paid_by_invoice' | 'paid_by_expense' | 'skipped' | 'probable'
+  | 'upcoming' | 'awaiting_invoice' | 'invoice_missing' | 'due';
+
+export interface RecurringRecord {
+  id: string;
+  amount: number;
+  date: string | null;
+  number?: string | null;
+  supplier?: string | null;
+  description?: string | null;
+  source?: 'expense' | 'invoice';
+}
+
+export interface RecurringOccurrence {
+  recurring_id: string;
+  month: string;
+  due_date: string;
+  expected_amount: number;
+  kind: RecurringKind;
+  state: RecurringState;
+  paid_amount: number | null;
+  invoices: RecurringRecord[];
+  expenses: RecurringRecord[];
+  // A record that looks like this month's payment - the owner says
+  match: RecurringRecord | null;
+  // Paid by an invoice and also recorded without one
+  duplicate?: boolean;
+  replace_automatically?: boolean;
+  // Recorded without an invoice, and an invoice that looks the same came
+  duplicate_suspected?: boolean;
+}
+
+export interface RecurringExpense {
+  id: string;
+  description: string;
+  amount: number;
+  day_of_month: number;
+  category?: string | null;
+  kind: RecurringKind;
+  supplier_name?: string | null;
+  supplier_eik?: string | null;
+  auto_record: boolean;
+  is_active: boolean;
+  // The month of its first payment ("YYYY-MM")
+  start_month: string;
+  // Every how many months it is paid - 1 every month
+  interval_months: number;
+  // How many payments in all - null for no end
+  payments_count: number | null;
+  last_month: string | null;
+  // No payment this month: null
+  current: RecurringOccurrence | null;
+  previous: RecurringOccurrence | null;
+  // The next payment still to make - null once they are over
+  next_payment: { month: string; due_date: string } | null;
+  // With an end: how many are left to make
+  payments_left: number | null;
+}
+
+export interface RecurringExpenseInput {
+  description: string;
+  amount: number;
+  day_of_month: number;
+  kind: RecurringKind;
+  supplier_name?: string | null;
+  supplier_eik?: string | null;
+  auto_record?: boolean;
+  is_active?: boolean;
+  interval_months?: number;
+  start_month?: string;
+  payments_count?: number | null;
+}
+
+export interface RecurringOverview {
+  recurring_expenses: RecurringExpense[];
+  month: string | null;
+  outlook: { paid_so_far: number; month_total: number; still_expected: number } | null;
+}
+
+// "Ask your own numbers" chat (Module 4 Finding #3)
+export interface BusinessChatDigestPeriod {
+  label: string;
+  revenue: number;
+  expenses: number;
+  profit: number | null;
+  invoice_count: number;
+}
+
+export interface BusinessChatDigestExpenseItem {
+  name: string;
+  amount: number;
+  source: 'invoice' | 'off_book';
+}
+
+export interface BusinessChatDigest {
+  this_month: BusinessChatDigestPeriod;
+  last_month: BusinessChatDigestPeriod;
+  top_expenses_this_month: BusinessChatDigestExpenseItem[];
+  unpaid_invoices: {
+    count: number;
+    overdue_count: number;
+    total_unpaid_amount: number;
+  };
+  budget: {
+    expense_limit: number;
+    total_spent: number;
+    percent_used: number;
+  } | null;
+  receivables: {
+    total_owed: number;
+    unpaid_count: number;
+    total_overdue: number;
+    overdue_count: number;
+  } | null;
+  // null when the business is not registered for VAT (vat_registered false).
+  vat_registered?: boolean;
+  vat_due_this_month: number | null;
+  forecast: {
+    revenue: BusinessChatForecastSummary | null;
+    expenses: BusinessChatForecastSummary | null;
+  };
+  roi: {
+    total_personal_investment: number;
+    total_profit: number | null;
+    roi_percent: number | null;
+    investment_covered: boolean | null;
+  } | null;
+  assets: {
+    active_count: number;
+    total_net_book_value: number;
+    monthly_depreciation_total: number;
+  } | null;
+  payroll: {
+    total_employer_cost: number;
+    employee_count: number;
+  } | null;
+  schedule: {
+    total_hours: number;
+    estimated_pay: number;
+    unpaid_amount: number;
+    on_leave_today: string[];
+  } | null;
+  personal_wallet: {
+    total_spent: number;
+    status: 'ok' | 'warning' | 'danger';
+    spent_percent_of_profit: number | null;
+  } | null;
+  scan_credits: {
+    total_remaining: number;
+    auto_reload_enabled: boolean;
+  };
+  price_alerts_unread_count: number;
+  reorder_nudges: {
+    item_name: string;
+    days_since_last: number;
+    median_days_between: number;
+    avg_order_value: number;
+    recommended_quantity: number;
+    unit: string;
+  }[];
+  item_purchases: BusinessChatItemPurchase[];
+}
+
+export interface BusinessChatItemPurchase {
+  name: string;
+  quantity: number;
+  unit: string;
+  purchases_count: number;
+  total_spent: number;
+}
+
+export interface BusinessChatForecastSummary {
+  next_month_predicted: number;
+  trend: 'increasing' | 'decreasing' | 'stable' | 'insufficient_data';
+  months_of_history: number;
+}
+
+export interface BusinessChatHistoryTurn {
+  role: 'user' | 'assistant';
+  text: string;
+}
+
+export interface BusinessChatResponse {
+  answer: string;
+  digest: BusinessChatDigest;
 }
 
 export interface OCRItemResult {
@@ -154,62 +1021,227 @@ export interface OCRResult {
   supplier: string;
   supplier_eik?: string;  // ЕИК на доставчика, ако е разпознат
   invoice_number: string;
+  document_type?: InvoiceDocumentType | null;  // credit_note, ако е озаглавен "КРЕДИТНО ИЗВЕСТИЕ" (сумите са без минус)
+  credited_invoice_number?: string | null;  // при кредитно известие: "към фактура №"
+  buyer?: string | null;  // получателят - за фактура, издадена от самата фирма
+  buyer_eik?: string | null;
   amount_without_vat: number;
   vat_amount: number;
   total_amount: number;
   invoice_date?: string;  // Дата на издаване от фактурата
   payment_due_date?: string;  // Срок за плащане, ако е отпечатан на фактурата
+  payment_method?: PaymentMethod | null;  // Начин на плащане, ако е отпечатан на фактурата
   items?: OCRItemResult[];  // Разпознати продукти от таблицата с артикули
   corrections?: string[];  // AI корекции
   confidence?: number;  // Увереност в резултата
+  // The photos as they were read: each page straightened and cut out of
+  // its background, null where a photo was read as it came.
+  pages?: (string | null)[] | null;
 }
 
 export interface FinancialVisibility {
+  // The overarching gate - without view_statistics, every field below that
+  // is typed `number | null` comes back null regardless of the other three
+  // flags (a newly invited staff member has none of these by default).
+  statistics: boolean;
   pocket_money: boolean;
   off_book_expenses: boolean;
   profit: boolean;
   personal_investments: boolean;
+  // The salaries: for whoever keeps the payroll - out of everyone else's
+  // totals (expenses, profit, charts, forecast...), like pocket money.
+  payroll?: boolean;
+  // The personal notebook (company money spent personally): its viewers
+  // see it beside the profit - never as a business expense.
+  personal_wallet?: boolean;
 }
 
 export interface Summary {
-  total_invoice_amount: number;
-  total_invoice_vat: number;
-  total_fiscal_revenue: number;
   // null (not 0) when this viewer's permissions hide the field - every
   // total below is already recomputed as if it were zero in that case.
+  total_invoice_amount: number | null;
+  total_invoice_vat: number | null;
+  total_fiscal_revenue: number | null;
+  // Invoices issued to customers in the period (with VAT) - part of income.
+  total_issued_invoices?: number | null;
+  // false: the business is not registered for VAT - no VAT cards.
+  vat_registered?: boolean;
+  // The one profit (P1-1): income and expenses without VAT (registered for
+  // VAT); the salaries not entered yet, counted among the expenses.
+  vat_excluded?: boolean;
+  payroll_expected?: number | null;
+  issued_invoice_count?: number | null;
+  issued_invoice_vat?: number | null;
   total_pocket_money: number | null;
-  fiscal_vat: number;
-  vat_to_pay: number;
+  fiscal_vat: number | null;
+  vat_to_pay: number | null;
   total_non_invoice_expenses: number | null;
-  total_payroll_cost: number;
-  total_depreciation_expense: number;
-  total_income: number;
-  total_expense: number;
+  total_payroll_cost: number | null;
+  total_depreciation_expense: number | null;
+  total_income: number | null;
+  total_expense: number | null;
   profit: number | null;
-  invoice_count: number;
-  total_cash_revenue: number;
-  total_card_revenue: number;
-  total_unpaid_amount: number;
-  unpaid_invoice_count: number;
-  total_overdue_amount: number;
-  overdue_invoice_count: number;
+  // The personal notebook beside the profit, for its viewers only (null for
+  // anyone else): company money spent personally in the period, and what
+  // is left in the business after it (null without the profit too).
+  personal_withdrawals?: number | null;
+  left_after_personal?: number | null;
+  invoice_count: number | null;
+  total_cash_revenue: number | null;
+  total_card_revenue: number | null;
+  // Invoices issued and paid by bank: with cash and card, the whole income.
+  total_bank_revenue?: number | null;
+  total_unpaid_amount: number | null;
+  unpaid_invoice_count: number | null;
+  total_overdue_amount: number | null;
+  overdue_invoice_count: number | null;
   financial_visibility: FinancialVisibility;
+  // The days these totals cover: a period still running is counted through
+  // today (through_date), the rest of it hasn't happened yet.
+  period?: { start_date: string; end_date: string; days: number; through_date: string };
+  revenue_day_count?: number;
+  pace?: SummaryPace | null;
+}
+
+// How a period is going, day by day (backend server.period_pace).
+export interface SummaryPace {
+  is_current: boolean;
+  open_days: number;
+  open_days_so_far: number;
+  // Days revenue was entered on - the divisor of the average; a day
+  // nobody entered is unknown, never a zero day.
+  revenue_days: number;
+  avg_per_revenue_day: number | null;
+  // Average per day x every open day of the period - only while it runs.
+  expected_income: number | null;
+}
+
+export interface ReorderItem {
+  item_name: string;
+  supplier: string;
+  unit: string;
+  median_days_between: number;
+  days_since_last: number;
+  last_purchase_date: string;
+  avg_order_value: number;
+  // Trend-adjusted suggested order size for this item's next cycle - this
+  // item's own trailing per-day purchase rate, scaled by how the
+  // company's overall revenue has trended lately. 0 whenever not enough
+  // revenue data exists on either side to say anything about a trend.
+  recommended_quantity: number;
+  trend_ratio: number;
+}
+
+// The ordering plan (backend reorder_plan): items by the supplier they were
+// last bought from - to order now, soon, already ordered (its invoice not in
+// yet) or not yet; apart, the items long not bought (no status: asked
+// about, never ordered).
+export type ReorderStatus = 'order' | 'soon' | 'ordered' | 'ok';
+
+export interface ReorderPlanItem extends ReorderItem {
+  item_key: string;
+  last_supplier: string;
+  suppliers_count: number;
+  // Negative: this many days past its usual gap.
+  days_until_due: number;
+  status?: ReorderStatus;
+  // Marked "Поръчано": when and by whom (first name).
+  ordered?: { at: string; by: string | null };
+  // The delivery its order goes with (a supplier with fixed delivery
+  // days, else null) and the day to order by - "YYYY-MM-DD".
+  delivery?: string | null;
+  order_by?: string;
+  // In the supplier's next order: what "Копирай" and "Поръчано" take.
+  in_next_order?: boolean;
+  // The quantity is what is usually taken on that weekday.
+  usual_for_weekday?: boolean;
+  // The delivery it was ordered for came without it, that day.
+  missing_on?: string;
+}
+
+export interface ReorderPlanSupplier {
+  supplier: string;
+  status: ReorderStatus;
+  to_order: number;
+  soon: number;
+  ordered: number;
+  // What the next order is usually bought for.
+  order_value: number;
+  items: ReorderPlanItem[];
+  // Fixed delivery days read from its invoices (0 = Monday), or null.
+  schedule?: number[] | null;
+  // The days changed lately.
+  schedule_changed?: boolean;
+  // The next delivery (fixed days) and the day to order by - "YYYY-MM-DD".
+  next_delivery?: string | null;
+  order_by?: string | null;
+  // A public holiday on the next delivery.
+  holiday?: { date: string; name: string } | null;
+  // The delivery it was ordered for came without these.
+  missing?: { date: string; items: string[] } | null;
+  // Yesterday's expected delivery has no invoice ("YYYY-MM-DD").
+  no_invoice?: string | null;
+}
+
+export interface ReorderPlan {
+  suppliers: ReorderPlanSupplier[];
+  stale: ReorderPlanItem[];
+}
+
+export interface WeekdayRevenueStat {
+  weekday: number; // 0=Monday..6=Sunday, matches date.weekday()
+  avg_revenue: number;
+  days_observed: number;
+}
+
+export interface WeakDaySuggestion {
+  weekday: number;
+  avg_revenue: number;
+  overall_avg_revenue: number;
+  percent_below_average: number;
+}
+
+export interface StaffingEfficiencyStat {
+  weekday: number;
+  avg_revenue: number;
+  avg_scheduled_hours: number;
+  revenue_per_labor_hour: number;
+}
+
+export interface StaffingRebalanceSuggestion {
+  overstaffed_weekday: number;
+  understaffed_weekday: number;
+  overstaffed_hours: number;
+  understaffed_hours: number;
+  overstaffed_percent_of_average: number;
+  understaffed_percent_of_average: number;
+  suggested_hours_to_move: number;
 }
 
 export interface ChartDataPoint {
   date: string;
   label: string;
   income: number;
+  // Includes the bucket's share of the month's payroll and depreciation
+  // (fixed_costs), so the buckets add up to the summary's total expense.
   expense: number;
+  fixed_costs?: number;
+  // The month's payroll and depreciation within fixed_costs - a cost of
+  // the month: a day chart shows it apart, not as the day's spending.
+  monthly_costs?: number;
   vat: number;
   is_closed: boolean;
+  has_revenue?: boolean;
+  bucket?: 'day' | 'month';
+  revenue_days?: number;
+  open_days?: number;
 }
 
 export interface NotificationSettings {
   id: string;
   user_id: string;
-  vat_threshold_enabled: boolean;
-  vat_threshold_amount: number;
+  daily_push_enabled: boolean;
+  daily_push_hour: number;
   periodic_enabled: boolean;
   periodic_dates: number[];
   created_at: string;
@@ -233,10 +1265,14 @@ export interface SupplierStats {
 }
 
 export interface SupplierOverviewResponse {
+  // Null ends when no period was asked for: the whole history.
   period: {
-    start_date: string;
-    end_date: string;
+    start_date: string | null;
+    end_date: string | null;
   };
+  // What "active" means: bought from in the chosen period, or - for the
+  // whole history - a delivery in the last 30 days.
+  activity_basis?: 'period' | 'last_30_days';
   executive_summary: {
     top_3_concentration: number;
     top_5_concentration: number;
@@ -253,6 +1289,8 @@ export interface SupplierOverviewResponse {
     total_net: number;
     supplier_count: number;
     invoice_count: number;
+    // Fixed-asset purchases in the total (not the day's expense).
+    assets_total?: number;
   };
   top_by_amount: SupplierStats[];
   top_by_frequency: SupplierStats[];
@@ -262,14 +1300,41 @@ export interface SupplierOverviewResponse {
   all_suppliers: SupplierStats[];
 }
 
+export type SupplierGroupBy = 'day' | 'week' | 'month' | 'year';
+
+// One calendar day, week (Monday-Sunday), month or year of a supplier's
+// purchases - present even when nothing was bought (amount 0).
+export interface SupplierSeriesPoint {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+  amount: number;
+  count: number;
+  // Reaches past the chosen period (a week cut by its first day) or is
+  // still running - not a whole one, so never compared with one.
+  is_partial: boolean;
+  // Against the whole bucket before it - only between two whole ones.
+  growth_percent: number | null;
+}
+
 export interface SupplierDetailedResponse {
   supplier: string;
   found: boolean;
+  // The days the totals and the series cover (up to today).
+  period?: { start_date: string; end_date: string } | null;
+  group_by?: SupplierGroupBy;
+  series?: SupplierSeriesPoint[];
   overview?: {
     total_amount: number;
     total_vat: number;
     total_net: number;
     invoice_count: number;
+    // Credit notes apart (they take their amount off the total), and the
+    // fixed-asset purchases included in it (depreciated, not a day's expense).
+    credit_note_count?: number;
+    credit_note_total?: number;
+    assets_total?: number;
     avg_invoice: number;
     first_delivery?: string;
     last_delivery?: string;
@@ -281,6 +1346,7 @@ export interface SupplierDetailedResponse {
     amount: number;
     count: number;
     growth_percent: number;
+    is_partial?: boolean;
   }[];
   anomalies?: {
     date: string;
@@ -294,6 +1360,8 @@ export interface SupplierDetailedResponse {
     date: string;
     total_amount: number;
     vat_amount: number;
+    document_type?: 'invoice' | 'credit_note';
+    is_asset?: boolean;
   }[];
 }
 
@@ -317,6 +1385,23 @@ export interface InvoiceItemCreate {
   unit_price: number;
   total_price?: number;
   vat_amount?: number;
+  // Scan review only (never stored on the line): this line was re-read as
+  // k pieces per invoice unit - remembered for the supplier + item - or a
+  // remembered pack size the app applied was undone (forgotten).
+  pack_multiple_applied?: number;
+  pack_rule_rejected?: boolean;
+}
+
+// Corrects one already-saved line item on an existing invoice (e.g. OCR
+// read "1 бр." for what was actually a 6-pack) - id identifies which item,
+// every other field is optional and only sent when it actually changed.
+// total_price/vat_amount are recomputed server-side, not sent here.
+export interface InvoiceItemUpdate {
+  id: string;
+  name?: string;
+  quantity?: number;
+  unit?: string;
+  unit_price?: number;
 }
 
 // Price Alert types
@@ -328,14 +1413,128 @@ export interface PriceAlert {
   old_price: number;
   new_price: number;
   change_percent: number;
+  direction: 'increase' | 'decrease';
+  baseline_purchase_count: number;
   invoice_id: string;
   invoice_number: string;
   status: 'unread' | 'read' | 'dismissed';
   created_at: string;
+  // "pack_suspect": the new unit price is exactly a pack multiple of the
+  // usual one - a question about a likely misread, not a price rise.
+  kind?: 'price_change' | 'pack_suspect';
+  // (new - old) x usual monthly quantity, EUR per month
+  monthly_impact?: number | null;
+  pack_multiple?: number | null;
+  unit?: string | null;
+  line_item_id?: string | null;
+}
+
+// Scan-review preview of what a recognized line would raise once saved
+// (POST /items/price-check) - index points into the request's items.
+export interface ItemPriceHint {
+  index: number;
+  // pack_rule: a pack size learned from an earlier correction, applied
+  // automatically in scan review (with undo)
+  kind: 'price_change' | 'pack_suspect' | 'pack_rule';
+  auto_apply?: boolean;
+  old_price: number | null;
+  new_price: number;
+  change_percent: number | null;
+  direction: 'increase' | 'decrease';
+  pack_multiple: number | null;
+  monthly_impact: number | null;
+  unit: string | null;
+}
+
+// The ROI card ("Лични вложения", GET /roi/analysis): does the business pay
+// back what the owner put in, what moved profit, what can be done - each
+// part with its own plain-language line.
+export interface RoiMover {
+  kind: 'revenue' | 'supplier' | 'off_book';
+  label: string;
+  current: number;
+  usual: number;
+  delta: number;
+  // + helps profit, - hurts it (a supplier's rise is a negative effect)
+  profit_effect: number;
+  text: string;
+}
+
+export interface RoiAction {
+  kind: 'price_increases' | 'cheaper_supplier' | 'missing_revenue';
+  monthly_eur: number | null;
+  route: string;
+  text: string;
+}
+
+export interface RoiAnalysisDetail {
+  payback: { invested: number; profit: number; coverage: number; months: number; text: string } | null;
+  month: { personal: number; profit: number; partial: boolean; through_day: number | null; text: string } | null;
+  movers: RoiMover[];
+  actions: RoiAction[];
+  notes: string[];
+  profit_visible: boolean;
+}
+
+// AI advice on the ROI facts (GET /roi/advice) - kept until the numbers change.
+export interface RoiAdviceResponse {
+  available: boolean;
+  advice: { headline: string; points: string[] } | null;
+  cached?: boolean;
+}
+
+// Scan review, before saving (POST /invoices/draft-check): do the amounts
+// add up, and which line is most likely wrong if not. Indexes point into
+// the request's items.
+export interface InvoiceDraftFix {
+  index: number;
+  unit_price: number;
+}
+
+export type InvoiceDraftCause =
+  | 'ok'
+  | 'line_values'
+  | 'vat_included'
+  | 'duplicate_line'
+  | 'decimal_slip'
+  | 'missing_line'
+  | 'extra';
+
+export interface InvoiceDraftCheck {
+  header: { expected_total: number; total_amount: number; difference: number } | null;
+  lines: {
+    sum: number;
+    base: number;
+    difference: number;
+    ok: boolean;
+    cause: InvoiceDraftCause | null;
+    fixes: InvoiceDraftFix[];
+    remove_index: number | null;
+    index: number | null;
+    factor: number | null;
+  } | null;
+  // quantity x price differs from the line's printed value; the price and
+  // (when plausible) the quantity that would match it.
+  line_flags: {
+    index: number;
+    kind: 'line_value_mismatch';
+    computed: number;
+    printed: number;
+    unit_price?: number;
+    quantity?: number;
+  }[];
+}
+
+export interface PriceAlertMute {
+  id: string;
+  item_name: string;
+  supplier: string;
 }
 
 export interface PriceAlertSettings {
   threshold_percent: number;
+  min_monthly_impact: number;
+  alert_on_decrease: boolean;
   enabled: boolean;
 }
 
@@ -351,6 +1550,12 @@ export interface ItemPriceHistory {
 export interface ItemStatistics {
   item_name: string;
   quantity: number;
+  // The line unit the quantity is counted in ("кг", "бр."), or the base
+  // unit when all purchases convert to one; null when they mix units.
+  unit?: string | null;
+  // Price per kg / l / piece, when every purchase converts to the same one.
+  base_unit?: string | null;
+  avg_base_price?: number | null;
   total_value: number;
   frequency: number;
   avg_price: number;
@@ -368,9 +1573,30 @@ export interface ItemStatsResponse {
     unique_items: number;
   };
   top_by_quantity: ItemStatistics[];
+  // Quantity is only ranked within one unit: 40 kg and 400 pieces are not
+  // "more" than each other. Keyed by the unit label, most common unit first.
+  top_by_quantity_by_unit?: Record<string, ItemStatistics[]>;
   top_by_value: ItemStatistics[];
   top_by_frequency: ItemStatistics[];
   price_trends: ItemStatistics[];
+}
+
+// The same product in another pack size, compared per kg / l / piece.
+export interface ItemOtherSize {
+  item_name: string;
+  avg_base_price: number;
+  base_unit: string;
+  purchase_count: number;
+  difference_percent: number | null;
+}
+
+// The owner's own catalog: names joined with an item, look-alikes not yet
+// joined, and names the owner said are a different product.
+export interface RelatedItems {
+  item_name: string;
+  merged_with: string[];
+  similar: { item_name: string; similarity: number }[];
+  different_from: string[];
 }
 
 // Payroll / Ведомост за заплати
@@ -388,7 +1614,31 @@ export interface Employee {
   food_vouchers: number;
   additional_insurance: number;
   active: boolean;
+  // Optional link to this same person's own app account (a team member
+  // with their own login) - distinct from `user_id` above, which is who
+  // CREATED this payroll record. Used by the work-schedule feature to
+  // cross-check a shift against this employee's already-recorded leave.
+  linked_user_id?: string | null;
+  // Paid annual leave in working days a year, and the unused days carried
+  // into a year (entered once).
+  annual_leave_days?: number;
+  leave_carryover?: { year: number; days: number } | null;
+  // The location they work at - its payroll goes there.
+  location_id?: string | null;
   created_at: string;
+}
+
+// An employee's paid leave in a year, in working days.
+export interface LeaveBalance {
+  employee_id: string;
+  employee_name: string;
+  year: number;
+  annual_leave_days: number;
+  carried_over: number;
+  entitlement: number;
+  used: number;
+  planned: number;
+  remaining: number;
 }
 
 export interface EmployeeCreate {
@@ -399,14 +1649,209 @@ export interface EmployeeCreate {
   agreement_type: PayrollAgreementType;
   food_vouchers?: number;
   additional_insurance?: number;
+  linked_user_id?: string | null;
+  // "" on an update takes them off any location.
+  location_id?: string | null;
 }
 
-export interface PayrollRates {
+export type ShiftRepeatPattern = 'none' | 'daily' | 'weekly' | 'monthly';
+
+export interface WorkShift {
+  id: string;
+  company_id: string;
+  user_id: string;
+  created_by: string;
+  date: string; // "YYYY-MM-DD" - anchor/first occurrence
+  start_time: string; // "HH:MM"
+  end_time: string; // "HH:MM" - may be before start_time (overnight shift)
+  repeat_pattern: ShiftRepeatPattern;
+  repeat_until?: string | null;
+  hourly_rate?: number | null;
+  note?: string | null;
+  created_at: string;
+}
+
+export interface WorkShiftCreate {
+  user_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  repeat_pattern?: ShiftRepeatPattern;
+  repeat_until?: string | null;
+  hourly_rate?: number | null;
+  note?: string | null;
+}
+
+export interface ShiftOccurrence {
+  shift_id: string;
+  user_id: string;
+  user_name: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  // The planned duration from start_time/end_time - stays fixed even
+  // once `hours` below is overridden by a correction.
+  scheduled_hours: number;
+  // The duration to actually use (hours worked + pay) - the scheduled
+  // duration, or the corrected one when `adjusted` is true.
+  hours: number;
+  hourly_rate?: number | null;
+  note?: string | null;
+  repeat_pattern: ShiftRepeatPattern;
+  repeat_until?: string | null;
+  leave_conflict: boolean;
+  // Counted in pay: not a day of the person's leave, unless a manager
+  // recorded the hours actually worked that day (an adjustment).
+  payable: boolean;
+  adjusted: boolean;
+  adjustment_reason?: string | null;
+  adjusted_by_name?: string | null;
+}
+
+export interface ShiftAdjustmentCreate {
+  actual_hours: number;
+  actual_hourly_rate?: number | null;
+  reason: string;
+}
+
+export interface ScheduleSummary {
+  total_hours: number;
+  estimated_pay: number;
+  shift_count: number;
+  // Shifts on a day of the person's leave - not counted in hours or pay.
+  leave_days_excluded?: number;
+}
+
+export interface SchedulePaymentCreate {
+  user_id: string;
+  period_start: string;
+  period_end: string;
+  // The person's formal payroll already covers the month: pay anyway.
+  confirm_double_pay?: boolean;
+}
+
+export interface SchedulePayment {
+  id: string;
+  company_id: string;
+  user_id: string;
+  user_name: string;
+  period_start: string;
+  period_end: string;
+  total_hours: number;
+  amount: number;
+  expense_id: string;
+  paid_by: string;
+  paid_by_name: string;
+  created_at: string;
+}
+
+// Pays several team members in one action - some on a fixed monthly
+// salary (formal payroll), others hourly (Work Schedule) - see pay-run.tsx.
+export interface BatchPayrollItem {
+  employee_id: string;
+  period_month: number;
+  period_year: number;
+  confirm_double_pay?: boolean;
+}
+
+export interface BatchPayRequest {
+  payroll_entries: BatchPayrollItem[];
+  schedule_payments: SchedulePaymentCreate[];
+}
+
+export interface BatchPayResultItem {
+  kind: 'payroll' | 'schedule';
+  label: string;
+  success: boolean;
+  error?: string | null;
+  amount?: number | null;
+  // Already paid for the month the other way - pay only after a yes.
+  needs_confirmation?: boolean;
+  ref?: string | null;
+}
+
+// Manager-only team member profile (opened from an avatar tap, e.g. the
+// work-schedule grid) + private positive/negative performance notes.
+export type TeamNoteType = 'positive' | 'negative';
+
+export interface TeamNoteCreate {
+  user_id: string;
+  note_type: TeamNoteType;
+  text: string;
+}
+
+export interface TeamNote {
+  id: string;
+  company_id: string;
+  user_id: string;
+  note_type: TeamNoteType;
+  text: string;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+}
+
+export interface TeamNotesResponse {
+  notes: TeamNote[];
+  positive_count: number;
+  negative_count: number;
+  net_score: number;
+}
+
+export interface TeamMemberIdentity {
+  user_id: string;
+  name: string;
+  email: string;
+  picture?: string | null;
+  role: 'owner' | 'manager' | 'staff' | 'accountant';
+  permissions: string[];
+  created_at: string;
+}
+
+// Deliberately narrower than the full Employee type - no salary/agreement
+// here, that stays in the Payroll screen where it already lives.
+export interface TeamMemberEmployeeInfo {
+  id: string;
+  name: string;
+  position?: string | null;
+  hire_date?: string | null;
+  active: boolean;
+}
+
+export interface TeamMemberProfile {
+  member: TeamMemberIdentity;
+  employee: TeamMemberEmployeeInfo | null;
+  schedule_summary: ScheduleSummary;
+  leave_entries: LeaveEntry[];
+  holiday_work_entries: HolidayWorkEntry[];
+  notes: TeamNotesResponse;
+}
+
+// A leave entry resolved to the SAME person's real login (user_id) rather
+// than the payroll-only employee_id - what the work-schedule grid needs
+// to show "on leave" blocks keyed the same way it already keys shifts.
+export interface ScheduleLeaveEntry {
+  id: string;
+  user_id: string;
+  employee_name: string;
+  leave_type: LeaveType;
+  start_date: string;
+  end_date: string;
+  note?: string | null;
+}
+
+export interface PayrollRateValues {
   employee_rate_percent: number;
   employer_rate_percent: number;
   income_tax_percent: number;
   min_insurance_income: number;
   max_insurance_income: number;
+}
+
+// The rates in effect in a month, and every dated version ("в сила от").
+export interface PayrollRates extends PayrollRateValues {
+  effective_from?: string | null;  // "YYYY-MM" of the version in effect
+  versions?: (PayrollRateValues & { effective_from: string })[];
 }
 
 export interface PayrollBreakdown {
@@ -415,6 +1860,10 @@ export interface PayrollBreakdown {
   employee_contributions: number;
   employer_contributions: number;
   income_tax: number;
+  // Advance/garnishment/other withholding distinct from social
+  // contributions and income tax - only ever non-zero for an entry
+  // imported from the accountant's own ведомост PDF.
+  other_deductions: number;
   net_amount: number;
   food_vouchers: number;
   additional_insurance: number;
@@ -431,7 +1880,60 @@ export interface PayrollEntry extends PayrollBreakdown {
   period_year: number;
   bonus_amount: number;
   notes?: string;
+  // Whether this entry counts toward total business expenses - absent
+  // on entries created before this field existed, which means "yes"
+  // (the same default new entries get), not "unknown".
+  counted_in_expenses?: boolean;
+  // Absent for a manually-entered/estimated entry - "accountant_import"
+  // for one created from a parsed ведомост PDF (see PayrollImportEntry).
+  source?: 'accountant_import';
   created_at: string;
+}
+
+// One parsed person from the accountant's own ведомост PDF
+// (POST /payroll/import/preview), before the user has confirmed/adjusted
+// the employee match - egn is shown only for the user to visually confirm
+// identity, never sent back on commit or persisted anywhere.
+export interface PayrollImportEntry {
+  name: string;
+  egn?: string | null;
+  position?: string | null;
+  gross_amount: number;
+  insurance_base: number;
+  employee_contributions: number;
+  employer_contributions: number;
+  income_tax: number;
+  other_deductions: number;
+  net_amount: number;
+  matched_employee_id: string | null;
+  matched_employee_name: string | null;
+  match_confidence: number;
+  already_imported: boolean;
+}
+
+export interface PayrollImportPreviewResponse {
+  period_month: number;
+  period_year: number;
+  entries: PayrollImportEntry[];
+}
+
+export interface PayrollImportCommitEntry {
+  employee_id: string;
+  period_month: number;
+  period_year: number;
+  gross_amount: number;
+  insurance_base: number;
+  employee_contributions: number;
+  employer_contributions: number;
+  income_tax: number;
+  other_deductions: number;
+  net_amount: number;
+}
+
+export interface PayrollImportCommitResult {
+  imported: number;
+  skipped: { employee_id: string; message: string }[];
+  total: number;
 }
 
 // Official Bulgarian public holidays (computed, not stored) and
@@ -452,7 +1954,113 @@ export interface HolidayWorkEntry {
   created_at: string;
 }
 
+// What a business has entered of its first steps (Home's "Започни оттук").
+export interface GettingStarted {
+  revenue: boolean;
+  invoice: boolean;
+  expense: boolean;
+  issued: boolean;
+}
+
+// Home in one request (Л14): each part as its own endpoint answers it,
+// null where this viewer may not see it.
+export interface HomeData {
+  summary: Summary | null;
+  signals: ProactiveSignal[] | null;
+  getting_started: GettingStarted | null;
+  billing_overview: BillingOverview | null;
+  scan_credits: ScanBalance | null;
+  day_card?: DayCardData | null;
+  // The personal notebook's month - null for whoever may not see it.
+  personal_wallet?: PersonalWalletSummary | null;
+  // The VAT to pay, when, and where the month is heading - null for whoever
+  // does not see the totals.
+  vat?: VatOutlook | null;
+  // The period's gross, operating and net margin - null for whoever may
+  // not see the profit.
+  margins?: PeriodMargins | null;
+}
+
+// The VAT a business owes (backend routers/vat.py): only `registered` for a
+// business not registered for VAT.
+export interface VatOutlook {
+  registered: boolean;
+  period?: { start_date: string; end_date: string };
+  sales_vat?: number;
+  purchase_vat?: number;
+  // Below zero: VAT to reclaim.
+  due?: number;
+  // "YYYY-MM" when the period is one calendar month.
+  month?: string | null;
+  running?: boolean;
+  pay_by?: string | null;
+  // The whole month at its pace so far - a running month only.
+  expected_due?: number | null;
+  // Last month's VAT, while its 14th has not passed.
+  previous?: { month: string; due: number; pay_by: string } | null;
+}
+
+// One margin: its percent of the sales, the profit it leaves and its
+// change since the period before, in percentage points.
+export interface Margin {
+  percent: number;
+  profit: number;
+  change: number | null;
+}
+
+// A period's margins (backend routers/margins.py): without VAT for a
+// business registered for VAT; only of what the viewer sees.
+export interface PeriodMargins {
+  available: boolean;
+  period: { start_date: string; end_date: string };
+  previous_period: { start_date: string; end_date: string } | null;
+  vat_excluded: boolean;
+  profit_tax_percent: number;
+  payroll_left_out: boolean;
+  no_recurring_costs: boolean;
+  sales?: number;
+  // payroll_expected: the part of the payroll not entered yet, counted by the salaries in Екип.
+  costs?: { goods: number; payroll: number; payroll_expected?: number; recurring: number; depreciation: number; profit_tax: number };
+  gross?: Margin;
+  operating?: Margin;
+  net?: Margin;
+}
+
+// The day card (backend routers/day_card): a greeting, the weather where
+// the business is, one line for the day, what the role needs today and one
+// spark - every number only for whoever may see it.
+export type WeatherKind = 'clear' | 'partly' | 'cloudy' | 'fog' | 'rain' | 'sleet' | 'snow' | 'thunder';
+
+export interface DayCardItem {
+  key: string;
+  icon: string;
+  text: string;
+  route: string | null;
+}
+
+export interface DayCardData {
+  date: string;
+  greeting: { part: 'morning' | 'day' | 'evening' | 'night'; name: string };
+  weather: {
+    now: number | null; min: number; max: number; kind: WeatherKind; now_kind: WeatherKind;
+    precipitation_mm: number; place: string | null; label: string;
+    // How wet days move this business's revenue, from its own days - for
+    // whoever sees the revenue, once there are enough of them.
+    effect_percent: number | null;
+  } | null;
+  line: { text: string; source: 'ai' | 'template' } | null;
+  focus: DayCardItem[];
+  spark: DayCardItem | null;
+  attribution?: string;
+  // Nothing the business entered tells where it is (no city, address,
+  // site or scanned invoice to it): a manager can show the weather "here".
+  place_missing?: boolean;
+}
+
 export type LeaveType = 'paid' | 'unpaid' | 'sick';
+
+// Why a sick-leave sheet was issued - never the diagnosis.
+export type SickReason = 'illness' | 'work_accident' | 'occupational' | 'family_care' | 'maternity' | 'other';
 
 export interface LeaveEntry {
   id: string;
@@ -462,8 +2070,22 @@ export interface LeaveEntry {
   leave_type: LeaveType;
   start_date: string;
   end_date: string;
-  note?: string;
+  note?: string | null;
+  // A sick leave's sheet as the employer gets it (only on sick leave).
+  sheet_number?: string | null;
+  sick_reason?: SickReason | null;
+  is_continuation?: boolean;
   created_at: string;
+}
+
+export interface LeaveEntryInput {
+  leave_type: LeaveType;
+  start_date: string;
+  end_date: string;
+  note?: string | null;
+  sheet_number?: string | null;
+  sick_reason?: SickReason | null;
+  is_continuation?: boolean;
 }
 
 // Fixed Assets / Дълготрайни активи (ДМА)
@@ -502,6 +2124,21 @@ export interface FixedAsset {
   monthly_depreciation: number;
   accumulated_depreciation: number;
   net_book_value: number;
+  // Its purchase invoice: while linked, that invoice is not an expense of
+  // its day - the depreciation is - and its VAT is still a credit.
+  invoice_id?: string | null;
+  invoice_label?: string | null;
+}
+
+export interface LinkableInvoice {
+  id: string;
+  supplier: string;
+  invoice_number: string;
+  date: string | null;
+  total_amount: number;
+  amount_without_vat: number;
+  first_item?: string | null;
+  asset_id?: string | null;
 }
 
 export interface FixedAssetCreate {
@@ -514,6 +2151,8 @@ export interface FixedAssetCreate {
   responsible_person?: string;
   image_base64?: string;
   notes?: string;
+  // "" removes the link (on an update).
+  invoice_id?: string;
 }
 
 export interface AssetsSummary {
@@ -547,6 +2186,8 @@ export interface ImportCommitResult {
   imported: number;
   failed: { index: number; message: string }[];
   total: number;
+  // Expenses already held (same day, description and amount) - not imported again.
+  already_present?: number;
 }
 
 // Team collaboration: shared calendar + messages (owner/manager/accountant)
@@ -653,8 +2294,12 @@ export interface PersonalWalletSummary {
   category_totals: Partial<Record<PersonalWalletCategory, number>>;
   needs_total: number;
   wants_total: number;
-  profit_this_month: number;
-  safe_to_spend: number;
+  // Measured against the profit: null for a viewer who does not see the profit.
+  profit_this_month: number | null;
+  safe_to_spend: number | null;
+  // What safe_to_spend keeps back: the month's VAT to pay, the salaries not
+  // entered yet (by the days gone) and what falls due within a week.
+  set_aside?: { vat: number; salaries: number; upcoming: number } | null;
   threshold_percent: number;
   spent_percent_of_profit: number | null;
   status: 'ok' | 'warning' | 'danger';
@@ -693,4 +2338,54 @@ export interface ScanPackage {
   bonus_scans: number;
   price_eur: number;
   price_per_scan: number;
+}
+
+// The "Състояние" screen (GET /system/status): the server, the database,
+// the background jobs, the outside services switched on, and the errors of
+// the last day - the company's own for the owner, everyone's for the person
+// who runs the program (scope "all").
+export type SystemJobState = 'ok' | 'failing' | 'late' | 'waiting' | 'off';
+
+export interface SystemJob {
+  key: string;
+  every_minutes: number;
+  state: SystemJobState;
+  last_run_at: string | null;
+  last_ok_at: string | null;
+  last_error_at: string | null;
+  last_error: string | null;
+}
+
+export interface SystemError {
+  id: string;
+  source: 'server' | 'job' | 'app';
+  where: string;
+  kind: string;
+  message: string;
+  count: number;
+  day: string;
+  first_at: string;
+  last_at: string;
+  path?: string | null;
+  company_id?: string | null;
+  company_name?: string | null;
+  trace?: string | null;
+}
+
+export interface SystemStatus {
+  scope: 'all' | 'company';
+  checked_at: string;
+  server: { started_at: string; version: string | null };
+  database: { ok: boolean; ms: number | null };
+  features: { ai: boolean; email: boolean; payments: boolean; push: boolean; storage: boolean };
+  jobs: SystemJob[];
+  errors: { count: number; items: SystemError[] };
+}
+
+export interface ClientErrorReport {
+  message: string;
+  stack?: string;
+  screen?: string;
+  kind: 'error' | 'promise' | 'render';
+  platform: 'web' | 'ios' | 'android';
 }

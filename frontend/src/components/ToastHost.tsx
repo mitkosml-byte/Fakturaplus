@@ -76,7 +76,11 @@ export function ToastHost() {
     <View pointerEvents="box-none" style={[styles.host, { bottom: insets.bottom + 84 }]}>
       <Animated.View style={[styles.toast, animatedStyle]}>
         <Pressable style={styles.body} onPress={animateOutAndAdvance}>
-          <Ionicons name={ICONS[current.variant]} size={20} color={ICON_COLORS[current.variant]} />
+          <Ionicons
+            name={(current.icon as keyof typeof Ionicons.glyphMap | undefined) ?? ICONS[current.variant]}
+            size={20}
+            color={current.iconColor ?? ICON_COLORS[current.variant]}
+          />
           <Text style={styles.message} numberOfLines={2}>
             {current.message}
           </Text>

@@ -28,6 +28,30 @@ def is_configured() -> bool:
     return bool(VAPID_PRIVATE_KEY)
 
 
+_public_key: Optional[str] = None
+
+
+def public_key() -> Optional[str]:
+    """The public half of VAPID_PRIVATE_KEY (base64url, uncompressed point):
+    what a browser subscribes with. Served by the server, so a new install
+    with its own key pair works without changing the app. None without a
+    key (or one that cannot be read)."""
+    global _public_key
+    if _public_key is None and VAPID_PRIVATE_KEY:
+        try:
+            import base64
+            from cryptography.hazmat.primitives import serialization
+            from py_vapid import Vapid  # type: ignore[import-untyped]
+            point = Vapid.from_string(private_key=VAPID_PRIVATE_KEY).public_key.public_bytes(
+                serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint,
+            )
+            _public_key = base64.urlsafe_b64encode(point).rstrip(b"=").decode("ascii")
+        except Exception:
+            logger.exception("VAPID_PRIVATE_KEY could not be read - push notifications are disabled.")
+            return None
+    return _public_key
+
+
 def _warn_unconfigured_once():
     global _warned_unconfigured
     if not _warned_unconfigured:

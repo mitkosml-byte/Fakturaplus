@@ -16,6 +16,9 @@ type Props<T extends string> = {
   options: ChipTabOption<T>[];
   active: T;
   onChange: (key: T) => void;
+  // Many short tabs in a narrow row (the period's Ден…От–до): a smaller
+  // label and less padding, so five fit on a 360px phone.
+  compact?: boolean;
 };
 
 // Motion Design System: "Category tab / chip switch" - a sliding pill
@@ -23,7 +26,7 @@ type Props<T extends string> = {
 // independently swapping its own background instantly. First built for
 // Profile's category selector; reused here for Stats' tab and period
 // rows instead of duplicating the same pill-tracking logic three times.
-export function ChipTabs<T extends string>({ options, active, onChange }: Props<T>) {
+export function ChipTabs<T extends string>({ options, active, onChange, compact = false }: Props<T>) {
   const rowRef = useRef<View>(null);
   const chipRefs = useRef<Partial<Record<string, any>>>({});
   const pillX = useSharedValue(0);
@@ -62,19 +65,35 @@ export function ChipTabs<T extends string>({ options, active, onChange }: Props<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keysSignature, active]);
 
+  // Re-snap (no animation) whenever the ROW ITSELF is re-measured, not just
+  // when the active tab or the key set changes - e.g. async content above
+  // this row (the Home screen's Daily Briefing card loading its signals a
+  // beat after mount) growing taller shifts a scrollbar into/out of view on
+  // web, narrowing every chip's pixel width without the key set or the
+  // active tab ever changing, which otherwise left the pill frozen at its
+  // pre-shift position (visibly under the wrong chip, e.g. "Year" instead
+  // of the actually-selected "Month").
+  // The active tab read at the time of the layout, not at the render that
+  // made the handler: on the web the row's layout callback can be the one
+  // from the first render, which on a screen opened straight on another tab
+  // (Statistics' ?tab=items) put the pill back under the first tab.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const handleRowLayout = () => movePillTo(activeRef.current, false);
+
   const pillStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: pillX.value }],
     width: pillWidth.value,
   }));
 
   return (
-    <View ref={rowRef} style={styles.row}>
+    <View ref={rowRef} style={styles.row} onLayout={handleRowLayout}>
       <Animated.View style={[styles.pill, pillStyle]} />
       {options.map((opt) => (
         <TouchableOpacity
           key={opt.key}
           ref={(node) => { chipRefs.current[opt.key] = node; }}
-          style={styles.chip}
+          style={[styles.chip, compact && styles.chipCompact]}
           onPress={() => onChange(opt.key)}
         >
           {opt.icon && (
@@ -87,7 +106,7 @@ export function ChipTabs<T extends string>({ options, active, onChange }: Props<
               )}
             </View>
           )}
-          <Text style={[styles.chipText, active === opt.key && styles.chipTextActive]}>{opt.label}</Text>
+          <Text style={[styles.chipText, compact && styles.chipTextCompact, active === opt.key && styles.chipTextActive]}>{opt.label}</Text>
         </TouchableOpacity>
       ))}
     </View>
@@ -101,6 +120,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 4,
     gap: 4,
+    // Never wider than the box it sits in: the chips shrink (minWidth 0)
+    // rather than push the row past its card on a narrow phone. No flexGrow
+    // here - in the column most screens put it in, that stretched the row
+    // down the whole screen (Statistics' Suppliers and Items).
+    minWidth: 0,
   },
   pill: {
     position: 'absolute',
@@ -112,6 +136,12 @@ const styles = StyleSheet.create({
   },
   chip: {
     flex: 1,
+    // Flex items default to min-width: auto on web, which refuses to
+    // shrink a chip below its own text's natural (unwrapped) width - a
+    // longer translated label (e.g. "Счетоводител") then overflows past
+    // its border instead of wrapping, while the pill above still tracks
+    // the geometrically correct (but now visually wrong-looking) position.
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -133,6 +163,8 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: 'white',
   },
+  chipCompact: { paddingHorizontal: 2 },
+  chipTextCompact: { fontSize: 13 },
   badge: {
     position: 'absolute',
     top: -6,
