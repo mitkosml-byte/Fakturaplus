@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { AmbientGlow } from '../../src/components/AmbientGlow';
 import {
   View,
   Text,
@@ -37,6 +38,8 @@ import { BillingOverviewCard } from '../../src/components/home/BillingOverviewCa
 import { GettingStartedCard } from '../../src/components/home/GettingStartedCard';
 import { DayCard } from '../../src/components/home/DayCard';
 import { RevenueSplit } from '../../src/components/home/RevenueSplit';
+import { StatTile } from '../../src/components/home/StatTile';
+import { LinearGradient } from 'expo-linear-gradient';
 import { PersonalWalletCard } from '../../src/components/home/PersonalWalletCard';
 import { MarginsCard } from '../../src/components/home/MarginsCard';
 import { VatCard } from '../../src/components/home/VatCard';
@@ -393,17 +396,22 @@ export default function HomeScreen() {
 
   // The day's actions, in the order a day goes: the till's revenue, an
   // expense, an invoice to a customer.
-  const homeActions: { key: string; label: string; hint: string; icon: keyof typeof Ionicons.glyphMap; color: string; onPress: () => void }[] = [
+  // Each with its colour's gradient, lighter at the top left (the greeting
+  // card's manner).
+  const homeActions: { key: string; label: string; hint: string; icon: keyof typeof Ionicons.glyphMap; color: string; gradient: [string, string]; onPress: () => void }[] = [
     ...(usesTill && hasPermission('add_revenue') ? [{
       key: 'revenue', label: t('home.dailyRevenue'), hint: t('home.actionRevenueHint'), icon: 'cash' as const, color: COLORS.success,
+      gradient: ['#34D399', '#059669'] as [string, string],
       onPress: () => revenueEntry.open(),
     }] : []),
     ...(hasPermission('add_expenses') ? [{
       key: 'expense', label: t('home.expenses'), hint: t('home.actionExpenseHint'), icon: 'remove-circle' as const, color: COLORS.warning,
+      gradient: ['#FBBF24', '#D97706'] as [string, string],
       onPress: () => { setExpenseDate(getDefaultActionDate()); setExpenseModalVisible(true); },
     }] : []),
     ...(usesBilling && hasPermission('issue_invoices') ? [{
       key: 'invoice', label: t('home.actionInvoice'), hint: t('home.actionInvoiceHint'), icon: 'document-text' as const, color: COLORS.primary,
+      gradient: ['#A78BFA', '#7C3AED'] as [string, string],
       onPress: () => router.push({ pathname: '/billing-documents', params: { new: 'invoice' } }),
     }] : []),
   ];
@@ -480,6 +488,7 @@ export default function HomeScreen() {
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <ScrollView
             style={styles.scrollView}
@@ -528,14 +537,18 @@ export default function HomeScreen() {
                 {homeActions.map((action) => (
                   <TouchableOpacity
                     key={action.key}
-                    style={[styles.actionButton, { backgroundColor: action.color }]}
+                    style={[styles.actionButton, { shadowColor: action.color }]}
                     onPress={action.onPress}
                     accessibilityRole="button"
                     accessibilityLabel={action.label}
                   >
-                    <Ionicons name={action.icon} size={22} color="white" />
-                    <Text style={styles.actionButtonText} numberOfLines={2}>{action.label}</Text>
-                    <Text style={styles.actionButtonHint} numberOfLines={2}>{action.hint}</Text>
+                    <LinearGradient colors={action.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.actionGradient}>
+                      <View style={styles.actionIcon}>
+                        <Ionicons name={action.icon} size={20} color="white" />
+                      </View>
+                      <Text style={styles.actionButtonText} numberOfLines={2}>{action.label}</Text>
+                      <Text style={styles.actionButtonHint} numberOfLines={2}>{action.hint}</Text>
+                    </LinearGradient>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -568,26 +581,26 @@ export default function HomeScreen() {
                   </>
                 ) : (
                   <>
-                    <View style={styles.statItem}>
+                    <StatTile accent={COLORS.info} icon="document-text" label={t('home.invoices')}>
                       {summary.invoice_count === null ? (
                         <LockedValue textStyle={styles.statValue} fakeText="14" iconSize={16} />
                       ) : (
                         <CountUp value={summary.invoice_count || 0} formatter={(n) => `${Math.round(n)}`} style={styles.statValue} />
                       )}
-                      <Text style={styles.statLabel}>{t('home.invoices')}</Text>
-                    </View>
+                    </StatTile>
                     {usesTill && (
                       <>
-                        <View style={styles.statItem}>
+                        <StatTile accent={COLORS.primary} icon="receipt" label={t('home.fiscalRevenue')}>
                           {summary.total_fiscal_revenue === null ? (
                             <LockedValue textStyle={styles.statValue} fakeText="1240" iconSize={16} />
                           ) : (
                             <CountUp value={summary.total_fiscal_revenue || 0} formatter={(n) => formatMoney(n)} style={styles.statValue} />
                           )}
-                          <Text style={styles.statLabel}>{t('home.fiscalRevenue')}</Text>
-                        </View>
-                        <TouchableOpacity
-                          style={styles.statItem}
+                        </StatTile>
+                        <StatTile
+                          accent={COLORS.warning}
+                          icon="wallet"
+                          label={t('home.pocket')}
                           onPress={() => router.push('/pocket-money-history')}
                           disabled={summary.total_pocket_money === null}
                         >
@@ -596,12 +609,16 @@ export default function HomeScreen() {
                           ) : (
                             <CountUp value={summary.total_pocket_money || 0} formatter={(n) => formatMoney(n)} style={styles.statValue} />
                           )}
-                          <Text style={styles.statLabel}>{t('home.pocket')}</Text>
-                        </TouchableOpacity>
+                        </StatTile>
                       </>
                     )}
-                    <View style={[styles.statItem, { overflow: 'visible' }]}>
-                      <CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />
+                    <StatTile
+                      accent={(summary.profit || 0) >= 0 ? COLORS.success : COLORS.danger}
+                      icon={(summary.profit || 0) >= 0 ? 'trending-up' : 'trending-down'}
+                      label={t('home.profit')}
+                      decoration={<CelebrationGlow trigger={celebrateProfit} onDone={() => setCelebrateProfit(false)} />}
+                      style={{ overflow: 'visible' }}
+                    >
                       {summary.profit === null ? (
                         <LockedValue textStyle={styles.statValue} fakeText="380" iconSize={16} />
                       ) : (
@@ -611,8 +628,7 @@ export default function HomeScreen() {
                           style={[styles.statValue, { color: (summary.profit || 0) >= 0 ? COLORS.success : COLORS.danger }]}
                         />
                       )}
-                      <Text style={styles.statLabel}>{t('home.profit')}</Text>
-                    </View>
+                    </StatTile>
                     {ledgerRows.length > 0 && (
                       <View style={styles.ledger}>
                         {ledgerRows.map((row, index) => (
@@ -825,11 +841,12 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 24,
   },
+  // The loading placeholders, the shape of the number tiles (StatTile).
   statItem: {
     width: '47%',
     flexGrow: 1,
     backgroundColor: COLORS.surface,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     alignItems: 'center',
   },
@@ -837,11 +854,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 4,
   },
   askField: {
     flexDirection: 'row',
@@ -909,12 +921,31 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+    borderRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  actionGradient: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
     paddingHorizontal: 6,
-    borderRadius: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
     gap: 2,
+  },
+  actionIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
   },
   actionButtonText: {
     color: 'white',

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { AmbientGlow } from '../src/components/AmbientGlow';
 import {
   View,
   Text,
@@ -163,6 +164,7 @@ export default function CompanySettingsScreen() {
     return (
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
+          <AmbientGlow />
           <SafeAreaView style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primary} />
           </SafeAreaView>
@@ -181,6 +183,7 @@ export default function CompanySettingsScreen() {
     <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

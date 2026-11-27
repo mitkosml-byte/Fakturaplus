@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { AmbientGlow } from '../../src/components/AmbientGlow';
 import { FirstUseHint } from '../../src/components/FirstUseHint';
 import {
   View,
@@ -692,6 +693,7 @@ export default function InvoicesScreen() {
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <Animated.View style={[styles.header, headerAnimatedStyle]}>
             <Text style={styles.title}>{t('invoices.title')}</Text>

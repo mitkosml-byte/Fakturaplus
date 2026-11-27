@@ -8,6 +8,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Alert } from '../src/utils/alert';
 import { LinearGradient } from 'expo-linear-gradient';
+import { AmbientGlow } from '../src/components/AmbientGlow';
 import { useLanguageStore, useTranslation } from '../src/i18n';
 import { api } from '../src/services/api';
 import { setStoredToken, cookieOnlySession, keepTokenSession } from '../src/utils/tokenStorage';
@@ -161,6 +162,7 @@ export default function LoginScreen() {
         colors={['rgba(15, 23, 42, 0.85)', 'rgba(30, 41, 59, 0.75)', 'rgba(15, 23, 42, 0.9)']}
         style={styles.gradient}
       >
+        <AmbientGlow />
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={{ flex: 1 }}

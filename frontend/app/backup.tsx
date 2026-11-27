@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { AmbientGlow } from '../src/components/AmbientGlow';
 import {
   View,
   Text,
@@ -331,6 +332,7 @@ export default function BackupScreen() {
     return (
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
+          <AmbientGlow />
           <SafeAreaView style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.success} />
           </SafeAreaView>
@@ -343,6 +345,7 @@ export default function BackupScreen() {
     <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           {/* Header */}
           <View style={styles.header}>

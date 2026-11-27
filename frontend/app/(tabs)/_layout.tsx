@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useRef } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Tabs, useRouter, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, View, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
@@ -180,9 +181,9 @@ export default function TabsLayout() {
             href: showScanTab ? undefined : null,
             tabBarIcon: ({ focused }) => (
               <AnimatedTabIcon focused={focused}>
-                <View style={styles.scanButton}>
+                <LinearGradient colors={['#A78BFA', '#7C3AED']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.scanButton}>
                   <Ionicons name="scan" size={28} color="white" />
-                </View>
+                </LinearGradient>
               </AnimatedTabIcon>
             ),
           }}
@@ -249,18 +250,20 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  // The scan button: the brand violet as a gradient, with its glow.
   scanButton: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: COLORS.primary,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
     shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.55,
+    shadowRadius: 14,
+    elevation: 10,
   },
 });

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { AmbientGlow } from '../src/components/AmbientGlow';
 import {
   View,
   Text,
@@ -285,6 +286,7 @@ export default function UsersManagementScreen() {
     return (
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
+          <AmbientGlow />
           <SafeAreaView style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primary} />
           </SafeAreaView>
@@ -298,6 +300,7 @@ export default function UsersManagementScreen() {
     return (
       <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
         <View style={styles.overlay}>
+          <AmbientGlow />
           <SafeAreaView style={styles.container}>
             <View style={styles.header}>
               <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -326,6 +329,7 @@ export default function UsersManagementScreen() {
     <ScreenEnter>
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           {/* Header */}
           <View style={styles.header}>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { AmbientGlow } from '../../src/components/AmbientGlow';
 import { FirstUseHint } from '../../src/components/FirstUseHint';
 import {
   View,
@@ -831,6 +832,7 @@ export default function StatsScreen() {
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <Animated.ScrollView
             style={styles.scrollView}

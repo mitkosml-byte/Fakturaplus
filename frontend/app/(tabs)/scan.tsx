@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { AmbientGlow } from '../../src/components/AmbientGlow';
 import { InfoButton } from '../../src/components/InfoButton';
 import {
   View,
@@ -859,6 +860,7 @@ export default function ScanScreen() {
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

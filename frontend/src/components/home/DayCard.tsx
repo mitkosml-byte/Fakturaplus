@@ -9,6 +9,7 @@ import { useTranslation } from '../../i18n';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/api';
 import { Toast } from '../../utils/toast';
+import { SKY, dayPartNow } from '../../theme/dayPart';
 import type { DayCardData, DayCardItem, WeatherKind } from '../../types';
 
 type Props = {
@@ -21,13 +22,8 @@ type Props = {
 
 type Part = DayCardData['greeting']['part'];
 
-// The sky of the moment: the time of day, greyer when it rains or snows.
-const SKY: Record<Part, [string, string]> = {
-  morning: ['#3F3477', '#1E3A5F'],
-  day: ['#1F4F82', '#14304F'],
-  evening: ['#4A2A5E', '#1B1F3B'],
-  night: ['#1E1B4B', '#0F172A'],
-};
+// The sky of the moment (theme/dayPart, shared with the glow behind every
+// screen): the time of day, greyer when it rains or snows.
 const WET_SKY: [string, string] = ['#334155', '#1E293B'];
 const SNOW_SKY: [string, string] = ['#3E5470', '#1F2A38'];
 
@@ -41,14 +37,6 @@ const WEATHER_ICON: Record<WeatherKind, keyof typeof Ionicons.glyphMap> = {
   snow: 'snow',
   thunder: 'thunderstorm',
 };
-
-function partNow(): Part {
-  const hour = new Date().getHours();
-  if (hour >= 5 && hour < 11) return 'morning';
-  if (hour >= 11 && hour < 18) return 'day';
-  if (hour >= 18 && hour < 23) return 'evening';
-  return 'night';
-}
 
 // The day card (instead of "Welcome!"): a personal greeting, the weather
 // where the business is, one line for the day, and what the day holds for
@@ -96,7 +84,7 @@ export function DayCard({ data, right, onPlaceSet }: Props) {
     );
   };
 
-  const part: Part = data?.greeting.part || partNow();
+  const part: Part = data?.greeting.part || dayPartNow();
   const name = data?.greeting.name ?? (user?.name || '').trim().split(' ')[0];
   const weather = data?.weather || null;
   const wet = weather && ['rain', 'sleet', 'thunder'].includes(weather.kind);

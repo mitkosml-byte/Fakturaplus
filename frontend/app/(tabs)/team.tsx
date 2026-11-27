@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
+import { AmbientGlow } from '../../src/components/AmbientGlow';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ImageBackground } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -120,6 +121,7 @@ export default function TeamScreen() {
   return (
     <ImageBackground source={{ uri: BACKGROUND_IMAGE }} style={styles.backgroundImage}>
       <View style={styles.overlay}>
+        <AmbientGlow />
         <SafeAreaView style={styles.container} edges={['top']}>
           <ScrollView style={styles.scrollView}>
             {landsHere && <DayCard data={dayCard} onPlaceSet={() => { refetchDayCard(); }} />}
